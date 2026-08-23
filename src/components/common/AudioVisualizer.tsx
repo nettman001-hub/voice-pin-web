@@ -28,7 +28,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
 
     if (!isActive) {
       // 대기 상태 점선 라인
-      ctx.strokeStyle = '#334155';
+      ctx.strokeStyle = '#cbd5e1';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(0, height / 2);
@@ -50,11 +50,11 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
       const x = i * (barWidth + gap);
       const y = (height - barHeight) / 2;
 
-      // 네온 그라디언트
+      // 생동감 있는 그라디언트
       const grad = ctx.createLinearGradient(0, y, 0, y + barHeight);
-      grad.addColorStop(0, '#25F4EE');
-      grad.addColorStop(0.5, '#0e8ce9');
-      grad.addColorStop(1, '#FE2C55');
+      grad.addColorStop(0, '#0ea5e9');
+      grad.addColorStop(0.5, '#3b82f6');
+      grad.addColorStop(1, '#ec4899');
 
       ctx.fillStyle = grad;
       if (ctx.roundRect) {
@@ -72,7 +72,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
       ref={canvasRef}
       width={400}
       height={80}
-      className={`rounded-xl bg-slate-950/80 border border-slate-800 ${className}`}
+      className={`rounded-2xl bg-slate-50 border border-slate-200 shadow-inner ${className}`}
     />
   );
 };

@@ -1,21 +1,16 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
-import { SaleRecord } from '../../types/live';
-import { CaptureViewerModal } from './CaptureViewerModal';
+import { SaleStatus } from '../../types/live';
 import {
+  ShoppingBag,
   ArrowLeft,
-  Edit3,
   Trash2,
-  Check,
-  X,
+  Save,
   Camera,
-  Calendar,
-  DollarSign,
-  User,
-  FileText,
-  Clock,
-  CheckCircle2
+  CheckCircle2,
+  AlertCircle,
+  ExternalLink
 } from 'lucide-react';
 
 export const SalesDetailPage: React.FC = () => {
@@ -25,41 +20,39 @@ export const SalesDetailPage: React.FC = () => {
 
   const sale = sales.find((s) => s.id === id);
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [nickname, setNickname] = useState(sale?.buyerNickname || '');
-  const [amount, setAmount] = useState(sale?.amount?.toString() || '0');
-  const [status, setStatus] = useState(sale?.status || '자동저장');
-  const [isCaptureModalOpen, setIsCaptureModalOpen] = useState(false);
+  const [buyerNickname, setBuyerNickname] = useState(sale?.buyerNickname || '');
+  const [amount, setAmount] = useState(sale?.amount.toString() || '0');
+  const [status, setStatus] = useState<SaleStatus>(sale?.status || '자동저장');
+  const [note, setNote] = useState(sale?.note || '');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   if (!sale) {
     return (
-      <div className="p-8 max-w-2xl mx-auto text-center space-y-4">
-        <h2 className="text-xl font-bold text-white">판매 내역을 찾을 수 없습니다.</h2>
-        <Link to="/sales" className="text-xs text-brand-400 hover:underline">
-          판매 내역 목록으로 돌아가기
+      <div className="p-12 text-center text-xs text-slate-500">
+        해당 판매 내역을 찾을 수 없습니다.{' '}
+        <Link to="/sales" className="text-brand-600 underline font-bold">
+          목록으로 돌아가기
         </Link>
       </div>
     );
   }
 
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    const updatedAmount = parseInt(amount.replace(/,/g, ''), 10) || 0;
-    const updated: SaleRecord = {
+    const updated = {
       ...sale,
-      buyerNickname: nickname.trim(),
-      amount: updatedAmount,
-      status: '수동수정'
+      buyerNickname,
+      amount: parseInt(amount, 10) || 0,
+      status,
+      note
     };
     updateSale(updated);
-    setIsEditing(false);
-    setToastMsg('판매 내역이 성공적으로 수정되었습니다.');
+    setToastMsg('판매 정보가 성공적으로 수정 저장되었습니다.');
     setTimeout(() => setToastMsg(null), 3000);
   };
 
   const handleDelete = () => {
-    if (window.confirm('이 판매 내역을 삭제하시겠습니까?')) {
+    if (window.confirm('정말 이 판매 내역을 삭제하시겠습니까?')) {
       deleteSale(sale.id);
       navigate('/sales');
     }
@@ -67,178 +60,161 @@ export const SalesDetailPage: React.FC = () => {
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
-      {/* 뒤로가기 & 헤더 */}
+      {/* 상단 네비게이션 */}
       <div className="flex items-center justify-between">
         <button
-          onClick={() => navigate('/sales')}
-          className="flex items-center space-x-1 text-xs text-slate-400 hover:text-white transition"
+          onClick={() => navigate(-1)}
+          className="text-xs font-bold text-slate-600 hover:text-slate-900 flex items-center space-x-1 transition"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>판매 내역 목록으로</span>
+          <span>판매 목록으로 돌아가기</span>
         </button>
 
-        <div className="flex items-center space-x-2">
-          {!isEditing ? (
-            <>
-              <button
-                onClick={() => setIsEditing(true)}
-                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 flex items-center space-x-1.5 transition"
-              >
-                <Edit3 className="w-3.5 h-3.5" />
-                <span>수정하기</span>
-              </button>
-              <button
-                onClick={handleDelete}
-                className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-xs font-bold border border-rose-500/30 flex items-center space-x-1.5 transition"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>삭제하기</span>
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={() => setIsEditing(false)}
-              className="px-3.5 py-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white text-xs font-bold flex items-center space-x-1.5"
-            >
-              <X className="w-3.5 h-3.5" />
-              <span>수정 취소</span>
-            </button>
-          )}
-        </div>
+        <button
+          onClick={handleDelete}
+          className="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 text-xs font-bold flex items-center space-x-1 transition border border-rose-200"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          <span>삭제하기</span>
+        </button>
       </div>
 
       {toastMsg && (
-        <div className="p-4 rounded-2xl bg-emerald-500/20 border border-emerald-500 text-emerald-200 text-xs font-bold flex items-center space-x-2 animate-in fade-in">
-          <CheckCircle2 className="w-4 h-4" />
+        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center space-x-2 animate-in fade-in">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
           <span>{toastMsg}</span>
         </div>
       )}
 
-      {/* 메인 상세 정보 카드 */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-xl space-y-6">
-        <div className="flex items-center justify-between pb-6 border-b border-slate-800">
-          <div>
-            <div className="flex items-center space-x-2">
-              <h1 className="text-2xl font-black text-white">{sale.buyerNickname}</h1>
-              <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold ${
-                sale.status === '보류'
-                  ? 'bg-amber-400 text-slate-950'
-                  : sale.status === '수동수정'
-                  ? 'bg-purple-500/20 text-purple-300'
-                  : 'bg-emerald-500/20 text-emerald-300'
-              }`}>
-                {sale.status}
-              </span>
+      {/* 메인 상세 및 수정 카드 */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-6">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center font-bold">
+              <ShoppingBag className="w-5 h-5" />
             </div>
-            <p className="text-xs text-slate-400 mt-1 font-mono">
-              방송 회차 ID: <strong className="text-slate-200">{sale.sessionId}</strong>
-            </p>
+            <div>
+              <h1 className="text-lg font-black text-slate-900">판매 상세 정보</h1>
+              <p className="text-xs text-slate-400 font-mono">ID: {sale.id}</p>
+            </div>
           </div>
 
-          <div className="text-right">
-            <span className="text-xs text-slate-400">판매 금액</span>
-            <div className="text-3xl font-black text-brand-400 mt-0.5">
-              {sale.amount.toLocaleString()}원
-            </div>
+          <span
+            className={`px-3 py-1 rounded-full text-xs font-bold ${
+              sale.status === '보류'
+                ? 'bg-amber-400 text-slate-950'
+                : sale.status === '수동수정'
+                ? 'bg-purple-100 text-purple-700'
+                : 'bg-emerald-50 text-emerald-700'
+            }`}
+          >
+            현재 상태: {sale.status}
+          </span>
+        </div>
+
+        {/* 원본 발화 문장 */}
+        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+            🎙️ AI STT 원본 발화 문장 (전사 기록)
+          </span>
+          <p className="text-sm font-semibold text-slate-900">"{sale.rawTranscript}"</p>
+          <div className="text-[11px] text-slate-400 mt-2 flex items-center space-x-2">
+            <span>인식 시각: {new Date(sale.recognizedAt).toLocaleString('ko-KR')}</span>
+            <span>•</span>
+            <span>방송 회차: {sale.sessionId}</span>
           </div>
         </div>
 
-        {/* 인라인 수정 모드 */}
-        {isEditing ? (
-          <form onSubmit={handleSaveEdit} className="p-6 bg-slate-950 rounded-2xl border border-brand-500/50 space-y-4">
-            <h4 className="text-xs font-bold text-brand-300 uppercase tracking-wider">판매 정보 수정</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">구매자 닉네임</label>
-                <input
-                  type="text"
-                  required
-                  value={nickname}
-                  onChange={(e) => setNickname(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-brand-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">금액 (원)</label>
-                <input
-                  type="number"
-                  required
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-brand-500"
-                />
-              </div>
-            </div>
-            <button
-              type="submit"
-              className="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold shadow-md"
-            >
-              수정 내용 저장
-            </button>
-          </form>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-1">
-              <span className="text-xs text-slate-400 flex items-center">
-                <Clock className="w-3.5 h-3.5 mr-1" /> 인식 시각
-              </span>
-              <p className="text-sm font-semibold text-slate-200">
-                {new Date(sale.recognizedAt).toLocaleString('ko-KR')}
-              </p>
+        {/* 수정 폼 */}
+        <form onSubmit={handleSave} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">구매자 닉네임</label>
+              <input
+                type="text"
+                required
+                value={buyerNickname}
+                onChange={(e) => setBuyerNickname(e.target.value)}
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-brand-500 font-bold"
+              />
             </div>
 
-            <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-1">
-              <span className="text-xs text-slate-400 flex items-center">
-                <FileText className="w-3.5 h-3.5 mr-1" /> 전사 원본 발화 문장
-              </span>
-              <p className="text-xs text-slate-300 italic">
-                "{sale.rawTranscript}"
-              </p>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">판매 금액 (원)</label>
+              <input
+                type="number"
+                required
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-brand-500 font-bold"
+              />
             </div>
           </div>
-        )}
 
-        {/* 연결된 캡처 이미지 섹션 */}
-        <div className="pt-4 border-t border-slate-800">
-          <h3 className="text-sm font-bold text-white mb-3 flex items-center space-x-2">
-            <Camera className="w-4 h-4 text-tiktok-cyan" />
-            <span>연결된 캡처 이미지</span>
-          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">처리 상태</label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as SaleStatus)}
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-brand-500"
+              >
+                <option value="확정">✅ 확정</option>
+                <option value="자동저장">📦 자동저장</option>
+                <option value="수동수정">✏️ 수동수정</option>
+                <option value="보류">⚠️ 보류 (추가 확인 필요)</option>
+              </select>
+            </div>
 
-          {sale.captureImageUrls && sale.captureImageUrls.length > 0 ? (
-            <div className="flex gap-4">
-              {sale.captureImageUrls.map((url, idx) => (
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">관리자/판매자 메모</label>
+              <input
+                type="text"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="특이사항 메모..."
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            className="w-full py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-500/20 flex items-center justify-center space-x-1.5 transition"
+          >
+            <Save className="w-4 h-4" />
+            <span>수정사항 저장하기</span>
+          </button>
+        </form>
+
+        {/* 연결된 화면 캡처 이미지 */}
+        {sale.captureImageUrls && sale.captureImageUrls.length > 0 && (
+          <div className="border-t border-slate-100 pt-6 space-y-3">
+            <h3 className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
+              <Camera className="w-4 h-4 text-cyan-600" />
+              <span>연결된 댓글창 화면 캡처 ({sale.captureImageUrls.length}장)</span>
+            </h3>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              {sale.captureImageUrls.map((imgUrl: string, idx: number) => (
                 <div
                   key={idx}
-                  onClick={() => setIsCaptureModalOpen(true)}
-                  className="w-32 h-44 rounded-2xl overflow-hidden border border-slate-700 bg-slate-950 cursor-pointer hover:opacity-85 transition relative group"
+                  className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 relative group shadow-sm"
                 >
-                  <img src={url} alt="캡처" className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-xs text-white font-bold transition">
-                    크게 보기
-                  </div>
+                  <img src={imgUrl} alt={`캡처 ${idx + 1}`} className="w-full h-40 object-cover" />
+                  <Link
+                    to={`/sales/${sale.id}/capture`}
+                    className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-xs text-white font-bold transition space-x-1"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    <span>전체화면 보기</span>
+                  </Link>
                 </div>
               ))}
             </div>
-          ) : (
-            <div className="p-6 rounded-2xl bg-slate-950/40 border border-dashed border-slate-800 text-center text-xs text-slate-400">
-              이 판매 건에 저장된 화면 캡처 이미지가 없습니다.
-            </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
-
-      {/* 캡처 이미지 뷰어 모달 (PG-011) */}
-      <CaptureViewerModal
-        isOpen={isCaptureModalOpen}
-        onClose={() => setIsCaptureModalOpen(false)}
-        images={sale.captureImageUrls || []}
-        saleInfo={{
-          nickname: sale.buyerNickname,
-          amount: sale.amount,
-          time: new Date(sale.recognizedAt).toLocaleString('ko-KR')
-        }}
-      />
     </div>
   );
 };

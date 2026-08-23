@@ -50,7 +50,7 @@ export const Sidebar: React.FC = () => {
       items: [
         { to: '/live', label: '라이브 청취 홈', icon: Radio, badge: isListening ? 'ON AIR' : undefined, badgeColor: 'bg-rose-500 text-white' },
         { to: '/sales', label: '판매 내역 목록', icon: ShoppingBag, badge: `${sales.length}건` },
-        { to: '/sales/review', label: '방송 후 일괄 확인', icon: CheckSquare, badge: pendingSalesCount > 0 ? `보류 ${pendingSalesCount}` : undefined, badgeColor: 'bg-amber-500 text-black font-bold' },
+        { to: '/sales/review', label: '방송 후 일괄 확인', icon: CheckSquare, badge: pendingSalesCount > 0 ? `보류 ${pendingSalesCount}` : undefined, badgeColor: 'bg-amber-500 text-white font-bold' },
         { to: '/settlement', label: '판매 정산·내보내기', icon: Calculator },
       ]
     },
@@ -87,7 +87,7 @@ export const Sidebar: React.FC = () => {
   const navSections = user?.role === '관리자' ? adminNav : sellerNav;
 
   return (
-    <aside className="w-64 bg-slate-900 border-r border-slate-800 text-slate-300 flex flex-col flex-shrink-0 min-h-[calc(100vh-4rem)]">
+    <aside className="w-64 bg-white border-r border-slate-200 text-slate-700 flex flex-col flex-shrink-0 min-h-[calc(100vh-4rem)] shadow-sm">
       {/* 메뉴 리스트 */}
       <div className="flex-1 px-3 py-4 space-y-6 overflow-y-auto">
         {navSections.map((section, idx) => (
@@ -104,18 +104,18 @@ export const Sidebar: React.FC = () => {
                   <NavLink
                     key={item.to}
                     to={item.to}
-                    className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition ${
+                    className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition ${
                       isActive
-                        ? 'bg-gradient-to-r from-brand-600 to-brand-500 text-white shadow-md shadow-brand-500/20'
-                        : 'hover:bg-slate-800/80 text-slate-300 hover:text-white'
+                        ? 'bg-brand-50 text-brand-700 border border-brand-200 shadow-sm'
+                        : 'hover:bg-slate-50 text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     <div className="flex items-center space-x-2.5 truncate">
-                      <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                      <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-brand-600' : 'text-slate-400'}`} />
                       <span className="truncate">{item.label}</span>
                     </div>
                     {item.badge && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${item.badgeColor || 'bg-slate-800 text-slate-300 border border-slate-700'}`}>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${item.badgeColor || 'bg-slate-100 text-slate-600 border border-slate-200'}`}>
                         {item.badge}
                       </span>
                     )}
@@ -128,25 +128,25 @@ export const Sidebar: React.FC = () => {
       </div>
 
       {/* 하단 Deepgram Nova-3 API Key 설정 인라인 위젯 */}
-      <div className="p-3 border-t border-slate-800 bg-slate-950/60">
-        <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800/80 text-xs">
+      <div className="p-3 border-t border-slate-200 bg-slate-50">
+        <div className="p-2.5 rounded-xl bg-white border border-slate-200 shadow-sm text-xs">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="font-bold text-slate-200 flex items-center">
-              <KeyRound className="w-3.5 h-3.5 mr-1 text-brand-400" /> Deepgram Nova-3
+            <span className="font-bold text-slate-800 flex items-center">
+              <KeyRound className="w-3.5 h-3.5 mr-1 text-brand-600" /> Deepgram Nova-3
             </span>
-            <span className="text-[10px] text-emerald-400 font-semibold">
+            <span className="text-[10px] text-emerald-600 font-bold">
               {deepgramApiKey ? 'Key 연동됨' : '시뮬레이터'}
             </span>
           </div>
           <input
             type="password"
-            placeholder="Deepgram API Key 입력 (선택)"
+            placeholder="Deepgram API Key (선택)"
             value={deepgramApiKey}
             onChange={(e) => setDeepgramApiKey(e.target.value)}
-            className="w-full px-2 py-1 bg-slate-950 border border-slate-700 rounded text-[11px] text-slate-200 placeholder-slate-400 focus:outline-none focus:border-brand-500"
+            className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[11px] text-slate-800 placeholder-slate-400 focus:outline-none focus:border-brand-500"
           />
           <p className="text-[10px] text-slate-400 mt-1">
-            * 미입력 시 틱톡 판매 음성 시뮬레이터로 자동 동작합니다.
+            * 미입력 시 틱톡 판매 음성 시뮬레이터로 동작합니다.
           </p>
         </div>
       </div>

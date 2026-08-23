@@ -1,112 +1,104 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useAppData } from '../../context/AppDataContext';
-import { CreditCard, ShieldCheck, Calendar, AlertCircle, RotateCcw, CheckCircle2 } from 'lucide-react';
+import { PaymentHistoryItem } from '../../types/subscription';
+import { CreditCard, Shield, AlertTriangle, CheckCircle2, ArrowRight } from 'lucide-react';
 
 export const SubscriptionManagePage: React.FC = () => {
-  const { currentPlan, subscriptionExpiresAt, isTrialActive, paymentHistory, cancelSubscription } = useAppData();
-  const navigate = useNavigate();
+  const { currentPlan, subscriptionExpiresAt, paymentHistory, cancelSubscription } = useAppData();
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   const handleCancel = () => {
-    if (window.confirm('정말로 구독을 해지하시겠습니까? 다음 갱신일까지는 정상 이용 가능합니다.')) {
+    if (window.confirm('정말 구독을 해지하시겠습니까? 남은 기간 동안은 계속 이용하실 수 있습니다.')) {
       cancelSubscription();
-      setToastMsg('구독 해지가 접수되었습니다. 만료일까지는 모든 기능을 이용하실 수 있습니다.');
-      setTimeout(() => setToastMsg(null), 4000);
+      setToastMsg('구독이 성공적으로 해지되었습니다. 현재 결제 주기 만료 후 무료 플랜으로 전환됩니다.');
+      setTimeout(() => setToastMsg(null), 3000);
     }
   };
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
-      {/* 헤더 */}
-      <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-xl">
-        <div className="flex items-center space-x-2">
-          <h1 className="text-2xl font-black text-white tracking-tight">구독 관리 & 결제 내역</h1>
-          <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30">
-            구독 활성 상태
-          </span>
+      <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center space-x-2">
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">구독 & 결제 관리</h1>
+            <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 text-xs font-bold border border-brand-200">
+              {currentPlan} 이용 중
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            현재 이용 중인 요금제 상태를 확인하고, 플랜 변경 및 결제 영수증 내역을 관리합니다.
+          </p>
         </div>
-        <p className="text-xs text-slate-400 mt-1">현재 이용 중인 구독 플랜을 확인하고 결제 수단 및 이력을 관리합니다.</p>
+
+        <Link
+          to="/subscription/plans"
+          className="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center space-x-1.5 transition"
+        >
+          <span>플랜 업그레이드 / 변경</span>
+          <ArrowRight className="w-4 h-4" />
+        </Link>
       </div>
 
       {toastMsg && (
-        <div className="p-4 rounded-2xl bg-amber-500/20 border border-amber-500 text-amber-200 text-xs font-bold flex items-center space-x-2 animate-in fade-in">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+        <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold flex items-center space-x-2 animate-in fade-in">
+          <CheckCircle2 className="w-4 h-4 text-amber-600 flex-shrink-0" />
           <span>{toastMsg}</span>
         </div>
       )}
 
       {/* 현재 구독 상태 카드 */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-lg">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 border-b border-slate-800">
-          <div>
-            <span className="text-xs text-slate-400 font-semibold">현재 이용 중인 플랜</span>
-            <div className="flex items-center space-x-3 mt-1">
-              <h2 className="text-2xl font-black text-white">{currentPlan} 플랜</h2>
-              {isTrialActive && (
-                <span className="text-xs px-2 py-0.5 rounded-full bg-brand-500/20 text-brand-300 font-bold border border-brand-500/30">
-                  7일 무료 체험 중
-                </span>
-              )}
-            </div>
-          </div>
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+        <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
+          <Shield className="w-4 h-4 text-brand-600" />
+          <span>현재 활성화된 멤버십</span>
+        </h3>
 
-          <div className="flex gap-2">
-            <Link
-              to="/subscription/plans"
-              className="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 transition"
-            >
-              요금제 변경
-            </Link>
-            <button
-              onClick={handleCancel}
-              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 text-xs font-bold border border-slate-700 transition"
-            >
-              구독 해지
-            </button>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+            <span className="text-[11px] text-slate-500">구독 요금제</span>
+            <div className="text-lg font-black text-brand-600 mt-1">{currentPlan} 플랜</div>
+          </div>
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+            <span className="text-[11px] text-slate-500">다음 결제 예정일 / 만료일</span>
+            <div className="text-lg font-bold text-slate-900 mt-1">{subscriptionExpiresAt}</div>
+          </div>
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+            <span className="text-[11px] text-slate-500">결제 수단</span>
+            <div className="text-sm font-bold text-slate-900 mt-1">현대카드 (•••• 4242)</div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pt-6 text-xs">
-          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
-            <span className="text-slate-400">구독 상태</span>
-            <p className="text-sm font-bold text-emerald-400">정상 이용 중 (활성)</p>
-          </div>
-          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
-            <span className="text-slate-400">다음 결제 예정일</span>
-            <p className="text-sm font-bold text-white">{subscriptionExpiresAt}</p>
-          </div>
-          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
-            <span className="text-slate-400">결제 수단</span>
-            <p className="text-sm font-bold text-slate-200">신한카드 (4820)</p>
-          </div>
+        <div className="pt-2 flex justify-end">
+          <button
+            onClick={handleCancel}
+            className="text-xs text-rose-600 hover:text-rose-700 hover:underline font-semibold"
+          >
+            구독 해지하기
+          </button>
         </div>
       </div>
 
-      {/* 과거 결제 내역 테이블 */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg space-y-4">
-        <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-          <Calendar className="w-4 h-4 text-brand-400" />
-          <span>과거 결제 영수증 및 결제 내역</span>
+      {/* 결제 이력 내역 */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+        <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
+          <CreditCard className="w-4 h-4 text-brand-600" />
+          <span>결제 이력 ({paymentHistory.length}건)</span>
         </h3>
 
-        <div className="space-y-2">
-          {paymentHistory.map((item) => (
+        <div className="space-y-2.5">
+          {paymentHistory.map((hist: PaymentHistoryItem) => (
             <div
-              key={item.id}
-              className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs"
+              key={hist.id}
+              className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs"
             >
               <div>
-                <span className="font-bold text-white text-sm">{item.planName}</span>
-                <div className="text-[11px] text-slate-400 mt-0.5">
-                  {item.date} • {item.paymentMethod}
-                </div>
+                <div className="font-bold text-slate-900">{hist.planName} 플랜 정기 결제</div>
+                <div className="text-[11px] text-slate-500 mt-0.5">{hist.date} • {hist.paymentMethod}</div>
               </div>
               <div className="text-right">
-                <div className="font-bold text-brand-400 text-sm">
-                  {item.amount.toLocaleString()}원
-                </div>
-                <span className="text-[10px] text-emerald-400 font-semibold">{item.status}</span>
+                <span className="font-black text-slate-900 text-sm">{hist.amount.toLocaleString()}원</span>
+                <span className="block text-[10px] text-emerald-600 font-bold">{hist.status}</span>
               </div>
             </div>
           ))}

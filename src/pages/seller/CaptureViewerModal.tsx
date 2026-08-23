@@ -1,156 +1,111 @@
 import React, { useState } from 'react';
-import { X, ChevronLeft, ChevronRight, Download, Trash2, Share2, ZoomIn, ZoomOut } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useSales } from '../../context/SalesContext';
+import { Camera, Download, ZoomIn, ZoomOut, ArrowLeft, X } from 'lucide-react';
 
-interface CaptureViewerModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  images: string[];
-  saleInfo?: {
-    nickname?: string;
-    amount?: number;
-    time?: string;
-  };
-}
+export const CaptureViewerModal: React.FC = () => {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { sales } = useSales();
 
-export const CaptureViewerModal: React.FC<CaptureViewerModalProps> = ({
-  isOpen,
-  onClose,
-  images,
-  saleInfo
-}) => {
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const sale = sales.find((s) => s.id === id);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [zoomLevel, setZoomLevel] = useState(1);
 
-  if (!isOpen || images.length === 0) return null;
+  if (!sale || !sale.captureImageUrls || sale.captureImageUrls.length === 0) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4">
+        <div className="bg-white p-6 rounded-3xl text-center space-y-4 max-w-sm w-full shadow-2xl">
+          <p className="text-xs text-slate-500">해당 주문에 연결된 캡처 이미지가 없습니다.</p>
+          <button
+            onClick={() => navigate(-1)}
+            className="w-full py-2 bg-brand-600 text-white rounded-xl text-xs font-bold"
+          >
+            돌아가기
+          </button>
+        </div>
+      </div>
+    );
+  }
 
-  const currentImage = images[currentIndex] || images[0];
-
-  const handlePrev = () => {
-    setCurrentIndex((prev) => (prev > 0 ? prev - 1 : images.length - 1));
-    setZoomLevel(1);
-  };
-
-  const handleNext = () => {
-    setCurrentIndex((prev) => (prev < images.length - 1 ? prev + 1 : 0));
-    setZoomLevel(1);
-  };
+  const currentUrl = sale.captureImageUrls[currentImageIndex];
 
   const handleDownload = () => {
-    const link = document.createElement('a');
-    link.href = currentImage;
-    link.download = `다들려_캡처_${saleInfo?.nickname || '판매'}_${Date.now()}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleShare = () => {
-    if (navigator.share) {
-      navigator.share({
-        title: '다들려 틱톡 라이브 판매 캡처',
-        text: `구매자: ${saleInfo?.nickname}, 금액: ${saleInfo?.amount?.toLocaleString()}원`,
-        url: window.location.href
-      }).catch(() => {});
-    } else {
-      alert('공유 링크가 클립보드에 복사되었습니다.');
-    }
+    const a = document.createElement('a');
+    a.href = currentUrl;
+    a.download = `다들려_캡처_${sale.buyerNickname}_${Date.now()}.png`;
+    a.click();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in">
-      <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh]">
-        {/* 상단 바 */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/80">
-          <div className="flex items-center space-x-3">
-            <span className="font-bold text-sm text-white">캡처 이미지 뷰어</span>
-            <span className="text-xs text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full">
-              {currentIndex + 1} / {images.length}
-            </span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-md p-4">
+      <div className="bg-white border border-slate-200 rounded-3xl max-w-2xl w-full flex flex-col max-h-[92vh] overflow-hidden shadow-2xl">
+        {/* 상단 툴바 */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/80">
+          <div className="flex items-center space-x-2">
+            <Camera className="w-5 h-5 text-cyan-600" />
+            <h3 className="text-sm font-bold text-slate-900">
+              {sale.buyerNickname}님 캡처 뷰어 ({currentImageIndex + 1}/{sale.captureImageUrls.length})
+            </h3>
           </div>
 
           <div className="flex items-center space-x-2">
             <button
-              onClick={() => setZoomLevel((z) => Math.min(2.5, z + 0.25))}
-              className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
+              onClick={() => setZoomLevel((prev) => Math.min(prev + 0.25, 2.5))}
+              className="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-slate-900"
               title="확대"
             >
               <ZoomIn className="w-4 h-4" />
             </button>
             <button
-              onClick={() => setZoomLevel((z) => Math.max(1, z - 0.25))}
-              className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
+              onClick={() => setZoomLevel((prev) => Math.max(prev - 0.25, 0.75))}
+              className="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-slate-900"
               title="축소"
             >
               <ZoomOut className="w-4 h-4" />
             </button>
             <button
               onClick={handleDownload}
-              className="p-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-white shadow"
-              title="다운로드"
+              className="px-3 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold flex items-center space-x-1 shadow-sm"
             >
-              <Download className="w-4 h-4" />
+              <Download className="w-3.5 h-3.5" />
+              <span>다운로드</span>
             </button>
             <button
-              onClick={handleShare}
-              className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
-              title="공유"
-            >
-              <Share2 className="w-4 h-4" />
-            </button>
-            <button
-              onClick={onClose}
-              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              onClick={() => navigate(-1)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-800"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* 메인 이미지 뷰어 영역 */}
-        <div className="flex-1 bg-slate-950 flex items-center justify-center p-6 relative overflow-hidden min-h-[420px]">
-          {images.length > 1 && (
-            <>
-              <button
-                onClick={handlePrev}
-                className="absolute left-4 p-3 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white border border-slate-700 shadow-xl transition"
-              >
-                <ChevronLeft className="w-6 h-6" />
-              </button>
-              <button
-                onClick={handleNext}
-                className="absolute right-4 p-3 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white border border-slate-700 shadow-xl transition"
-              >
-                <ChevronRight className="w-6 h-6" />
-              </button>
-            </>
-          )}
-
-          <div
-            className="transition-transform duration-200 ease-out max-h-[60vh] overflow-hidden flex items-center justify-center"
+        {/* 메인 뷰어 */}
+        <div className="flex-1 bg-slate-100 p-6 flex items-center justify-center overflow-auto min-h-[350px]">
+          <img
+            src={currentUrl}
+            alt="댓글 캡처"
+            className="rounded-2xl shadow-lg transition-transform duration-200 object-contain max-h-[65vh]"
             style={{ transform: `scale(${zoomLevel})` }}
-          >
-            <img
-              src={currentImage}
-              alt="캡처"
-              className="max-h-[60vh] max-w-full object-contain rounded-xl shadow-2xl border border-slate-800"
-            />
-          </div>
+          />
         </div>
 
-        {/* 하단 캡처 정보 바 */}
-        <div className="px-6 py-4 bg-slate-950/90 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-300 gap-2">
-          <div className="flex items-center space-x-4">
-            <span>구매자: <strong className="text-white">{saleInfo?.nickname || '미확인'}</strong></span>
-            <span>•</span>
-            <span>금액: <strong className="text-brand-400">{saleInfo?.amount ? `${saleInfo.amount.toLocaleString()}원` : '0원'}</strong></span>
-            <span>•</span>
-            <span>시각: {saleInfo?.time || new Date().toLocaleTimeString('ko-KR')}</span>
+        {/* 하단 썸네일 스트립 (복수 장일 때) */}
+        {sale.captureImageUrls.length > 1 && (
+          <div className="p-3 bg-white border-t border-slate-100 flex space-x-2 overflow-x-auto justify-center">
+            {sale.captureImageUrls.map((url: string, idx: number) => (
+              <button
+                key={idx}
+                onClick={() => setCurrentImageIndex(idx)}
+                className={`w-14 h-14 rounded-xl overflow-hidden border-2 transition ${
+                  idx === currentImageIndex ? 'border-brand-500 shadow-md' : 'border-slate-200 opacity-60'
+                }`}
+              >
+                <img src={url} alt={`썸네일 ${idx}`} className="w-full h-full object-cover" />
+              </button>
+            ))}
           </div>
-
-          <div className="text-slate-400 text-[11px]">
-            * 마우스 드래그 또는 줌 버튼으로 확대/축소 가능합니다.
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

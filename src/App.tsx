@@ -46,7 +46,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const showSidebar = isAuthenticated && !isAuthRoute;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-brand-500 selection:text-white">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col selection:bg-brand-500 selection:text-white">
       <Header />
       <div className="flex-1 flex flex-row">
         {showSidebar && <Sidebar />}
