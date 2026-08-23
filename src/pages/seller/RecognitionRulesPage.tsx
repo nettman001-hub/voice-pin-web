@@ -1,16 +1,65 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAppData, CAPTURE_PRESETS } from '../../context/AppDataContext';
-import { RecognitionWordRule, RuleAction, CaptureAreaPreset } from '../../types/rules';
-import { Sliders, Plus, Trash2, Shield, Camera, Database, CheckCircle2, AlertCircle } from 'lucide-react';
+import { RecognitionWordRule, RuleAction, CaptureAreaPreset, CaptureAreaConfig } from '../../types/rules';
+import { screenCaptureService } from '../../services/screenCaptureService';
+import {
+  Sliders,
+  Plus,
+  Trash2,
+  Shield,
+  Camera,
+  Database,
+  CheckCircle2,
+  AlertCircle,
+  Crop,
+  Move,
+  Maximize2,
+  MousePointer,
+  Sparkles,
+  Eye,
+  X,
+  RotateCcw
+} from 'lucide-react';
 
 export const RecognitionRulesPage: React.FC = () => {
-  const { rules, addRule, updateRule, deleteRule, toggleRule, captureAreaConfig, setCaptureAreaConfig } = useAppData();
+  const {
+    rules,
+    addRule,
+    updateRule,
+    deleteRule,
+    toggleRule,
+    captureAreaConfig,
+    setCaptureAreaConfig
+  } = useAppData();
 
+  // 단어 등록 상태
   const [newWord, setNewWord] = useState('');
   const [newAction, setNewAction] = useState<RuleAction>('DB_SAVE');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
+  // --- 인터랙티브 캡처 영역 스튜디오 상태 ---
+  const [selectMode, setSelectMode] = useState<'DRAG' | 'CLICK_POINTS'>('DRAG');
+  const [clickPointStep, setClickPointStep] = useState<1 | 2>(1);
+  const [firstPoint, setFirstPoint] = useState<{ x: number; y: number } | null>(null);
+
+  // 현재 편집 중인 영역 좌표 (0.0 ~ 1.0 비율)
+  const [currentArea, setCurrentArea] = useState<CaptureAreaConfig>(captureAreaConfig);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [dragAction, setDragAction] = useState<'CREATE' | 'MOVE' | 'RESIZE_TL' | 'RESIZE_TR' | 'RESIZE_BL' | 'RESIZE_BR' | null>(null);
+
+  // 테스트 캡처 결과 모달
+  const [testCaptureUrl, setTestCaptureUrl] = useState<string | null>(null);
+  const [isTestingCapture, setIsTestingCapture] = useState(false);
+
+  const canvasContainerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setCurrentArea(captureAreaConfig);
+  }, [captureAreaConfig]);
+
+  // 단어 추가
   const handleAddWord = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -35,18 +84,184 @@ export const RecognitionRulesPage: React.FC = () => {
     }
   };
 
+  // 프리셋 선택
+  const handleSelectPreset = (preset: CaptureAreaConfig) => {
+    setCurrentArea(preset);
+    setCaptureAreaConfig(preset);
+    setToastMsg(`'${preset.name}' 영역 프리셋이 적용되었습니다.`);
+    setTimeout(() => setToastMsg(null), 2500);
+  };
+
+  // 캔버스 좌표 정규화 (0.0 ~ 1.0)
+  const getNormalizedCoordinates = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!canvasContainerRef.current) return { x: 0, y: 0 };
+    const rect = canvasContainerRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    return { x, y };
+  };
+
+  // 1. 마우스 다운 (드래그 시작 또는 리사이즈)
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>, actionType: 'CREATE' | 'MOVE' | 'RESIZE_TL' | 'RESIZE_TR' | 'RESIZE_BL' | 'RESIZE_BR' = 'CREATE') => {
+    if (selectMode === 'CLICK_POINTS') return;
+
+    e.stopPropagation();
+    const { x, y } = getNormalizedCoordinates(e);
+    setIsDragging(true);
+    setDragStart({ x, y });
+    setDragAction(actionType);
+
+    if (actionType === 'CREATE') {
+      setCurrentArea({
+        preset: 'CUSTOM',
+        name: '사용자 직접 드래그 영역',
+        xRatio: x,
+        yRatio: y,
+        widthRatio: 0.01,
+        heightRatio: 0.01
+      });
+    }
+  };
+
+  // 2. 마우스 이동 (드래그 영역 갱신)
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDragging || !dragStart) return;
+    const { x, y } = getNormalizedCoordinates(e);
+
+    if (dragAction === 'CREATE') {
+      const minX = Math.min(dragStart.x, x);
+      const minY = Math.min(dragStart.y, y);
+      const width = Math.max(0.05, Math.abs(x - dragStart.x));
+      const height = Math.max(0.05, Math.abs(y - dragStart.y));
+
+      setCurrentArea({
+        preset: 'CUSTOM',
+        name: '사용자 지정 영역',
+        xRatio: Math.min(1 - width, minX),
+        yRatio: Math.min(1 - height, minY),
+        widthRatio: Math.min(1, width),
+        heightRatio: Math.min(1, height)
+      });
+    } else if (dragAction === 'MOVE') {
+      const dx = x - dragStart.x;
+      const dy = y - dragStart.y;
+      setDragStart({ x, y });
+
+      setCurrentArea((prev) => ({
+        ...prev,
+        preset: 'CUSTOM',
+        name: '사용자 지정 영역',
+        xRatio: Math.max(0, Math.min(1 - prev.widthRatio, prev.xRatio + dx)),
+        yRatio: Math.max(0, Math.min(1 - prev.heightRatio, prev.yRatio + dy))
+      }));
+    } else if (dragAction === 'RESIZE_BR') {
+      const width = Math.max(0.05, Math.min(1 - currentArea.xRatio, x - currentArea.xRatio));
+      const height = Math.max(0.05, Math.min(1 - currentArea.yRatio, y - currentArea.yRatio));
+      setCurrentArea((prev) => ({ ...prev, widthRatio: width, heightRatio: height }));
+    } else if (dragAction === 'RESIZE_TL') {
+      const right = currentArea.xRatio + currentArea.widthRatio;
+      const bottom = currentArea.yRatio + currentArea.heightRatio;
+      const newX = Math.max(0, Math.min(right - 0.05, x));
+      const newY = Math.max(0, Math.min(bottom - 0.05, y));
+      setCurrentArea((prev) => ({
+        ...prev,
+        xRatio: newX,
+        yRatio: newY,
+        widthRatio: right - newX,
+        heightRatio: bottom - newY
+      }));
+    }
+  };
+
+  // 3. 마우스 업
+  const handleMouseUp = () => {
+    if (isDragging) {
+      setIsDragging(false);
+      setDragAction(null);
+      setDragStart(null);
+      setCaptureAreaConfig(currentArea);
+    }
+  };
+
+  // 꼭짓점 2점 클릭 방식
+  const handleCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (selectMode !== 'CLICK_POINTS') return;
+
+    const { x, y } = getNormalizedCoordinates(e);
+
+    if (clickPointStep === 1) {
+      setFirstPoint({ x, y });
+      setClickPointStep(2);
+      setToastMsg('1단계 시작점(좌상단) 지정 완료! 이제 대각선 끝점(우하단)을 클릭하세요.');
+    } else if (firstPoint) {
+      const minX = Math.min(firstPoint.x, x);
+      const minY = Math.min(firstPoint.y, y);
+      const width = Math.max(0.05, Math.abs(x - firstPoint.x));
+      const height = Math.max(0.05, Math.abs(y - firstPoint.y));
+
+      const newCfg: CaptureAreaConfig = {
+        preset: 'CUSTOM',
+        name: '꼭짓점 2점 지정 영역',
+        xRatio: minX,
+        yRatio: minY,
+        widthRatio: width,
+        heightRatio: height
+      };
+
+      setCurrentArea(newCfg);
+      setCaptureAreaConfig(newCfg);
+      setClickPointStep(1);
+      setFirstPoint(null);
+      setToastMsg('2개 꼭짓점 좌표로 영역 지정이 완료되었습니다! ✨');
+      setTimeout(() => setToastMsg(null), 3000);
+    }
+  };
+
+  // 수치 슬라이더 직접 조절
+  const handleSliderChange = (key: 'xRatio' | 'yRatio' | 'widthRatio' | 'heightRatio', val: number) => {
+    const updated = {
+      ...currentArea,
+      preset: 'CUSTOM' as CaptureAreaPreset,
+      name: '사용자 미세조정 영역',
+      [key]: val
+    };
+    setCurrentArea(updated);
+    setCaptureAreaConfig(updated);
+  };
+
+  // 실시간 캡처 테스트 실행
+  const handleTestCapture = async () => {
+    setIsTestingCapture(true);
+    try {
+      const img = await screenCaptureService.captureArea(null, currentArea, {
+        nickname: '러블리마켓',
+        amount: 35000,
+        timestamp: new Date().toLocaleTimeString('ko-KR')
+      });
+      setTestCaptureUrl(img);
+    } finally {
+      setIsTestingCapture(false);
+    }
+  };
+
+  // 1080x1920 기준 픽셀 계산
+  const pixelX = Math.round(currentArea.xRatio * 1080);
+  const pixelY = Math.round(currentArea.yRatio * 1920);
+  const pixelW = Math.round(currentArea.widthRatio * 1080);
+  const pixelH = Math.round(currentArea.heightRatio * 1920);
+
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
-      {/* 헤더 */}
+    <div className="p-6 max-w-6xl mx-auto space-y-6">
+      {/* 상단 헤더 */}
       <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-xl">
         <div className="flex items-center space-x-2">
-          <h1 className="text-2xl font-black text-white tracking-tight">인식 단어 & 동작 규칙 설정</h1>
+          <h1 className="text-2xl font-black text-white tracking-tight">인식 단어 & 캡처 영역 스튜디오</h1>
           <span className="px-2.5 py-0.5 rounded-full bg-brand-500/20 text-brand-300 text-xs font-bold border border-brand-500/30">
-            키워드 바이어싱
+            정밀 영역 드래그 에디터 탑재
           </span>
         </div>
         <p className="text-xs text-slate-400 mt-1">
-          방송 중 음성에서 감지할 특정 키워드와, 단어가 나왔을 때 실행할 자동화 동작(DB 적재, 화면 캡처)을 지정합니다.
+          방송 중 인식할 키워드와, '캡처' 단어가 나왔을 때 자동으로 잘라낼 틱톡 방송 화면 영역을 마우스로 직접 드래그하여 정밀 지정합니다.
         </p>
       </div>
 
@@ -58,15 +273,318 @@ export const RecognitionRulesPage: React.FC = () => {
       )}
 
       {toastMsg && (
-        <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center space-x-2 animate-in fade-in">
+        <div className="p-4 rounded-2xl bg-emerald-500/20 border border-emerald-500 text-emerald-200 text-xs font-bold flex items-center space-x-2 animate-in fade-in">
           <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
           <span>{toastMsg}</span>
         </div>
       )}
 
-      {/* 신규 단어 등록 폼 */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg">
-        <h3 className="text-sm font-bold text-white mb-4 flex items-center space-x-2">
+      {/* ========================================================================= */}
+      {/* 1. 자동 화면 캡처 영역 정밀 지정 스튜디오 (핵심 추가/고도화 기능) */}
+      {/* ========================================================================= */}
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
+          <div>
+            <h3 className="text-base font-black text-white flex items-center space-x-2">
+              <Crop className="w-5 h-5 text-tiktok-cyan" />
+              <span>화면 캡처 영역 인터랙티브 설정기</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              틱톡 화면 위를 **마우스로 직접 드래그**하거나 **모서리 꼭짓점을 클릭**하여 원하는 위치를 자유자재로 지정하세요.
+            </p>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleTestCapture}
+              disabled={isTestingCapture}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-brand-600 hover:from-cyan-500 hover:to-brand-500 text-white text-xs font-bold shadow-lg shadow-cyan-500/20 flex items-center space-x-1.5 transition"
+            >
+              <Eye className="w-4 h-4" />
+              <span>{isTestingCapture ? '캡처 중...' : '실시간 캡처 테스트'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 인터랙티브 모드 툴바 & 프리셋 버튼 */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* 지정 방식 모드 전환 (드래그 vs 꼭짓점 2점 찍기) */}
+          <div className="flex items-center space-x-1.5 bg-slate-950 p-1.5 rounded-2xl border border-slate-800 text-xs">
+            <span className="text-slate-400 px-2 font-bold">지정 모드:</span>
+            <button
+              onClick={() => { setSelectMode('DRAG'); setClickPointStep(1); setFirstPoint(null); }}
+              className={`px-3 py-1.5 rounded-xl font-bold flex items-center space-x-1 transition ${
+                selectMode === 'DRAG'
+                  ? 'bg-gradient-to-r from-brand-600 to-brand-500 text-white shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Move className="w-3.5 h-3.5" />
+              <span>마우스 직접 드래그</span>
+            </button>
+            <button
+              onClick={() => { setSelectMode('CLICK_POINTS'); setClickPointStep(1); setFirstPoint(null); }}
+              className={`px-3 py-1.5 rounded-xl font-bold flex items-center space-x-1 transition ${
+                selectMode === 'CLICK_POINTS'
+                  ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <MousePointer className="w-3.5 h-3.5" />
+              <span>끝 꼭짓점 2회 클릭</span>
+            </button>
+          </div>
+
+          {/* 빠른 프리셋 버튼 */}
+          <div className="flex items-center space-x-1.5 overflow-x-auto text-xs">
+            <span className="text-slate-400 px-1 font-semibold">프리셋:</span>
+            {CAPTURE_PRESETS.map((p) => (
+              <button
+                key={p.preset}
+                onClick={() => handleSelectPreset(p)}
+                className={`px-2.5 py-1.5 rounded-xl font-semibold border transition ${
+                  currentArea.preset === p.preset && currentArea.name === p.name
+                    ? 'bg-brand-500/20 border-brand-500 text-brand-300 shadow-sm'
+                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 2열 스튜디오 그리드: 좌측 대화형 틱톡 화면 / 우측 실시간 수치 조절기 */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* 좌측: 틱톡 라이브 인터랙티브 캔버스 (9:16 모바일 비율) */}
+          <div className="lg:col-span-6 flex flex-col items-center">
+            <div className="text-center text-xs font-semibold text-slate-300 mb-2 flex items-center space-x-1">
+              <Sparkles className="w-3.5 h-3.5 text-tiktok-cyan" />
+              <span>
+                {selectMode === 'DRAG'
+                  ? '화면 위를 드래그하여 사각형 박스를 그리거나 크기를 조절하세요'
+                  : clickPointStep === 1
+                  ? '📍 [1단계] 시작할 좌상단 꼭짓점을 클릭하세요'
+                  : '📍 [2단계] 대각선 끝 우하단 꼭짓점을 클릭하세요'}
+              </span>
+            </div>
+
+            <div
+              ref={canvasContainerRef}
+              onMouseDown={(e) => handleMouseDown(e, 'CREATE')}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onClick={handleCanvasClick}
+              className="relative w-[300px] h-[533px] bg-slate-950 rounded-3xl border-2 border-slate-700 shadow-2xl overflow-hidden cursor-crosshair select-none flex flex-col justify-between"
+              style={{
+                backgroundImage: 'linear-gradient(180deg, #161623 0%, #2b173a 50%, #0d0d17 100%)'
+              }}
+            >
+              {/* 틱톡 모의 화면 배경 그래픽 요소들 */}
+              {/* 1. 상단 라이브 헤더 */}
+              <div className="p-3 flex items-center justify-between pointer-events-none">
+                <div className="flex items-center space-x-2 bg-black/40 px-2.5 py-1 rounded-full border border-white/10">
+                  <div className="w-5 h-5 rounded-full bg-tiktok-pink flex items-center justify-center text-[10px] font-bold text-white">LIVE</div>
+                  <span className="text-[11px] font-bold text-white">다들려 스토어</span>
+                </div>
+                <span className="text-[10px] text-tiktok-cyan font-bold bg-black/40 px-2 py-0.5 rounded-full">🔥 3.8k</span>
+              </div>
+
+              {/* 2. 중앙 상품 배너 영역 */}
+              <div className="mx-3 p-3 bg-white/5 border border-white/10 rounded-xl pointer-events-none text-left">
+                <div className="text-[10px] text-tiktok-cyan font-bold">✨ [실시간 특가 판매]</div>
+                <div className="text-xs font-bold text-white mt-0.5">인기 프리미엄 라이브 의류</div>
+                <div className="text-sm font-black text-amber-300 mt-1">35,000원</div>
+              </div>
+
+              {/* 3. 하단 실시간 댓글창 영역 */}
+              <div className="p-3 bg-black/60 rounded-t-2xl border-t border-white/10 pointer-events-none space-y-1.5 text-left text-[10px]">
+                <div className="text-tiktok-cyan font-bold pb-1">💬 틱톡 실시간 댓글 목록</div>
+                <div className="text-slate-300">
+                  <strong className="text-brand-300">러블리:</strong> 구매확정합니다! 입금완료요~
+                </div>
+                <div className="text-slate-300">
+                  <strong className="text-purple-300">달콤한하루:</strong> 저도 바로 구매할게요!!
+                </div>
+                <div className="text-slate-400">
+                  <strong className="text-slate-400">민트초코:</strong> 캡처 부탁드려요
+                </div>
+              </div>
+
+              {/* --- 상호작용 바운딩 박스 오버레이 (선택된 영역) --- */}
+              <div
+                onMouseDown={(e) => handleMouseDown(e, 'MOVE')}
+                className="absolute border-2 border-tiktok-cyan bg-tiktok-cyan/20 shadow-2xl transition-all cursor-move group"
+                style={{
+                  left: `${currentArea.xRatio * 100}%`,
+                  top: `${currentArea.yRatio * 100}%`,
+                  width: `${currentArea.widthRatio * 100}%`,
+                  height: `${currentArea.heightRatio * 100}%`
+                }}
+              >
+                {/* 영역 이름 태그 */}
+                <div className="absolute -top-6 left-0 bg-tiktok-cyan text-slate-950 text-[10px] font-black px-1.5 py-0.5 rounded shadow whitespace-nowrap">
+                  📸 {currentArea.name} ({pixelW}x{pixelH}px)
+                </div>
+
+                {/* 4개 꼭짓점 조절 핸들 (인터랙티브 리사이즈 점) */}
+                {/* 좌상단 꼭짓점 */}
+                <div
+                  onMouseDown={(e) => handleMouseDown(e, 'RESIZE_TL')}
+                  className="absolute -top-2 -left-2 w-4 h-4 bg-white border-2 border-tiktok-cyan rounded-full cursor-nwse-resize hover:scale-125 transition-transform shadow"
+                />
+                {/* 우상단 꼭짓점 */}
+                <div
+                  onMouseDown={(e) => handleMouseDown(e, 'RESIZE_TR')}
+                  className="absolute -top-2 -right-2 w-4 h-4 bg-white border-2 border-tiktok-cyan rounded-full cursor-nesw-resize hover:scale-125 transition-transform shadow"
+                />
+                {/* 좌하단 꼭짓점 */}
+                <div
+                  onMouseDown={(e) => handleMouseDown(e, 'RESIZE_BL')}
+                  className="absolute -bottom-2 -left-2 w-4 h-4 bg-white border-2 border-tiktok-cyan rounded-full cursor-nesw-resize hover:scale-125 transition-transform shadow"
+                />
+                {/* 우하단 꼭짓점 */}
+                <div
+                  onMouseDown={(e) => handleMouseDown(e, 'RESIZE_BR')}
+                  className="absolute -bottom-2 -right-2 w-4 h-4 bg-white border-2 border-tiktok-cyan rounded-full cursor-nwse-resize hover:scale-125 transition-transform shadow"
+                />
+
+                {/* 중앙 십자선 가이드 */}
+                <div className="w-full h-full flex items-center justify-center opacity-30 pointer-events-none">
+                  <Maximize2 className="w-6 h-6 text-white" />
+                </div>
+              </div>
+
+              {/* 꼭짓점 2점 클릭 모드에서 첫 번째 점 핀 표시 */}
+              {selectMode === 'CLICK_POINTS' && firstPoint && (
+                <div
+                  className="absolute w-5 h-5 bg-rose-500 border-2 border-white rounded-full -translate-x-1/2 -translate-y-1/2 shadow-lg animate-ping"
+                  style={{ left: `${firstPoint.x * 100}%`, top: `${firstPoint.y * 100}%` }}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* 우측: 정밀 수치 조절 슬라이더 및 좌표 인풋 패널 */}
+          <div className="lg:col-span-6 space-y-4 bg-slate-950 p-6 rounded-2xl border border-slate-800">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-bold text-white flex items-center space-x-1.5">
+                <Sliders className="w-4 h-4 text-brand-400" />
+                <span>정밀 픽셀 & 비율 미세조정</span>
+              </h4>
+              <button
+                onClick={() => handleSelectPreset(CAPTURE_PRESETS[0])}
+                className="text-[11px] text-slate-400 hover:text-white flex items-center space-x-1"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>초기화</span>
+              </button>
+            </div>
+
+            {/* 실시간 픽셀 좌표 요약 카드 */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+              <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                <span className="text-[10px] text-slate-400">X 시작점</span>
+                <div className="font-bold text-white mt-0.5">{pixelX}px ({Math.round(currentArea.xRatio * 100)}%)</div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                <span className="text-[10px] text-slate-400">Y 시작점</span>
+                <div className="font-bold text-white mt-0.5">{pixelY}px ({Math.round(currentArea.yRatio * 100)}%)</div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                <span className="text-[10px] text-slate-400">가로 너비 (W)</span>
+                <div className="font-bold text-tiktok-cyan mt-0.5">{pixelW}px ({Math.round(currentArea.widthRatio * 100)}%)</div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                <span className="text-[10px] text-slate-400">세로 높이 (H)</span>
+                <div className="font-bold text-tiktok-cyan mt-0.5">{pixelH}px ({Math.round(currentArea.heightRatio * 100)}%)</div>
+              </div>
+            </div>
+
+            {/* 슬라이더 컨트롤들 */}
+            <div className="space-y-3 pt-2 text-xs">
+              {/* X 좌표 */}
+              <div>
+                <div className="flex justify-between text-slate-300 font-semibold mb-1">
+                  <span>가로 시작 위치 (X 좌표)</span>
+                  <span className="text-brand-400 font-mono">{Math.round(currentArea.xRatio * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="0.9"
+                  step="0.01"
+                  value={currentArea.xRatio}
+                  onChange={(e) => handleSliderChange('xRatio', parseFloat(e.target.value))}
+                  className="w-full accent-brand-500 cursor-pointer"
+                />
+              </div>
+
+              {/* Y 좌표 */}
+              <div>
+                <div className="flex justify-between text-slate-300 font-semibold mb-1">
+                  <span>세로 시작 위치 (Y 좌표)</span>
+                  <span className="text-brand-400 font-mono">{Math.round(currentArea.yRatio * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="0.9"
+                  step="0.01"
+                  value={currentArea.yRatio}
+                  onChange={(e) => handleSliderChange('yRatio', parseFloat(e.target.value))}
+                  className="w-full accent-brand-500 cursor-pointer"
+                />
+              </div>
+
+              {/* 너비 (Width) */}
+              <div>
+                <div className="flex justify-between text-slate-300 font-semibold mb-1">
+                  <span>크롭 영역 너비 (Width)</span>
+                  <span className="text-tiktok-cyan font-mono">{Math.round(currentArea.widthRatio * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.1"
+                  max="1.0"
+                  step="0.01"
+                  value={currentArea.widthRatio}
+                  onChange={(e) => handleSliderChange('widthRatio', parseFloat(e.target.value))}
+                  className="w-full accent-tiktok-cyan cursor-pointer"
+                />
+              </div>
+
+              {/* 높이 (Height) */}
+              <div>
+                <div className="flex justify-between text-slate-300 font-semibold mb-1">
+                  <span>크롭 영역 높이 (Height)</span>
+                  <span className="text-tiktok-cyan font-mono">{Math.round(currentArea.heightRatio * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.1"
+                  max="1.0"
+                  step="0.01"
+                  value={currentArea.heightRatio}
+                  onChange={(e) => handleSliderChange('heightRatio', parseFloat(e.target.value))}
+                  className="w-full accent-tiktok-cyan cursor-pointer"
+                />
+              </div>
+            </div>
+
+            {/* 설정 저장 확인 안내 */}
+            <div className="p-3 bg-brand-500/10 border border-brand-500/20 rounded-xl text-[11px] text-brand-200">
+              💡 마우스 드래그 또는 슬라이더 조절 시 변경 사항이 즉시 자동 반영되어 다음 라이브 방송 캡처에 적용됩니다.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 2. 새로운 인식 단어 추가 및 단어 목록 */}
+      {/* ========================================================================= */}
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg space-y-4">
+        <h3 className="text-sm font-bold text-white flex items-center space-x-2">
           <Plus className="w-4 h-4 text-brand-400" />
           <span>새로운 인식 단어 추가</span>
         </h3>
@@ -106,7 +624,7 @@ export const RecognitionRulesPage: React.FC = () => {
         </form>
       </div>
 
-      {/* 등록된 단어 목록 */}
+      {/* 등록된 단어 규칙 목록 */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg space-y-4">
         <h3 className="text-sm font-bold text-white flex items-center space-x-2">
           <Sliders className="w-4 h-4 text-tiktok-cyan" />
@@ -143,7 +661,6 @@ export const RecognitionRulesPage: React.FC = () => {
               </div>
 
               <div className="flex items-center space-x-3">
-                {/* 동작 선택 */}
                 <select
                   value={rule.action}
                   onChange={(e) => updateRule({ ...rule, action: e.target.value as RuleAction })}
@@ -154,7 +671,6 @@ export const RecognitionRulesPage: React.FC = () => {
                   <option value="DB_SAVE_AND_CAPTURE">⚡ 저장 + 캡처</option>
                 </select>
 
-                {/* 삭제 버튼 (필수 단어는 비활성화) */}
                 <button
                   onClick={() => handleDeleteWord(rule.id, rule.word)}
                   disabled={rule.isEssential}
@@ -173,56 +689,37 @@ export const RecognitionRulesPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 화면 캡처 영역 설정 */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg space-y-4">
-        <h3 className="text-sm font-bold text-white flex items-center space-x-2">
-          <Camera className="w-4 h-4 text-tiktok-pink" />
-          <span>자동 화면 캡처 영역 프리셋 설정</span>
-        </h3>
-        <p className="text-xs text-slate-400">
-          '캡처' 단어가 발화될 때 틱톡 방송 화면에서 자동으로 잘라낼 영역을 선택하세요.
-        </p>
+      {/* 캡처 테스트 결과 미리보기 팝업 모달 */}
+      {testCaptureUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <h3 className="text-sm font-bold text-white flex items-center space-x-1.5">
+                <Eye className="w-4 h-4 text-tiktok-cyan" />
+                <span>지정 영역 캡처 테스트 결과 미리보기</span>
+              </h3>
+              <button onClick={() => setTestCaptureUrl(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {CAPTURE_PRESETS.map((preset) => {
-            const isSelected = captureAreaConfig.preset === preset.preset;
+            <div className="bg-slate-950 p-2 rounded-2xl border border-slate-800 flex items-center justify-center max-h-[60vh] overflow-hidden">
+              <img src={testCaptureUrl} alt="테스트 캡처" className="rounded-xl max-h-[55vh] object-contain shadow" />
+            </div>
 
-            return (
-              <div
-                key={preset.preset}
-                onClick={() => setCaptureAreaConfig(preset)}
-                className={`p-4 rounded-2xl border cursor-pointer transition ${
-                  isSelected
-                    ? 'bg-brand-500/10 border-brand-500 shadow-lg shadow-brand-500/10'
-                    : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-white">{preset.name}</span>
-                  {isSelected && <CheckCircle2 className="w-4 h-4 text-brand-400" />}
-                </div>
-                <div className="w-full h-24 bg-slate-950 border border-slate-800 rounded-xl relative overflow-hidden flex items-center justify-center text-[10px] text-slate-400">
-                  {preset.preset === 'COMMENTS' && (
-                    <div className="absolute bottom-2 right-2 w-3/4 h-12 bg-tiktok-cyan/20 border border-tiktok-cyan/50 rounded flex items-center justify-center text-tiktok-cyan font-bold">
-                      댓글창 영역 크롭
-                    </div>
-                  )}
-                  {preset.preset === 'ORDERS' && (
-                    <div className="absolute top-4 left-4 right-4 h-12 bg-amber-500/20 border border-amber-500/50 rounded flex items-center justify-center text-amber-300 font-bold">
-                      주문창 영역 크롭
-                    </div>
-                  )}
-                  {preset.preset === 'FULL_SCREEN' && (
-                    <div className="absolute inset-2 bg-purple-500/20 border border-purple-500/50 rounded flex items-center justify-center text-purple-300 font-bold">
-                      전체 화면 캡처
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+            <p className="text-xs text-slate-400 text-center">
+              현재 설정된 좌표 (X:{pixelX}px, Y:{pixelY}px, W:{pixelW}px, H:{pixelH}px) 기준으로 깔끔하게 크롭되었습니다!
+            </p>
+
+            <button
+              onClick={() => setTestCaptureUrl(null)}
+              className="w-full py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold shadow-md"
+            >
+              확인 및 닫기
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
