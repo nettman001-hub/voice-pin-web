@@ -23,7 +23,20 @@ export class ScreenCaptureService {
   }
 
   /**
-   * 화면/창 스트림 요청 (이미 연결된 스트림이 있다면 재사용)
+   * 현재 연결된 스트림에서 방송 오디오 트랙 추출
+   */
+  public getActiveAudioTrack(): MediaStreamTrack | null {
+    const stream = this.getActiveStream();
+    if (stream) {
+      const audioTracks = stream.getAudioTracks();
+      const liveTrack = audioTracks.find(t => t.readyState === 'live');
+      if (liveTrack) return liveTrack;
+    }
+    return null;
+  }
+
+  /**
+   * 화면/창/특정 크롬 탭 스트림 요청 (화면 비디오 + 방송 소리 오디오 동시 획득)
    */
   public async getOrCreateStream(forceNew = false): Promise<MediaStream | null> {
     if (!forceNew) {
@@ -42,13 +55,18 @@ export class ScreenCaptureService {
         window.__VOICECAP_SCREEN_STREAM__ = null;
       }
 
+      // 특정 크롬 탭 / 윈도우 창의 영상 및 방송 소리(오디오) 동시 요청
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
-          displaySurface: 'window',
+          displaySurface: 'browser',
           width: { ideal: 1920 },
           height: { ideal: 1080 }
         } as any,
-        audio: false
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        } as any
       });
 
       // 사용자가 브라우저 상단에서 공유 중지를 눌렀을 때 핸들링
@@ -65,7 +83,7 @@ export class ScreenCaptureService {
       }
       return stream;
     } catch (err) {
-      console.warn('[ScreenCapture] 화면 공유 취소 또는 거부:', err);
+      console.warn('[ScreenCapture] 화면/탭 공유 취소 또는 거부:', err);
       return null;
     }
   }
@@ -132,17 +150,17 @@ export class ScreenCaptureService {
               resolve();
             }
           };
-          const timeout = setTimeout(done, 400);
+          const timeout = setTimeout(done, 300);
 
           if ('requestVideoFrameCallback' in video!) {
             (video as any).requestVideoFrameCallback(() => {
               clearTimeout(timeout);
-              setTimeout(done, 80);
+              setTimeout(done, 60);
             });
           } else {
             video!.onloadeddata = () => {
               clearTimeout(timeout);
-              setTimeout(done, 100);
+              setTimeout(done, 80);
             };
           }
         });
@@ -169,7 +187,7 @@ export class ScreenCaptureService {
         ctx.font = 'bold 11px sans-serif';
         ctx.fillText('🎙️ VoiceCAP 캡처', canvas.width - badgeW, canvas.height - 10);
 
-        // 정리 작업 (비디오 엘리먼트만 DOM에서 제거하고, 스트림은 다음 캡처를 위해 유지!)
+        // 정리 작업
         if (video.parentNode) {
           video.parentNode.removeChild(video);
         }

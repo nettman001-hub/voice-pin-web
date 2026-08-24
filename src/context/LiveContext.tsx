@@ -31,7 +31,7 @@ interface LiveContextType {
   editingFieldInfo: string | null;
   deepgramApiKey: string;
   setDeepgramApiKey: (key: string) => void;
-  startListening: (mode?: 'MIC' | 'SYSTEM_LOOPBACK') => Promise<void>;
+  startListening: (mode?: 'TAB_AUDIO' | 'MIC') => Promise<void>;
   stopListening: () => void;
   injectTestMent: (text: string) => void;
   captureCurrentScreen: (area?: CaptureAreaConfig, triggerWord?: string) => Promise<string>;
@@ -279,8 +279,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setTranscriptLogs((prev) => [newLog, ...prev.slice(0, 49)]);
   };
 
-  // 라이브 청취 시작
-  const startListening = async (mode: 'MIC' | 'SYSTEM_LOOPBACK' = 'MIC') => {
+  // 라이브 청취 시작 (크롬 탭 방송 소리 또는 마이크)
+  const startListening = async (mode: 'TAB_AUDIO' | 'MIC' = 'TAB_AUDIO') => {
     try {
       const newSessionId = generateSessionId();
       setCurrentSessionId(newSessionId);
