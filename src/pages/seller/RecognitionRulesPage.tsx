@@ -235,94 +235,27 @@ export const RecognitionRulesPage: React.FC = () => {
     setCaptureAreaConfig(updated);
   };
 
-  // 실시간 윈도우 영역 캡처 테스트 (공유창 팝업 없이 즉시 지정 영역 크롭 캡처)
+  // 실시간 윈도우 창/화면 공유 기반 실제 캡처 테스트
   const handleTestCapture = async () => {
     setIsTestingCapture(true);
+    setToastMsg('🪟 캡처할 윈도우 창(틱톡 라이브 스튜디오 / OBS) 또는 모니터 화면을 선택해 주세요.');
     try {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        canvas.width = desktopResolution.width;
-        canvas.height = desktopResolution.height;
-
-        // 1. 윈도우 데스크톱 배경
-        const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-        grad.addColorStop(0, '#0f172a');
-        grad.addColorStop(0.5, '#1e1b4b');
-        grad.addColorStop(1, '#020617');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        // 2. 윈도우 창 상단바
-        ctx.fillStyle = 'rgba(30, 41, 59, 0.95)';
-        ctx.fillRect(0, 0, canvas.width, 36);
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = 'bold 13px sans-serif';
-        ctx.fillText(`🪟 Windows Desktop - TikTok Live Studio (${desktopResolution.width}x${desktopResolution.height})`, 16, 23);
-
-        // 3. 좌측 도구함
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
-        ctx.fillRect(20, 50, canvas.width * 0.22, canvas.height - 70);
-
-        // 4. 중앙 송출 프리뷰
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(canvas.width * 0.25, 50, canvas.width * 0.44, canvas.height - 70);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 16px sans-serif';
-        ctx.fillText('🔴 LIVE 메인 송출 영상', canvas.width * 0.25 + 20, 85);
-
-        // 5. 우측 틱톡 실시간 댓글 및 주문 패널
-        const commentX = canvas.width * 0.71;
-        const commentW = canvas.width * 0.27;
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
-        ctx.fillRect(commentX, 50, commentW, canvas.height - 70);
-        ctx.strokeStyle = 'rgba(56, 189, 248, 0.5)';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(commentX, 50, commentW, canvas.height - 70);
-
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 15px sans-serif';
-        ctx.fillText('💬 틱톡 실시간 댓글 및 구매창', commentX + 16, 85);
-
-        // 구매 댓글 렌더링
-        ctx.fillStyle = '#f8fafc';
-        ctx.font = 'bold 14px sans-serif';
-        ctx.fillText('✨ 러블리샵: 구매확정! 35,000원 입금했습니다', commentX + 16, 130);
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '12px sans-serif';
-        ctx.fillText(`⏰ ${new Date().toLocaleTimeString('ko-KR')} • 자동판매인식`, commentX + 16, 155);
-
-        ctx.fillStyle = '#e2e8f0';
-        ctx.font = 'bold 14px sans-serif';
-        ctx.fillText('✨ 달콤한하루: 저도 35,000원 주문이요~', commentX + 16, 200);
-
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '12px sans-serif';
-        ctx.fillText('✨ 민트초코: 캡처 부탁드려요!', commentX + 16, 245);
-
-        // 6. 워터마크 태그
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
-        ctx.fillRect(canvas.width - 170, canvas.height - 40, 160, 30);
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 13px sans-serif';
-        ctx.fillText('🎙️ VoiceCAP 자동캡처', canvas.width - 160, canvas.height - 20);
-
-        // 현재 지정 영역(X, Y, W, H)으로 정밀 크롭
-        const cropCanvas = document.createElement('canvas');
-        const cropCtx = cropCanvas.getContext('2d');
-        const sx = Math.floor(canvas.width * currentArea.xRatio);
-        const sy = Math.floor(canvas.height * currentArea.yRatio);
-        const sw = Math.max(50, Math.floor(canvas.width * currentArea.widthRatio));
-        const sh = Math.max(50, Math.floor(canvas.height * currentArea.heightRatio));
-
-        cropCanvas.width = sw;
-        cropCanvas.height = sh;
-        cropCtx?.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
-
-        setTestCaptureUrl(cropCanvas.toDataURL('image/png'));
-        setToastMsg(`📸 지정한 윈도우 영역(${pixelW}x${pixelH}px)의 실시간 캡처가 완료되었습니다!`);
+      const imgUrl = await screenCaptureService.captureArea(null, currentArea, {
+        nickname: '러블리샵',
+        amount: 35000,
+        timestamp: new Date().toLocaleTimeString('ko-KR')
+      });
+      if (imgUrl) {
+        setTestCaptureUrl(imgUrl);
+        setToastMsg(`📸 선택한 윈도우 화면의 지정 영역(${pixelW}x${pixelH}px) 실제 캡처가 완료되었습니다!`);
+        setTimeout(() => setToastMsg(null), 3000);
+      } else {
+        setToastMsg('ℹ️ 화면 공유가 취소되었거나 선택되지 않았습니다.');
         setTimeout(() => setToastMsg(null), 3000);
       }
+    } catch (e) {
+      console.error(e);
+      alert('화면 캡처 테스트 중 오류가 발생했습니다.');
     } finally {
       setIsTestingCapture(false);
     }
