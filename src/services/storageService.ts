@@ -172,7 +172,8 @@ const KEYS = {
   REPORTS: 'dadryeo_reports',
   LOGS: 'dadryeo_logs',
   NOTIFICATIONS: 'dadryeo_notifications',
-  DEEPGRAM_API_KEY: 'dadryeo_deepgram_api_key'
+  DEEPGRAM_API_KEY: 'dadryeo_deepgram_api_key',
+  CAPTURE_AREA: 'voicecap_capture_area_config'
 };
 
 export class StorageService {
@@ -339,6 +340,14 @@ export class StorageService {
     ]);
   }
   public saveNotifications(notis: NotificationSetting[]) { this.setItem(KEYS.NOTIFICATIONS, notis); }
+
+  // 캡처 영역 설정 영구 저장
+  public getCaptureAreaConfig(): CaptureAreaConfig | null {
+    return this.getItem<CaptureAreaConfig | null>(KEYS.CAPTURE_AREA, null);
+  }
+  public saveCaptureAreaConfig(config: CaptureAreaConfig) {
+    this.setItem(KEYS.CAPTURE_AREA, config);
+  }
 }
 
 export const storageService = new StorageService();

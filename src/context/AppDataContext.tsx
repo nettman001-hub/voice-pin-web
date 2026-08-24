@@ -98,7 +98,14 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // 규칙 상태
   const [rules, setRules] = useState<RecognitionWordRule[]>([]);
-  const [captureAreaConfig, setCaptureAreaConfig] = useState<CaptureAreaConfig>(CAPTURE_PRESETS[0]);
+  const [captureAreaConfig, setCaptureAreaConfigState] = useState<CaptureAreaConfig>(() => {
+    return storageService.getCaptureAreaConfig() || CAPTURE_PRESETS[0];
+  });
+
+  const setCaptureAreaConfig = (cfg: CaptureAreaConfig) => {
+    setCaptureAreaConfigState(cfg);
+    storageService.saveCaptureAreaConfig(cfg);
+  };
 
   // 학습 상태
   const [trainingSentences, setTrainingSentences] = useState<TrainingSentence[]>([]);
@@ -121,6 +128,10 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => {
     storageService.init();
     setRules(storageService.getRules());
+    const savedArea = storageService.getCaptureAreaConfig();
+    if (savedArea) {
+      setCaptureAreaConfigState(savedArea);
+    }
     setTrainingSentences(storageService.getTrainingSentences());
     setPaymentHistory(storageService.getPayments());
     setNotifications(storageService.getNotifications());

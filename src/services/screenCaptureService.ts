@@ -1,16 +1,24 @@
 import { CaptureAreaConfig } from '../types/rules';
 
-export class ScreenCaptureService {
-  private currentStream: MediaStream | null = null;
+// 전역 window 객체에 스트림 레퍼런스 유지 (페이지 이동/언마운트 시 유실 방지)
+declare global {
+  interface Window {
+    __VOICECAP_SCREEN_STREAM__?: MediaStream | null;
+  }
+}
 
+export class ScreenCaptureService {
   /**
    * 현재 연결되어 살아있는 비디오 스트림이 있는지 확인
    */
   public getActiveStream(): MediaStream | null {
-    if (this.currentStream && this.currentStream.getVideoTracks().some(t => t.readyState === 'live')) {
-      return this.currentStream;
+    if (typeof window !== 'undefined' && window.__VOICECAP_SCREEN_STREAM__) {
+      const stream = window.__VOICECAP_SCREEN_STREAM__;
+      if (stream.getVideoTracks().some(t => t.readyState === 'live')) {
+        return stream;
+      }
+      window.__VOICECAP_SCREEN_STREAM__ = null;
     }
-    this.currentStream = null;
     return null;
   }
 
@@ -29,9 +37,9 @@ export class ScreenCaptureService {
 
     try {
       // 기존 스트림 정리
-      if (this.currentStream) {
-        this.currentStream.getTracks().forEach(t => t.stop());
-        this.currentStream = null;
+      if (typeof window !== 'undefined' && window.__VOICECAP_SCREEN_STREAM__) {
+        window.__VOICECAP_SCREEN_STREAM__.getTracks().forEach(t => t.stop());
+        window.__VOICECAP_SCREEN_STREAM__ = null;
       }
 
       const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -46,11 +54,15 @@ export class ScreenCaptureService {
       // 사용자가 브라우저 상단에서 공유 중지를 눌렀을 때 핸들링
       stream.getVideoTracks().forEach(track => {
         track.onended = () => {
-          this.currentStream = null;
+          if (typeof window !== 'undefined') {
+            window.__VOICECAP_SCREEN_STREAM__ = null;
+          }
         };
       });
 
-      this.currentStream = stream;
+      if (typeof window !== 'undefined') {
+        window.__VOICECAP_SCREEN_STREAM__ = stream;
+      }
       return stream;
     } catch (err) {
       console.warn('[ScreenCapture] 화면 공유 취소 또는 거부:', err);
@@ -62,9 +74,9 @@ export class ScreenCaptureService {
    * 스트림 연결 해제
    */
   public stopStream(): void {
-    if (this.currentStream) {
-      this.currentStream.getTracks().forEach(t => t.stop());
-      this.currentStream = null;
+    if (typeof window !== 'undefined' && window.__VOICECAP_SCREEN_STREAM__) {
+      window.__VOICECAP_SCREEN_STREAM__.getTracks().forEach(t => t.stop());
+      window.__VOICECAP_SCREEN_STREAM__ = null;
     }
   }
 
