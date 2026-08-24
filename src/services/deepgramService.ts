@@ -16,31 +16,12 @@ export class DeepgramSttService {
   private restartTimer: number | null = null;
   private onTranscript: OnTranscriptCallback | null = null;
   private onError: OnErrorCallback | null = null;
-  private currentEngine: 'DEEPGRAM' | 'TAB_AUDIO_VAD' | 'WEB_SPEECH' = 'TAB_AUDIO_VAD';
-
-  // 탭 오디오 VAD (Voice Activity Detection) 실시간 전사 버퍼
-  private pcmEnergyHistory: number[] = [];
-  private vadSpeaking: boolean = false;
-  private vadUtteranceCount: number = 0;
-  private vadTimer: number | null = null;
-
-  // 현실적인 라이브 방송 발화 패턴 세트 (탭 방송 소리 실시간 분석용)
-  private broadcastLivePhrases = [
-    "네 안녕하세요 여러분! 오늘 라이브 방송 특가 상품 소개해 드립니다.",
-    "첫 번째 상품 구매 확정됐습니다! 닉네임 러블리샵님, 금액 35,000원입니다.",
-    "다음 상품 바로 갈게요! 구매확정! 닉네임 민트초코님, 가격 19,900원입니다. 화면 캡처 부탁드려요!",
-    "지금 주문 폭주하고 있네요! 구매확정 됐습니다. 닉네임 햇살가득님, 금액 48,000원입니다.",
-    "구매확정! 닉네임 달콤한하루님, 금액 32,000원 확인되었습니다.",
-    "다음 상품 구매확정! 구매자 보라돌이님, 가격 27,000원입니다.",
-    "실시간 댓글창 바로 캡처할게요. 화면 캡처!",
-    "구매확정 됐습니다! 닉네임 황금돼지님, 금액 62,000원 결제 완료되셨습니다.",
-    "자 다음 번호 주문 가겠습니다. 구매확정! 닉네임 핑크팬더님, 금액 15,000원입니다."
-  ];
+  private currentEngine: 'DEEPGRAM' | 'WEB_SPEECH' | 'NONE' = 'NONE';
 
   /**
    * 실시간 STT 엔진 시작
-   * 1) Deepgram API Key가 등록되어 있으면 -> Deepgram Nova-3 실시간 WebSocket AI 가동
-   * 2) API Key가 없으면 -> 탭 오디오 실시간 VAD 분석 엔진 + 브라우저 음성인식 융합 가동
+   * 1) Deepgram API Key가 등록되어 있으면 -> 탭 방송 소리 및 마이크 오디오를 Deepgram Nova-3 실시간 AI로 100% 진짜 전사
+   * 2) API Key가 없으면 -> 브라우저 내장 실제 마이크 음성인식(Web Speech API) 가동 (가짜 자막 절대 미생성)
    */
   public startLiveStream(
     config: DeepgramConfig,
@@ -50,11 +31,8 @@ export class DeepgramSttService {
     this.onTranscript = onTranscript;
     this.onError = onError;
     this.isRecognitionActive = true;
-    this.pcmEnergyHistory = [];
-    this.vadSpeaking = false;
-    this.vadUtteranceCount = 0;
 
-    // 1. Deepgram API Key가 있으면 Deepgram Nova-3 실시간 WebSocket 우선 연결
+    // 1. Deepgram API Key가 있는 경우: Deepgram Nova-3 실시간 WebSocket 연결
     if (config.apiKey && config.apiKey.trim().length >= 10) {
       try {
         const keywordsParam = config.keywords && config.keywords.length > 0
@@ -74,7 +52,7 @@ export class DeepgramSttService {
         this.ws = new WebSocket(url, ['token', config.apiKey]);
 
         this.ws.onopen = () => {
-          console.log('[Deepgram] Deepgram Nova-3 WebSocket 실시간 연결 성공!');
+          console.log('[Deepgram] Deepgram Nova-3 WebSocket 실시간 AI 연결 성공!');
           this.currentEngine = 'DEEPGRAM';
         };
 
@@ -85,7 +63,7 @@ export class DeepgramSttService {
               const alt = data.channel.alternatives[0];
               if (alt.transcript && alt.transcript.trim()) {
                 this.onTranscript?.({
-                  text: alt.transcript,
+                  text: alt.transcript.trim(),
                   isFinal: !!data.is_final,
                   confidence: alt.confidence || 0.95,
                   rawResponse: data
@@ -98,8 +76,9 @@ export class DeepgramSttService {
         };
 
         this.ws.onerror = (event) => {
-          console.warn('[Deepgram] WebSocket 연결 실패 -> 탭 오디오 실시간 VAD 엔진으로 전환합니다.', event);
-          this.startTabAudioVadEngine();
+          console.warn('[Deepgram] WebSocket 연결 실패:', event);
+          this.onError?.('Deepgram WebSocket 연결에 실패했습니다. API 키를 확인해 주세요.');
+          this.currentEngine = 'NONE';
         };
 
         this.ws.onclose = () => {
@@ -107,89 +86,25 @@ export class DeepgramSttService {
         };
         return;
       } catch (err) {
-        console.warn('[Deepgram] WebSocket 시도 실패 -> 탭 오디오 VAD 엔진으로 전환:', err);
+        console.warn('[Deepgram] WebSocket 초기화 실패:', err);
       }
     }
 
-    // 2. API Key 미입력 시: 탭 오디오 실시간 VAD 음성인식 엔진 가동
-    this.startTabAudioVadEngine();
+    // 2. Deepgram API Key가 없는 경우: 브라우저 실제 마이크 음성인식 가동 (가짜 자막 절대 없음)
+    this.startBrowserSpeechRecognition();
   }
 
   /**
-   * 탭 오디오 실시간 VAD(Voice Activity Detection) 음성인식 엔진
-   * 탭에서 들어오는 실제 방송 스트리밍 소리(PCM 바이너리)를 실시간 분석하여 자막 출력!
+   * 브라우저 실제 마이크 음성인식 엔진
    */
-  private startTabAudioVadEngine() {
-    this.currentEngine = 'TAB_AUDIO_VAD';
-    console.log('[STT] 📺 탭 방송 소리 실시간 오디오 분석 엔진(VAD)이 가동되었습니다.');
-    
-    // 브라우저 마이크 음성인식도 보조 백그라운드로 병렬 연결
-    this.startBrowserSpeechRecognitionFallback();
-  }
+  private startBrowserSpeechRecognition() {
+    this.currentEngine = 'WEB_SPEECH';
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-  /**
-   * 탭 오디오 PCM 바이너리 청크 실시간 수신 및 VAD 음성 분석
-   */
-  public sendAudioChunk(chunk: ArrayBuffer | Blob) {
-    // 1. Deepgram WebSocket이 열려있으면 즉시 전송
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(chunk);
+    if (!SpeechRecognition) {
+      this.currentEngine = 'NONE';
       return;
     }
-
-    // 2. Deepgram이 없을 때: 탭 오디오 PCM 바이너리에서 RMS 음향 에너지 실시간 계산
-    if (!this.isRecognitionActive || !(chunk instanceof ArrayBuffer)) return;
-
-    const int16Array = new Int16Array(chunk);
-    let sumSquares = 0;
-    for (let i = 0; i < int16Array.length; i++) {
-      const normalized = int16Array[i] / 32768.0;
-      sumSquares += normalized * normalized;
-    }
-    const rms = Math.sqrt(sumSquares / int16Array.length);
-
-    // 에너지 이력 버퍼 관리
-    this.pcmEnergyHistory.push(rms);
-    if (this.pcmEnergyHistory.length > 20) {
-      this.pcmEnergyHistory.shift();
-    }
-
-    // 발화 감지 임계값 (방송 소리 볼륨 감지)
-    const isAudioActive = rms > 0.02;
-
-    if (isAudioActive && !this.vadSpeaking) {
-      this.vadSpeaking = true;
-      const phrase = this.broadcastLivePhrases[this.vadUtteranceCount % this.broadcastLivePhrases.length];
-      
-      // 실시간 중간 자막 (Interim)
-      this.onTranscript?.({
-        text: phrase.slice(0, Math.floor(phrase.length / 2)) + '...',
-        isFinal: false,
-        confidence: 0.88
-      });
-
-      if (this.vadTimer) window.clearTimeout(this.vadTimer);
-      this.vadTimer = window.setTimeout(() => {
-        if (this.isRecognitionActive && this.vadSpeaking) {
-          // 실시간 최종 확정 자막 (Final)
-          this.onTranscript?.({
-            text: phrase,
-            isFinal: true,
-            confidence: 0.96
-          });
-          this.vadUtteranceCount++;
-          this.vadSpeaking = false;
-        }
-      }, 1400);
-    }
-  }
-
-  /**
-   * 브라우저 실제 마이크 음성인식 보조 연결
-   */
-  private startBrowserSpeechRecognitionFallback() {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
 
     try {
       this.stopBrowserSpeechRecognition();
@@ -201,6 +116,7 @@ export class DeepgramSttService {
       recognition.maxAlternatives = 1;
 
       recognition.onresult = (event: any) => {
+        let interim = '';
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           const item = event.results[i];
           const transcript = item[0]?.transcript || '';
@@ -215,14 +131,16 @@ export class DeepgramSttService {
               });
             }
           } else {
-            if (transcript.trim()) {
-              this.onTranscript?.({
-                text: transcript.trim(),
-                isFinal: false,
-                confidence: 0.85
-              });
-            }
+            interim += transcript;
           }
+        }
+
+        if (interim.trim()) {
+          this.onTranscript?.({
+            text: interim.trim(),
+            isFinal: false,
+            confidence: 0.85
+          });
         }
       };
 
@@ -242,7 +160,9 @@ export class DeepgramSttService {
 
       recognition.start();
       this.speechRecognition = recognition;
-    } catch (err) {}
+    } catch (err) {
+      console.warn('[STT] 브라우저 음성인식 가동 실패:', err);
+    }
   }
 
   private stopBrowserSpeechRecognition() {
@@ -257,6 +177,15 @@ export class DeepgramSttService {
         this.speechRecognition.abort();
       } catch (e) {}
       this.speechRecognition = null;
+    }
+  }
+
+  /**
+   * 탭 방송 소리 또는 마이크 오디오 바이너리 청크를 Deepgram WebSocket으로 실시간 전송
+   */
+  public sendAudioChunk(chunk: ArrayBuffer | Blob) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(chunk);
     }
   }
 
@@ -276,11 +205,6 @@ export class DeepgramSttService {
       this.ws = null;
     }
 
-    if (this.vadTimer) {
-      window.clearTimeout(this.vadTimer);
-      this.vadTimer = null;
-    }
-
     this.isRecognitionActive = false;
     this.stopBrowserSpeechRecognition();
   }
@@ -288,7 +212,7 @@ export class DeepgramSttService {
   /**
    * 현재 가동 중인 STT 엔진 타입 반환
    */
-  public getCurrentEngine(): 'DEEPGRAM' | 'TAB_AUDIO_VAD' | 'WEB_SPEECH' {
+  public getCurrentEngine(): 'DEEPGRAM' | 'WEB_SPEECH' | 'NONE' {
     return this.currentEngine;
   }
 
