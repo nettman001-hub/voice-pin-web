@@ -2,38 +2,94 @@ import { CaptureAreaConfig } from '../types/rules';
 
 export class ScreenCaptureService {
   /**
-   * 지정된 비디오 스트림 또는 윈도우 데스크톱 화면에서 특정 영역(댓글창, OBS 송출창, 전체화면)을 캡처하여 Data URL (PNG)로 반환
+   * 지정된 비디오 스트림 또는 실제 윈도우 화면 공유에서 특정 영역(댓글창, OBS 송출창, 전체화면)을 캡처하여 Data URL (PNG)로 반환
    */
   public async captureArea(
     stream: MediaStream | null,
     areaConfig: CaptureAreaConfig,
     metadata?: { nickname?: string; amount?: number; timestamp?: string }
   ): Promise<string> {
+    let activeStream = stream;
+    let needToCloseStream = false;
+
+    // 스트림이 없고 브라우저 getDisplayMedia 지원 시 실제 윈도우 화면 공유 스트림 요청
+    if (!activeStream || !activeStream.getVideoTracks().some(t => t.readyState === 'live')) {
+      if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getDisplayMedia) {
+        try {
+          activeStream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+              displaySurface: 'window', // 윈도우 창 또는 모니터 화면
+              width: { ideal: 1920 },
+              height: { ideal: 1080 }
+            } as any,
+            audio: false
+          });
+          needToCloseStream = true;
+        } catch (e) {
+          console.warn('[ScreenCapture] 화면 공유 취소 또는 권한 거부, 모의 윈도우 캔버스로 생성합니다:', e);
+        }
+      }
+    }
+
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) return '';
 
     // 실제 비디오 트랙이 있는 경우 (화면 공유 / 윈도우 창 캡처)
-    const videoTrack = stream?.getVideoTracks()[0];
+    const videoTrack = activeStream?.getVideoTracks()[0];
     if (videoTrack && videoTrack.readyState === 'live') {
       try {
         const video = document.createElement('video');
         video.muted = true;
+        video.playsInline = true;
         video.srcObject = new MediaStream([videoTrack]);
-        await video.play();
 
-        const sx = video.videoWidth * areaConfig.xRatio;
-        const sy = video.videoHeight * areaConfig.yRatio;
-        const sw = video.videoWidth * areaConfig.widthRatio;
-        const sh = video.videoHeight * areaConfig.heightRatio;
+        // 비디오 메타데이터 및 첫 프레임 로드 보장
+        await new Promise<void>((resolve) => {
+          if (video.readyState >= 2 && video.videoWidth > 0) {
+            resolve();
+            return;
+          }
+          video.onloadedmetadata = () => {
+            video.play().then(() => resolve()).catch(() => resolve());
+          };
+          // 안전 타임아웃
+          setTimeout(resolve, 800);
+        });
 
-        canvas.width = Math.max(100, Math.round(sw || 800));
-        canvas.height = Math.max(100, Math.round(sh || 600));
+        const vw = video.videoWidth || 1920;
+        const vh = video.videoHeight || 1080;
 
-        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+        const sx = Math.max(0, Math.floor(vw * areaConfig.xRatio));
+        const sy = Math.max(0, Math.floor(vh * areaConfig.yRatio));
+        const sw = Math.min(vw - sx, Math.max(50, Math.floor(vw * areaConfig.widthRatio)));
+        const sh = Math.min(vh - sy, Math.max(50, Math.floor(vh * areaConfig.heightRatio)));
+
+        canvas.width = sw;
+        canvas.height = sh;
+
+        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+
+        // 캡처 워터마크 태그 부착
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+        const badgeW = Math.min(150, Math.max(100, sw * 0.4));
+        const badgeH = 24;
+        ctx.fillRect(canvas.width - badgeW - 8, canvas.height - badgeH - 8, badgeW, badgeH);
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillText('🎙️ VoiceCAP 캡처', canvas.width - badgeW, canvas.height - 12);
+
+        // 일회성 테스트 스트림인 경우 트랙 종료
+        if (needToCloseStream) {
+          activeStream?.getTracks().forEach((t) => t.stop());
+        }
+
         return canvas.toDataURL('image/png');
       } catch (err) {
-        console.warn('[ScreenCapture] 비디오 프레임 크롭 실패, 고화질 윈도우 데스크톱 목업 캡처 생성:', err);
+        console.warn('[ScreenCapture] 실제 비디오 프레임 크롭 실패, 고화질 윈도우 데스크톱 목업으로 폴백:', err);
+        if (needToCloseStream) {
+          activeStream?.getTracks().forEach((t) => t.stop());
+        }
       }
     }
 

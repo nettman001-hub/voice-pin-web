@@ -238,13 +238,17 @@ export const RecognitionRulesPage: React.FC = () => {
   // 실시간 윈도우 화면 캡처 테스트
   const handleTestCapture = async () => {
     setIsTestingCapture(true);
+    setToastMsg('🪟 캡처할 윈도우 창(틱톡 라이브 스튜디오 / OBS) 또는 화면을 선택해 주세요.');
     try {
       const imgUrl = await screenCaptureService.captureArea(null, currentArea, {
         nickname: '러블리샵',
         amount: 35000,
         timestamp: new Date().toLocaleTimeString('ko-KR')
       });
-      setTestCaptureUrl(imgUrl);
+      if (imgUrl) {
+        setTestCaptureUrl(imgUrl);
+        setToastMsg('📸 선택한 윈도우 영역의 실시간 캡처가 완료되었습니다!');
+      }
     } catch (e) {
       console.error(e);
       alert('화면 캡처 테스트 중 오류가 발생했습니다.');
