@@ -281,20 +281,21 @@ export const RecognitionRulesPage: React.FC = () => {
         </div>
 
         {/* 윈도우 해상도 선택 셀렉터 */}
-        <div className="flex items-center space-x-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200 text-xs">
-          <span className="text-slate-500 font-bold px-1.5 flex items-center space-x-1">
+        <div className="flex items-center space-x-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200 text-xs overflow-x-auto">
+          <span className="text-slate-500 font-bold px-1.5 flex items-center space-x-1 whitespace-nowrap">
             <Tv className="w-3.5 h-3.5 text-brand-600" />
             <span>기준 해상도:</span>
           </span>
           {[
-            { width: 1920, height: 1080, name: '1920x1080 (FHD)' },
+            { width: 3840, height: 2160, name: '3840x2160 (4K UHD)' },
             { width: 2560, height: 1440, name: '2560x1440 (QHD)' },
+            { width: 1920, height: 1080, name: '1920x1080 (FHD)' },
             { width: 1366, height: 768, name: '1366x768 (HD)' },
           ].map((res) => (
             <button
               key={res.name}
               onClick={() => setDesktopResolution({ ...res, name: `${res.width} x ${res.height}` })}
-              className={`px-3 py-1.5 rounded-xl font-bold transition ${
+              className={`px-3 py-1.5 rounded-xl font-bold transition whitespace-nowrap ${
                 desktopResolution.width === res.width
                   ? 'bg-slate-800 text-white shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
