@@ -43,9 +43,10 @@ export const SUBSCRIPTION_PLANS: PlanInfo[] = [
 ];
 
 export const CAPTURE_PRESETS: CaptureAreaConfig[] = [
-  { preset: 'COMMENTS', name: '댓글 목록 (하단 우측)', xRatio: 0.05, yRatio: 0.5, widthRatio: 0.9, heightRatio: 0.45 },
-  { preset: 'ORDERS', name: '주문/선물 알림 (중앙)', xRatio: 0.1, yRatio: 0.2, widthRatio: 0.8, heightRatio: 0.35 },
-  { preset: 'FULL_SCREEN', name: '화면 전체', xRatio: 0, yRatio: 0, widthRatio: 1, heightRatio: 1 }
+  { preset: 'COMMENTS', name: '틱톡 스튜디오 댓글창 (우측)', xRatio: 0.70, yRatio: 0.20, widthRatio: 0.28, heightRatio: 0.75 },
+  { preset: 'ORDERS', name: 'OBS/스튜디오 라이브 화면 (중앙)', xRatio: 0.25, yRatio: 0.15, widthRatio: 0.45, heightRatio: 0.75 },
+  { preset: 'COMMENTS', name: '주문/채팅 알림 영역 (하단)', xRatio: 0.25, yRatio: 0.65, widthRatio: 0.45, heightRatio: 0.28 },
+  { preset: 'FULL_SCREEN', name: '윈도우 데스크톱 전체 (1920x1080)', xRatio: 0, yRatio: 0, widthRatio: 1, heightRatio: 1 }
 ];
 
 interface AppDataContextType {
