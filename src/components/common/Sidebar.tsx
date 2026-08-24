@@ -1,121 +1,127 @@
 import React from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLive } from '../../context/LiveContext';
-import { useSales } from '../../context/SalesContext';
-import { useAppData } from '../../context/AppDataContext';
 import {
   Radio,
+  Sliders,
+  Sparkles,
   ShoppingBag,
   CheckSquare,
-  Calculator,
-  Mic2,
-  Sliders,
+  BarChart3,
   CreditCard,
   Bell,
   User,
-  LayoutDashboard,
+  Shield,
   Users,
   AlertTriangle,
-  BarChart3,
-  Sparkles,
-  KeyRound
+  FileSpreadsheet
 } from 'lucide-react';
 
 interface NavItem {
-  to: string;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
+  name: string;
+  path: string;
+  icon: React.FC<{ className?: string }>;
   badge?: string;
-  badgeColor?: string;
+  isLiveOnly?: boolean;
 }
 
-interface NavSection {
-  category: string;
+interface NavGroup {
+  groupName: string;
   items: NavItem[];
 }
 
 export const Sidebar: React.FC = () => {
   const { user } = useAuth();
-  const { isListening, deepgramApiKey, setDeepgramApiKey } = useLive();
-  const { sales } = useSales();
-  const { completedTrainingCount } = useAppData();
-  const location = useLocation();
+  const { isListening } = useLive();
 
-  const pendingSalesCount = sales.filter((s) => s.status === '보류').length;
-
-  const sellerNav: NavSection[] = [
+  // 판매자 네비게이션
+  const sellerGroups: NavGroup[] = [
     {
-      category: '라이브 & 판매 자동화',
+      groupName: '라이브 방송 관제',
       items: [
-        { to: '/live', label: '라이브 청취 홈', icon: Radio, badge: isListening ? 'ON AIR' : undefined, badgeColor: 'bg-rose-500 text-white' },
-        { to: '/sales', label: '판매 내역 목록', icon: ShoppingBag, badge: `${sales.length}건` },
-        { to: '/sales/review', label: '방송 후 일괄 확인', icon: CheckSquare, badge: pendingSalesCount > 0 ? `보류 ${pendingSalesCount}` : undefined, badgeColor: 'bg-amber-500 text-white font-bold' },
-        { to: '/settlement', label: '판매 정산·내보내기', icon: Calculator },
+        { name: '라이브 청취 홈', path: '/live', icon: Radio, badge: isListening ? 'ON AIR' : undefined },
+        { name: '음성인식 훈련 (학습)', path: '/training', icon: Sparkles },
+        { name: '캡처 영역 & 단어 규칙', path: '/rules', icon: Sliders },
       ]
     },
     {
-      category: 'AI 음성 & 규칙 설정',
+      groupName: '판매 & 정산 관리',
       items: [
-        { to: '/voice-training', label: '음성 학습 & 훈련', icon: Mic2, badge: `${completedTrainingCount}/7 완료` },
-        { to: '/recognition-rules', label: '인식 단어·동작 규칙', icon: Sliders },
+        { name: '판매 내역 목록', path: '/sales', icon: ShoppingBag },
+        { name: '방송 후 일괄 확인', path: '/sales/review', icon: CheckSquare },
+        { name: '정산 및 엑셀 다운로드', path: '/settlement', icon: FileSpreadsheet },
       ]
     },
     {
-      category: '계정 & 구독',
+      groupName: '계정 및 구독',
       items: [
-        { to: '/subscription/plans', label: '요금제 선택', icon: Sparkles },
-        { to: '/subscription/manage', label: '구독 관리·결제 내역', icon: CreditCard },
-        { to: '/notifications/settings', label: '알림 설정', icon: Bell },
-        { to: '/my', label: '마이페이지', icon: User },
+        { name: '요금제 및 멤버십', path: '/subscription/plans', icon: CreditCard },
+        { name: '구독 & 결제 관리', path: '/subscription/manage', icon: BarChart3 },
+        { name: '알림 설정', path: '/settings/notifications', icon: Bell },
+        { name: '마이페이지 & 백업', path: '/my', icon: User },
       ]
     }
   ];
 
-  const adminNav: NavSection[] = [
+  // 관리자 네비게이션
+  const adminGroups: NavGroup[] = [
     {
-      category: '관리자 대시보드',
+      groupName: '시스템 관제',
       items: [
-        { to: '/admin', label: '통합 대시보드', icon: LayoutDashboard },
-        { to: '/admin/members', label: '회원 관리 (정지/해제)', icon: Users },
-        { to: '/admin/reports', label: '신고 처리 센터', icon: AlertTriangle },
-        { to: '/admin/stats', label: '이용 통계 & 시스템 로그', icon: BarChart3 },
+        { name: '관리자 대시보드', path: '/admin', icon: Shield },
+        { name: '회원 관리 & 정지', path: '/admin/members', icon: Users },
+        { name: '신고 처리 센터', path: '/admin/reports', icon: AlertTriangle },
+        { name: '이용 통계 & 시스템 로그', path: '/admin/stats', icon: BarChart3 },
       ]
     }
   ];
 
-  const navSections = user?.role === '관리자' ? adminNav : sellerNav;
+  const currentGroups = user?.role === '관리자' ? adminGroups : sellerGroups;
 
   return (
-    <aside className="w-64 bg-white border-r border-slate-200 text-slate-700 flex flex-col flex-shrink-0 min-h-[calc(100vh-4rem)] shadow-sm">
-      {/* 메뉴 리스트 */}
-      <div className="flex-1 px-3 py-4 space-y-6 overflow-y-auto">
-        {navSections.map((section, idx) => (
-          <div key={idx}>
-            <div className="px-3 mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              {section.category}
+    <aside className="w-64 bg-white border-r border-slate-200 text-slate-700 flex flex-col h-[calc(100vh-4rem)] sticky top-16 select-none shadow-sm">
+      <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+        <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+          {user?.role === '관리자' ? '관리자 시스템 관제' : '판매자 방송 관제 센터'}
+        </span>
+        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-brand-50 text-brand-700 border border-brand-200">
+          v1.0.0
+        </span>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
+        {currentGroups.map((group, gIdx) => (
+          <div key={gIdx} className="space-y-1">
+            <div className="px-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+              {group.groupName}
             </div>
             <div className="space-y-1">
-              {section.items.map((item) => {
+              {group.items.map((item) => {
                 const Icon = item.icon;
-                const isActive = location.pathname === item.to || (item.to !== '/live' && item.to !== '/admin' && location.pathname.startsWith(item.to));
-
                 return (
                   <NavLink
-                    key={item.to}
-                    to={item.to}
-                    className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition ${
-                      isActive
-                        ? 'bg-brand-50 text-brand-700 border border-brand-200 shadow-sm'
-                        : 'hover:bg-slate-50 text-slate-600 hover:text-slate-900'
-                    }`}
+                    key={item.path}
+                    to={item.path}
+                    end={item.path === '/live' || item.path === '/admin' || item.path === '/sales'}
+                    className={({ isActive }) =>
+                      `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition ${
+                        isActive
+                          ? 'bg-brand-50 text-brand-700 font-bold border border-brand-200 shadow-sm'
+                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      }`
+                    }
                   >
-                    <div className="flex items-center space-x-2.5 truncate">
-                      <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-brand-600' : 'text-slate-400'}`} />
-                      <span className="truncate">{item.label}</span>
+                    <div className="flex items-center space-x-2.5">
+                      <Icon className="w-4 h-4 flex-shrink-0 text-slate-500" />
+                      <span>{item.name}</span>
                     </div>
                     {item.badge && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${item.badgeColor || 'bg-slate-100 text-slate-600 border border-slate-200'}`}>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        item.badge === 'ON AIR'
+                          ? 'bg-rose-500 text-white animate-pulse'
+                          : 'bg-brand-100 text-brand-700'
+                      }`}>
                         {item.badge}
                       </span>
                     )}
@@ -127,27 +133,16 @@ export const Sidebar: React.FC = () => {
         ))}
       </div>
 
-      {/* 하단 Deepgram Nova-3 API Key 설정 인라인 위젯 */}
+      {/* 하단 시스템 상태 안내 위젯 */}
       <div className="p-3 border-t border-slate-200 bg-slate-50">
-        <div className="p-2.5 rounded-xl bg-white border border-slate-200 shadow-sm text-xs">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="font-bold text-slate-800 flex items-center">
-              <KeyRound className="w-3.5 h-3.5 mr-1 text-brand-600" /> Deepgram Nova-3
-            </span>
-            <span className="text-[10px] text-emerald-600 font-bold">
-              {deepgramApiKey ? 'Key 연동됨' : '시뮬레이터'}
-            </span>
+        <div className="p-2.5 rounded-xl bg-white border border-slate-200 shadow-sm text-xs flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+            <span className="font-bold text-slate-800 text-[11px]">Deepgram Nova-3 AI</span>
           </div>
-          <input
-            type="password"
-            placeholder="Deepgram API Key (선택)"
-            value={deepgramApiKey}
-            onChange={(e) => setDeepgramApiKey(e.target.value)}
-            className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[11px] text-slate-800 placeholder-slate-400 focus:outline-none focus:border-brand-500"
-          />
-          <p className="text-[10px] text-slate-400 mt-1">
-            * 미입력 시 틱톡 판매 음성 시뮬레이터로 동작합니다.
-          </p>
+          <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+            정상 가동
+          </span>
         </div>
       </div>
     </aside>

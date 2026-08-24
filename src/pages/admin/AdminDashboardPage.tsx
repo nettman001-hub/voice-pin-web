@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppData } from '../../context/AppDataContext';
 import { useSales } from '../../context/SalesContext';
+import { useLive } from '../../context/LiveContext';
 import { User } from '../../types/auth';
 import { ReportItem } from '../../types/admin';
 import {
@@ -12,17 +13,34 @@ import {
   ArrowRight,
   TrendingUp,
   Activity,
-  Server
+  Server,
+  KeyRound,
+  CheckCircle2,
+  Save,
+  Lock,
+  Sparkles
 } from 'lucide-react';
 
 export const AdminDashboardPage: React.FC = () => {
   const { allMembers, reports } = useAppData();
   const { sales } = useSales();
+  const { deepgramApiKey, setDeepgramApiKey } = useLive();
+
+  const [inputKey, setInputKey] = useState(deepgramApiKey);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [showKey, setShowKey] = useState(false);
 
   const totalMembers = allMembers.length;
   const activeMembers = allMembers.filter((m: User) => m.status === '활성').length;
   const pendingReports = reports.filter((r: ReportItem) => r.status === '접수').length;
   const totalRevenue = sales.filter((s) => s.status !== '보류').reduce((sum, s) => sum + s.amount, 0);
+
+  const handleSaveApiKey = (e: React.FormEvent) => {
+    e.preventDefault();
+    setDeepgramApiKey(inputKey.trim());
+    setToastMsg('Deepgram Nova-3 API Key가 시스템 전역에 안전하게 저장되었습니다! 모든 판매자에게 즉시 적용됩니다. 🎉');
+    setTimeout(() => setToastMsg(null), 3500);
+  };
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -36,7 +54,7 @@ export const AdminDashboardPage: React.FC = () => {
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            다들려 서비스의 핵심 KPI 지표, 회원 현황, 신고 처리 상태를 실시간으로 모니터링합니다.
+            다들려 서비스의 핵심 KPI 지표, 회원 현황, STT 클라우드 API Key 및 신고 처리 상태를 중앙 관제합니다.
           </p>
         </div>
 
@@ -46,6 +64,67 @@ export const AdminDashboardPage: React.FC = () => {
             <span>STT 서버 정상 가동 중 (Nova-3)</span>
           </span>
         </div>
+      </div>
+
+      {toastMsg && (
+        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center space-x-2 animate-in fade-in">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+          <span>{toastMsg}</span>
+        </div>
+      )}
+
+      {/* 🔑 Deepgram Nova-3 클라우드 STT API Key 중앙 관리 카드 (관리자 전용) */}
+      <div className="bg-gradient-to-br from-white via-brand-50/20 to-purple-50/30 border-2 border-brand-200 rounded-3xl p-6 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-2xl bg-brand-600 text-white flex items-center justify-center shadow-md shadow-brand-500/20">
+              <KeyRound className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-base font-black text-slate-900">Deepgram Nova-3 음성인식 API Key 관리</h3>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  deepgramApiKey ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                }`}>
+                  {deepgramApiKey ? '✅ 실제 키 연동됨 (전체 판매자 공통 적용)' : '⚠️ 미등록 (시뮬레이터 모드)'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                여기서 등록한 API Key는 모든 판매자의 라이브 방송 음성인식(Nova-3 한국어)에 자동으로 공통 적용됩니다. 판매자는 별도로 키를 입력할 필요가 없습니다.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <form onSubmit={handleSaveApiKey} className="pt-2">
+          <div className="flex flex-col sm:flex-row gap-2.5 items-stretch">
+            <div className="relative flex-1">
+              <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={inputKey}
+                onChange={(e) => setInputKey(e.target.value)}
+                placeholder="Deepgram Nova-3 API Key (예: 8f3a9b2c...)"
+                className="w-full pl-10 pr-24 py-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500 font-mono"
+              />
+              <button
+                type="button"
+                onClick={() => setShowKey(!showKey)}
+                className="absolute right-3 top-2.5 text-[11px] font-bold text-slate-400 hover:text-slate-700"
+              >
+                {showKey ? '숨기기' : '보기'}
+              </button>
+            </div>
+
+            <button
+              type="submit"
+              className="px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-500/20 flex items-center justify-center space-x-1.5 transition"
+            >
+              <Save className="w-4 h-4" />
+              <span>API Key 저장 & 전체 적용</span>
+            </button>
+          </div>
+        </form>
       </div>
 
       {/* 4대 KPI 요약 카드 */}
