@@ -37,8 +37,16 @@ export const RecognitionRulesPage: React.FC = () => {
 
   const [newWord, setNewWord] = useState('');
   const [newAction, setNewAction] = useState<RuleAction>('DB_SAVE');
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  const [modalNotice, setModalNotice] = useState<{
+    title: string;
+    message: string;
+    type: 'info' | 'success' | 'warning';
+  } | null>(null);
+
+  const showNotice = (message: string, title = '상황 안내', type: 'info' | 'success' | 'warning' = 'info') => {
+    setModalNotice({ title, message, type });
+  };
 
   // 윈도우 데스크톱 해상도 기준 설정
   const [desktopResolution, setDesktopResolution] = useState<{ width: number; height: number; name: string }>({
@@ -71,13 +79,12 @@ export const RecognitionRulesPage: React.FC = () => {
   // 화면 스트림 변경 요청
   const handleChangeScreen = async () => {
     setIsTestingCapture(true);
-    setToastMsg('🪟 변경할 새로운 윈도우 창 또는 모니터 화면을 선택해 주세요.');
+    showNotice('변경할 새로운 윈도우 창 또는 모니터 화면을 선택해 주세요.', '🪟 화면 변경 요청', 'info');
     try {
       const stream = await screenCaptureService.getOrCreateStream(true);
       if (stream) {
         setIsScreenConnected(true);
-        setToastMsg('✅ 새로운 윈도우 화면으로 성공적으로 변경되었습니다!');
-        setTimeout(() => setToastMsg(null), 3000);
+        showNotice('새로운 윈도우 화면으로 성공적으로 변경되었습니다!', '✅ 화면 변경 완료', 'success');
       }
     } finally {
       setIsTestingCapture(false);
@@ -88,8 +95,7 @@ export const RecognitionRulesPage: React.FC = () => {
   const handleDisconnectScreen = () => {
     screenCaptureService.stopStream();
     setIsScreenConnected(false);
-    setToastMsg('🔌 윈도우 화면 연결이 해제되었습니다.');
-    setTimeout(() => setToastMsg(null), 2500);
+    showNotice('윈도우 화면 연결이 정상적으로 해제되었습니다.', '🔌 연결 해제 안내', 'info');
   };
 
   // 실시간 윈도우 창/화면 캡처 (1회 연결 후 다음부터는 공유창 없이 즉시 캡처)
@@ -97,7 +103,7 @@ export const RecognitionRulesPage: React.FC = () => {
     setIsTestingCapture(true);
     const hadStream = !!screenCaptureService.getActiveStream();
     if (!hadStream) {
-      setToastMsg('🪟 최초 1회 캡처할 윈도우 창(틱톡 스튜디오/OBS)을 선택하세요. (이후 자동 캡처)');
+      showNotice('최초 1회 캡처할 윈도우 창(틱톡 라이브 스튜디오/OBS)을 선택해 주세요. 이후부터는 자동으로 즉시 캡처됩니다.', '🪟 윈도우 화면 연결 안내', 'info');
     }
     try {
       const imgUrl = await screenCaptureService.captureArea(null, currentArea, {
@@ -108,18 +114,13 @@ export const RecognitionRulesPage: React.FC = () => {
       if (imgUrl) {
         setIsScreenConnected(true);
         setTestCaptureUrl(imgUrl);
-        setToastMsg(hadStream 
-          ? `⚡ 연결된 윈도우에서 지정 영역(${pixelW}x${pixelH}px)이 즉시 캡처되었습니다!`
-          : `📸 윈도우 화면이 성공적으로 연결되어 지정 영역이 캡처되었습니다!`);
-        setTimeout(() => setToastMsg(null), 3000);
       } else {
         setIsScreenConnected(!!screenCaptureService.getActiveStream());
-        setToastMsg('ℹ️ 화면 공유가 취소되었거나 선택되지 않았습니다.');
-        setTimeout(() => setToastMsg(null), 3000);
+        showNotice('화면 공유가 취소되었거나 창이 선택되지 않았습니다.', 'ℹ️ 안내', 'warning');
       }
     } catch (e) {
       console.error(e);
-      alert('화면 캡처 테스트 중 오류가 발생했습니다.');
+      showNotice('화면 캡처 처리 중 오류가 발생했습니다.', '⚠️ 오류 발생', 'warning');
     } finally {
       setIsTestingCapture(false);
     }
@@ -127,33 +128,28 @@ export const RecognitionRulesPage: React.FC = () => {
 
   const handleAddWord = (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMsg(null);
     const res = addRule(newWord, newAction);
     if (!res.success) {
-      setErrorMsg(res.message || '단어 추가에 실패했습니다.');
+      showNotice(res.message || '단어 추가에 실패했습니다.', '⚠️ 추가 실패', 'warning');
     } else {
       setNewWord('');
-      setToastMsg(`'${newWord}' 단어가 인식 규칙에 추가되었습니다.`);
-      setTimeout(() => setToastMsg(null), 3000);
+      showNotice(`'${newWord}' 단어가 새로운 인식 규칙으로 추가되었습니다!`, '🎉 단어 규칙 추가 완료', 'success');
     }
   };
 
   const handleDeleteWord = (id: string, word: string) => {
-    setErrorMsg(null);
     const res = deleteRule(id);
     if (!res.success) {
-      setErrorMsg(res.message || '삭제할 수 없습니다.');
+      showNotice(res.message || '삭제할 수 없습니다.', '⚠️ 삭제 실패', 'warning');
     } else {
-      setToastMsg(`'${word}' 단어가 삭제되었습니다.`);
-      setTimeout(() => setToastMsg(null), 3000);
+      showNotice(`'${word}' 단어가 인식 규칙에서 삭제되었습니다.`, '🗑️ 단어 삭제 완료', 'info');
     }
   };
 
   const handleSelectPreset = (preset: CaptureAreaConfig) => {
     setCurrentArea(preset);
     setCaptureAreaConfig(preset);
-    setToastMsg(`'${preset.name}' 윈도우 데스크톱 영역 프리셋이 적용되었습니다.`);
-    setTimeout(() => setToastMsg(null), 2500);
+    showNotice(`'${preset.name}' 윈도우 데스크톱 영역 프리셋이 적용되었습니다.`, '🪟 프리셋 적용', 'success');
   };
 
   const getNormalizedCoordinates = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -257,7 +253,7 @@ export const RecognitionRulesPage: React.FC = () => {
     if (clickPointStep === 1) {
       setFirstPoint({ x, y });
       setClickPointStep(2);
-      setToastMsg('📍 [1단계 완료] 대각선 끝 지점(우하단)을 클릭하세요.');
+      showNotice('대각선 끝 지점(우하단)을 클릭하여 캡처 영역을 완성하세요.', '📍 2단계 지점 클릭', 'info');
     } else {
       if (!firstPoint) return;
       const minX = Math.min(firstPoint.x, x);
@@ -278,8 +274,7 @@ export const RecognitionRulesPage: React.FC = () => {
       setCaptureAreaConfig(updated);
       setClickPointStep(1);
       setFirstPoint(null);
-      setToastMsg('🎉 2점 꼭짓점 클릭으로 윈도우 캡처 영역이 지정되었습니다!');
-      setTimeout(() => setToastMsg(null), 3000);
+      showNotice(`2점 꼭짓점 클릭으로 윈도우 캡처 영역이 지정되었습니다!`, '🎉 캡처 영역 지정 완료', 'success');
     }
   };
 
@@ -293,8 +288,6 @@ export const RecognitionRulesPage: React.FC = () => {
     setCurrentArea(updated);
     setCaptureAreaConfig(updated);
   };
-
-
 
   // 현재 해상도 기준 픽셀 계산
   const pixelX = Math.round(currentArea.xRatio * desktopResolution.width);
@@ -344,20 +337,6 @@ export const RecognitionRulesPage: React.FC = () => {
           ))}
         </div>
       </div>
-
-      {toastMsg && (
-        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center space-x-2 animate-in fade-in">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-          <span>{toastMsg}</span>
-        </div>
-      )}
-
-      {errorMsg && (
-        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center space-x-2 animate-in fade-in">
-          <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
-          <span>{errorMsg}</span>
-        </div>
-      )}
 
       {/* 1. 윈도우 데스크톱 화면 캡처 영역 설정 스튜디오 (핵심) */}
       <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-6">
@@ -722,8 +701,7 @@ export const RecognitionRulesPage: React.FC = () => {
               <button
                 onClick={() => {
                   setCaptureAreaConfig(currentArea);
-                  setToastMsg('윈도우 데스크톱 캡처 설정이 성공적으로 저장되었습니다! 💾');
-                  setTimeout(() => setToastMsg(null), 3000);
+                  showNotice(`윈도우 캡처 영역(${pixelW}x${pixelH}px) 설정이 안전하게 저장되었습니다! 💾`, '💾 설정 저장 완료', 'success');
                 }}
                 className="w-full py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-500/20 transition"
               >
@@ -835,6 +813,62 @@ export const RecognitionRulesPage: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {/* 상황 안내 멘트 모달 새 창 */}
+      {modalNotice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center space-x-3">
+                <div className={`p-3 rounded-2xl ${
+                  modalNotice.type === 'success'
+                    ? 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                    : modalNotice.type === 'warning'
+                    ? 'bg-rose-50 text-rose-600 border border-rose-200'
+                    : 'bg-brand-50 text-brand-600 border border-brand-200'
+                }`}>
+                  {modalNotice.type === 'success' ? (
+                    <CheckCircle2 className="w-6 h-6" />
+                  ) : modalNotice.type === 'warning' ? (
+                    <AlertCircle className="w-6 h-6" />
+                  ) : (
+                    <Sparkles className="w-6 h-6" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">{modalNotice.title}</h3>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">VoiceCAP 시스템 상황 안내</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setModalNotice(null)}
+                className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 text-sm text-slate-800 font-semibold leading-relaxed">
+              {modalNotice.message}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setModalNotice(null)}
+                className={`w-full py-3 rounded-xl text-white font-bold text-xs shadow-md transition ${
+                  modalNotice.type === 'success'
+                    ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20'
+                    : modalNotice.type === 'warning'
+                    ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-500/20'
+                    : 'bg-brand-600 hover:bg-brand-500 shadow-brand-500/20'
+                }`}
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 실시간 캡처 테스트 결과 모달 */}
       {testCaptureUrl && (
