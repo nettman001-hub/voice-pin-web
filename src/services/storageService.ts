@@ -222,8 +222,42 @@ export class StorageService {
   public getDeepgramApiKey(): string {
     return localStorage.getItem(KEYS.DEEPGRAM_API_KEY) || '';
   }
-  public setDeepgramApiKey(key: string) {
+  public setDeepgramApiKey(key: string): void {
     localStorage.setItem(KEYS.DEEPGRAM_API_KEY, key);
+  }
+
+  // 전체 데이터 백업 (JSON 파일 다운로드용)
+  public exportFullBackup(): string {
+    const backupData = {
+      version: '1.0.0',
+      exportedAt: new Date().toISOString(),
+      sales: this.getSales(),
+      captures: this.getCaptures(),
+      rules: this.getRules(),
+      trainingSentences: this.getTrainingSentences(),
+      payments: this.getPayments(),
+      notifications: this.getNotifications(),
+      deepgramApiKey: this.getDeepgramApiKey()
+    };
+    return JSON.stringify(backupData, null, 2);
+  }
+
+  // 백업 데이터 복원
+  public importFullBackup(jsonString: string): boolean {
+    try {
+      const data = JSON.parse(jsonString);
+      if (data.sales) this.saveSales(data.sales);
+      if (data.captures) localStorage.setItem(KEYS.CAPTURES, JSON.stringify(data.captures));
+      if (data.rules) this.saveRules(data.rules);
+      if (data.trainingSentences) this.saveTrainingSentences(data.trainingSentences);
+      if (data.payments) localStorage.setItem(KEYS.PAYMENTS, JSON.stringify(data.payments));
+      if (data.notifications) localStorage.setItem(KEYS.NOTIFICATIONS, JSON.stringify(data.notifications));
+      if (data.deepgramApiKey) this.setDeepgramApiKey(data.deepgramApiKey);
+      return true;
+    } catch (e) {
+      console.error('[Storage] 백업 복원 실패:', e);
+      return false;
+    }
   }
 
   // 회원 및 인증

@@ -2,36 +2,55 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLive } from '../../context/LiveContext';
-import { Mic, Radio, User, Shield, LogOut, Settings, Bell, ChevronDown } from 'lucide-react';
+import { Modal } from './Modal';
+import {
+  Mic,
+  Radio,
+  User,
+  Shield,
+  LogOut,
+  Settings,
+  Bell,
+  ChevronDown,
+  HelpCircle,
+  Sparkles,
+  CheckCircle2,
+  Camera,
+  Download
+} from 'lucide-react';
 
 export const Header: React.FC = () => {
   const { user, isAuthenticated, logout, switchUserRole } = useAuth();
   const { isListening, currentSessionId } = useLive();
   const navigate = useNavigate();
+
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showGuideModal, setShowGuideModal] = useState(false);
 
   return (
     <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200 text-slate-800 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        {/* 로고 & 방송 회차 */}
-        <div className="flex items-center space-x-4">
+        {/* 로고 & 버전 배지 */}
+        <div className="flex items-center space-x-3">
           <Link to={isAuthenticated ? (user?.role === '관리자' ? '/admin' : '/live') : '/onboarding'} className="flex items-center space-x-2 group">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-brand-500 flex items-center justify-center shadow-md shadow-brand-500/20 group-hover:scale-105 transition-transform">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 via-brand-500 to-rose-500 flex items-center justify-center shadow-md shadow-brand-500/20 group-hover:scale-105 transition-transform">
               <Mic className="w-5 h-5 text-white" />
             </div>
             <div>
-              <span className="font-extrabold text-xl tracking-tight text-slate-900">
-                다들려
-              </span>
-              <span className="ml-1.5 text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-brand-50 text-brand-600 border border-brand-200">
-                Nova-3 STT
-              </span>
+              <div className="flex items-center space-x-1.5">
+                <span className="font-extrabold text-xl tracking-tight text-slate-900">
+                  다들려
+                </span>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 border border-brand-200">
+                  v1.0.0 정식
+                </span>
+              </div>
             </div>
           </Link>
 
           {/* 청취 상태 & 방송 회차 배지 */}
           {isAuthenticated && user?.role === '판매자' && (
-            <div className="hidden sm:flex items-center space-x-2 ml-4 pl-4 border-l border-slate-200">
+            <div className="hidden sm:flex items-center space-x-2 ml-3 pl-3 border-l border-slate-200">
               <div className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
                 isListening
                   ? 'bg-rose-50 text-rose-600 border border-rose-200 animate-pulse'
@@ -47,19 +66,28 @@ export const Header: React.FC = () => {
           )}
         </div>
 
-        {/* 상단 네비게이션 & 사용자 메뉴 */}
+        {/* 상단 네비게이션 & 빠른 도움말 / 계정 메뉴 */}
         <div className="flex items-center space-x-3">
-          {/* 데모용 역할 스위처 */}
+          {/* 처음 사용 가이드 버튼 */}
+          <button
+            onClick={() => setShowGuideModal(true)}
+            className="hidden md:flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition border border-slate-200"
+          >
+            <HelpCircle className="w-4 h-4 text-brand-600" />
+            <span>이용 가이드</span>
+          </button>
+
+          {/* 데모용 빠른 역할 스위처 */}
           {isAuthenticated && (
-            <div className="hidden md:flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
-              <span className="text-slate-500 px-2 font-medium">데모전환:</span>
+            <div className="hidden lg:flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
+              <span className="text-slate-500 px-2 font-medium">모드:</span>
               <button
                 onClick={() => { switchUserRole('판매자'); navigate('/live'); }}
                 className={`px-2.5 py-1 rounded-lg font-bold transition ${
                   user?.role === '판매자' ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                판매자 모드
+                판매자
               </button>
               <button
                 onClick={() => { switchUserRole('관리자'); navigate('/admin'); }}
@@ -67,7 +95,7 @@ export const Header: React.FC = () => {
                   user?.role === '관리자' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                관리자 모드
+                관리자
               </button>
             </div>
           )}
@@ -78,7 +106,7 @@ export const Header: React.FC = () => {
                 onClick={() => setShowUserMenu(!showUserMenu)}
                 className="flex items-center space-x-2 bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200 transition"
               >
-                <div className="w-7 h-7 rounded-lg bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-xs">
+                <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-brand-600 to-purple-600 text-white flex items-center justify-center font-bold text-xs shadow-sm">
                   {user?.nickname ? user.nickname[0] : 'U'}
                 </div>
                 <div className="text-left hidden sm:block">
@@ -123,7 +151,7 @@ export const Header: React.FC = () => {
                         onClick={() => setShowUserMenu(false)}
                         className="flex items-center px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600"
                       >
-                        <User className="w-4 h-4 mr-2 text-emerald-500" /> 마이페이지
+                        <User className="w-4 h-4 mr-2 text-emerald-500" /> 마이페이지 & 백업
                       </Link>
                     </>
                   ) : (
@@ -178,6 +206,71 @@ export const Header: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* 처음 사용자를 위한 퀵 스타트 가이드 모달 */}
+      <Modal
+        isOpen={showGuideModal}
+        onClose={() => setShowGuideModal(false)}
+        title="✨ 다들려(Dadryeo) v1.0.0 정식 이용 가이드"
+        maxWidth="max-w-xl"
+      >
+        <div className="space-y-4 text-xs text-slate-700">
+          <p className="text-slate-600 leading-relaxed">
+            '다들려'는 틱톡 라이브 판매자님의 음성을 Deepgram Nova-3 AI로 실시간 인식하여 주문을 자동 저장하고 정산하는 상용 솔루션입니다.
+          </p>
+
+          <div className="space-y-3 pt-2">
+            <div className="p-3.5 rounded-2xl bg-brand-50 border border-brand-200 flex items-start space-x-3">
+              <div className="w-7 h-7 rounded-xl bg-brand-600 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">1</div>
+              <div>
+                <strong className="text-brand-900 block text-sm">라이브 청취 시작</strong>
+                <span className="text-slate-600 mt-0.5 block">
+                  홈 화면에서 [라이브 청취 시작]을 누르고 마이크 권한을 허용합니다. (사이드바에 Deepgram API Key를 입력하시면 실제 실시간 전사 연동)
+                </span>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-start space-x-3">
+              <div className="w-7 h-7 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">2</div>
+              <div>
+                <strong className="text-emerald-900 block text-sm">자연스러운 판매 멘트 발화</strong>
+                <span className="text-slate-600 mt-0.5 block">
+                  "구매확정 됐습니다! 닉네임 러블리님 금액 35,000원입니다."라고 말씀하시면 0.1초 만에 판매 카드가 자동 적재됩니다.
+                </span>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-cyan-50 border border-cyan-200 flex items-start space-x-3">
+              <div className="w-7 h-7 rounded-xl bg-cyan-600 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">3</div>
+              <div>
+                <strong className="text-cyan-900 block text-sm">화면 자동 캡처 & 음성 수정</strong>
+                <span className="text-slate-600 mt-0.5 block">
+                  "캡처"라고 말씀하시면 댓글창 영역이 자동 크롭되며, 잘못 말했을 땐 "수정 시작" ➡️ "닉네임은 xxx, 금액은 xxx" ➡️ "수정 완료"로 수정됩니다.
+                </span>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-purple-50 border border-purple-200 flex items-start space-x-3">
+              <div className="w-7 h-7 rounded-xl bg-purple-600 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">4</div>
+              <div>
+                <strong className="text-purple-900 block text-sm">방송 후 일괄 확정 및 엑셀 정산</strong>
+                <span className="text-slate-600 mt-0.5 block">
+                  방송 종료 후 '방송 후 일괄 확인'에서 보류 건을 확인하고, 엑셀 한글 깨짐 방지(UTF-8 BOM) CSV로 즉시 다운로드합니다.
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <button
+              onClick={() => setShowGuideModal(false)}
+              className="w-full py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-bold rounded-xl shadow-md shadow-brand-500/20 text-xs transition"
+            >
+              이해했습니다! 방송 시작하기
+            </button>
+          </div>
+        </div>
+      </Modal>
     </header>
   );
 };
