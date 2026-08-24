@@ -165,34 +165,34 @@ export const LiveHomePage: React.FC = () => {
 
             <AudioVisualizer waveform={waveform} audioLevel={audioLevel} isActive={isListening} />
 
-            {/* 실시간 STT 변환 자막 박스 (상/하단 2단 분할) */}
-            <div className="rounded-2xl border border-slate-200 overflow-hidden bg-slate-900 shadow-inner">
-              {/* [상단] 실시간 전체 인식 자막 스트림 (자동 스크롤 흘러가기) */}
-              <div className="p-4 bg-slate-900 border-b border-slate-800">
+            {/* 실시간 STT 변환 자막 박스 (상/하단 2단 분할 - 밝은색 화이트 테마) */}
+            <div className="rounded-2xl border border-slate-200 overflow-hidden bg-white shadow-sm">
+              {/* [상단] 실시간 전체 인식 자막 스트림 (밝은색 배경) */}
+              <div className="p-4 bg-slate-50/60 border-b border-slate-200">
                 <div className="flex items-center justify-between mb-2">
-                  <div className="text-[11px] font-bold text-cyan-400 uppercase tracking-wider flex items-center">
-                    <span className={`w-2 h-2 rounded-full mr-1.5 ${isListening ? 'bg-cyan-400 animate-ping' : 'bg-slate-500'}`}></span>
+                  <div className="text-[11px] font-bold text-brand-700 uppercase tracking-wider flex items-center">
+                    <span className={`w-2 h-2 rounded-full mr-1.5 ${isListening ? 'bg-emerald-500 animate-ping' : 'bg-slate-400'}`}></span>
                     <span>1. 실시간 음성인식 전체 자막 스트림</span>
                   </div>
-                  <span className="text-[10px] text-slate-500 font-mono">Real-time Stream</span>
+                  <span className="text-[10px] text-slate-400 font-mono">Real-time Stream</span>
                 </div>
 
-                <div className="max-h-[110px] min-h-[60px] overflow-y-auto space-y-1.5 pr-1 font-sans text-xs text-slate-300 flex flex-col justify-end">
+                <div className="max-h-[110px] min-h-[60px] overflow-y-auto space-y-1.5 pr-1 font-sans text-xs text-slate-800 flex flex-col justify-end">
                   {liveTranscriptFlow.length === 0 && !currentInterimTranscript ? (
-                    <div className="text-slate-500 text-xs italic py-2">
+                    <div className="text-slate-400 text-xs italic py-2">
                       {isListening ? '마이크로 말씀하시는 모든 발화가 실시간으로 흘러갑니다...' : '상단의 [라이브 청취 시작]을 누르면 실시간 자막이 표시됩니다.'}
                     </div>
                   ) : (
                     <>
                       {liveTranscriptFlow.slice(-6).map((flow) => (
-                        <div key={flow.id} className="leading-relaxed flex items-baseline space-x-2 text-slate-300">
-                          <span className="text-[10px] text-slate-600 font-mono flex-shrink-0">{flow.timestamp}</span>
+                        <div key={flow.id} className="leading-relaxed flex items-baseline space-x-2 text-slate-700 font-medium">
+                          <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">{flow.timestamp}</span>
                           <span>{flow.text}</span>
                         </div>
                       ))}
                       {currentInterimTranscript && (
-                        <div className="leading-relaxed flex items-baseline space-x-2 text-cyan-300 font-semibold animate-pulse">
-                          <span className="text-[10px] text-cyan-600 font-mono flex-shrink-0">듣는 중...</span>
+                        <div className="leading-relaxed flex items-baseline space-x-2 text-brand-600 font-bold animate-pulse">
+                          <span className="text-[10px] text-brand-400 font-mono flex-shrink-0">듣는 중...</span>
                           <span>{currentInterimTranscript}</span>
                         </div>
                       )}
@@ -201,38 +201,38 @@ export const LiveHomePage: React.FC = () => {
                 </div>
               </div>
 
-              {/* [하단] 규칙 지정된 문장 & 액션 하이라이트 박스 */}
-              <div className="p-4 bg-slate-950/80">
+              {/* [하단] 규칙 지정된 문장 & 액션 하이라이트 박스 (밝은색 배경) */}
+              <div className="p-4 bg-amber-50/40 border-t border-amber-100">
                 <div className="flex items-center justify-between mb-1.5">
-                  <div className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <div className="text-[11px] font-bold text-amber-800 uppercase tracking-wider flex items-center space-x-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
                     <span>2. 규칙 감지 핵심 발화 & 액션</span>
                   </div>
                   {lastMatchedRuleItem && (
-                    <span className="text-[10px] text-slate-500 font-mono">{lastMatchedRuleItem.timestamp}</span>
+                    <span className="text-[10px] text-slate-400 font-mono">{lastMatchedRuleItem.timestamp}</span>
                   )}
                 </div>
 
                 {lastMatchedRuleItem ? (
-                  <div className="p-3 rounded-xl bg-slate-900 border border-amber-500/30 space-y-2">
+                  <div className="p-3 rounded-xl bg-white border border-amber-200 shadow-sm space-y-2">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center space-x-1.5 flex-wrap gap-1">
                         {lastMatchedRuleItem.matchedKeywords.map((kw, idx) => (
-                          <span key={idx} className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-black text-[10px] border border-amber-500/40">
+                          <span key={idx} className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-bold text-[10px] border border-amber-300">
                             #{kw}
                           </span>
                         ))}
                       </div>
-                      <span className="px-2.5 py-0.5 rounded-full bg-brand-500/20 text-brand-300 border border-brand-500/30 text-[10px] font-bold">
+                      <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-[10px] font-bold">
                         {lastMatchedRuleItem.action}
                       </span>
                     </div>
-                    <p className="text-sm font-black text-white tracking-tight leading-snug">
+                    <p className="text-sm font-black text-slate-900 tracking-tight leading-snug">
                       "{lastMatchedRuleItem.text}"
                     </p>
                   </div>
                 ) : (
-                  <div className="py-2.5 px-3 rounded-xl bg-slate-900/50 border border-slate-800 text-xs text-slate-500 italic">
+                  <div className="py-2.5 px-3 rounded-xl bg-white border border-slate-200 text-xs text-slate-400 italic">
                     "구매확정, 금액, 닉네임, 캡처, 수정" 등 규칙 지정 단어가 포함된 문장이 감지되면 이곳에 하이라이트됩니다.
                   </div>
                 )}
