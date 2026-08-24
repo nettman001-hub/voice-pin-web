@@ -60,10 +60,17 @@ export class AudioCaptureService {
     try {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       this.audioContext = new AudioContextClass({ sampleRate: 16000 });
+
+      // 브라우저 자동재생 정책으로 suspended 된 경우 즉시 resume
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+      }
+
       const source = this.audioContext.createMediaStreamSource(stream);
 
       this.analyser = this.audioContext.createAnalyser();
       this.analyser.fftSize = 256;
+      this.analyser.smoothingTimeConstant = 0.8;
       source.connect(this.analyser);
 
       // PCM 오디오 청크 추출용 ScriptProcessor
@@ -84,20 +91,28 @@ export class AudioCaptureService {
       };
 
       // 파형 및 볼륨 시각화 루프
-      const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
-      const updateWaveform = () => {
+      const rawDataArray = new Uint8Array(this.analyser.frequencyBinCount);
+      let lastTimestamp = 0;
+
+      const updateWaveform = (timestamp: number) => {
         if (!this.isCapturing || !this.analyser) return;
 
-        this.analyser.getByteFrequencyData(dataArray);
+        // 약 60fps로 React State 갱신
+        if (timestamp - lastTimestamp >= 16) {
+          lastTimestamp = timestamp;
+          this.analyser.getByteFrequencyData(rawDataArray);
 
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i];
+          let sum = 0;
+          for (let i = 0; i < rawDataArray.length; i++) {
+            sum += rawDataArray[i];
+          }
+          const avg = sum / rawDataArray.length;
+          const volume = Math.min(100, Math.round((avg / 255) * 100 * 2.5));
+
+          // React가 상태 변화를 감지할 수 있도록 새 Uint8Array 인스턴스로 복사 전달
+          onWaveform?.(new Uint8Array(rawDataArray), volume);
         }
-        const avg = sum / dataArray.length;
-        const volume = Math.min(100, Math.round((avg / 255) * 100 * 2.5));
 
-        onWaveform?.(dataArray, volume);
         this.animationFrameId = requestAnimationFrame(updateWaveform);
       };
 
@@ -128,7 +143,7 @@ export class AudioCaptureService {
     }
 
     if (this.audioContext && this.audioContext.state !== 'closed') {
-      this.audioContext.close();
+      this.audioContext.close().catch(() => {});
       this.audioContext = null;
     }
 
