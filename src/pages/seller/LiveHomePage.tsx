@@ -225,12 +225,27 @@ export const LiveHomePage: React.FC = () => {
             <div className="rounded-2xl border border-slate-200 overflow-hidden bg-white shadow-sm">
               {/* [상단] 실시간 전체 인식 자막 스트림 (밝은색 배경) */}
               <div className="p-4 bg-slate-50/60 border-b border-slate-200">
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between mb-2 flex-wrap gap-1">
                   <div className="text-[11px] font-bold text-brand-700 uppercase tracking-wider flex items-center">
                     <span className={`w-2 h-2 rounded-full mr-1.5 ${isListening ? 'bg-emerald-500 animate-ping' : 'bg-slate-400'}`}></span>
                     <span>1. 실시간 음성인식 전체 자막 스트림</span>
                   </div>
-                  <span className="text-[10px] text-slate-400 font-mono">Real-time Stream</span>
+                  <div className="flex items-center space-x-1.5">
+                    <button
+                      onClick={() => injectTestMent('구매확정! 닉네임 러블리샵님 금액 35,000원입니다.')}
+                      className="px-2 py-0.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-[10px] border border-emerald-200 transition"
+                      title="실제 발화 멘트 주입 테스트"
+                    >
+                      ⚡ 구매확정 3.5만 테스트
+                    </button>
+                    <button
+                      onClick={() => injectTestMent('댓글창 화면 캡처 부탁드립니다.')}
+                      className="px-2 py-0.5 rounded-lg bg-cyan-50 hover:bg-cyan-100 text-cyan-700 font-bold text-[10px] border border-cyan-200 transition"
+                      title="캡처 명령 테스트"
+                    >
+                      📸 캡처 테스트
+                    </button>
+                  </div>
                 </div>
 
                 <div

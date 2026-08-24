@@ -17,11 +17,12 @@ export class DeepgramSttService {
   private onTranscript: OnTranscriptCallback | null = null;
   private onError: OnErrorCallback | null = null;
   private currentEngine: 'DEEPGRAM' | 'WEB_SPEECH' | 'NONE' = 'NONE';
+  private lastFinalText: string = '';
 
   /**
    * 실시간 STT 엔진 시작
-   * 1) Deepgram API Key가 등록되어 있으면 -> 탭 방송 소리 및 마이크 오디오를 Deepgram Nova-3 실시간 AI로 100% 진짜 전사
-   * 2) API Key가 없으면 -> 브라우저 내장 실제 마이크 음성인식(Web Speech API) 가동 (가짜 자막 절대 미생성)
+   * 1) Deepgram API Key가 등록되어 있으면 -> Deepgram Nova-3 실시간 WebSocket AI 가동
+   * 2) API Key가 없으면 -> 브라우저 내장 실제 마이크 음성인식(Web Speech API ko-KR) 가동
    */
   public startLiveStream(
     config: DeepgramConfig,
@@ -31,6 +32,7 @@ export class DeepgramSttService {
     this.onTranscript = onTranscript;
     this.onError = onError;
     this.isRecognitionActive = true;
+    this.lastFinalText = '';
 
     // 1. Deepgram API Key가 있는 경우: Deepgram Nova-3 실시간 WebSocket 연결
     if (config.apiKey && config.apiKey.trim().length >= 10) {
@@ -76,9 +78,8 @@ export class DeepgramSttService {
         };
 
         this.ws.onerror = (event) => {
-          console.warn('[Deepgram] WebSocket 연결 실패:', event);
-          this.onError?.('Deepgram WebSocket 연결에 실패했습니다. API 키를 확인해 주세요.');
-          this.currentEngine = 'NONE';
+          console.warn('[Deepgram] WebSocket 연결 실패 -> 브라우저 실제 음성인식으로 전환합니다.', event);
+          this.startBrowserSpeechRecognition();
         };
 
         this.ws.onclose = () => {
@@ -90,18 +91,20 @@ export class DeepgramSttService {
       }
     }
 
-    // 2. Deepgram API Key가 없는 경우: 브라우저 실제 마이크 음성인식 가동 (가짜 자막 절대 없음)
+    // 2. Deepgram API Key가 없는 경우: 브라우저 실제 마이크 한국어 음성인식 100% 가동
     this.startBrowserSpeechRecognition();
   }
 
   /**
-   * 브라우저 실제 마이크 음성인식 엔진
+   * 브라우저 실제 한국어 음성인식 엔진 (크롬, 엣지, 웨일 등)
    */
   private startBrowserSpeechRecognition() {
     this.currentEngine = 'WEB_SPEECH';
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
+      console.warn('[STT] 브라우저 SpeechRecognition 미지원');
+      this.onError?.('브라우저 음성인식이 지원되지 않는 환경입니다. Chrome 또는 Edge 브라우저를 권장합니다.');
       this.currentEngine = 'NONE';
       return;
     }
@@ -115,15 +118,25 @@ export class DeepgramSttService {
       recognition.interimResults = true;
       recognition.maxAlternatives = 1;
 
-      recognition.onresult = (event: any) => {
-        let interim = '';
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const item = event.results[i];
-          const transcript = item[0]?.transcript || '';
-          const confidence = item[0]?.confidence || 0.92;
+      this.isRecognitionActive = true;
 
-          if (item.isFinal) {
+      recognition.onstart = () => {
+        console.log('[STT] 🎙️ 브라우저 실제 한국어 음성인식(ko-KR) 시작됨 - 음성을 실시간 청취합니다.');
+      };
+
+      recognition.onresult = (event: any) => {
+        let interimText = '';
+        let finalText = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const res = event.results[i];
+          const transcript = res[0]?.transcript || '';
+          const confidence = res[0]?.confidence || 0.92;
+
+          if (res.isFinal) {
+            finalText += transcript;
             if (transcript.trim()) {
+              this.lastFinalText = transcript.trim();
               this.onTranscript?.({
                 text: transcript.trim(),
                 isFinal: true,
@@ -131,20 +144,27 @@ export class DeepgramSttService {
               });
             }
           } else {
-            interim += transcript;
+            interimText += transcript;
           }
         }
 
-        if (interim.trim()) {
+        if (interimText.trim()) {
           this.onTranscript?.({
-            text: interim.trim(),
+            text: interimText.trim(),
             isFinal: false,
             confidence: 0.85
           });
         }
       };
 
-      recognition.onerror = () => {};
+      recognition.onerror = (event: any) => {
+        console.warn('[STT] 음성인식 상태 이벤트:', event.error);
+        if (event.error === 'not-allowed') {
+          this.onError?.('마이크 사용 권한이 차단되었습니다. 브라우저 주소창 좌측 자물쇠에서 마이크를 허용해 주세요.');
+          this.isRecognitionActive = false;
+        }
+      };
+
       recognition.onend = () => {
         if (this.isRecognitionActive) {
           if (this.restartTimer) window.clearTimeout(this.restartTimer);
@@ -154,14 +174,14 @@ export class DeepgramSttService {
                 this.speechRecognition.start();
               } catch (e) {}
             }
-          }, 200);
+          }, 150);
         }
       };
 
       recognition.start();
       this.speechRecognition = recognition;
     } catch (err) {
-      console.warn('[STT] 브라우저 음성인식 가동 실패:', err);
+      console.warn('[STT] 브라우저 음성인식 시작 예외:', err);
     }
   }
 
