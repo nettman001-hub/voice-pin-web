@@ -280,9 +280,9 @@ export const RecognitionRulesPage: React.FC = () => {
           </p>
         </div>
 
-        {/* 윈도우 해상도 선택 셀렉터 */}
-        <div className="flex items-center space-x-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200 text-xs overflow-x-auto">
-          <span className="text-slate-500 font-bold px-1.5 flex items-center space-x-1 whitespace-nowrap">
+        {/* 윈도우 해상도 선택 셀렉터 (스크롤 없이 컴팩트) */}
+        <div className="flex flex-wrap items-center gap-1.5 bg-slate-50 p-1.5 rounded-2xl border border-slate-200 text-xs">
+          <span className="text-slate-500 font-bold px-1 flex items-center space-x-1 whitespace-nowrap">
             <Tv className="w-3.5 h-3.5 text-brand-600" />
             <span>기준 해상도:</span>
           </span>
@@ -290,7 +290,6 @@ export const RecognitionRulesPage: React.FC = () => {
             { width: 3840, height: 2160, name: '3840x2160 (4K UHD)' },
             { width: 2560, height: 1440, name: '2560x1440 (QHD)' },
             { width: 1920, height: 1080, name: '1920x1080 (FHD)' },
-            { width: 1366, height: 768, name: '1366x768 (HD)' },
           ].map((res) => (
             <button
               key={res.name}
@@ -346,9 +345,9 @@ export const RecognitionRulesPage: React.FC = () => {
           </div>
         </div>
 
-        {/* 툴바 & 프리셋 */}
+        {/* 툴바 & 프리셋 (스크롤 없이 flex-wrap) */}
         <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200">
-          <div className="flex items-center space-x-2 text-xs">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <span className="text-slate-500 font-bold px-1">조작 모드:</span>
             <button
               onClick={() => setSelectMode('DRAG')}
@@ -374,7 +373,7 @@ export const RecognitionRulesPage: React.FC = () => {
             </button>
           </div>
 
-          <div className="flex items-center space-x-1.5 overflow-x-auto text-xs">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <span className="text-slate-500 px-1 font-semibold">윈도우 프리셋:</span>
             {CAPTURE_PRESETS.map((p, idx) => (
               <button
