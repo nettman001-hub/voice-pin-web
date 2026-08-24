@@ -54,7 +54,7 @@ export const AdminDashboardPage: React.FC = () => {
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            다들려 서비스의 핵심 KPI 지표, 회원 현황, STT 클라우드 API Key 및 신고 처리 상태를 중앙 관제합니다.
+            VoiceCAP 서비스의 핵심 KPI 지표, 회원 현황, STT 클라우드 API Key 및 신고 처리 상태를 중앙 관제합니다.
           </p>
         </div>
 

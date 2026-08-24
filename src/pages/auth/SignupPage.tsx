@@ -68,14 +68,12 @@ export const SignupPage: React.FC = () => {
   return (
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4 bg-slate-50">
       <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-8 shadow-xl">
-        <div className="text-center mb-6">
+        <div className="text-center mb-8">
           <div className="w-12 h-12 rounded-2xl bg-brand-600 flex items-center justify-center mx-auto shadow-md shadow-brand-500/20 mb-3">
             <Mic className="w-6 h-6 text-white" />
           </div>
-          <h2 className="text-2xl font-black text-slate-900 tracking-tight">다들려 회원가입</h2>
-          <p className="text-xs text-slate-500 mt-1">
-            {step === 'INPUT' ? '계정 정보 입력 및 이메일 인증' : '이메일 6자리 인증번호 확인'}
-          </p>
+          <h2 className="text-2xl font-black text-slate-900 tracking-tight">VoiceCAP 회원가입</h2>
+          <p className="text-xs text-slate-500 mt-1">틱톡 라이브 판매를 위한 스마트 AI 음성 자동화</p>
         </div>
 
         {errorMsg && (

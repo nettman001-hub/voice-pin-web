@@ -35,7 +35,7 @@ export const MyPage: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `다들려_전체데이터백업_${Date.now()}.json`;
+    a.download = `VoiceCAP_전체데이터백업_${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
     setToastMsg('전체 데이터(판매기록, 캡처, 설정)가 JSON 파일로 백업되었습니다! 💾');

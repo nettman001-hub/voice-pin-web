@@ -364,7 +364,7 @@ export const RecognitionRulesPage: React.FC = () => {
               <div className="p-3 flex items-center justify-between pointer-events-none">
                 <div className="flex items-center space-x-2 bg-black/40 px-2.5 py-1 rounded-full border border-white/10">
                   <div className="w-5 h-5 rounded-full bg-rose-500 flex items-center justify-center text-[10px] font-bold text-white">LIVE</div>
-                  <span className="text-[11px] font-bold text-white">다들려 스토어</span>
+                  <span className="text-[11px] font-bold text-white">VoiceCAP 스토어</span>
                 </div>
                 <span className="text-[10px] text-cyan-300 font-bold bg-black/40 px-2 py-0.5 rounded-full">🔥 3.8k</span>
               </div>

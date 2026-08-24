@@ -39,12 +39,12 @@ export const SettlementPage: React.FC = () => {
   };
 
   const handleExportAll = () => {
-    exportCsv(sales, `다들려_정산내역_전체_${Date.now()}.csv`);
+    exportCsv(sales, `VoiceCAP_정산내역_전체_${Date.now()}.csv`);
   };
 
   const handleExportDate = (dateStr: string) => {
     const target = groupedByDate[dateStr] || [];
-    exportCsv(target, `다들려_정산내역_${dateStr}.csv`);
+    exportCsv(target, `VoiceCAP_정산내역_${dateStr}.csv`);
   };
 
   return (

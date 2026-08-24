@@ -33,7 +33,7 @@ export const CaptureViewerModal: React.FC = () => {
   const handleDownload = () => {
     const a = document.createElement('a');
     a.href = currentUrl;
-    a.download = `다들려_캡처_${sale.buyerNickname}_${Date.now()}.png`;
+    a.download = `VoiceCAP_캡처_${sale.buyerNickname}_${Date.now()}.png`;
     a.click();
   };
 

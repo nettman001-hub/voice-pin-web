@@ -287,8 +287,8 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const sendTestNotification = () => {
     if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('다들려 알림 테스트', {
-        body: '다들려 테스트 알림이 정상적으로 수신되었습니다! 🎙️'
+      new Notification('VoiceCAP 알림 테스트', {
+        body: 'VoiceCAP 테스트 알림이 정상적으로 수신되었습니다! 🎙️'
       });
     } else if ('Notification' in window && Notification.permission !== 'denied') {
       Notification.requestPermission();

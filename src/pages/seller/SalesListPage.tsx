@@ -142,7 +142,7 @@ export const SalesListPage: React.FC = () => {
   };
 
   const handleExportCurrentView = () => {
-    exportCsv(filteredSales, `다들려_판매내역_${sessionFilter}_${Date.now()}.csv`);
+    exportCsv(filteredSales, `VoiceCAP_판매내역_${sessionFilter}_${Date.now()}.csv`);
   };
 
   return (

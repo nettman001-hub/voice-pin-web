@@ -104,8 +104,8 @@ export const OnboardingPage: React.FC = () => {
             <div className="flex items-start space-x-3">
               <div className="w-8 h-8 rounded-full bg-brand-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">2</div>
               <div>
-                <h4 className="text-sm font-bold text-slate-800">다들려 청취 시작</h4>
-                <p className="text-xs text-slate-500 mt-1">다들려 앱에서 [청취 시작]을 누르고 오디오를 공유합니다.</p>
+                <h4 className="text-sm font-bold text-slate-800">VoiceCAP 청취 시작</h4>
+                <p className="text-xs text-slate-500 mt-1">VoiceCAP 앱에서 [청취 시작]을 누르고 오디오를 공유합니다.</p>
               </div>
             </div>
             <div className="flex items-start space-x-3">
@@ -122,13 +122,16 @@ export const OnboardingPage: React.FC = () => {
       {/* 푸터 */}
       <footer className="border-t border-slate-200 bg-white py-8 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p>© 2026 다들려 (Dadryeo). All rights reserved.</p>
           <div className="flex space-x-6">
             <Link to="/password/reset" className="hover:text-brand-600 font-medium">비밀번호 찾기</Link>
             <Link to="/pricing" className="hover:text-brand-600 font-medium">요금제 비교</Link>
             <span className="text-slate-400">이용약관</span>
             <span className="text-slate-400">개인정보처리방침</span>
           </div>
+        </div>
+        {/* 푸터 카피라이트 */}
+        <div className="text-center text-xs text-slate-400 pt-8 border-t border-slate-200">
+          <p>© 2026 VoiceCAP. All rights reserved.</p>
         </div>
       </footer>
     </div>

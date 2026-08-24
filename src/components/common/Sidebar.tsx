@@ -138,7 +138,7 @@ export const Sidebar: React.FC = () => {
         <div className="p-2.5 rounded-xl bg-white border border-slate-200 shadow-sm text-xs flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-            <span className="font-bold text-slate-800 text-[11px]">Deepgram Nova-3 AI</span>
+            <span className="font-bold text-slate-800 text-[11px]">VoiceCAP AI</span>
           </div>
           <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
             정상 가동

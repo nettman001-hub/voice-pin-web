@@ -43,8 +43,8 @@ export const PermissionErrorModal: React.FC<PermissionErrorModalProps> = ({
 
         <div>
           <h2 className="text-xl font-black text-slate-900">오디오 / 화면 권한 필요 안내</h2>
-          <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-            다들려 서비스를 이용하기 위해서는 브라우저의 <strong className="text-slate-800">마이크 및 화면 공유 권한</strong> 허용이 반드시 필요합니다.
+          <p className="text-xs text-slate-600 leading-relaxed">
+            VoiceCAP 서비스를 이용하기 위해서는 브라우저의 <strong className="text-slate-800">마이크 및 화면 공유 권한</strong> 허용이 반드시 필요합니다.
           </p>
         </div>
 

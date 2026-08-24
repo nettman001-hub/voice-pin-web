@@ -130,11 +130,11 @@ export class ScreenCaptureService {
     });
 
     // 5. 캡처 워터마크 태그
-    ctx.fillStyle = 'rgba(37, 244, 238, 0.9)';
-    ctx.fillRect(canvas.width - 150, canvas.height - 35, 140, 25);
-    ctx.fillStyle = '#010101';
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.7)';
+    ctx.fillRect(canvas.width - 150, canvas.height - 36, 140, 26);
+    ctx.fillStyle = '#38bdf8';
     ctx.font = 'bold 12px sans-serif';
-    ctx.fillText('🎙️ 다들려 자동캡처', canvas.width - 142, canvas.height - 18);
+    ctx.fillText('🎙️ VoiceCAP 자동캡처', canvas.width - 142, canvas.height - 18);
 
     return canvas.toDataURL('image/png');
   }

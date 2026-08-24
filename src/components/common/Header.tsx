@@ -39,7 +39,7 @@ export const Header: React.FC = () => {
             <div>
               <div className="flex items-center space-x-1.5">
                 <span className="font-extrabold text-xl tracking-tight text-slate-900">
-                  다들려
+                  VoiceCAP
                 </span>
                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 border border-brand-200">
                   v1.0.0 정식
@@ -211,12 +211,12 @@ export const Header: React.FC = () => {
       <Modal
         isOpen={showGuideModal}
         onClose={() => setShowGuideModal(false)}
-        title="✨ 다들려(Dadryeo) v1.0.0 정식 이용 가이드"
+        title="✨ VoiceCAP v1.0.0 정식 이용 가이드"
         maxWidth="max-w-xl"
       >
         <div className="space-y-4 text-xs text-slate-700">
           <p className="text-slate-600 leading-relaxed">
-            '다들려'는 틱톡 라이브 판매자님의 음성을 Deepgram Nova-3 AI로 실시간 인식하여 주문을 자동 저장하고 정산하는 상용 솔루션입니다.
+            'VoiceCAP'은 틱톡 라이브 판매자님의 음성을 VoiceCAP AI로 실시간 인식하여 주문을 자동 저장하고 정산하는 상용 솔루션입니다.
           </p>
 
           <div className="space-y-3 pt-2">

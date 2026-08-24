@@ -42,12 +42,12 @@ export const LoginPage: React.FC = () => {
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4 bg-slate-50">
       <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-8 shadow-xl">
         {/* 헤더 */}
-        <div className="text-center mb-8">
-          <div className="w-12 h-12 rounded-2xl bg-brand-600 flex items-center justify-center mx-auto shadow-md shadow-brand-500/20 mb-3">
+        <div className="text-center space-y-2">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-brand-600 to-rose-500 flex items-center justify-center mx-auto shadow-lg shadow-brand-500/20">
             <Mic className="w-6 h-6 text-white" />
           </div>
-          <h2 className="text-2xl font-black text-slate-900 tracking-tight">다들려 로그인</h2>
-          <p className="text-xs text-slate-500 mt-1">틱톡 라이브 판매자 & 관리자 통합 로그인</p>
+          <h2 className="text-2xl font-black text-slate-900 tracking-tight">VoiceCAP 로그인</h2>
+          <p className="text-xs text-slate-500">틱톡 라이브 판매자를 위한 실시간 음성인식 & 자동 판매기록</p>
         </div>
 
         {/* 에러 배너 */}
