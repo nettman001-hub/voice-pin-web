@@ -11,28 +11,16 @@ export type OnErrorCallback = (error: string) => void;
 
 export class DeepgramSttService {
   private ws: WebSocket | null = null;
-  private isSimulating: boolean = false;
-  private simulationInterval: number | null = null;
+  private speechRecognition: any = null;
+  private isRecognitionActive: boolean = false;
   private onTranscript: OnTranscriptCallback | null = null;
   private onError: OnErrorCallback | null = null;
-
-  // 현실적인 틱톡 라이브 판매 멘트 시나리오 세트
-  private simulationScenarios = [
-    { text: "네 안녕하세요 여러분! 오늘 라이브 특가 상품 소개해 드립니다.", isSale: false, delay: 3000 },
-    { text: "첫 번째 상품 구매 확정됐습니다! 구매하신 분은 러블리님 이시구요, 금액은 35,000원입니다.", isSale: true, delay: 5000 },
-    { text: "다음 상품 가볼게요. 구매확정! 닉네임 민트초코님, 가격 19,900원입니다. 캡처 부탁드려요!", isSale: true, isCapture: true, delay: 6000 },
-    { text: "와 지금 주문 폭주하고 있네요! 구매확정 됐습니다. 닉네임 햇살가득님, 금액 48,000원입니다.", isSale: true, delay: 5000 },
-    { text: "어? 방금 닉네임을 잘못 말씀드렸네요. 수정 시작!", isSale: false, delay: 4000 },
-    { text: "닉네임은 달콤한하루님, 금액은 48,000원!", isSale: false, delay: 3500 },
-    { text: "네 확인됐습니다. 수정 완료!", isSale: false, delay: 3000 },
-    { text: "다음 상품 구매확정! 구매자 보라돌이님, 가격 삼만오천원입니다.", isSale: true, delay: 5000 },
-    { text: "지금 댓글창 바로 캡처할게요. 화면 캡처!", isSale: false, isCapture: true, delay: 4000 },
-    { text: "구매확정 됐습니다! 이번엔 닉네임만 확인되고 금액이 빠졌네요.", isSale: true, delay: 5000 }, // 보류 테스트용
-    { text: "구매확정! 닉네임 황금돼지님, 금액 62,000원 결제 완료되셨습니다.", isSale: true, delay: 5000 },
-  ];
+  private currentEngine: 'DEEPGRAM' | 'WEB_SPEECH' = 'WEB_SPEECH';
 
   /**
-   * Deepgram Nova-3 실시간 WebSocket 연결 시작 (API Key 있을 시 실제 스트리밍, 없을 시 지능형 시뮬레이터)
+   * 실시간 STT 엔진 시작
+   * 1) Deepgram API Key가 등록되어 있으면 -> Deepgram Nova-3 실시간 WebSocket AI 가동
+   * 2) API Key가 없으면 -> 브라우저 내장 실제 한국어 음성인식 엔진(Web Speech API ko-KR) 가동
    */
   public startLiveStream(
     config: DeepgramConfig,
@@ -42,70 +30,165 @@ export class DeepgramSttService {
     this.onTranscript = onTranscript;
     this.onError = onError;
 
-    if (!config.apiKey || config.apiKey.trim().length === 0) {
-      console.info('[Deepgram] API Key가 설정되지 않아 지능형 Nova-3 시뮬레이터 모드로 작동합니다.');
-      this.startSimulation();
+    // 1. Deepgram API Key가 있으면 Deepgram Nova-3 우선 연결
+    if (config.apiKey && config.apiKey.trim().length >= 10) {
+      try {
+        const keywordsParam = config.keywords && config.keywords.length > 0
+          ? config.keywords.map(k => `keywords=${encodeURIComponent(k)}`).join('&')
+          : '';
+
+        const queryParams = [
+          `model=${config.model || 'nova-3'}`,
+          `language=${config.language || 'ko'}`,
+          `punctuate=${config.punctuate !== false}`,
+          `interim_results=${config.interimResults !== false}`,
+          `endpointing=${config.endpointing || 300}`,
+          keywordsParam
+        ].filter(Boolean).join('&');
+
+        const url = `wss://api.deepgram.com/v1/listen?${queryParams}`;
+        this.ws = new WebSocket(url, ['token', config.apiKey]);
+
+        this.ws.onopen = () => {
+          console.log('[Deepgram] Deepgram Nova-3 WebSocket 실시간 연결 성공!');
+          this.currentEngine = 'DEEPGRAM';
+        };
+
+        this.ws.onmessage = (event) => {
+          try {
+            const data: DeepgramResponse = JSON.parse(event.data);
+            if (data.type === 'Results' && data.channel?.alternatives?.[0]) {
+              const alt = data.channel.alternatives[0];
+              if (alt.transcript && alt.transcript.trim()) {
+                this.onTranscript?.({
+                  text: alt.transcript,
+                  isFinal: !!data.is_final,
+                  confidence: alt.confidence || 0.95,
+                  rawResponse: data
+                });
+              }
+            }
+          } catch (e) {
+            console.error('[Deepgram] 응답 파싱 실패:', e);
+          }
+        };
+
+        this.ws.onerror = (event) => {
+          console.warn('[Deepgram] WebSocket 연결 실패 -> 브라우저 실제 한국어 음성인식 엔진으로 전환합니다.', event);
+          this.startBrowserSpeechRecognition();
+        };
+
+        this.ws.onclose = () => {
+          console.log('[Deepgram] WebSocket 연결 종료');
+        };
+        return;
+      } catch (err) {
+        console.warn('[Deepgram] WebSocket 시도 실패 -> 브라우저 한국어 음성인식 엔진으로 전환:', err);
+      }
+    }
+
+    // 2. API Key 미입력 시: 브라우저 실제 내장 한국어 음성인식(Web Speech API) 100% 실시간 가동
+    this.startBrowserSpeechRecognition();
+  }
+
+  /**
+   * 브라우저 실제 한국어 음성인식 엔진 (크롬, 엣지, 웨일 등 지원)
+   * 사용자의 실제 마이크 한국어 음성을 100% 실시간 캡처하여 인식!
+   */
+  private startBrowserSpeechRecognition() {
+    this.currentEngine = 'WEB_SPEECH';
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      console.warn('[STT] 브라우저 SpeechRecognition 미지원 환경');
+      this.onError?.('브라우저 음성인식 엔진을 사용할 수 없습니다. Chrome 또는 Edge 브라우저를 사용해 주세요.');
       return;
     }
 
     try {
-      const keywordsParam = config.keywords && config.keywords.length > 0
-        ? config.keywords.map(k => `keywords=${encodeURIComponent(k)}`).join('&')
-        : '';
+      this.stopBrowserSpeechRecognition();
 
-      const queryParams = [
-        `model=${config.model || 'nova-3'}`,
-        `language=${config.language || 'ko'}`,
-        `punctuate=${config.punctuate !== false}`,
-        `interim_results=${config.interimResults !== false}`,
-        `endpointing=${config.endpointing || 300}`,
-        keywordsParam
-      ].filter(Boolean).join('&');
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'ko-KR';
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
 
-      const url = `wss://api.deepgram.com/v1/listen?${queryParams}`;
-      this.ws = new WebSocket(url, ['token', config.apiKey]);
+      this.isRecognitionActive = true;
 
-      this.ws.onopen = () => {
-        console.log('[Deepgram] WebSocket Nova-3 연결 성공');
+      recognition.onstart = () => {
+        console.log('[STT] 브라우저 실제 한국어 음성인식(ko-KR) 가동 중 - 마이크 음성을 실시간 청취합니다.');
       };
 
-      this.ws.onmessage = (event) => {
-        try {
-          const data: DeepgramResponse = JSON.parse(event.data);
-          if (data.type === 'Results' && data.channel?.alternatives?.[0]) {
-            const alt = data.channel.alternatives[0];
-            if (alt.transcript && alt.transcript.trim()) {
-              this.onTranscript?.({
-                text: alt.transcript,
-                isFinal: !!data.is_final,
-                confidence: alt.confidence || 0.95,
-                rawResponse: data
-              });
-            }
+      recognition.onresult = (event: any) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const transcript = event.results[i][0].transcript;
+          const confidence = event.results[i][0].confidence || 0.92;
+
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript;
+            this.onTranscript?.({
+              text: transcript.trim(),
+              isFinal: true,
+              confidence
+            });
+          } else {
+            interimTranscript += transcript;
           }
-        } catch (e) {
-          console.error('[Deepgram] 응답 파싱 실패:', e);
+        }
+
+        if (interimTranscript.trim()) {
+          this.onTranscript?.({
+            text: interimTranscript.trim(),
+            isFinal: false,
+            confidence: 0.85
+          });
         }
       };
 
-      this.ws.onerror = (event) => {
-        console.error('[Deepgram] WebSocket 에러 발생, 시뮬레이터 모드로 대체합니다.', event);
-        this.onError?.('Deepgram WebSocket 연결 오류가 발생하여 시뮬레이터 모드로 전환합니다.');
-        this.startSimulation();
+      recognition.onerror = (event: any) => {
+        console.warn('[STT] 브라우저 음성인식 이벤트:', event.error);
+        if (event.error === 'not-allowed') {
+          this.onError?.('마이크 사용 권한이 차단되었습니다. 브라우저 주소창 좌측에서 마이크를 허용해 주세요.');
+          this.isRecognitionActive = false;
+        }
       };
 
-      this.ws.onclose = () => {
-        console.log('[Deepgram] WebSocket 연결 종료');
+      recognition.onend = () => {
+        // 청취 활성 상태라면 끊김 없이 자동으로 재시작하여 연속 청취 유지
+        if (this.isRecognitionActive) {
+          try {
+            recognition.start();
+          } catch (e) {
+            console.debug('[STT] 재시작 대기:', e);
+          }
+        }
       };
-    } catch (err: any) {
-      console.error('[Deepgram] WebSocket 초기화 실패:', err);
-      this.onError?.(err?.message || 'Deepgram 초기화 실패');
-      this.startSimulation();
+
+      recognition.start();
+      this.speechRecognition = recognition;
+    } catch (err) {
+      console.error('[STT] 브라우저 음성인식 시작 오류:', err);
+      this.onError?.('실제 음성인식 엔진을 시작하는 중 오류가 발생했습니다.');
+    }
+  }
+
+  private stopBrowserSpeechRecognition() {
+    this.isRecognitionActive = false;
+    if (this.speechRecognition) {
+      try {
+        this.speechRecognition.stop();
+        this.speechRecognition.abort();
+      } catch (e) {}
+      this.speechRecognition = null;
     }
   }
 
   /**
-   * 오디오 바이너리 청크 (Linear PCM 또는 WebM)를 Deepgram WebSocket으로 전송
+   * 오디오 바이너리 청크를 Deepgram WebSocket으로 전송
    */
   public sendAudioChunk(chunk: ArrayBuffer | Blob) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -129,60 +212,14 @@ export class DeepgramSttService {
       this.ws = null;
     }
 
-    if (this.simulationInterval) {
-      window.clearInterval(this.simulationInterval);
-      this.simulationInterval = null;
-    }
-    this.isSimulating = false;
+    this.stopBrowserSpeechRecognition();
   }
 
   /**
-   * 틱톡 라이브 판매 음성 인식 시뮬레이터
+   * 현재 가동 중인 STT 엔진 타입 반환
    */
-  private startSimulation() {
-    this.isSimulating = true;
-    let index = 0;
-
-    const playNext = () => {
-      if (!this.isSimulating) return;
-
-      const item = this.simulationScenarios[index % this.simulationScenarios.length];
-      index++;
-
-      // 1. 중간(Interim) 전사 자막 시뮬레이션
-      const words = item.text.split(' ');
-      let currentWordIndex = 0;
-
-      const interimInterval = window.setInterval(() => {
-        if (!this.isSimulating) {
-          clearInterval(interimInterval);
-          return;
-        }
-
-        currentWordIndex += 2;
-        if (currentWordIndex < words.length) {
-          const partialText = words.slice(0, currentWordIndex).join(' ');
-          this.onTranscript?.({
-            text: partialText,
-            isFinal: false,
-            confidence: 0.85
-          });
-        } else {
-          clearInterval(interimInterval);
-          // 2. 최종(Final) 전사 텍스트 발행
-          this.onTranscript?.({
-            text: item.text,
-            isFinal: true,
-            confidence: 0.96
-          });
-
-          // 다음 시나리오 대기 후 실행
-          this.simulationInterval = window.setTimeout(playNext, item.delay || 4000);
-        }
-      }, 400);
-    };
-
-    this.simulationInterval = window.setTimeout(playNext, 1500);
+  public getCurrentEngine(): 'DEEPGRAM' | 'WEB_SPEECH' {
+    return this.currentEngine;
   }
 
   /**

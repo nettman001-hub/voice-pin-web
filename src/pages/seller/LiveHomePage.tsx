@@ -112,6 +112,24 @@ export const LiveHomePage: React.FC = () => {
         </div>
       </div>
 
+      {/* 실제 마이크 청취 작동 안내 배너 */}
+      {isListening && (
+        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-sm animate-in fade-in">
+          <div className="flex items-center space-x-2.5">
+            <span className="w-3 h-3 rounded-full bg-emerald-500 animate-ping"></span>
+            <div>
+              <span className="text-sm font-black text-emerald-950">🎙️ 실제 마이크 음성 실시간 청취 중입니다!</span>
+              <p className="text-xs text-emerald-700 font-normal mt-0.5">
+                마이크에 대고 <strong>"구매확정 러블리샵 삼만 오천원"</strong> 또는 <strong>"캡처"</strong>라고 말씀해 보세요. AI가 실시간으로 인식하여 판매 내역에 자동 등록합니다.
+              </p>
+            </div>
+          </div>
+          <div className="px-3 py-1 bg-white rounded-xl border border-emerald-200 text-emerald-800 text-[11px] font-bold shadow-sm whitespace-nowrap">
+            ⚡ 실시간 한국어 STT 엔진 가동 중
+          </div>
+        </div>
+      )}
+
       {/* 음성 수정 명령 배너 */}
       {isVoiceEditing && (
         <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-400 text-amber-900 text-xs font-bold flex items-center justify-between animate-pulse shadow-sm">
