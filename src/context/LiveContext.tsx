@@ -290,19 +290,23 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const rules = storageService.getRules().filter((r) => r.isEnabled);
       const keywords = rules.map((r) => `${r.word}:2`);
 
-      // 1. 오디오 캡처 시작
-      await audioCaptureService.startCapture(
-        mode,
-        (chunk) => {
-          deepgramService.sendAudioChunk(chunk);
-        },
-        (wave, vol) => {
-          setWaveform(wave);
-          setAudioLevel(vol);
-        }
-      );
+      // 1. 오디오 파형 시각화 캡처 시작 (실패해도 STT는 정상 작동하도록 격리)
+      try {
+        await audioCaptureService.startCapture(
+          mode,
+          (chunk) => {
+            deepgramService.sendAudioChunk(chunk);
+          },
+          (wave, vol) => {
+            setWaveform(wave);
+            setAudioLevel(vol);
+          }
+        );
+      } catch (audioErr) {
+        console.warn('[Live] 오디오 시각화 캡처 경고 (STT는 계속 진행):', audioErr);
+      }
 
-      // 2. 실시간 STT 엔진 시작
+      // 2. 실시간 STT 엔진 시작 (Deepgram Nova-3 또는 브라우저 Web Speech API)
       deepgramService.startLiveStream(
         {
           apiKey: deepgramApiKey,
@@ -315,7 +319,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         },
         handleTranscript,
         (err) => {
-          console.error('[Live] STT 스트림 에러:', err);
+          console.error('[Live] STT 스트림 알림:', err);
         }
       );
     } catch (err) {

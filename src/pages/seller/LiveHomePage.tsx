@@ -37,6 +37,13 @@ export const LiveHomePage: React.FC = () => {
 
   const { sales } = useSales();
   const [selectedCaptureModal, setSelectedCaptureModal] = useState<string | null>(null);
+  const flowContainerRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (flowContainerRef.current) {
+      flowContainerRef.current.scrollTop = flowContainerRef.current.scrollHeight;
+    }
+  }, [liveTranscriptFlow, currentInterimTranscript]);
 
   const currentSessionSales = sales.filter((s) => s.sessionId === currentSessionId);
   const todayTotalAmount = currentSessionSales
@@ -177,7 +184,10 @@ export const LiveHomePage: React.FC = () => {
                   <span className="text-[10px] text-slate-400 font-mono">Real-time Stream</span>
                 </div>
 
-                <div className="max-h-[110px] min-h-[60px] overflow-y-auto space-y-1.5 pr-1 font-sans text-xs text-slate-800 flex flex-col justify-end">
+                <div
+                  ref={flowContainerRef}
+                  className="max-h-[130px] min-h-[65px] overflow-y-auto space-y-1.5 pr-1 font-sans text-xs text-slate-800 flex flex-col justify-end scroll-smooth"
+                >
                   {liveTranscriptFlow.length === 0 && !currentInterimTranscript ? (
                     <div className="text-slate-400 text-xs italic py-2">
                       {isListening ? '마이크로 말씀하시는 모든 발화가 실시간으로 흘러갑니다...' : '상단의 [라이브 청취 시작]을 누르면 실시간 자막이 표시됩니다.'}

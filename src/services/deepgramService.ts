@@ -13,6 +13,7 @@ export class DeepgramSttService {
   private ws: WebSocket | null = null;
   private speechRecognition: any = null;
   private isRecognitionActive: boolean = false;
+  private restartTimer: number | null = null;
   private onTranscript: OnTranscriptCallback | null = null;
   private onError: OnErrorCallback | null = null;
   private currentEngine: 'DEEPGRAM' | 'WEB_SPEECH' = 'WEB_SPEECH';
@@ -29,6 +30,7 @@ export class DeepgramSttService {
   ) {
     this.onTranscript = onTranscript;
     this.onError = onError;
+    this.isRecognitionActive = true;
 
     // 1. Deepgram API Key가 있으면 Deepgram Nova-3 우선 연결
     if (config.apiKey && config.apiKey.trim().length >= 10) {
@@ -74,7 +76,7 @@ export class DeepgramSttService {
         };
 
         this.ws.onerror = (event) => {
-          console.warn('[Deepgram] WebSocket 연결 실패 -> 브라우저 실제 한국어 음성인식 엔진으로 전환합니다.', event);
+          console.warn('[Deepgram] WebSocket 연결 실패 -> 브라우저 실제 한국어 음성인식 엔진으로 즉시 전환합니다.', event);
           this.startBrowserSpeechRecognition();
         };
 
@@ -93,7 +95,7 @@ export class DeepgramSttService {
 
   /**
    * 브라우저 실제 한국어 음성인식 엔진 (크롬, 엣지, 웨일 등 지원)
-   * 사용자의 실제 마이크 한국어 음성을 100% 실시간 캡처하여 인식!
+   * 화면 공유 상태에서도 마이크 한국어 음성을 100% 실시간 캡처하여 끊김 없이 인식!
    */
   private startBrowserSpeechRecognition() {
     this.currentEngine = 'WEB_SPEECH';
@@ -117,24 +119,25 @@ export class DeepgramSttService {
       this.isRecognitionActive = true;
 
       recognition.onstart = () => {
-        console.log('[STT] 브라우저 실제 한국어 음성인식(ko-KR) 가동 중 - 마이크 음성을 실시간 청취합니다.');
+        console.log('[STT] 🎙️ 브라우저 실제 한국어 음성인식(ko-KR) 가동 시작 - 마이크 음성을 실시간 청취합니다.');
       };
 
       recognition.onresult = (event: any) => {
         let interimTranscript = '';
-        let finalTranscript = '';
 
         for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const transcript = event.results[i][0].transcript;
-          const confidence = event.results[i][0].confidence || 0.92;
+          const item = event.results[i];
+          const transcript = item[0]?.transcript || '';
+          const confidence = item[0]?.confidence || 0.92;
 
-          if (event.results[i].isFinal) {
-            finalTranscript += transcript;
-            this.onTranscript?.({
-              text: transcript.trim(),
-              isFinal: true,
-              confidence
-            });
+          if (item.isFinal) {
+            if (transcript.trim()) {
+              this.onTranscript?.({
+                text: transcript.trim(),
+                isFinal: true,
+                confidence
+              });
+            }
           } else {
             interimTranscript += transcript;
           }
@@ -150,21 +153,27 @@ export class DeepgramSttService {
       };
 
       recognition.onerror = (event: any) => {
-        console.warn('[STT] 브라우저 음성인식 이벤트:', event.error);
+        console.warn('[STT] 브라우저 음성인식 이벤트 상태:', event.error);
         if (event.error === 'not-allowed') {
-          this.onError?.('마이크 사용 권한이 차단되었습니다. 브라우저 주소창 좌측에서 마이크를 허용해 주세요.');
+          this.onError?.('마이크 사용 권한이 차단되었습니다. 브라우저 주소창 좌측 자물쇠 아이콘에서 마이크를 허용해 주세요.');
           this.isRecognitionActive = false;
         }
+        // no-speech, audio-capture, network 에러는 자동 재가동으로 복구
       };
 
       recognition.onend = () => {
-        // 청취 활성 상태라면 끊김 없이 자동으로 재시작하여 연속 청취 유지
+        // 청취 활성 상태라면 안전하게 딜레이 후 자동 재시작하여 연속 청취 유지
         if (this.isRecognitionActive) {
-          try {
-            recognition.start();
-          } catch (e) {
-            console.debug('[STT] 재시작 대기:', e);
-          }
+          if (this.restartTimer) window.clearTimeout(this.restartTimer);
+          this.restartTimer = window.setTimeout(() => {
+            if (this.isRecognitionActive && this.speechRecognition) {
+              try {
+                this.speechRecognition.start();
+              } catch (e) {
+                console.debug('[STT] 자동 재시작 대기:', e);
+              }
+            }
+          }, 150);
         }
       };
 
@@ -178,8 +187,13 @@ export class DeepgramSttService {
 
   private stopBrowserSpeechRecognition() {
     this.isRecognitionActive = false;
+    if (this.restartTimer) {
+      window.clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
     if (this.speechRecognition) {
       try {
+        this.speechRecognition.onend = null;
         this.speechRecognition.stop();
         this.speechRecognition.abort();
       } catch (e) {}
