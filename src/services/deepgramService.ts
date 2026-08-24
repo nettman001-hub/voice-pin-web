@@ -8,6 +8,7 @@ export type OnTranscriptCallback = (data: {
 }) => void;
 
 export type OnErrorCallback = (error: string) => void;
+export type OnStatusCallback = (status: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR', message?: string) => void;
 
 export class DeepgramSttService {
   private ws: WebSocket | null = null;
@@ -16,6 +17,7 @@ export class DeepgramSttService {
   private restartTimer: number | null = null;
   private onTranscript: OnTranscriptCallback | null = null;
   private onError: OnErrorCallback | null = null;
+  private onStatus: OnStatusCallback | null = null;
   private currentEngine: 'DEEPGRAM' | 'WEB_SPEECH' | 'NONE' = 'NONE';
   private lastFinalText: string = '';
 
@@ -27,35 +29,45 @@ export class DeepgramSttService {
   public startLiveStream(
     config: DeepgramConfig,
     onTranscript: OnTranscriptCallback,
-    onError: OnErrorCallback
+    onError: OnErrorCallback,
+    onStatus?: OnStatusCallback
   ) {
     this.onTranscript = onTranscript;
     this.onError = onError;
+    this.onStatus = onStatus || null;
     this.isRecognitionActive = true;
     this.lastFinalText = '';
 
-    // 1. Deepgram API Key가 있는 경우: Deepgram Nova-3 실시간 WebSocket 연결
-    if (config.apiKey && config.apiKey.trim().length >= 10) {
+    const cleanApiKey = (config.apiKey || '').trim();
+
+    // 1. Deepgram API Key가 있는 경우: Deepgram Nova-2/Nova-3 실시간 WebSocket 연결
+    if (cleanApiKey.length >= 10) {
       try {
-        const keywordsParam = config.keywords && config.keywords.length > 0
-          ? config.keywords.map(k => `keywords=${encodeURIComponent(k)}`).join('&')
-          : '';
+        this.onStatus?.('CONNECTING', 'Deepgram AI 서버에 연결 중...');
 
         const queryParams = [
-          `model=${config.model || 'nova-3'}`,
-          `language=${config.language || 'ko'}`,
-          `punctuate=${config.punctuate !== false}`,
-          `interim_results=${config.interimResults !== false}`,
-          `endpointing=${config.endpointing || 300}`,
-          keywordsParam
+          `model=${config.model || 'nova-2'}`,
+          `language=ko`,
+          `smart_format=true`,
+          `punctuate=true`,
+          `interim_results=true`,
+          `encoding=linear16`,
+          `sample_rate=16000`,
+          `channels=1`,
+          `endpointing=300`,
+          config.keywords && config.keywords.length > 0
+            ? config.keywords.map(k => `keywords=${encodeURIComponent(k)}`).join('&')
+            : ''
         ].filter(Boolean).join('&');
 
         const url = `wss://api.deepgram.com/v1/listen?${queryParams}`;
-        this.ws = new WebSocket(url, ['token', config.apiKey]);
+        console.log('[Deepgram] WebSocket 연결 시도:', url);
+        this.ws = new WebSocket(url, ['token', cleanApiKey]);
 
         this.ws.onopen = () => {
-          console.log('[Deepgram] Deepgram Nova-3 WebSocket 실시간 AI 연결 성공!');
+          console.log('[Deepgram] 🟢 Deepgram WebSocket 실시간 연결 성공!');
           this.currentEngine = 'DEEPGRAM';
+          this.onStatus?.('CONNECTED', 'Deepgram AI 연결 성공! 방송 소리를 실시간 전사합니다.');
         };
 
         this.ws.onmessage = (event) => {
@@ -64,6 +76,7 @@ export class DeepgramSttService {
             if (data.type === 'Results' && data.channel?.alternatives?.[0]) {
               const alt = data.channel.alternatives[0];
               if (alt.transcript && alt.transcript.trim()) {
+                console.log('[Deepgram] 🎯 전사 결과 수신:', alt.transcript);
                 this.onTranscript?.({
                   text: alt.transcript.trim(),
                   isFinal: !!data.is_final,
@@ -78,16 +91,21 @@ export class DeepgramSttService {
         };
 
         this.ws.onerror = (event) => {
-          console.warn('[Deepgram] WebSocket 연결 실패 -> 브라우저 실제 음성인식으로 전환합니다.', event);
+          console.warn('[Deepgram] 🔴 WebSocket 연결 실패:', event);
+          this.onStatus?.('ERROR', 'Deepgram 연결 실패 (API 키를 확인해 주세요)');
+          this.onError?.('Deepgram WebSocket 연결 실패. 브라우저 마이크 음성인식으로 전환합니다.');
           this.startBrowserSpeechRecognition();
         };
 
-        this.ws.onclose = () => {
-          console.log('[Deepgram] WebSocket 연결 종료');
+        this.ws.onclose = (event) => {
+          console.log('[Deepgram] WebSocket 연결 종료 코드:', event.code, event.reason);
+          if (this.isRecognitionActive && this.currentEngine === 'DEEPGRAM') {
+            this.onStatus?.('DISCONNECTED', 'Deepgram 연결이 종료되었습니다.');
+          }
         };
         return;
-      } catch (err) {
-        console.warn('[Deepgram] WebSocket 초기화 실패:', err);
+      } catch (err: any) {
+        console.warn('[Deepgram] WebSocket 초기화 실패 -> 마이크 음성인식으로 전환:', err);
       }
     }
 
@@ -96,16 +114,18 @@ export class DeepgramSttService {
   }
 
   /**
-   * 브라우저 실제 한국어 음성인식 엔진 (크롬, 엣지, 웨일 등)
+   * 브라우저 실제 한국어 음성인식 엔진
    */
   private startBrowserSpeechRecognition() {
     this.currentEngine = 'WEB_SPEECH';
+    this.onStatus?.('CONNECTED', '브라우저 마이크 음성인식 가동 중 (ko-KR)');
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
       console.warn('[STT] 브라우저 SpeechRecognition 미지원');
       this.onError?.('브라우저 음성인식이 지원되지 않는 환경입니다. Chrome 또는 Edge 브라우저를 권장합니다.');
       this.currentEngine = 'NONE';
+      this.onStatus?.('ERROR', '음성인식 미지원 브라우저');
       return;
     }
 
@@ -121,12 +141,11 @@ export class DeepgramSttService {
       this.isRecognitionActive = true;
 
       recognition.onstart = () => {
-        console.log('[STT] 🎙️ 브라우저 실제 한국어 음성인식(ko-KR) 시작됨 - 음성을 실시간 청취합니다.');
+        console.log('[STT] 🎙️ 브라우저 실제 한국어 음성인식 시작');
       };
 
       recognition.onresult = (event: any) => {
         let interimText = '';
-        let finalText = '';
 
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           const res = event.results[i];
@@ -134,7 +153,6 @@ export class DeepgramSttService {
           const confidence = res[0]?.confidence || 0.92;
 
           if (res.isFinal) {
-            finalText += transcript;
             if (transcript.trim()) {
               this.lastFinalText = transcript.trim();
               this.onTranscript?.({
@@ -158,9 +176,10 @@ export class DeepgramSttService {
       };
 
       recognition.onerror = (event: any) => {
-        console.warn('[STT] 음성인식 상태 이벤트:', event.error);
+        console.warn('[STT] 음성인식 에러:', event.error);
         if (event.error === 'not-allowed') {
-          this.onError?.('마이크 사용 권한이 차단되었습니다. 브라우저 주소창 좌측 자물쇠에서 마이크를 허용해 주세요.');
+          this.onError?.('마이크 사용 권한이 차단되었습니다. 브라우저 주소창 좌측에서 마이크를 허용해 주세요.');
+          this.onStatus?.('ERROR', '마이크 권한 거부됨');
           this.isRecognitionActive = false;
         }
       };
@@ -181,7 +200,7 @@ export class DeepgramSttService {
       recognition.start();
       this.speechRecognition = recognition;
     } catch (err) {
-      console.warn('[STT] 브라우저 음성인식 시작 예외:', err);
+      console.warn('[STT] 브라우저 음성인식 시작 실패:', err);
     }
   }
 
@@ -227,6 +246,7 @@ export class DeepgramSttService {
 
     this.isRecognitionActive = false;
     this.stopBrowserSpeechRecognition();
+    this.onStatus?.('DISCONNECTED', '청취 중지됨');
   }
 
   /**

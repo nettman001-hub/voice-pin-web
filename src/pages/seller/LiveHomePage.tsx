@@ -33,6 +33,8 @@ export const LiveHomePage: React.FC = () => {
     editingFieldInfo,
     deepgramApiKey,
     setDeepgramApiKey,
+    sttEngineStatus,
+    sttEngineMessage,
     startListening,
     stopListening,
     injectTestMent,
@@ -86,10 +88,17 @@ export const LiveHomePage: React.FC = () => {
                 {isListening ? 'ON AIR (방송 소리 청취 중)' : '대기 중'}
               </span>
             </div>
-            <p className="text-xs text-slate-500 mt-1 flex items-center space-x-2">
+            <p className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-2">
               <span>현재 방송 회차: <strong className="text-slate-900 font-mono">{currentSessionId}</strong></span>
               <span>•</span>
-              <span>실시간 방송 소리(탭 오디오) AI 분석</span>
+              <span className="flex items-center space-x-1.5">
+                <span className={`w-2 h-2 rounded-full ${
+                  sttEngineStatus === 'CONNECTED' ? 'bg-emerald-500 animate-pulse' :
+                  sttEngineStatus === 'CONNECTING' ? 'bg-amber-500 animate-spin' :
+                  sttEngineStatus === 'ERROR' ? 'bg-rose-500' : 'bg-slate-400'
+                }`}></span>
+                <span className="font-medium text-slate-700">{sttEngineMessage}</span>
+              </span>
             </p>
           </div>
         </div>

@@ -31,6 +31,8 @@ interface LiveContextType {
   editingFieldInfo: string | null;
   deepgramApiKey: string;
   setDeepgramApiKey: (key: string) => void;
+  sttEngineStatus: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
+  sttEngineMessage: string;
   startListening: (mode?: 'TAB_AUDIO' | 'MIC') => Promise<void>;
   stopListening: () => void;
   injectTestMent: (text: string) => void;
@@ -52,6 +54,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [lastMatchedRuleItem, setLastMatchedRuleItem] = useState<MatchedRuleItem | null>(null);
   const [transcriptLogs, setTranscriptLogs] = useState<SttTranscriptLog[]>([]);
   const [recentCaptures, setRecentCaptures] = useState<CaptureItem[]>([]);
+  const [sttEngineStatus, setSttEngineStatus] = useState<'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR'>('DISCONNECTED');
+  const [sttEngineMessage, setSttEngineMessage] = useState<string>('대기 중');
   
   // 방송 중 음성 명령 수정 상태
   const [isVoiceEditing, setIsVoiceEditing] = useState<boolean>(false);
@@ -306,11 +310,14 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.warn('[Live] 오디오 시각화 캡처 경고 (STT는 계속 진행):', audioErr);
       }
 
-      // 2. 실시간 STT 엔진 시작 (Deepgram Nova-3 또는 브라우저 Web Speech API)
+      // 최신 API Key 확인
+      const activeApiKey = deepgramApiKey || storageService.getDeepgramApiKey();
+
+      // 2. 실시간 STT 엔진 시작 (Deepgram Nova-2/Nova-3 또는 브라우저 Web Speech API)
       deepgramService.startLiveStream(
         {
-          apiKey: deepgramApiKey,
-          model: 'nova-3',
+          apiKey: activeApiKey,
+          model: 'nova-2',
           language: 'ko',
           keywords,
           punctuate: true,
@@ -319,12 +326,18 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         },
         handleTranscript,
         (err) => {
-          console.error('[Live] STT 스트림 알림:', err);
+          console.error('[Live] STT 스트림 에러 알림:', err);
+        },
+        (status, message) => {
+          setSttEngineStatus(status);
+          if (message) setSttEngineMessage(message);
         }
       );
     } catch (err) {
       console.error('[Live] 라이브 청취 시작 실패:', err);
       setIsListening(false);
+      setSttEngineStatus('ERROR');
+      setSttEngineMessage('라이브 청취 시작 실패');
     }
   };
 
@@ -333,6 +346,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsListening(false);
     audioCaptureService.stopCapture();
     deepgramService.stopLiveStream();
+    setSttEngineStatus('DISCONNECTED');
+    setSttEngineMessage('청취 중지됨');
     setIsVoiceEditing(false);
     setEditingFieldInfo(null);
     if (editTimeoutRef.current) clearTimeout(editTimeoutRef.current);
@@ -364,6 +379,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         editingFieldInfo,
         deepgramApiKey,
         setDeepgramApiKey,
+        sttEngineStatus,
+        sttEngineMessage,
         startListening,
         stopListening,
         injectTestMent,
