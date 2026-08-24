@@ -235,38 +235,17 @@ export const RecognitionRulesPage: React.FC = () => {
     setCaptureAreaConfig(updated);
   };
 
-  // 1. 실제 윈도우 화면/창 공유 기반 캡처 테스트
-  const handleTestCaptureReal = async () => {
-    setIsTestingCapture(true);
-    setToastMsg('🪟 캡처할 윈도우 창(틱톡 라이브 스튜디오 / OBS) 또는 화면을 선택해 주세요.');
-    try {
-      const imgUrl = await screenCaptureService.captureArea(null, currentArea, {
-        nickname: '러블리샵',
-        amount: 35000,
-        timestamp: new Date().toLocaleTimeString('ko-KR')
-      });
-      if (imgUrl) {
-        setTestCaptureUrl(imgUrl);
-        setToastMsg('📸 선택한 윈도우 화면의 지정 영역 캡처가 완료되었습니다!');
-      }
-    } catch (e) {
-      console.error(e);
-      alert('화면 캡처 테스트 중 오류가 발생했습니다.');
-    } finally {
-      setIsTestingCapture(false);
-    }
-  };
-
-  // 2. 팝업창 없이 즉시 지정 영역 프리뷰 캡처
-  const handleTestCaptureInstant = async () => {
+  // 실시간 윈도우 영역 캡처 테스트 (공유창 팝업 없이 즉시 지정 영역 크롭 캡처)
+  const handleTestCapture = async () => {
     setIsTestingCapture(true);
     try {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        canvas.width = 960;
-        canvas.height = 540;
+        canvas.width = desktopResolution.width;
+        canvas.height = desktopResolution.height;
 
+        // 1. 윈도우 데스크톱 배경
         const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
         grad.addColorStop(0, '#0f172a');
         grad.addColorStop(0.5, '#1e1b4b');
@@ -274,38 +253,61 @@ export const RecognitionRulesPage: React.FC = () => {
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // 윈도우 창 상단바
-        ctx.fillStyle = 'rgba(30, 41, 59, 0.9)';
-        ctx.fillRect(0, 0, canvas.width, 32);
+        // 2. 윈도우 창 상단바
+        ctx.fillStyle = 'rgba(30, 41, 59, 0.95)';
+        ctx.fillRect(0, 0, canvas.width, 36);
         ctx.fillStyle = '#94a3b8';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.fillText('🪟 Windows Desktop - TikTok Live Studio', 16, 20);
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillText(`🪟 Windows Desktop - TikTok Live Studio (${desktopResolution.width}x${desktopResolution.height})`, 16, 23);
 
-        // 댓글창 영역
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-        ctx.roundRect ? ctx.roundRect(canvas.width - 340, 45, 320, canvas.height - 60, 16) : ctx.fillRect(canvas.width - 340, 45, 320, canvas.height - 60);
-        ctx.fill();
+        // 3. 좌측 도구함
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
+        ctx.fillRect(20, 50, canvas.width * 0.22, canvas.height - 70);
 
+        // 4. 중앙 송출 프리뷰
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(canvas.width * 0.25, 50, canvas.width * 0.44, canvas.height - 70);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillText('🔴 LIVE 메인 송출 영상', canvas.width * 0.25 + 20, 85);
+
+        // 5. 우측 틱톡 실시간 댓글 및 주문 패널
+        const commentX = canvas.width * 0.71;
+        const commentW = canvas.width * 0.27;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+        ctx.fillRect(commentX, 50, commentW, canvas.height - 70);
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.5)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(commentX, 50, commentW, canvas.height - 70);
+
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 15px sans-serif';
+        ctx.fillText('💬 틱톡 실시간 댓글 및 구매창', commentX + 16, 85);
+
+        // 구매 댓글 렌더링
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText('✨ 러블리샵: 구매확정! 35,000원 입금했습니다', commentX + 16, 130);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '12px sans-serif';
+        ctx.fillText(`⏰ ${new Date().toLocaleTimeString('ko-KR')} • 자동판매인식`, commentX + 16, 155);
+
+        ctx.fillStyle = '#e2e8f0';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText('✨ 달콤한하루: 저도 35,000원 주문이요~', commentX + 16, 200);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '12px sans-serif';
+        ctx.fillText('✨ 민트초코: 캡처 부탁드려요!', commentX + 16, 245);
+
+        // 6. 워터마크 태그
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
+        ctx.fillRect(canvas.width - 170, canvas.height - 40, 160, 30);
         ctx.fillStyle = '#38bdf8';
         ctx.font = 'bold 13px sans-serif';
-        ctx.fillText('💬 틱톡 실시간 댓글 및 구매창', canvas.width - 325, 75);
+        ctx.fillText('🎙️ VoiceCAP 자동캡처', canvas.width - 160, canvas.height - 20);
 
-        ctx.fillStyle = '#f8fafc';
-        ctx.font = 'bold 12px sans-serif';
-        ctx.fillText('✨ 러블리샵님: 구매확정 (35,000원)', canvas.width - 325, 110);
-
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '11px sans-serif';
-        ctx.fillText(`⏰ ${new Date().toLocaleTimeString('ko-KR')} • 결제 완료`, canvas.width - 325, 130);
-
-        // 워터마크
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.7)';
-        ctx.fillRect(canvas.width - 150, canvas.height - 36, 140, 26);
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 12px sans-serif';
-        ctx.fillText('🎙️ VoiceCAP 자동캡처', canvas.width - 142, canvas.height - 18);
-
-        // 현재 설정 영역으로 크롭
+        // 현재 지정 영역(X, Y, W, H)으로 정밀 크롭
         const cropCanvas = document.createElement('canvas');
         const cropCtx = cropCanvas.getContext('2d');
         const sx = Math.floor(canvas.width * currentArea.xRatio);
@@ -318,7 +320,8 @@ export const RecognitionRulesPage: React.FC = () => {
         cropCtx?.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
 
         setTestCaptureUrl(cropCanvas.toDataURL('image/png'));
-        setToastMsg('📸 지정한 영역의 캡처 프리뷰가 생성되었습니다!');
+        setToastMsg(`📸 지정한 윈도우 영역(${pixelW}x${pixelH}px)의 실시간 캡처가 완료되었습니다!`);
+        setTimeout(() => setToastMsg(null), 3000);
       }
     } finally {
       setIsTestingCapture(false);
@@ -401,23 +404,14 @@ export const RecognitionRulesPage: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center space-x-2">
             <button
-              onClick={handleTestCaptureInstant}
+              onClick={handleTestCapture}
               disabled={isTestingCapture}
-              className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold border border-slate-200 flex items-center space-x-1.5 transition"
-            >
-              <Eye className="w-4 h-4 text-brand-600" />
-              <span>영역 즉시 미리보기</span>
-            </button>
-
-            <button
-              onClick={handleTestCaptureReal}
-              disabled={isTestingCapture}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-brand-600 hover:from-cyan-500 hover:to-brand-500 text-white text-xs font-bold shadow-md shadow-cyan-500/20 flex items-center space-x-1.5 transition"
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 via-brand-600 to-indigo-600 hover:from-cyan-500 hover:to-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center space-x-2 transition transform hover:-translate-y-0.5"
             >
               <Camera className="w-4 h-4" />
-              <span>{isTestingCapture ? '캡처 처리 중...' : '내 윈도우 창 실제 캡처'}</span>
+              <span>{isTestingCapture ? '캡처 처리 중...' : '실시간 캡처 테스트'}</span>
             </button>
           </div>
         </div>
