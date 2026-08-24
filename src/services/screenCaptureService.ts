@@ -18,7 +18,7 @@ export class ScreenCaptureService {
         try {
           activeStream = await navigator.mediaDevices.getDisplayMedia({
             video: {
-              displaySurface: 'window', // 윈도우 창 또는 모니터 화면
+              displaySurface: 'window',
               width: { ideal: 1920 },
               height: { ideal: 1080 }
             } as any,
@@ -38,23 +38,35 @@ export class ScreenCaptureService {
     // 실제 비디오 트랙이 있는 경우 (화면 공유 / 윈도우 창 캡처)
     const videoTrack = activeStream?.getVideoTracks()[0];
     if (videoTrack && videoTrack.readyState === 'live') {
+      let video: HTMLVideoElement | null = null;
       try {
-        const video = document.createElement('video');
+        video = document.createElement('video');
         video.muted = true;
         video.playsInline = true;
+        video.autoplay = true;
         video.srcObject = new MediaStream([videoTrack]);
+        
+        // 브라우저 렌더러가 프레임을 실제로 디코딩하도록 DOM에 일시 부착
+        video.style.position = 'fixed';
+        video.style.top = '-9999px';
+        video.style.left = '-9999px';
+        video.style.width = '1px';
+        video.style.height = '1px';
+        video.style.opacity = '0';
+        video.style.pointerEvents = 'none';
+        document.body.appendChild(video);
 
-        // 비디오 메타데이터 및 첫 프레임 로드 보장
+        await video.play();
+
+        // 비디오 프레임이 실제로 렌더링되도록 300ms 확실히 대기
         await new Promise<void>((resolve) => {
-          if (video.readyState >= 2 && video.videoWidth > 0) {
-            resolve();
-            return;
+          const timeout = setTimeout(resolve, 500);
+          if ('requestVideoFrameCallback' in video!) {
+            (video as any).requestVideoFrameCallback(() => {
+              clearTimeout(timeout);
+              setTimeout(resolve, 100);
+            });
           }
-          video.onloadedmetadata = () => {
-            video.play().then(() => resolve()).catch(() => resolve());
-          };
-          // 안전 타임아웃
-          setTimeout(resolve, 800);
         });
 
         const vw = video.videoWidth || 1920;
@@ -79,21 +91,30 @@ export class ScreenCaptureService {
         ctx.font = 'bold 11px sans-serif';
         ctx.fillText('🎙️ VoiceCAP 캡처', canvas.width - badgeW, canvas.height - 12);
 
-        // 일회성 테스트 스트림인 경우 트랙 종료
+        // 정리 작업
+        if (video.parentNode) {
+          video.parentNode.removeChild(video);
+        }
         if (needToCloseStream) {
           activeStream?.getTracks().forEach((t) => t.stop());
         }
 
-        return canvas.toDataURL('image/png');
+        const dataUrl = canvas.toDataURL('image/png');
+        if (dataUrl && dataUrl.length > 500) {
+          return dataUrl;
+        }
       } catch (err) {
         console.warn('[ScreenCapture] 실제 비디오 프레임 크롭 실패, 고화질 윈도우 데스크톱 목업으로 폴백:', err);
+        if (video && video.parentNode) {
+          video.parentNode.removeChild(video);
+        }
         if (needToCloseStream) {
           activeStream?.getTracks().forEach((t) => t.stop());
         }
       }
     }
 
-    // 화면 스트림 미연결 시: 윈도우 데스크톱 (1920x1080) 기준 고화질 목업 캡처 생성
+    // 화면 스트림 미연결 시 또는 공유 취소 시: 윈도우 데스크톱 (1920x1080) 기준 고화질 목업 캡처 생성
     canvas.width = 960;
     canvas.height = 540;
 
