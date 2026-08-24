@@ -1,35 +1,87 @@
 import { CaptureAreaConfig } from '../types/rules';
 
 export class ScreenCaptureService {
+  private currentStream: MediaStream | null = null;
+
   /**
-   * 지정된 비디오 스트림 또는 실제 윈도우 화면 공유에서 특정 영역(댓글창, OBS 송출창, 전체화면)을 캡처하여 Data URL (PNG)로 반환
+   * 현재 연결되어 살아있는 비디오 스트림이 있는지 확인
+   */
+  public getActiveStream(): MediaStream | null {
+    if (this.currentStream && this.currentStream.getVideoTracks().some(t => t.readyState === 'live')) {
+      return this.currentStream;
+    }
+    this.currentStream = null;
+    return null;
+  }
+
+  /**
+   * 화면/창 스트림 요청 (이미 연결된 스트림이 있다면 재사용)
+   */
+  public async getOrCreateStream(forceNew = false): Promise<MediaStream | null> {
+    if (!forceNew) {
+      const active = this.getActiveStream();
+      if (active) return active;
+    }
+
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getDisplayMedia) {
+      return null;
+    }
+
+    try {
+      // 기존 스트림 정리
+      if (this.currentStream) {
+        this.currentStream.getTracks().forEach(t => t.stop());
+        this.currentStream = null;
+      }
+
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          displaySurface: 'window',
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        } as any,
+        audio: false
+      });
+
+      // 사용자가 브라우저 상단에서 공유 중지를 눌렀을 때 핸들링
+      stream.getVideoTracks().forEach(track => {
+        track.onended = () => {
+          this.currentStream = null;
+        };
+      });
+
+      this.currentStream = stream;
+      return stream;
+    } catch (err) {
+      console.warn('[ScreenCapture] 화면 공유 취소 또는 거부:', err);
+      return null;
+    }
+  }
+
+  /**
+   * 스트림 연결 해제
+   */
+  public stopStream(): void {
+    if (this.currentStream) {
+      this.currentStream.getTracks().forEach(t => t.stop());
+      this.currentStream = null;
+    }
+  }
+
+  /**
+   * 지정된 비디오 스트림 또는 캐시된 윈도우 화면 공유에서 특정 영역(댓글창, OBS 송출창, 전체화면)을 캡처하여 Data URL (PNG)로 반환
    */
   public async captureArea(
     stream: MediaStream | null,
     areaConfig: CaptureAreaConfig,
     metadata?: { nickname?: string; amount?: number; timestamp?: string }
   ): Promise<string> {
-    let activeStream = stream;
-    let needToCloseStream = false;
+    let activeStream = stream || this.getActiveStream();
 
-    // 스트림이 없고 브라우저 getDisplayMedia 지원 시 실제 윈도우 화면 공유 스트림 요청
-    if (!activeStream || !activeStream.getVideoTracks().some(t => t.readyState === 'live')) {
-      if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getDisplayMedia) {
-        try {
-          activeStream = await navigator.mediaDevices.getDisplayMedia({
-            video: {
-              displaySurface: 'window',
-              width: { ideal: 1920 },
-              height: { ideal: 1080 }
-            } as any,
-            audio: false
-          });
-          needToCloseStream = true;
-        } catch (e) {
-          console.warn('[ScreenCapture] 화면 공유 취소 또는 권한 거부:', e);
-          return '';
-        }
-      }
+    // 스트림이 아직 없다면 최초 1회 화면 공유 요청
+    if (!activeStream) {
+      activeStream = await this.getOrCreateStream(false);
+      if (!activeStream) return '';
     }
 
     const canvas = document.createElement('canvas');
@@ -37,7 +89,7 @@ export class ScreenCaptureService {
     if (!ctx) return '';
 
     // 실제 비디오 트랙이 있는 경우 (화면 공유 / 윈도우 창 캡처)
-    const videoTrack = activeStream?.getVideoTracks()[0];
+    const videoTrack = activeStream.getVideoTracks()[0];
     if (videoTrack && videoTrack.readyState === 'live') {
       let video: HTMLVideoElement | null = null;
       try {
@@ -59,7 +111,7 @@ export class ScreenCaptureService {
 
         await video.play();
 
-        // 비디오 프레임이 실제로 렌더링되도록 확실히 대기 (최대 600ms)
+        // 비디오 프레임이 실제로 렌더링되도록 대기
         await new Promise<void>((resolve) => {
           let resolved = false;
           const done = () => {
@@ -68,17 +120,17 @@ export class ScreenCaptureService {
               resolve();
             }
           };
-          const timeout = setTimeout(done, 500);
+          const timeout = setTimeout(done, 400);
 
           if ('requestVideoFrameCallback' in video!) {
             (video as any).requestVideoFrameCallback(() => {
               clearTimeout(timeout);
-              setTimeout(done, 150);
+              setTimeout(done, 80);
             });
           } else {
             video!.onloadeddata = () => {
               clearTimeout(timeout);
-              setTimeout(done, 200);
+              setTimeout(done, 100);
             };
           }
         });
@@ -105,23 +157,17 @@ export class ScreenCaptureService {
         ctx.font = 'bold 11px sans-serif';
         ctx.fillText('🎙️ VoiceCAP 캡처', canvas.width - badgeW, canvas.height - 10);
 
-        // 정리 작업
+        // 정리 작업 (비디오 엘리먼트만 DOM에서 제거하고, 스트림은 다음 캡처를 위해 유지!)
         if (video.parentNode) {
           video.parentNode.removeChild(video);
-        }
-        if (needToCloseStream) {
-          activeStream?.getTracks().forEach((t) => t.stop());
         }
 
         const dataUrl = canvas.toDataURL('image/png');
         return dataUrl;
       } catch (err) {
-        console.warn('[ScreenCapture] 실제 비디오 프레임 크롭 실패:', err);
+        console.warn('[ScreenCapture] 비디오 프레임 크롭 실패:', err);
         if (video && video.parentNode) {
           video.parentNode.removeChild(video);
-        }
-        if (needToCloseStream) {
-          activeStream?.getTracks().forEach((t) => t.stop());
         }
       }
     }

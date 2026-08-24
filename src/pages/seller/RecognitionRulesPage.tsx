@@ -59,12 +59,71 @@ export const RecognitionRulesPage: React.FC = () => {
 
   const [testCaptureUrl, setTestCaptureUrl] = useState<string | null>(null);
   const [isTestingCapture, setIsTestingCapture] = useState(false);
+  const [isScreenConnected, setIsScreenConnected] = useState<boolean>(() => !!screenCaptureService.getActiveStream());
 
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setCurrentArea(captureAreaConfig);
+    setIsScreenConnected(!!screenCaptureService.getActiveStream());
   }, [captureAreaConfig]);
+
+  // 화면 스트림 변경 요청
+  const handleChangeScreen = async () => {
+    setIsTestingCapture(true);
+    setToastMsg('🪟 변경할 새로운 윈도우 창 또는 모니터 화면을 선택해 주세요.');
+    try {
+      const stream = await screenCaptureService.getOrCreateStream(true);
+      if (stream) {
+        setIsScreenConnected(true);
+        setToastMsg('✅ 새로운 윈도우 화면으로 성공적으로 변경되었습니다!');
+        setTimeout(() => setToastMsg(null), 3000);
+      }
+    } finally {
+      setIsTestingCapture(false);
+    }
+  };
+
+  // 화면 스트림 연결 해제
+  const handleDisconnectScreen = () => {
+    screenCaptureService.stopStream();
+    setIsScreenConnected(false);
+    setToastMsg('🔌 윈도우 화면 연결이 해제되었습니다.');
+    setTimeout(() => setToastMsg(null), 2500);
+  };
+
+  // 실시간 윈도우 창/화면 캡처 (1회 연결 후 다음부터는 공유창 없이 즉시 캡처)
+  const handleTestCapture = async () => {
+    setIsTestingCapture(true);
+    const hadStream = !!screenCaptureService.getActiveStream();
+    if (!hadStream) {
+      setToastMsg('🪟 최초 1회 캡처할 윈도우 창(틱톡 스튜디오/OBS)을 선택하세요. (이후 자동 캡처)');
+    }
+    try {
+      const imgUrl = await screenCaptureService.captureArea(null, currentArea, {
+        nickname: '러블리샵',
+        amount: 35000,
+        timestamp: new Date().toLocaleTimeString('ko-KR')
+      });
+      if (imgUrl) {
+        setIsScreenConnected(true);
+        setTestCaptureUrl(imgUrl);
+        setToastMsg(hadStream 
+          ? `⚡ 연결된 윈도우에서 지정 영역(${pixelW}x${pixelH}px)이 즉시 캡처되었습니다!`
+          : `📸 윈도우 화면이 성공적으로 연결되어 지정 영역이 캡처되었습니다!`);
+        setTimeout(() => setToastMsg(null), 3000);
+      } else {
+        setIsScreenConnected(!!screenCaptureService.getActiveStream());
+        setToastMsg('ℹ️ 화면 공유가 취소되었거나 선택되지 않았습니다.');
+        setTimeout(() => setToastMsg(null), 3000);
+      }
+    } catch (e) {
+      console.error(e);
+      alert('화면 캡처 테스트 중 오류가 발생했습니다.');
+    } finally {
+      setIsTestingCapture(false);
+    }
+  };
 
   const handleAddWord = (e: React.FormEvent) => {
     e.preventDefault();
@@ -235,31 +294,7 @@ export const RecognitionRulesPage: React.FC = () => {
     setCaptureAreaConfig(updated);
   };
 
-  // 실시간 윈도우 창/화면 공유 기반 실제 캡처 테스트
-  const handleTestCapture = async () => {
-    setIsTestingCapture(true);
-    setToastMsg('🪟 캡처할 윈도우 창(틱톡 라이브 스튜디오 / OBS) 또는 모니터 화면을 선택해 주세요.');
-    try {
-      const imgUrl = await screenCaptureService.captureArea(null, currentArea, {
-        nickname: '러블리샵',
-        amount: 35000,
-        timestamp: new Date().toLocaleTimeString('ko-KR')
-      });
-      if (imgUrl) {
-        setTestCaptureUrl(imgUrl);
-        setToastMsg(`📸 선택한 윈도우 화면의 지정 영역(${pixelW}x${pixelH}px) 실제 캡처가 완료되었습니다!`);
-        setTimeout(() => setToastMsg(null), 3000);
-      } else {
-        setToastMsg('ℹ️ 화면 공유가 취소되었거나 선택되지 않았습니다.');
-        setTimeout(() => setToastMsg(null), 3000);
-      }
-    } catch (e) {
-      console.error(e);
-      alert('화면 캡처 테스트 중 오류가 발생했습니다.');
-    } finally {
-      setIsTestingCapture(false);
-    }
-  };
+
 
   // 현재 해상도 기준 픽셀 계산
   const pixelX = Math.round(currentArea.xRatio * desktopResolution.width);
@@ -337,15 +372,50 @@ export const RecognitionRulesPage: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={handleTestCapture}
-              disabled={isTestingCapture}
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 via-brand-600 to-indigo-600 hover:from-cyan-500 hover:to-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center space-x-2 transition transform hover:-translate-y-0.5"
-            >
-              <Camera className="w-4 h-4" />
-              <span>{isTestingCapture ? '캡처 처리 중...' : '실시간 캡처 테스트'}</span>
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {isScreenConnected ? (
+              <>
+                <span className="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold flex items-center space-x-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>윈도우 화면 연결됨</span>
+                </span>
+
+                <button
+                  onClick={handleTestCapture}
+                  disabled={isTestingCapture}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-500/20 flex items-center space-x-1.5 transition"
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>{isTestingCapture ? '캡처 중...' : '실시간 즉시 캡처'}</span>
+                </button>
+
+                <button
+                  onClick={handleChangeScreen}
+                  disabled={isTestingCapture}
+                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200 transition"
+                  title="다른 윈도우 창 또는 모니터로 화면 변경"
+                >
+                  화면 변경
+                </button>
+
+                <button
+                  onClick={handleDisconnectScreen}
+                  className="px-2.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-semibold border border-rose-200 transition"
+                  title="화면 연결 해제"
+                >
+                  연결 해제
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={handleTestCapture}
+                disabled={isTestingCapture}
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 via-brand-600 to-indigo-600 hover:from-cyan-500 hover:to-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center space-x-2 transition transform hover:-translate-y-0.5"
+              >
+                <Camera className="w-4 h-4" />
+                <span>{isTestingCapture ? '화면 연결 중...' : '실시간 캡처 테스트 (1회 화면 연결)'}</span>
+              </button>
+            )}
           </div>
         </div>
 
