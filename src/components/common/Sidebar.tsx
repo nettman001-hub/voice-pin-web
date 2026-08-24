@@ -41,8 +41,8 @@ export const Sidebar: React.FC = () => {
       groupName: '라이브 방송 관제',
       items: [
         { name: '라이브 청취 홈', path: '/live', icon: Radio, badge: isListening ? 'ON AIR' : undefined },
-        { name: '음성인식 훈련 (학습)', path: '/training', icon: Sparkles },
-        { name: '캡처 영역 & 단어 규칙', path: '/rules', icon: Sliders },
+        { name: '음성인식 훈련 (학습)', path: '/voice-training', icon: Sparkles },
+        { name: '캡처 영역 & 단어 규칙', path: '/recognition-rules', icon: Sliders },
       ]
     },
     {

@@ -87,7 +87,9 @@ export const App: React.FC = () => {
                   {/* 2. 판매자 핵심 기능 (PG-006 ~ PG-013) */}
                   <Route path="/live" element={<LiveHomePage />} />
                   <Route path="/voice-training" element={<VoiceTrainingPage />} />
+                  <Route path="/training" element={<VoiceTrainingPage />} />
                   <Route path="/recognition-rules" element={<RecognitionRulesPage />} />
+                  <Route path="/rules" element={<RecognitionRulesPage />} />
                   <Route path="/sales" element={<SalesListPage />} />
                   <Route path="/sales/:id" element={<SalesDetailPage />} />
                   <Route path="/sales/:id/capture" element={<SalesDetailPage />} />
