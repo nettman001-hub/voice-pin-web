@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import { useLive } from '../../context/LiveContext';
 import { useSales } from '../../context/SalesContext';
 import { AudioVisualizer } from '../../components/common/AudioVisualizer';
@@ -41,9 +42,13 @@ export const LiveHomePage: React.FC = () => {
     captureCurrentScreen
   } = useLive();
 
+  const { user } = useAuth();
+  const isAdmin = user?.role === '관리자';
+
   const { sales } = useSales();
   const [selectedCaptureModal, setSelectedCaptureModal] = useState<string | null>(null);
   const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
+  const [showAdminOnlyModal, setShowAdminOnlyModal] = useState<boolean>(false);
   const [keyInput, setKeyInput] = useState<string>(deepgramApiKey || '');
   const [audioSourceMode, setAudioSourceMode] = useState<'TAB_AUDIO' | 'MIC'>('TAB_AUDIO');
   const flowContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -133,14 +138,23 @@ export const LiveHomePage: React.FC = () => {
 
           <button
             onClick={() => {
-              setKeyInput(deepgramApiKey || '');
-              setShowKeyModal(true);
+              if (isAdmin) {
+                setKeyInput(deepgramApiKey || '');
+                setShowKeyModal(true);
+              } else {
+                setShowAdminOnlyModal(true);
+              }
             }}
-            className="px-3.5 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 flex items-center space-x-1.5 transition"
-            title="Deepgram Nova-3 API Key 설정"
+            className={`px-3.5 py-3 rounded-xl text-xs font-bold border flex items-center space-x-1.5 transition ${
+              isAdmin
+                ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200 cursor-pointer'
+                : 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed opacity-80'
+            }`}
+            title={isAdmin ? 'Deepgram AI Key 설정 (관리자 전용)' : 'AI 키 설정은 관리자만 변경할 수 있습니다'}
           >
-            <Key className="w-4 h-4 text-amber-500" />
+            <Key className={`w-4 h-4 ${isAdmin ? 'text-amber-500' : 'text-slate-400'}`} />
             <span>AI 키 {deepgramApiKey ? '연결됨' : '설정'}</span>
+            {!isAdmin && <span className="text-[10px] text-slate-400 bg-slate-200/60 px-1.5 py-0.5 rounded">관리자 전용</span>}
           </button>
 
           <button
@@ -579,6 +593,29 @@ export const LiveHomePage: React.FC = () => {
                 저장하기
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 관리자 전용 기능 안내 팝업 모달 */}
+      {showAdminOnlyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="max-w-sm w-full bg-white p-6 rounded-3xl border border-slate-200 shadow-2xl space-y-4 animate-in zoom-in-95 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center mx-auto">
+              <Key className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-black text-slate-900">관리자 전용 기능</h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                Deepgram AI 키 설정 및 수정은 <strong className="text-slate-800">최고 관리자(ADMIN)</strong> 권한으로 로그인한 계정만 접근할 수 있습니다.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowAdminOnlyModal(false)}
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition shadow-sm"
+            >
+              확인
+            </button>
           </div>
         </div>
       )}
