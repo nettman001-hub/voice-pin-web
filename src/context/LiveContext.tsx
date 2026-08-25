@@ -422,8 +422,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ) {
         // 같은 브라우저에서 다른 계정으로 전환된 경우 이전 계정의 공유를 넘기지 않는다.
         screenCaptureService.stopStream();
+        audioCaptureService.stopCapture();
       }
 
+      const previousMode = activeAudioSourceModeRef.current;
       activeAudioSourceModeRef.current = mode;
       isListeningRef.current = true;
       const newSessionId = generateSessionId();
@@ -436,29 +438,40 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const rules = storageService.getRules().filter((r) => r.isEnabled);
       const keywords = rules.map((r) => `${r.word}:2`);
 
-      // 1. 오디오 캡처 시작. TAB_AUDIO 실패 시 마이크로 몰래 전환하지 않는다.
-      await audioCaptureService.startCapture(
-        mode,
-        (chunk) => {
-          if (
-            listeningGenerationRef.current === listeningGeneration &&
-            isListeningRef.current &&
-            currentUserIdRef.current === requestedUserId
-          ) {
-            deepgramService.sendAudioChunk(chunk);
-          }
-        },
-        (wave, vol) => {
-          if (
-            listeningGenerationRef.current === listeningGeneration &&
-            isListeningRef.current &&
-            currentUserIdRef.current === requestedUserId
-          ) {
-            setWaveform(wave);
-            setAudioLevel(vol);
-          }
+      const chunkCallback = (chunk: ArrayBuffer) => {
+        if (
+          listeningGenerationRef.current === listeningGeneration &&
+          isListeningRef.current &&
+          currentUserIdRef.current === requestedUserId
+        ) {
+          deepgramService.sendAudioChunk(chunk);
         }
-      );
+      };
+
+      const waveformCallback = (wave: Uint8Array, vol: number) => {
+        if (
+          listeningGenerationRef.current === listeningGeneration &&
+          isListeningRef.current &&
+          currentUserIdRef.current === requestedUserId
+        ) {
+          setWaveform(wave);
+          setAudioLevel(vol);
+        }
+      };
+
+      // 1. 오디오 캡처 시작. TAB_AUDIO 실패 시 마이크로 몰래 전환하지 않는다.
+      //    같은 모드의 일시정지된 파이프라인이 살아있으면 재개만 한다.
+      //    (트랙을 stop하면 Chrome이 원본 탭 오디오까지 종료시켜 공유 창이 다시 뜬다)
+      let captureResumed = false;
+      if (mode === 'TAB_AUDIO' && previousMode === 'TAB_AUDIO') {
+        captureResumed = await audioCaptureService
+          .resumeCapture(chunkCallback, waveformCallback)
+          .catch(() => false);
+      }
+
+      if (!captureResumed) {
+        await audioCaptureService.startCapture(mode, chunkCallback, waveformCallback);
+      }
 
       // 공유 선택창/AudioContext 준비 사이 중지, 로그아웃 또는 계정 전환이 발생했다.
       if (
@@ -468,7 +481,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         currentUserIdRef.current !== requestedUserId ||
         authBoundaryGenerationRef.current !== requestedAuthGeneration
       ) {
-        audioCaptureService.stopCapture();
+        if (mode === 'TAB_AUDIO') {
+          audioCaptureService.pauseCapture();
+        } else {
+          audioCaptureService.stopCapture();
+        }
         return;
       }
 
@@ -512,7 +529,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
             activeListeningUserIdRef.current = null;
             isListeningRef.current = false;
             setIsListening(false);
-            audioCaptureService.stopCapture();
+            audioCaptureService.pauseCapture();
             setAudioLevel(0);
             setWaveform(new Uint8Array(128));
           }
@@ -526,7 +543,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         activeListeningUserIdRef.current = null;
         isListeningRef.current = false;
         setIsListening(false);
-        audioCaptureService.stopCapture();
+        if (mode === 'TAB_AUDIO') {
+          audioCaptureService.pauseCapture();
+        } else {
+          audioCaptureService.stopCapture();
+        }
         deepgramService.stopLiveStream();
         setSttEngineStatus('ERROR');
         setSttEngineMessage(err instanceof Error ? err.message : '라이브 청취 시작 실패');
@@ -536,13 +557,17 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // 라이브 청취 중지
+  // 라이브 청취 중지 (TAB_AUDIO는 파이프라인을 일시정지해 공유 연결을 유지한다)
   const stopListening = useCallback(() => {
     listeningGenerationRef.current += 1;
     activeListeningUserIdRef.current = null;
     isListeningRef.current = false;
     setIsListening(false);
-    audioCaptureService.stopCapture();
+    if (activeAudioSourceModeRef.current === 'TAB_AUDIO') {
+      audioCaptureService.pauseCapture();
+    } else {
+      audioCaptureService.stopCapture();
+    }
     deepgramService.stopLiveStream();
     setSttEngineStatus('DISCONNECTED');
     setSttEngineMessage(
@@ -560,6 +585,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const disconnectScreenShare = useCallback(() => {
     stopListening();
+    audioCaptureService.stopCapture();
     screenCaptureService.stopStream();
     setSttEngineStatus('DISCONNECTED');
     setSttEngineMessage('방송 탭 공유 연결 해제됨');

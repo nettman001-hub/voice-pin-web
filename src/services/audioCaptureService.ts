@@ -10,7 +10,10 @@ export class AudioCaptureService {
   private scriptProcessor: ScriptProcessorNode | null = null;
   private animationFrameId: number | null = null;
   private isCapturing: boolean = false;
+  private isPaused: boolean = false;
   private captureGeneration = 0;
+  private onAudioChunk: AudioDataCallback | null = null;
+  private onWaveform: WaveformCallback | null = null;
 
   private createCancelledError(): DOMException {
     return new DOMException('오디오 캡처 시작이 취소되었습니다.', 'AbortError');
@@ -38,6 +41,9 @@ export class AudioCaptureService {
   ): Promise<MediaStream> {
     this.stopCapture();
     const captureGeneration = this.captureGeneration;
+    this.onAudioChunk = onAudioChunk ?? null;
+    this.onWaveform = onWaveform ?? null;
+    this.isPaused = false;
 
     let stream: MediaStream | null = null;
 
@@ -126,39 +132,10 @@ export class AudioCaptureService {
           const s = Math.max(-1, Math.min(1, inputData[i]));
           pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
         }
-        onAudioChunk?.(pcm16.buffer);
+        this.onAudioChunk?.(pcm16.buffer);
       };
 
-      // 파형 및 볼륨 시각화 루프
-      const rawDataArray = new Uint8Array(this.analyser.frequencyBinCount);
-      let lastTimestamp = 0;
-
-      const updateWaveform = (timestamp: number) => {
-        if (
-          !this.isCapturing ||
-          captureGeneration !== this.captureGeneration ||
-          !this.analyser
-        ) return;
-
-        if (timestamp - lastTimestamp >= 16) {
-          lastTimestamp = timestamp;
-          this.analyser.getByteFrequencyData(rawDataArray);
-
-          // 볼륨 RMS 계산
-          let sum = 0;
-          for (let i = 0; i < rawDataArray.length; i++) {
-            sum += rawDataArray[i] * rawDataArray[i];
-          }
-          const rms = Math.sqrt(sum / rawDataArray.length);
-          const normalizedVolume = Math.min(100, Math.round((rms / 255) * 100));
-
-          onWaveform?.(new Uint8Array(rawDataArray), normalizedVolume);
-        }
-
-        this.animationFrameId = requestAnimationFrame(updateWaveform);
-      };
-
-      this.animationFrameId = requestAnimationFrame(updateWaveform);
+      this.startWaveformLoop();
     } catch (e) {
       if (captureGeneration !== this.captureGeneration || (e instanceof DOMException && e.name === 'AbortError')) {
         stream.getTracks().forEach((track) => track.stop());
@@ -176,11 +153,109 @@ export class AudioCaptureService {
   }
 
   /**
+   * 파형 및 볼륨 시각화 루프 시작
+   */
+  private startWaveformLoop(): void {
+    if (!this.analyser) return;
+
+    const analyser = this.analyser;
+    const rawDataArray = new Uint8Array(analyser.frequencyBinCount);
+    let lastTimestamp = 0;
+
+    const updateWaveform = (timestamp: number) => {
+      if (!this.isCapturing || !this.analyser || this.analyser !== analyser) return;
+
+      if (timestamp - lastTimestamp >= 16) {
+        lastTimestamp = timestamp;
+        analyser.getByteFrequencyData(rawDataArray);
+
+        // 볼륨 RMS 계산
+        let sum = 0;
+        for (let i = 0; i < rawDataArray.length; i++) {
+          sum += rawDataArray[i] * rawDataArray[i];
+        }
+        const rms = Math.sqrt(sum / rawDataArray.length);
+        const normalizedVolume = Math.min(100, Math.round((rms / 255) * 100));
+
+        this.onWaveform?.(new Uint8Array(rawDataArray), normalizedVolume);
+      }
+
+      this.animationFrameId = requestAnimationFrame(updateWaveform);
+    };
+
+    this.animationFrameId = requestAnimationFrame(updateWaveform);
+  }
+
+  /**
+   * 청취 파이프라인(오디오 트랙·AudioContext)은 유지한 채 전송만 일시정지한다.
+   * Chrome은 탭 공유 오디오의 clone을 stop하면 원본 오디오 트랙도 종료시키므로,
+   * 방송 탭 공유 연결을 보존하려면 트랙을 끝내지 말고 파이프라인을 일시정지해야 한다.
+   */
+  public pauseCapture(): void {
+    if (!this.mediaStream && !this.audioContext) return;
+
+    this.isPaused = true;
+    this.isCapturing = false;
+
+    if (this.animationFrameId !== null) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+
+    if (this.audioContext && this.audioContext.state === 'running') {
+      try {
+        void this.audioContext.suspend();
+      } catch {}
+    }
+  }
+
+  /**
+   * 일시정지된 청취 파이프라인 재개.
+   * 콜백을 최신 세션 기준으로 교체하고 오디오 컨텍스트를 재가동한다.
+   * 파이프라인이 없거나 트랙이 종료된 경우 false를 반환한다.
+   */
+  public async resumeCapture(
+    onAudioChunk?: AudioDataCallback,
+    onWaveform?: WaveformCallback
+  ): Promise<boolean> {
+    if (!this.mediaStream || !this.audioContext || !this.scriptProcessor) {
+      return false;
+    }
+
+    const hasLiveTrack = this.mediaStream
+      .getAudioTracks()
+      .some((track) => track.readyState === 'live');
+
+    if (!hasLiveTrack || this.audioContext.state === 'closed') {
+      return false;
+    }
+
+    if (onAudioChunk) this.onAudioChunk = onAudioChunk;
+    if (onWaveform) this.onWaveform = onWaveform;
+
+    try {
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+      }
+    } catch {
+      return false;
+    }
+
+    this.isPaused = false;
+    this.isCapturing = true;
+    this.startWaveformLoop();
+    return true;
+  }
+
+  /**
    * 오디오 캡처 중지
    */
   public stopCapture() {
     this.captureGeneration += 1;
     this.isCapturing = false;
+    this.isPaused = false;
+    this.onAudioChunk = null;
+    this.onWaveform = null;
 
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
