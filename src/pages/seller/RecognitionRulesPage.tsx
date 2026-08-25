@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAppData, CAPTURE_PRESETS } from '../../context/AppDataContext';
+import { useLive } from '../../context/LiveContext';
 import { RecognitionWordRule, RuleAction, CaptureAreaPreset, CaptureAreaConfig } from '../../types/rules';
 import { screenCaptureService } from '../../services/screenCaptureService';
 import {
@@ -34,6 +35,7 @@ export const RecognitionRulesPage: React.FC = () => {
     captureAreaConfig,
     setCaptureAreaConfig
   } = useAppData();
+  const { isListening, stopListening, disconnectScreenShare } = useLive();
 
   const [newWord, setNewWord] = useState('');
   const [newAction, setNewAction] = useState<RuleAction>('DB_SAVE');
@@ -73,13 +75,22 @@ export const RecognitionRulesPage: React.FC = () => {
 
   useEffect(() => {
     setCurrentArea(captureAreaConfig);
-    setIsScreenConnected(!!screenCaptureService.getActiveStream());
   }, [captureAreaConfig]);
+
+  useEffect(() => screenCaptureService.subscribeConnection((state) => {
+    setIsScreenConnected(state.isConnected);
+  }), []);
 
   // 화면 스트림 변경 요청
   const handleChangeScreen = async () => {
+    // 처리용 audio clone이 이전 탭을 계속 참조하지 않도록 변경 전에 청취를 종료한다.
+    if (isListening) stopListening();
     setIsTestingCapture(true);
-    showNotice('변경할 새로운 윈도우 창 또는 모니터 화면을 선택해 주세요.', '🪟 화면 변경 요청', 'info');
+    showNotice(
+      `변경할 새로운 윈도우 창 또는 모니터 화면을 선택해 주세요.${isListening ? ' 안전한 변경을 위해 기존 청취를 중지했습니다.' : ''}`,
+      '🪟 화면 변경 요청',
+      'info'
+    );
     try {
       const stream = await screenCaptureService.getOrCreateStream(true);
       if (stream) {
@@ -93,7 +104,7 @@ export const RecognitionRulesPage: React.FC = () => {
 
   // 화면 스트림 연결 해제
   const handleDisconnectScreen = () => {
-    screenCaptureService.stopStream();
+    disconnectScreenShare();
     setIsScreenConnected(false);
     showNotice('윈도우 화면 연결이 정상적으로 해제되었습니다.', '🔌 연결 해제 안내', 'info');
   };

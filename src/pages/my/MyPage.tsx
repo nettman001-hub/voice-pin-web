@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useLive } from '../../context/LiveContext';
 import { storageService } from '../../services/storageService';
 import {
   User,
@@ -16,6 +17,7 @@ import {
 
 export const MyPage: React.FC = () => {
   const { user, updateProfile, logout } = useAuth();
+  const { disconnectScreenShare } = useLive();
 
   const [nickname, setNickname] = useState(user?.nickname || '');
   const [phone, setPhone] = useState('010-1234-5678');
@@ -67,6 +69,7 @@ export const MyPage: React.FC = () => {
 
   const handleDeleteAccount = () => {
     if (window.confirm('정말 회원 탈퇴를 진행하시겠습니까? 저장된 판매 내역과 음성 훈련 데이터가 영구 삭제됩니다.')) {
+      disconnectScreenShare();
       alert('회원 탈퇴가 접수되었습니다.');
       logout();
     }

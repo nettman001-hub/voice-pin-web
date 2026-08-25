@@ -6,6 +6,7 @@ export interface DeepgramConfig {
   punctuate: boolean;
   interimResults: boolean;
   endpointing: number;
+  allowBrowserSpeechFallback?: boolean;
 }
 
 export interface DeepgramWord {

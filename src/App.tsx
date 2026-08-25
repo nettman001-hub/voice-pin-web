@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SalesProvider } from './context/SalesContext';
 import { LiveProvider } from './context/LiveContext';
@@ -70,10 +70,27 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 };
 
 const RootRedirect: React.FC = () => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, isInitialized, user } = useAuth();
+  if (!isInitialized) return <AuthLoadingState />;
   if (!isAuthenticated) return <Navigate to="/onboarding" replace />;
   if (user?.role === '관리자') return <Navigate to="/admin" replace />;
   return <Navigate to="/live" replace />;
+};
+
+const AuthLoadingState: React.FC = () => (
+  <div
+    role="status"
+    aria-live="polite"
+    className="min-h-[calc(100vh-4rem)] flex items-center justify-center text-sm font-semibold text-slate-500"
+  >
+    로그인 상태 확인 중...
+  </div>
+);
+
+const ProtectedRoute: React.FC = () => {
+  const { isAuthenticated, isInitialized } = useAuth();
+  if (!isInitialized) return <AuthLoadingState />;
+  return isAuthenticated ? <Outlet /> : <Navigate to="/login" replace />;
 };
 
 export const App: React.FC = () => {
@@ -95,43 +112,45 @@ export const App: React.FC = () => {
                   <Route path="/password/reset" element={<PasswordResetPage />} />
                   <Route path="/pricing" element={<PricingPage />} />
 
-                  {/* 2. 판매자 핵심 기능 (PG-006 ~ PG-013) */}
-                  <Route path="/live" element={<LiveHomePage />} />
-                  <Route path="/voice-training" element={<VoiceTrainingPage />} />
-                  <Route path="/training" element={<VoiceTrainingPage />} />
-                  <Route path="/recognition-rules" element={<RecognitionRulesPage />} />
-                  <Route path="/rules" element={<RecognitionRulesPage />} />
-                  <Route path="/sales" element={<SalesListPage />} />
-                  <Route path="/sales/:id" element={<SalesDetailPage />} />
-                  <Route path="/sales/:id/capture" element={<SalesDetailPage />} />
-                  <Route path="/sales/review" element={<SalesReviewPage />} />
-                  <Route path="/settlement" element={<SettlementPage />} />
+                  <Route element={<ProtectedRoute />}>
+                    {/* 2. 판매자 핵심 기능 (PG-006 ~ PG-013) */}
+                    <Route path="/live" element={<LiveHomePage />} />
+                    <Route path="/voice-training" element={<VoiceTrainingPage />} />
+                    <Route path="/training" element={<VoiceTrainingPage />} />
+                    <Route path="/recognition-rules" element={<RecognitionRulesPage />} />
+                    <Route path="/rules" element={<RecognitionRulesPage />} />
+                    <Route path="/sales" element={<SalesListPage />} />
+                    <Route path="/sales/:id" element={<SalesDetailPage />} />
+                    <Route path="/sales/:id/capture" element={<SalesDetailPage />} />
+                    <Route path="/sales/review" element={<SalesReviewPage />} />
+                    <Route path="/settlement" element={<SettlementPage />} />
 
-                  {/* 3. 구독 섹션 (PG-014 ~ PG-017) */}
-                  <Route path="/subscription" element={<Navigate to="/subscription/plans" replace />} />
-                  <Route path="/subscription/plans" element={<PlanSelectionPage />} />
-                  <Route path="/subscription/payment" element={<PaymentPage />} />
-                  <Route path="/subscription/manage" element={<SubscriptionManagePage />} />
+                    {/* 3. 구독 섹션 (PG-014 ~ PG-017) */}
+                    <Route path="/subscription" element={<Navigate to="/subscription/plans" replace />} />
+                    <Route path="/subscription/plans" element={<PlanSelectionPage />} />
+                    <Route path="/subscription/payment" element={<PaymentPage />} />
+                    <Route path="/subscription/manage" element={<SubscriptionManagePage />} />
 
-                  {/* 4. 마이 & 알림 설정 (PG-018 ~ PG-020) */}
-                  <Route path="/notifications/settings" element={<NotificationSettingsPage />} />
-                  <Route path="/my" element={<MyPage />} />
-                  <Route
-                    path="/error/permission"
-                    element={
-                      <PermissionErrorModal
-                        isOpen={true}
-                        onClose={() => window.history.back()}
-                        onRetry={() => window.location.reload()}
-                      />
-                    }
-                  />
+                    {/* 4. 마이 & 알림 설정 (PG-018 ~ PG-020) */}
+                    <Route path="/notifications/settings" element={<NotificationSettingsPage />} />
+                    <Route path="/my" element={<MyPage />} />
+                    <Route
+                      path="/error/permission"
+                      element={
+                        <PermissionErrorModal
+                          isOpen={true}
+                          onClose={() => window.history.back()}
+                          onRetry={() => window.location.reload()}
+                        />
+                      }
+                    />
 
-                  {/* 5. 관리자 웹 대시보드 (PG-021 ~ PG-024) */}
-                  <Route path="/admin" element={<AdminDashboardPage />} />
-                  <Route path="/admin/members" element={<MemberManagementPage />} />
-                  <Route path="/admin/reports" element={<ReportManagementPage />} />
-                  <Route path="/admin/stats" element={<AdminStatsPage />} />
+                    {/* 5. 관리자 웹 대시보드 (PG-021 ~ PG-024) */}
+                    <Route path="/admin" element={<AdminDashboardPage />} />
+                    <Route path="/admin/members" element={<MemberManagementPage />} />
+                    <Route path="/admin/reports" element={<ReportManagementPage />} />
+                    <Route path="/admin/stats" element={<AdminStatsPage />} />
+                  </Route>
 
                   {/* 일치하지 않는 경로는 홈으로 리다이렉트 */}
                   <Route path="*" element={<Navigate to="/" replace />} />

@@ -28,11 +28,33 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu, isMobileMenuOpen }) => {
   const { user, isAuthenticated, logout, switchUserRole } = useAuth();
-  const { isListening, currentSessionId } = useLive();
+  const {
+    isListening,
+    currentSessionId,
+    isScreenShareConnected,
+    hasScreenShareAudio,
+    stopListening,
+    disconnectScreenShare
+  } = useLive();
   const navigate = useNavigate();
 
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showGuideModal, setShowGuideModal] = useState(false);
+
+  const handleLogoutKeepingShare = () => {
+    setShowUserMenu(false);
+    stopListening();
+    logout();
+    navigate('/login');
+  };
+
+  const handleLogoutDisconnectingShare = () => {
+    setShowUserMenu(false);
+    stopListening();
+    disconnectScreenShare();
+    logout();
+    navigate('/login');
+  };
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 text-slate-800 shadow-sm select-none">
@@ -85,6 +107,26 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu, isMobileMenu
 
         {/* 상단 네비게이션 & 빠른 도움말 / 계정 메뉴 */}
         <div className="flex items-center space-x-2 sm:space-x-3">
+          {/* 로그아웃 화면에서도 공유 연결이 살아 있음을 숨기지 않고 즉시 해제 가능하게 한다. */}
+          {isAuthenticated && isScreenShareConnected && (
+            <button
+              onClick={disconnectScreenShare}
+              className={`flex items-center space-x-1.5 p-2 sm:px-3 sm:py-1.5 rounded-xl text-xs font-bold transition border active:scale-95 ${
+                hasScreenShareAudio
+                  ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'
+              }`}
+              title="AI 청취는 중지할 수 있으며, 이 버튼을 누르면 방송 탭 공유 연결 자체가 해제됩니다."
+              aria-label="방송 탭 공유 연결 해제"
+            >
+              <Camera className="w-4 h-4 flex-shrink-0" />
+              <span className="hidden sm:inline">
+                {hasScreenShareAudio ? '탭 공유 유지 중' : '공유 오디오 없음'}
+              </span>
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+
           {/* 가이드 버튼 (모바일: 아이콘만, 데스크톱: 텍스트 포함) */}
           <button
             onClick={() => setShowGuideModal(true)}
@@ -192,11 +234,23 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu, isMobileMenu
                   )}
                   <div className="border-t border-slate-100 my-1"></div>
                   <button
-                    onClick={() => { setShowUserMenu(false); logout(); navigate('/login'); }}
+                    onClick={handleLogoutKeepingShare}
                     className="w-full flex items-center px-4 py-2 text-xs text-rose-600 hover:bg-rose-50"
+                    title={isScreenShareConnected ? 'AI 청취와 전송은 중지되고, 같은 브라우저 탭의 공유 연결만 유지됩니다.' : '로그아웃'}
                   >
-                    <LogOut className="w-4 h-4 mr-2" /> 로그아웃
+                    <LogOut className="w-4 h-4 mr-2" />
+                    {isScreenShareConnected ? '로그아웃 · 공유 유지' : '로그아웃'}
                   </button>
+                  {isScreenShareConnected && (
+                    <button
+                      onClick={handleLogoutDisconnectingShare}
+                      className="w-full flex items-center px-4 py-2 text-xs text-slate-600 hover:bg-slate-100"
+                      title="AI 청취와 전송을 중지하고 방송 탭 공유 연결도 해제한 뒤 로그아웃합니다."
+                    >
+                      <X className="w-4 h-4 mr-2" />
+                      공유 해제 후 로그아웃
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -225,6 +279,24 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu, isMobileMenu
         </div>
       </div>
 
+      {!isAuthenticated && isScreenShareConnected && (
+        <div className="border-t border-amber-200 bg-amber-50 text-amber-950">
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2 flex items-center justify-between gap-2">
+            <div className="min-w-0 flex items-center gap-2 text-[11px] sm:text-xs font-black">
+              <Camera className="w-4 h-4 flex-shrink-0 text-amber-700" />
+              <span>공유 연결 유지 · AI 청취/전송 중지</span>
+            </div>
+            <button
+              onClick={disconnectScreenShare}
+              className="flex-shrink-0 px-2.5 py-1.5 rounded-lg bg-white hover:bg-amber-100 border border-amber-300 text-[10px] sm:text-xs font-bold text-amber-900 transition active:scale-95"
+              aria-label="유지 중인 방송 탭 공유 연결 해제"
+            >
+              공유 연결 해제
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 처음 사용자를 위한 퀵 스타트 가이드 모달 */}
       <Modal
         isOpen={showGuideModal}
@@ -243,7 +315,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu, isMobileMenu
               <div>
                 <strong className="text-brand-900 block text-sm">라이브 청취 시작</strong>
                 <span className="text-slate-600 mt-0.5 block">
-                  홈 화면에서 [라이브 청취 시작]을 누르고 마이크 권한을 허용합니다. (사이드바에 Deepgram API Key를 입력하시면 실제 실시간 전사 연동)
+                  홈 화면에서 [라이브 청취 시작]을 누르고 방송 탭과 [탭 오디오 공유]를 선택합니다. 청취 중지나 로그아웃 후에도 같은 브라우저 탭에서는 공유 연결을 재사용하며, 상단의 [탭 공유 유지 중] 버튼으로 완전히 해제할 수 있습니다.
                 </span>
               </div>
             </div>

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { LiveSession, SttTranscriptLog, CaptureItem, SaleRecord } from '../types/live';
 import { deepgramService } from '../services/deepgramService';
 import { audioCaptureService } from '../services/audioCaptureService';
@@ -7,6 +7,7 @@ import { extractSaleFromTranscript } from '../services/salesExtractor';
 import { parseVoiceCommand } from '../services/voiceCommandParser';
 import { storageService, generateSessionId } from '../services/storageService';
 import { useSales } from './SalesContext';
+import { useAuth } from './AuthContext';
 import { CaptureAreaConfig } from '../types/rules';
 
 export interface MatchedRuleItem {
@@ -33,8 +34,11 @@ interface LiveContextType {
   setDeepgramApiKey: (key: string) => void;
   sttEngineStatus: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
   sttEngineMessage: string;
+  isScreenShareConnected: boolean;
+  hasScreenShareAudio: boolean;
   startListening: (mode?: 'TAB_AUDIO' | 'MIC') => Promise<void>;
   stopListening: () => void;
+  disconnectScreenShare: () => void;
   injectTestMent: (text: string) => void;
   captureCurrentScreen: (area?: CaptureAreaConfig, triggerWord?: string) => Promise<string>;
 }
@@ -43,6 +47,7 @@ const LiveContext = createContext<LiveContextType | undefined>(undefined);
 
 export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { addSale, updateSale, sales } = useSales();
+  const { isAuthenticated, user } = useAuth();
 
   const [isListening, setIsListening] = useState<boolean>(false);
   const [currentSessionId, setCurrentSessionId] = useState<string>(generateSessionId());
@@ -56,6 +61,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [recentCaptures, setRecentCaptures] = useState<CaptureItem[]>([]);
   const [sttEngineStatus, setSttEngineStatus] = useState<'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR'>('DISCONNECTED');
   const [sttEngineMessage, setSttEngineMessage] = useState<string>('대기 중');
+  const [screenConnection, setScreenConnection] = useState(() => screenCaptureService.getConnectionState());
   
   // 방송 중 음성 명령 수정 상태
   const [isVoiceEditing, setIsVoiceEditing] = useState<boolean>(false);
@@ -69,11 +75,42 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isListeningRef = useRef<boolean>(false);
   const isVoiceEditingRef = useRef<boolean>(false);
   const lastSavedSaleRef = useRef<SaleRecord | null>(null);
+  const activeAudioSourceModeRef = useRef<'TAB_AUDIO' | 'MIC'>('TAB_AUDIO');
+  const previousAuthenticatedRef = useRef<boolean>(isAuthenticated);
+  const previousShareAudioRef = useRef<boolean>(screenConnection.hasAudio);
+  const shareOwnerUserIdRef = useRef<string | null>(null);
+  const currentUserIdRef = useRef<string | null>(user?.id ?? null);
+  const isAuthenticatedRef = useRef<boolean>(isAuthenticated);
+  const authBoundaryGenerationRef = useRef(0);
+  const previousAuthIdentityRef = useRef(`${isAuthenticated}:${user?.id ?? ''}`);
+  const listeningGenerationRef = useRef(0);
+  const activeListeningUserIdRef = useRef<string | null>(null);
+  const startInFlightRef = useRef(false);
 
   useEffect(() => {
     isListeningRef.current = isListening;
     isVoiceEditingRef.current = isVoiceEditing;
   }, [isListening, isVoiceEditing]);
+
+  useEffect(() => {
+    const authIdentity = `${isAuthenticated}:${user?.id ?? ''}`;
+    if (previousAuthIdentityRef.current !== authIdentity) {
+      previousAuthIdentityRef.current = authIdentity;
+      authBoundaryGenerationRef.current += 1;
+    }
+    currentUserIdRef.current = user?.id ?? null;
+    isAuthenticatedRef.current = isAuthenticated;
+  }, [isAuthenticated, user?.id]);
+
+  useEffect(() => screenCaptureService.subscribeConnection((state) => {
+    setScreenConnection(state);
+
+    if (!state.isConnected) {
+      shareOwnerUserIdRef.current = null;
+    } else if (!shareOwnerUserIdRef.current && currentUserIdRef.current) {
+      shareOwnerUserIdRef.current = currentUserIdRef.current;
+    }
+  }), []);
 
   const setDeepgramApiKey = (key: string) => {
     setDeepgramApiKeyState(key);
@@ -116,8 +153,36 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // 화면 캡처 실행 (스튜디오에서 설정한 윈도우 데스크톱 좌표 영역 및 비디오 스트림 적용)
   const captureCurrentScreen = async (
     areaConfig?: CaptureAreaConfig,
-    triggerWord: string = '화면 캡처'
+    triggerWord: string = '화면 캡처',
+    requiredListeningGeneration?: number
   ): Promise<string> => {
+    const requestedUserId = currentUserIdRef.current;
+    const requestedAuthGeneration = authBoundaryGenerationRef.current;
+
+    if (!isAuthenticatedRef.current || !requestedUserId) {
+      console.warn('[Live] 로그인되지 않은 상태의 화면 캡처 요청을 차단했습니다.');
+      return '';
+    }
+
+    if (
+      requiredListeningGeneration !== undefined &&
+      (
+        listeningGenerationRef.current !== requiredListeningGeneration ||
+        !isListeningRef.current ||
+        activeListeningUserIdRef.current !== requestedUserId
+      )
+    ) {
+      return '';
+    }
+
+    if (
+      shareOwnerUserIdRef.current &&
+      shareOwnerUserIdRef.current !== requestedUserId
+    ) {
+      console.warn('[Live] 다른 계정이 연결한 화면 캡처 요청을 차단했습니다.');
+      return '';
+    }
+
     // 1. 판매자가 캡처 영역 설정에서 지정한 윈도우 데스크톱 영역 로드
     const configuredArea = areaConfig || storageService.getCaptureAreaConfig() || {
       preset: 'COMMENTS',
@@ -137,6 +202,32 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       amount: lastSale?.amount,
       timestamp: new Date().toLocaleTimeString('ko-KR')
     });
+
+    const authChanged =
+      !isAuthenticatedRef.current ||
+      currentUserIdRef.current !== requestedUserId ||
+      authBoundaryGenerationRef.current !== requestedAuthGeneration;
+    const listeningChanged =
+      requiredListeningGeneration !== undefined &&
+      (
+        listeningGenerationRef.current !== requiredListeningGeneration ||
+        !isListeningRef.current ||
+        activeListeningUserIdRef.current !== requestedUserId
+      );
+
+    // 공유 선택/프레임 디코딩 중 로그아웃, 계정 전환, 청취 중지가 발생하면
+    // 뒤늦게 반환된 이미지를 판매 데이터에 저장하지 않는다.
+    if (authChanged || listeningChanged) {
+      return '';
+    }
+
+    if (!shareOwnerUserIdRef.current && screenCaptureService.getActiveStream()) {
+      shareOwnerUserIdRef.current = requestedUserId;
+    }
+
+    if (shareOwnerUserIdRef.current !== requestedUserId) {
+      return '';
+    }
 
     if (!imageUrl) {
       console.warn('[Live] 캡처 이미지가 비어있습니다.');
@@ -170,7 +261,25 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // 실시간 전사 처리 핸들러
-  const handleTranscript = (data: { text: string; isFinal: boolean; confidence: number }) => {
+  const handleTranscript = (
+    data: { text: string; isFinal: boolean; confidence: number },
+    requiredListeningGeneration?: number,
+    requiredUserId?: string
+  ) => {
+    if (!isAuthenticatedRef.current || !currentUserIdRef.current) return;
+
+    if (
+      requiredListeningGeneration !== undefined &&
+      (
+        listeningGenerationRef.current !== requiredListeningGeneration ||
+        !isListeningRef.current ||
+        activeListeningUserIdRef.current !== requiredUserId ||
+        currentUserIdRef.current !== requiredUserId
+      )
+    ) {
+      return;
+    }
+
     if (!data.text) return;
 
     if (!data.isFinal) {
@@ -255,7 +364,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (fullText.includes('캡처') || fullText.includes('화면캡처')) {
         actionTriggered = 'SCREEN_CAPTURED';
         ruleActionName = ruleActionName ? `${ruleActionName} + 📸 캡처` : '📸 화면 자동 캡처';
-        captureCurrentScreen(undefined, '음성인식 자동캡처');
+        void captureCurrentScreen(
+          undefined,
+          '음성인식 자동캡처',
+          requiredListeningGeneration
+        );
       }
     }
 
@@ -285,29 +398,82 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // 라이브 청취 시작 (크롬 탭 방송 소리 또는 마이크)
   const startListening = async (mode: 'TAB_AUDIO' | 'MIC' = 'TAB_AUDIO') => {
+    if (!isAuthenticatedRef.current || !currentUserIdRef.current) {
+      setSttEngineStatus('ERROR');
+      setSttEngineMessage('로그인 후 라이브 청취를 시작해 주세요.');
+      return;
+    }
+
+    // 빠른 이중 클릭이나 아직 닫히지 않은 공유 선택창으로 중복 시작하지 않는다.
+    if (startInFlightRef.current || isListeningRef.current) return;
+
+    const requestedUserId = currentUserIdRef.current;
+    const requestedAuthGeneration = authBoundaryGenerationRef.current;
+    const listeningGeneration = ++listeningGenerationRef.current;
+    startInFlightRef.current = true;
+    activeListeningUserIdRef.current = requestedUserId;
+
     try {
+      if (
+        mode === 'TAB_AUDIO' &&
+        screenCaptureService.getActiveStream() &&
+        shareOwnerUserIdRef.current &&
+        shareOwnerUserIdRef.current !== requestedUserId
+      ) {
+        // 같은 브라우저에서 다른 계정으로 전환된 경우 이전 계정의 공유를 넘기지 않는다.
+        screenCaptureService.stopStream();
+      }
+
+      activeAudioSourceModeRef.current = mode;
+      isListeningRef.current = true;
       const newSessionId = generateSessionId();
       setCurrentSessionId(newSessionId);
       setSessionStartTime(new Date().toISOString());
       setIsListening(true);
+      setSttEngineStatus('CONNECTING');
+      setSttEngineMessage(mode === 'TAB_AUDIO' ? '방송 탭 오디오 연결 확인 중' : '마이크 연결 확인 중');
 
       const rules = storageService.getRules().filter((r) => r.isEnabled);
       const keywords = rules.map((r) => `${r.word}:2`);
 
-      // 1. 오디오 파형 시각화 캡처 시작 (실패해도 STT는 정상 작동하도록 격리)
-      try {
-        await audioCaptureService.startCapture(
-          mode,
-          (chunk) => {
+      // 1. 오디오 캡처 시작. TAB_AUDIO 실패 시 마이크로 몰래 전환하지 않는다.
+      await audioCaptureService.startCapture(
+        mode,
+        (chunk) => {
+          if (
+            listeningGenerationRef.current === listeningGeneration &&
+            isListeningRef.current &&
+            currentUserIdRef.current === requestedUserId
+          ) {
             deepgramService.sendAudioChunk(chunk);
-          },
-          (wave, vol) => {
+          }
+        },
+        (wave, vol) => {
+          if (
+            listeningGenerationRef.current === listeningGeneration &&
+            isListeningRef.current &&
+            currentUserIdRef.current === requestedUserId
+          ) {
             setWaveform(wave);
             setAudioLevel(vol);
           }
-        );
-      } catch (audioErr) {
-        console.warn('[Live] 오디오 시각화 캡처 경고 (STT는 계속 진행):', audioErr);
+        }
+      );
+
+      // 공유 선택창/AudioContext 준비 사이 중지, 로그아웃 또는 계정 전환이 발생했다.
+      if (
+        listeningGenerationRef.current !== listeningGeneration ||
+        !isListeningRef.current ||
+        !isAuthenticatedRef.current ||
+        currentUserIdRef.current !== requestedUserId ||
+        authBoundaryGenerationRef.current !== requestedAuthGeneration
+      ) {
+        audioCaptureService.stopCapture();
+        return;
+      }
+
+      if (mode === 'TAB_AUDIO' && screenCaptureService.getActiveStream()) {
+        shareOwnerUserIdRef.current = requestedUserId;
       }
 
       // 최신 API Key 확인
@@ -322,36 +488,132 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           keywords,
           punctuate: true,
           interimResults: true,
-          endpointing: 300
+          endpointing: 300,
+          allowBrowserSpeechFallback: mode === 'MIC'
         },
-        handleTranscript,
+        (data) => {
+          handleTranscript(data, listeningGeneration, requestedUserId);
+        },
         (err) => {
-          console.error('[Live] STT 스트림 에러 알림:', err);
+          if (listeningGenerationRef.current === listeningGeneration) {
+            console.error('[Live] STT 스트림 에러 알림:', err);
+          }
         },
         (status, message) => {
+          if (
+            listeningGenerationRef.current !== listeningGeneration ||
+            currentUserIdRef.current !== requestedUserId
+          ) return;
+
           setSttEngineStatus(status);
           if (message) setSttEngineMessage(message);
+          if (status === 'ERROR' && mode === 'TAB_AUDIO') {
+            listeningGenerationRef.current += 1;
+            activeListeningUserIdRef.current = null;
+            isListeningRef.current = false;
+            setIsListening(false);
+            audioCaptureService.stopCapture();
+            setAudioLevel(0);
+            setWaveform(new Uint8Array(128));
+          }
         }
       );
     } catch (err) {
-      console.error('[Live] 라이브 청취 시작 실패:', err);
-      setIsListening(false);
-      setSttEngineStatus('ERROR');
-      setSttEngineMessage('라이브 청취 시작 실패');
+      // 이미 stop/logout으로 무효화된 시작의 늦은 실패는 현재 UI를 덮지 않는다.
+      if (listeningGenerationRef.current === listeningGeneration) {
+        console.error('[Live] 라이브 청취 시작 실패:', err);
+        listeningGenerationRef.current += 1;
+        activeListeningUserIdRef.current = null;
+        isListeningRef.current = false;
+        setIsListening(false);
+        audioCaptureService.stopCapture();
+        deepgramService.stopLiveStream();
+        setSttEngineStatus('ERROR');
+        setSttEngineMessage(err instanceof Error ? err.message : '라이브 청취 시작 실패');
+      }
+    } finally {
+      startInFlightRef.current = false;
     }
   };
 
   // 라이브 청취 중지
-  const stopListening = () => {
+  const stopListening = useCallback(() => {
+    listeningGenerationRef.current += 1;
+    activeListeningUserIdRef.current = null;
+    isListeningRef.current = false;
     setIsListening(false);
     audioCaptureService.stopCapture();
     deepgramService.stopLiveStream();
     setSttEngineStatus('DISCONNECTED');
-    setSttEngineMessage('청취 중지됨');
+    setSttEngineMessage(
+      screenCaptureService.getActiveAudioTrack()
+        ? '청취 중지됨 · 방송 탭 공유 연결 유지 중'
+        : '청취 중지됨'
+    );
+    setAudioLevel(0);
+    setWaveform(new Uint8Array(128));
+    setCurrentInterimTranscript('');
     setIsVoiceEditing(false);
     setEditingFieldInfo(null);
     if (editTimeoutRef.current) clearTimeout(editTimeoutRef.current);
-  };
+  }, []);
+
+  const disconnectScreenShare = useCallback(() => {
+    stopListening();
+    screenCaptureService.stopStream();
+    setSttEngineStatus('DISCONNECTED');
+    setSttEngineMessage('방송 탭 공유 연결 해제됨');
+  }, [stopListening]);
+
+  // 로그아웃 시 AI 처리와 전송은 즉시 중지하되, 같은 SPA 탭의 공유 원본은 유지한다.
+  useEffect(() => {
+    const didLogout = previousAuthenticatedRef.current && !isAuthenticated;
+    previousAuthenticatedRef.current = isAuthenticated;
+
+    if (didLogout) {
+      // 기존 공유 원본은 유지하되, 아직 완료되지 않은 새 공유 선택은 받아들이지 않는다.
+      screenCaptureService.cancelPendingRequest();
+      stopListening();
+      if (screenCaptureService.getActiveStream()) {
+        setSttEngineMessage('로그아웃됨 · AI 청취 중지 · 방송 탭 공유 연결 유지 중');
+      }
+    }
+  }, [isAuthenticated, stopListening]);
+
+  // 다른 계정으로 로그인하면 이전 계정이 연결한 공유 원본을 자동으로 넘기지 않는다.
+  useEffect(() => {
+    if (
+      isAuthenticated &&
+      user?.id &&
+      screenConnection.isConnected &&
+      shareOwnerUserIdRef.current &&
+      shareOwnerUserIdRef.current !== user.id
+    ) {
+      disconnectScreenShare();
+      setSttEngineMessage('계정 변경으로 이전 방송 탭 공유 연결을 해제했습니다.');
+    }
+  }, [disconnectScreenShare, isAuthenticated, screenConnection.isConnected, user?.id]);
+
+  // Chrome의 [공유 중지] 또는 공유 오디오 종료를 Live/STT 상태에 반영한다.
+  useEffect(() => {
+    const audioWasConnected = previousShareAudioRef.current;
+    previousShareAudioRef.current = screenConnection.hasAudio;
+
+    if (
+      audioWasConnected &&
+      !screenConnection.hasAudio &&
+      isListeningRef.current &&
+      activeAudioSourceModeRef.current === 'TAB_AUDIO'
+    ) {
+      stopListening();
+      setSttEngineStatus('ERROR');
+      setSttEngineMessage(
+        screenConnection.isConnected
+          ? '방송 탭 오디오 공유가 종료되어 청취를 중지했습니다.'
+          : '방송 탭 공유가 종료되어 청취를 중지했습니다.'
+      );
+    }
+  }, [screenConnection.hasAudio, screenConnection.isConnected, stopListening]);
 
   // 수동 텍스트 주입 테스트
   const injectTestMent = (text: string) => {
@@ -381,8 +643,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setDeepgramApiKey,
         sttEngineStatus,
         sttEngineMessage,
+        isScreenShareConnected: screenConnection.isConnected,
+        hasScreenShareAudio: screenConnection.hasAudio,
         startListening,
         stopListening,
+        disconnectScreenShare,
         injectTestMent,
         captureCurrentScreen
       }}

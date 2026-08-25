@@ -3,6 +3,7 @@ import { User, AuthState, UserRole } from '../types/auth';
 import { storageService } from '../services/storageService';
 
 interface AuthContextType extends AuthState {
+  isInitialized: boolean;
   login: (email: string, pass: string, autoLogin?: boolean) => { success: boolean; message?: string };
   signup: (email: string, pass: string, role: UserRole, nickname: string) => { success: boolean; message?: string };
   logout: () => void;
@@ -22,19 +23,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loginAttempts, setLoginAttempts] = useState<number>(0);
   const [isLocked, setIsLocked] = useState<boolean>(false);
   const [lockUntil, setLockUntil] = useState<number | null>(null);
+  const [isInitialized, setIsInitialized] = useState<boolean>(false);
 
   useEffect(() => {
-    storageService.init();
-    const savedToken = storageService.getToken();
-    const savedUser = storageService.getCurrentUser();
+    try {
+      storageService.init();
+      const savedToken = storageService.getToken();
+      const savedUser = storageService.getCurrentUser();
 
-    if (savedToken && savedUser) {
-      setUser(savedUser);
-      setToken(savedToken);
-    } else if (savedUser) {
-      // 기본 판매자 계정으로 편리한 시작 지원
-      setUser(savedUser);
-      setToken('mock_jwt_token_seller_1');
+      if (savedToken && savedUser) {
+        setUser(savedUser);
+        setToken(savedToken);
+      } else if (savedUser) {
+        // 기본 판매자 계정으로 편리한 시작 지원
+        setUser(savedUser);
+        setToken('mock_jwt_token_seller_1');
+      }
+    } finally {
+      setIsInitialized(true);
     }
   }, []);
 
@@ -153,6 +159,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         user,
         isAuthenticated: !!user,
+        isInitialized,
         token,
         autoLogin,
         loginAttempts,

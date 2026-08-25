@@ -10,6 +10,23 @@ export class AudioCaptureService {
   private scriptProcessor: ScriptProcessorNode | null = null;
   private animationFrameId: number | null = null;
   private isCapturing: boolean = false;
+  private captureGeneration = 0;
+
+  private createCancelledError(): DOMException {
+    return new DOMException('오디오 캡처 시작이 취소되었습니다.', 'AbortError');
+  }
+
+  /**
+   * 화면공유 원본 트랙은 screenCaptureService가 소유한다.
+   * 청취 파이프라인에서는 clone만 사용해 중지 시 원본 공유 연결을 보존한다.
+   */
+  private createDisplayAudioStream(displayStream: MediaStream): MediaStream | null {
+    const sourceTrack = displayStream
+      .getAudioTracks()
+      .find((track) => track.readyState === 'live');
+
+    return sourceTrack ? new MediaStream([sourceTrack.clone()]) : null;
+  }
 
   /**
    * 오디오 캡처 시작 (크롬 탭 방송 소리 또는 마이크)
@@ -20,6 +37,7 @@ export class AudioCaptureService {
     onWaveform?: WaveformCallback
   ): Promise<MediaStream> {
     this.stopCapture();
+    const captureGeneration = this.captureGeneration;
 
     let stream: MediaStream | null = null;
 
@@ -27,24 +45,28 @@ export class AudioCaptureService {
       if (mode === 'TAB_AUDIO') {
         // 1. 이미 연결된 화면/탭 공유 스트림에 오디오 트랙이 있는지 확인
         const activeScreenStream = screenCaptureService.getActiveStream();
-        if (activeScreenStream && activeScreenStream.getAudioTracks().some(t => t.readyState === 'live')) {
-          stream = new MediaStream(activeScreenStream.getAudioTracks());
+        if (activeScreenStream) {
+          stream = this.createDisplayAudioStream(activeScreenStream);
+        }
+
+        if (stream) {
           console.log('[AudioCapture] 기존 연결된 탭 방송 오디오 스트림 재사용');
         } else {
-          // 새로 화면/탭 오디오 공유 요청
-          const newScreenStream = await screenCaptureService.getOrCreateStream(true);
-          if (newScreenStream && newScreenStream.getAudioTracks().length > 0) {
-            stream = new MediaStream(newScreenStream.getAudioTracks());
+          // 공유가 없으면 최초 연결, 화면만 남고 오디오가 끝났다면 새 연결을 요청한다.
+          const newScreenStream = await screenCaptureService.getOrCreateStream(!!activeScreenStream);
+          if (newScreenStream) {
+            stream = this.createDisplayAudioStream(newScreenStream);
+          }
+
+          if (stream) {
             console.log('[AudioCapture] 새 탭 방송 오디오 스트림 획득 성공!');
           }
         }
-      }
 
-      // 탭 오디오가 없거나 마이크 모드일 경우
-      if (!stream || stream.getAudioTracks().length === 0) {
-        if (mode === 'TAB_AUDIO') {
-          console.info('[AudioCapture] 탭 오디오 트랙이 없어 마이크 오디오로 보조 전환합니다.');
+        if (!stream) {
+          throw new Error('방송 탭 오디오가 공유되지 않았습니다. 방송 탭과 「탭 오디오 공유」를 선택해 주세요.');
         }
+      } else {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
@@ -55,14 +77,14 @@ export class AudioCaptureService {
           video: false,
         });
       }
-    } catch (err: any) {
-      console.warn('[AudioCapture] 장치 오디오 요청 예외, 가상 스트림 폴백:', err);
-      const fakeCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const osc = fakeCtx.createOscillator();
-      const dst = fakeCtx.createMediaStreamDestination();
-      osc.connect(dst);
-      osc.start();
-      stream = dst.stream;
+    } catch (err) {
+      console.warn('[AudioCapture] 오디오 연결 실패:', err);
+      throw err;
+    }
+
+    if (captureGeneration !== this.captureGeneration) {
+      stream.getTracks().forEach((track) => track.stop());
+      throw this.createCancelledError();
     }
 
     this.mediaStream = stream;
@@ -70,26 +92,33 @@ export class AudioCaptureService {
 
     try {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      this.audioContext = new AudioContextClass({ sampleRate: 16000 });
+      const audioContext: AudioContext = new AudioContextClass({ sampleRate: 16000 });
+      this.audioContext = audioContext;
 
-      if (this.audioContext.state === 'suspended') {
-        await this.audioContext.resume();
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
       }
 
-      const source = this.audioContext.createMediaStreamSource(stream);
+      if (captureGeneration !== this.captureGeneration) {
+        if (audioContext.state !== 'closed') void audioContext.close();
+        stream.getTracks().forEach((track) => track.stop());
+        throw this.createCancelledError();
+      }
 
-      this.analyser = this.audioContext.createAnalyser();
+      const source = audioContext.createMediaStreamSource(stream);
+
+      this.analyser = audioContext.createAnalyser();
       this.analyser.fftSize = 256;
       this.analyser.smoothingTimeConstant = 0.8;
       source.connect(this.analyser);
 
       // PCM 오디오 청크 추출용 ScriptProcessor
-      this.scriptProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
+      this.scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
       this.analyser.connect(this.scriptProcessor);
-      this.scriptProcessor.connect(this.audioContext.destination);
+      this.scriptProcessor.connect(audioContext.destination);
 
       this.scriptProcessor.onaudioprocess = (e) => {
-        if (!this.isCapturing) return;
+        if (!this.isCapturing || captureGeneration !== this.captureGeneration) return;
         const inputData = e.inputBuffer.getChannelData(0);
         // Float32 -> 16bit Linear PCM 변환
         const pcm16 = new Int16Array(inputData.length);
@@ -105,7 +134,11 @@ export class AudioCaptureService {
       let lastTimestamp = 0;
 
       const updateWaveform = (timestamp: number) => {
-        if (!this.isCapturing || !this.analyser) return;
+        if (
+          !this.isCapturing ||
+          captureGeneration !== this.captureGeneration ||
+          !this.analyser
+        ) return;
 
         if (timestamp - lastTimestamp >= 16) {
           lastTimestamp = timestamp;
@@ -127,7 +160,16 @@ export class AudioCaptureService {
 
       this.animationFrameId = requestAnimationFrame(updateWaveform);
     } catch (e) {
+      if (captureGeneration !== this.captureGeneration || (e instanceof DOMException && e.name === 'AbortError')) {
+        stream.getTracks().forEach((track) => track.stop());
+        throw this.createCancelledError();
+      }
       console.warn('[AudioCapture] AudioContext 시각화 연결 실패:', e);
+    }
+
+    if (captureGeneration !== this.captureGeneration) {
+      stream.getTracks().forEach((track) => track.stop());
+      throw this.createCancelledError();
     }
 
     return stream;
@@ -137,9 +179,10 @@ export class AudioCaptureService {
    * 오디오 캡처 중지
    */
   public stopCapture() {
+    this.captureGeneration += 1;
     this.isCapturing = false;
 
-    if (this.animationFrameId) {
+    if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
     }
@@ -158,10 +201,12 @@ export class AudioCaptureService {
       this.analyser = null;
     }
 
-    if (this.audioContext && this.audioContext.state !== 'closed') {
-      try {
-        this.audioContext.close();
-      } catch {}
+    if (this.audioContext) {
+      if (this.audioContext.state !== 'closed') {
+        try {
+          void this.audioContext.close();
+        } catch {}
+      }
       this.audioContext = null;
     }
 

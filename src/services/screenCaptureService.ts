@@ -1,5 +1,10 @@
 import { CaptureAreaConfig } from '../types/rules';
 
+export interface ScreenCaptureConnectionState {
+  isConnected: boolean;
+  hasAudio: boolean;
+}
+
 // 전역 window 객체에 스트림 레퍼런스 유지 (페이지 이동/언마운트 시 유실 방지)
 declare global {
   interface Window {
@@ -8,6 +13,61 @@ declare global {
 }
 
 export class ScreenCaptureService {
+  private connectionListeners = new Set<(state: ScreenCaptureConnectionState) => void>();
+  private boundStreams = new WeakSet<MediaStream>();
+  private captureRequestGeneration = 0;
+
+  private ensureStreamListeners(stream: MediaStream): void {
+    if (this.boundStreams.has(stream)) return;
+    this.boundStreams.add(stream);
+
+    const handleVideoEnded = () => {
+      if (typeof window === 'undefined' || window.__VOICECAP_SCREEN_STREAM__ !== stream) return;
+
+      // 브라우저의 [공유 중지]로 비디오가 끝나면 남아 있는 오디오도 함께 정리한다.
+      window.__VOICECAP_SCREEN_STREAM__ = null;
+      stream.getTracks().forEach((track) => {
+        if (track.readyState === 'live') track.stop();
+      });
+      this.emitConnectionState();
+    };
+
+    stream.getVideoTracks().forEach((track) => {
+      track.addEventListener('ended', handleVideoEnded, { once: true });
+    });
+
+    stream.getAudioTracks().forEach((track) => {
+      track.addEventListener('ended', () => {
+        if (typeof window !== 'undefined' && window.__VOICECAP_SCREEN_STREAM__ === stream) {
+          this.emitConnectionState();
+        }
+      }, { once: true });
+    });
+  }
+
+  private emitConnectionState(): void {
+    const state = this.getConnectionState();
+    this.connectionListeners.forEach((listener) => listener(state));
+  }
+
+  public getConnectionState(): ScreenCaptureConnectionState {
+    const stream = this.getActiveStream();
+    return {
+      isConnected: !!stream,
+      hasAudio: !!stream?.getAudioTracks().some((track) => track.readyState === 'live')
+    };
+  }
+
+  public subscribeConnection(
+    listener: (state: ScreenCaptureConnectionState) => void
+  ): () => void {
+    this.connectionListeners.add(listener);
+    listener(this.getConnectionState());
+    return () => {
+      this.connectionListeners.delete(listener);
+    };
+  }
+
   /**
    * 현재 연결되어 살아있는 비디오 스트림이 있는지 확인
    */
@@ -15,9 +75,14 @@ export class ScreenCaptureService {
     if (typeof window !== 'undefined' && window.__VOICECAP_SCREEN_STREAM__) {
       const stream = window.__VOICECAP_SCREEN_STREAM__;
       if (stream.getVideoTracks().some(t => t.readyState === 'live')) {
+        this.ensureStreamListeners(stream);
         return stream;
       }
+
       window.__VOICECAP_SCREEN_STREAM__ = null;
+      stream.getTracks().forEach((track) => {
+        if (track.readyState === 'live') track.stop();
+      });
     }
     return null;
   }
@@ -44,17 +109,14 @@ export class ScreenCaptureService {
       if (active) return active;
     }
 
+    const previousStream = forceNew ? this.getActiveStream() : null;
+    const requestGeneration = ++this.captureRequestGeneration;
+
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getDisplayMedia) {
       return null;
     }
 
     try {
-      // 기존 스트림 정리
-      if (typeof window !== 'undefined' && window.__VOICECAP_SCREEN_STREAM__) {
-        window.__VOICECAP_SCREEN_STREAM__.getTracks().forEach(t => t.stop());
-        window.__VOICECAP_SCREEN_STREAM__ = null;
-      }
-
       // 특정 크롬 탭 / 윈도우 창의 영상 및 방송 소리(오디오) 동시 요청
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
@@ -69,18 +131,25 @@ export class ScreenCaptureService {
         } as any
       });
 
-      // 사용자가 브라우저 상단에서 공유 중지를 눌렀을 때 핸들링
-      stream.getVideoTracks().forEach(track => {
-        track.onended = () => {
-          if (typeof window !== 'undefined') {
-            window.__VOICECAP_SCREEN_STREAM__ = null;
-          }
-        };
-      });
+      // 연결 해제/로그아웃 또는 더 최근의 공유 요청이 이 요청을 무효화했다.
+      // 뒤늦게 선택된 스트림이 전역 캐시에 살아남지 않도록 즉시 종료한다.
+      if (requestGeneration !== this.captureRequestGeneration) {
+        stream.getTracks().forEach((track) => track.stop());
+        return null;
+      }
 
       if (typeof window !== 'undefined') {
         window.__VOICECAP_SCREEN_STREAM__ = stream;
       }
+      this.ensureStreamListeners(stream);
+
+      // 새 공유 선택에 성공한 뒤에만 이전 연결을 종료한다.
+      // 사용자가 변경 창을 취소하면 기존 공유는 그대로 유지된다.
+      if (previousStream && previousStream !== stream) {
+        previousStream.getTracks().forEach((track) => track.stop());
+      }
+
+      this.emitConnectionState();
       return stream;
     } catch (err) {
       console.warn('[ScreenCapture] 화면/탭 공유 취소 또는 거부:', err);
@@ -89,12 +158,25 @@ export class ScreenCaptureService {
   }
 
   /**
+   * 현재 공유 원본은 유지하면서 아직 열려 있는 공유 선택 요청만 무효화한다.
+   * 로그아웃 도중 선택창이 뒤늦게 완료되는 경우에 사용한다.
+   */
+  public cancelPendingRequest(): void {
+    this.captureRequestGeneration += 1;
+  }
+
+  /**
    * 스트림 연결 해제
    */
   public stopStream(): void {
+    // 아직 완료되지 않은 공유 선택 요청도 함께 무효화한다.
+    this.cancelPendingRequest();
+
     if (typeof window !== 'undefined' && window.__VOICECAP_SCREEN_STREAM__) {
-      window.__VOICECAP_SCREEN_STREAM__.getTracks().forEach(t => t.stop());
+      const stream = window.__VOICECAP_SCREEN_STREAM__;
       window.__VOICECAP_SCREEN_STREAM__ = null;
+      stream.getTracks().forEach(t => t.stop());
+      this.emitConnectionState();
     }
   }
 

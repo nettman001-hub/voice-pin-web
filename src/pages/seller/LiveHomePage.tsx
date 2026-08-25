@@ -36,6 +36,7 @@ export const LiveHomePage: React.FC = () => {
     setDeepgramApiKey,
     sttEngineStatus,
     sttEngineMessage,
+    hasScreenShareAudio,
     startListening,
     stopListening,
     injectTestMent,
@@ -183,7 +184,11 @@ export const LiveHomePage: React.FC = () => {
             ) : (
               <>
                 <Play className="w-4 h-4 fill-current" />
-                <span>라이브 청취 시작</span>
+                <span>
+                  {audioSourceMode === 'TAB_AUDIO' && hasScreenShareAudio
+                    ? '연결된 방송 탭으로 청취 시작'
+                    : '라이브 청취 시작'}
+                </span>
               </>
             )}
           </button>
