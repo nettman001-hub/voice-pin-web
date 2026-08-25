@@ -44,17 +44,17 @@ export const MemberManagementPage: React.FC = () => {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="p-3.5 sm:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6">
       {/* 헤더 */}
-      <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200 p-4 sm:p-6 rounded-3xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2">
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">회원 관리</h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 text-xs font-bold border border-brand-200">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">회원 관리</h1>
+            <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 text-[10px] sm:text-xs font-bold border border-brand-200">
               총 {allMembers.length}명
             </span>
           </div>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-[11px] sm:text-xs text-slate-500 mt-1">
             등록된 판매자 및 관리자 계정 목록을 조회하고, 비정상 활동 사용자를 정지/해제합니다.
           </p>
         </div>
@@ -68,10 +68,10 @@ export const MemberManagementPage: React.FC = () => {
       )}
 
       {/* 검색 및 필터 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          <div className="relative flex-1 max-w-md">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+          <div className="relative flex-1 max-w-full sm:max-w-md">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
             <input
               type="text"
               value={searchTerm}
@@ -81,13 +81,13 @@ export const MemberManagementPage: React.FC = () => {
             />
           </div>
 
-          <div className="flex items-center space-x-2 text-xs">
-            <span className="text-slate-500">상태:</span>
+          <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-1 text-xs">
+            <span className="text-slate-500 flex-shrink-0">상태:</span>
             {(['ALL', '활성', '정지'] as const).map((st) => (
               <button
                 key={st}
                 onClick={() => setStatusFilter(st)}
-                className={`px-3 py-1.5 rounded-xl font-bold transition ${
+                className={`px-3 py-1.5 rounded-xl font-bold transition flex-shrink-0 ${
                   statusFilter === st
                     ? 'bg-slate-800 text-white shadow-sm'
                     : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'

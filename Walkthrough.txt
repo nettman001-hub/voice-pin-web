@@ -1,0 +1,60 @@
+# VoiceCAP 모바일 웹(스마트폰/태블릿) 최적화 완료 보고서
+
+VoiceCAP의 데스크톱 웹 환경에 이어 **스마트폰(iOS/Android) 및 태블릿 브라우저 환경에서 완벽하게 동작하도록 전면 고도화 및 모바일 반응형 최적화**를 완료하였습니다.
+
+---
+
+## 📱 1. 모바일 전용 뷰포트 & 네비게이션 시스템 구축
+
+### 1) 모바일 뷰포트 및 Safe Area 지원
+- **파일**: [`index.html`](file:///c:/dev/voice-pin-web/index.html), [`src/index.css`](file:///c:/dev/voice-pin-web/src/index.css)
+- `viewport-fit=cover`, `maximum-scale=1.0, user-scalable=no` 메타 태그 적용.
+- iOS 노치 및 홈 인디케이터에 대응하는 `.pb-safe`, `.pt-safe`, 탭 하이라이트 제거, 가로 스크롤 시 스크롤바를 숨기는 `.no-scrollbar` 유틸리티 추가.
+
+### 2) 모바일 하단 플로팅 글래스모피즘 네비게이션 탭 바 (`MobileBottomNav`)
+- **파일**: [`src/components/common/MobileBottomNav.tsx`](file:///c:/dev/voice-pin-web/src/components/common/MobileBottomNav.tsx)
+- 판매자 및 관리자 역할에 맞춰 동적으로 전환되는 5개 핵심 탭 제공:
+  - **판매자**: `라이브(ON 에어 배지)` | `판매내역` | `단어/규칙` | `정산` | `마이`
+  - **관리자**: `대시보드` | `회원관리` | `신고센터` | `통계로그` | `마이`
+- 하단 고정 바 높이만큼 본문 하단 여백(`pb-20 lg:pb-0`) 자동 보정.
+
+### 3) 모바일 슬라이드 드로어 사이드바 & 헤더 개선
+- **파일**: [`src/components/common/Header.tsx`](file:///c:/dev/voice-pin-web/src/components/common/Header.tsx), [`src/components/common/Sidebar.tsx`](file:///c:/dev/voice-pin-web/src/components/common/Sidebar.tsx)
+- 헤더 좌측 햄버거 메뉴 버튼을 통해 부드럽게 열리는 모바일 슬라이드 드로어 메뉴 지원.
+- 헤더 내 판매자/관리자 모드 전환 스위치 및 가이드 버튼 아이콘화.
+
+---
+
+## 🎙️ 2. 페이지별 모바일 최적화 세부 내역
+
+### 1) 라이브 청취 홈 (`LiveHomePage.tsx`)
+- **가로 스크롤 테스트 멘트 칩 바**: 한 줄 가로 스크롤(`no-scrollbar`)로 화면 공간 절약 및 원터치 빠른 발화 테스트 지원.
+- **오디오 시각화 및 실시간 스트림**: 모바일 뷰포트에 맞춘 2열 콤팩트 카드 및 직관적인 실시간 전사 / 자동 판매 추출 피드.
+- **캡처 모달 뷰어**: 캡처 이미지 클릭 시 모바일 전체화면으로 확인 가능한 팝업 뷰어 연동.
+
+### 2) 캡처 영역 & 단어 규칙 스튜디오 (`RecognitionRulesPage.tsx`)
+- **터치 이벤트 완벽 지원 (`onTouchStart`, `onTouchMove`, `onTouchEnd`)**: 모바일 스마트폰 화면에서도 손가락 터치 드래그로 16:9 데스크톱 캡처 영역 이동 및 4개 모서리 크기 조절 가능.
+- **모바일 프리셋 칩 바 & 해상도 셀렉터**: 가로 스크롤 칩 바로 한눈에 선택 가능.
+- **단어 규칙 목록**: 모바일 카드형 반응형 레이아웃 및 원터치 토글.
+
+### 3) 판매 내역 & 방송 후 일괄 확인 (`SalesListPage.tsx`, `SalesReviewPage.tsx`, `SalesDetailPage.tsx`)
+- **회차 필터 가로 스크롤**: 수많은 방송 회차를 가로 스크롤로 매끄럽게 탐색.
+- **구매자별 묶어보기 / 건별 개별 보기**: 모바일 2열 세그먼트 버튼 및 터치 아코디언 카드.
+- **모바일 인라인 수정 & 일괄 확정**: 모바일 화면에서 닉네임과 금액을 바로 수정하고 일괄 확정 처리 가능.
+
+### 4) 판매 정산 & 음성 학습 (`SettlementPage.tsx`, `VoiceTrainingPage.tsx`)
+- **4대 정산 요약 카드**: 모바일 2x2 그리드 배치로 한눈에 매출 및 건수 파악.
+- **일자별 아코디언 & CSV 다운로드**: UTF-8 BOM 엑셀 호환 CSV 즉시 다운로드.
+- **음성 학습 녹음 모달**: 3회 반복 훈련 진행률 게이지 및 모바일 카운트다운 모달.
+
+### 5) 관리자 관제 센터 & 마이페이지 (`AdminDashboardPage.tsx`, `MemberManagementPage.tsx`, `ReportManagementPage.tsx`, `AdminStatsPage.tsx`, `MyPage.tsx`)
+- **Deepgram Nova-3 API Key 관리**: 중앙 관리자 카드에서 클라우드 키 간편 등록/수정.
+- **회원 관리 모바일 카드 뷰**: 모바일 테이블 가로 스크롤 대신 터치 친화적 회원 카드 목록 제공.
+- **전체 데이터 JSON 백업/복원**: 모바일에서도 모든 데이터를 손쉽게 백업 및 복원.
+
+---
+
+## 🔍 3. 빌드 및 동작 검증 결과
+
+- **TypeScript 컴파일 및 Vite 번들링 (`npm run build`)**: `tsc && vite build` 정상 통과 (0 error, 0 warning).
+- **로컬 개발 서버**: `http://localhost:3000/`에서 실시간 모바일 뷰포트 렌더링 검증 완료.

@@ -146,50 +146,50 @@ export const SalesListPage: React.FC = () => {
   };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-3.5 sm:p-6 max-w-6xl mx-auto space-y-4 sm:space-y-6">
       {/* 헤더 & 상단 액션 */}
-      <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200 p-4 sm:p-6 rounded-3xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2">
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">판매 내역 목록</h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 text-xs font-bold border border-brand-200">
-              회차별 묶음 지원
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">판매 내역 목록</h1>
+            <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 text-[10px] sm:text-xs font-bold border border-brand-200">
+              회차별 묶음
             </span>
           </div>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-[11px] sm:text-xs text-slate-500 mt-1">
             방송 회차별로 판매 내역을 확인하고, 동일 구매자의 중복 주문을 하나로 합산하여 정산합니다.
           </p>
         </div>
 
-        <div className="flex items-center space-x-3">
+        <div className="grid grid-cols-2 sm:flex items-center gap-2 sm:space-x-3 w-full sm:w-auto">
           <Link
             to="/sales/review"
-            className="px-4 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold flex items-center space-x-1.5 transition"
+            className="px-3.5 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold flex items-center justify-center space-x-1.5 transition active:scale-95 text-center"
           >
-            <CheckSquare className="w-4 h-4 text-amber-600" />
-            <span>방송 후 일괄 확인</span>
+            <CheckSquare className="w-4 h-4 text-amber-600 flex-shrink-0" />
+            <span>일괄 확인</span>
           </Link>
           <button
             onClick={handleExportCurrentView}
-            className="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center space-x-1.5 transition"
+            className="px-3.5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center justify-center space-x-1.5 transition active:scale-95 text-center"
           >
-            <Download className="w-4 h-4" />
-            <span>현재 목록 CSV</span>
+            <Download className="w-4 h-4 flex-shrink-0" />
+            <span>CSV 저장</span>
           </button>
         </div>
       </div>
 
       {/* 회차 선택 탭 & 회차 요약 카드 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-slate-100">
-          <span className="text-xs font-bold text-slate-700 flex items-center">
-            <Layers className="w-3.5 h-3.5 mr-1.5 text-brand-600" /> 방송 회차 선택:
+          <span className="text-xs font-bold text-slate-700 flex items-center flex-shrink-0">
+            <Layers className="w-3.5 h-3.5 mr-1.5 text-brand-600" /> 회차 선택:
           </span>
 
-          <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 max-w-full">
+          <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-1 max-w-full">
             <button
               onClick={() => setSessionFilter('ALL')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex-shrink-0 ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex-shrink-0 ${
                 sessionFilter === 'ALL'
                   ? 'bg-brand-600 text-white shadow-sm'
                   : 'bg-slate-50 text-slate-600 hover:text-slate-900 border border-slate-200'
@@ -216,34 +216,34 @@ export const SalesListPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
-            <span className="text-[11px] text-slate-500 font-medium">선택 회차 총 매출액</span>
-            <div className="text-xl font-black text-brand-600 mt-1">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 pt-1">
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">선택 회차 총 매출액</span>
+            <div className="text-lg sm:text-xl font-black text-brand-600 mt-1 truncate">
               {currentSessionSummary.totalAmount.toLocaleString()}{' '}
               <span className="text-xs font-normal text-slate-500">원</span>
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
-            <span className="text-[11px] text-slate-500 font-medium">고유 구매자 수 (중복 제외)</span>
-            <div className="text-xl font-black text-purple-700 mt-1">
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">고유 구매자 수</span>
+            <div className="text-lg sm:text-xl font-black text-purple-700 mt-1">
               {currentSessionSummary.uniqueBuyerCount}{' '}
               <span className="text-xs font-normal text-slate-500">명</span>
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
-            <span className="text-[11px] text-slate-500 font-medium">총 주문 건수</span>
-            <div className="text-xl font-black text-slate-900 mt-1">
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">총 주문 건수</span>
+            <div className="text-lg sm:text-xl font-black text-slate-900 mt-1">
               {currentSessionSummary.totalCount}{' '}
               <span className="text-xs font-normal text-slate-500">건</span>
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
-            <span className="text-[11px] text-slate-500 font-medium">보류 건수</span>
-            <div className="text-xl font-black text-amber-600 mt-1">
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">보류 건수</span>
+            <div className="text-lg sm:text-xl font-black text-amber-600 mt-1">
               {currentSessionSummary.pendingCount}{' '}
               <span className="text-xs font-normal text-slate-500">건</span>
             </div>
@@ -252,57 +252,57 @@ export const SalesListPage: React.FC = () => {
       </div>
 
       {/* 필터 & 뷰 모드 전환 바 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          <div className="flex items-center space-x-1.5 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
+          <div className="grid grid-cols-2 sm:flex items-center gap-1.5 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
             <button
               onClick={() => setViewMode('BUYER_GROUPED')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition ${
+              className={`px-3 py-2 sm:px-3.5 sm:py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition ${
                 viewMode === 'BUYER_GROUPED'
                   ? 'bg-brand-600 text-white shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <Users className="w-3.5 h-3.5" />
-              <span>구매자별 묶어보기 ({buyerGroupedList.length}명)</span>
+              <span>구매자별 ({buyerGroupedList.length})</span>
             </button>
             <button
               onClick={() => setViewMode('INDIVIDUAL')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition ${
+              className={`px-3 py-2 sm:px-3.5 sm:py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition ${
                 viewMode === 'INDIVIDUAL'
                   ? 'bg-brand-600 text-white shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <ShoppingBag className="w-3.5 h-3.5" />
-              <span>건별 개별 보기 ({sortedIndividualSales.length}건)</span>
+              <span>건별 보기 ({sortedIndividualSales.length})</span>
             </button>
           </div>
 
-          <div className="relative flex-1 max-w-sm">
+          <div className="relative flex-1 max-w-full sm:max-w-sm">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="구매자 닉네임, 금액, 발화 내용..."
-              className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
+              className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
             />
           </div>
         </div>
 
-        {/* 상태 필터 및 정렬 */}
-        <div className="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-slate-100 text-xs">
-          <div className="flex items-center space-x-2">
-            <span className="text-slate-500">상태:</span>
+        {/* 상태 필터 및 정렬 (모바일 가로 스크롤 지원) */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
+          <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-1">
+            <span className="text-slate-500 flex-shrink-0">상태:</span>
             {(['ALL', '확정', '자동저장', '수동수정', '보류'] as const).map((st) => (
               <button
                 key={st}
                 onClick={() => setStatusFilter(st)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition flex-shrink-0 ${
                   statusFilter === st
-                    ? 'bg-slate-800 text-white'
-                    : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    ? 'bg-slate-800 text-white shadow-sm'
+                    : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60'
                 }`}
               >
                 {st === 'ALL' ? '전체' : st}
@@ -310,7 +310,7 @@ export const SalesListPage: React.FC = () => {
             ))}
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 self-end sm:self-auto">
             <span className="text-slate-500">정렬:</span>
             <select
               value={sortOrder}

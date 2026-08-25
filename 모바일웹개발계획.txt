@@ -1,0 +1,175 @@
+# VoiceCAP 모바일 웹 버전 완벽 구축 및 고도화 계획
+
+현재 데스크톱 웹 환경에서 구축 완료 및 디버깅 중인 **VoiceCAP (틱톡 라이브 판매자 AI 실시간 음성인식 & 자동 판매기록 & 정산 시스템)**을 스마트폰 및 태블릿 등 모든 모바일 기기(iOS Safari, Android Chrome/Samsung Internet)에서 완벽하고 유려하게 작동하도록 모바일 웹 전용 반응형 레이아웃, 모바일 터치 제스처, 모바일 바텀 네비게이션, 모바일 뷰포트/Safe-Area 최적화를 구현합니다.
+
+---
+
+## 1. 현재 구조 분석 및 모바일 이슈 진단
+
+### 1.1 레이아웃 및 네비게이션 이슈
+- **고정 사이드바 (`Sidebar.tsx`)**: 데스크톱 기준 좌측 고정 폭(`w-64`)으로 렌더링되어 모바일 화면(폭 360~430px) 진입 시 콘텐츠 영역을 심각하게 잠식하거나 화면이 깨지는 현상 발생.
+- **모바일 네비게이션 부재**: 스마트폰 한 손 조작을 위한 모바일 최적화 하단 바(Bottom Navigation Bar) 및 햄버거 슬라이드 드로어 메뉴 부재.
+- **헤더 조작성**: 상단 헤더에 버전, 청취 상태, 역할 스위처, 이용 가이드, 프로필이 가로로 배치되어 모바일에서 영역 겹침 및 버튼 크기 축소 문제.
+
+### 1.2 핵심 페이지별 모바일 인터랙션 이슈
+- **라이브 청취 홈 (`LiveHomePage.tsx`)**:
+  - 오디오 소스 선택(방송 탭/마이크), AI 키, 즉시 캡처, 청취 시작 버튼이 모바일에서 터치하기 용이하도록 그리드/스택 재배치 필요.
+  - 상/하단 2분할 실시간 자막 스트림과 파형 시각화의 모바일 뷰포트 높이 최적화.
+  - 시연 및 테스트 멘트 주입 툴바의 모바일 가로 스크롤 칩 UI 적용.
+- **캡처 영역 & 단어 규칙 스튜디오 (`RecognitionRulesPage.tsx`)**:
+  - 16:9 데스크톱 캡처 캔버스에 마우스 이벤트(`onMouseDown`, `onMouseMove`, `onMouseUp`)만 연결되어 있어 **모바일 스마트폰 터치(`onTouchStart`, `onTouchMove`, `onTouchEnd`) 미지원**.
+  - 터치 조작 지원 및 모바일 작은 화면에서도 슬라이더와 프리셋으로 정밀하게 영역을 조작할 수 있는 전용 모바일 탭/스택 인터페이스 필요.
+- **판매 내역 목록 (`SalesListPage.tsx`)**:
+  - 회차 선택 탭, 구매자별 묶어보기/건별 개별보기 토글, 상태 필터 및 검색창이 모바일에서 스크롤 없이 시원하게 동작하도록 반응형 필터 바 재설계.
+  - 구매자별 다건 주문 아코디언의 모바일 터치 영역 및 상세 주문 목록 뷰포트 최적화.
+- **방송 후 일괄 확인 (`SalesReviewPage.tsx`) & 상세 수정 (`SalesDetailPage.tsx`)**:
+  - 모바일에서 한 손으로 체크박스 일괄 선택 및 상태 변경을 쉽게 할 수 있는 플로팅/하단 액션 바.
+  - 캡처 이미지 뷰어 모달의 모바일 풀스크린 및 핀치/더블탭 확대 지원.
+- **정산 & 요금제 & 마이페이지 & 관리자 페이지**:
+  - 일자별 정산 카드 및 통계 카드 2열 그리드 최적화.
+  - 관리자 테이블의 모바일 가로 스크롤 및 모바일 카드 뷰 자동 변환.
+- **모바일 뷰포트 & 터치 UX (iOS Safe Area)**:
+  - `viewport-fit=cover` 및 iOS 홈 인디케이터/노치 여백(`safe-area-inset-bottom`) 지원.
+  - 모바일 인풋 포커스 시 브라우저 자동 확대 방지 (`font-size` 최소 16px 대응 또는 적절한 터치 타깃).
+
+---
+
+## 2. 모바일 웹 구현 상세 계획
+
+```mermaid
+graph TD
+    A[모바일 웹 완벽 구축] --> B[1. 모바일 쉘 & 네비게이션]
+    A --> C[2. 모바일 터치 & 제스처 지원]
+    A --> D[3. 페이지별 반응형/모바일 UI 고도화]
+    A --> E[4. 모바일 환경 최적화 & PWA/iOS Safe Area]
+
+    B --> B1[모바일 하단 탭바 BottomNav]
+    B --> B2[헤더 햄버거 메뉴 & 사이드 드로어]
+    B --> B3[AppLayout 모바일 safe-area & pb-20]
+
+    C --> C1[RecognitionRules 터치 캔버스 드래그/리사이즈]
+    C --> C2[터치 타깃 44px 이상 확보]
+
+    D --> D1[LiveHomePage 모바일 제어 패널 & 자막 스트림]
+    D --> D2[SalesListPage & ReviewPage 모바일 필터 & 아코디언]
+    D --> D3[Settlement / Training / Plans / Admin 모바일 뷰]
+
+    E --> E1[index.html & index.css 뷰포트 / Safe Area]
+    E --> E2[모바일 사파리/크롬 가상 키보드 & 스크롤 최적화]
+```
+
+---
+
+## 3. 세부 작업 항목 (Proposed Changes)
+
+### 3.1 모바일 코어 쉘 및 레이아웃 컴포넌트
+
+#### [NEW] [MobileBottomNav.tsx](file:///c:/dev/voice-pin-web/src/components/common/MobileBottomNav.tsx)
+- 판매자 및 관리자 역할에 맞춘 모바일 전용 하단 고정 탭 바 컴포넌트 생성.
+- 판매자 탭: **라이브 홈** (ON AIR 뱃지 및 펄스 효과), **판매 내역**, **캡처/규칙**, **정산**, **마이페이지**.
+- 관리자 탭: **대시보드**, **회원 관리**, **신고 센터**, **통계 로그**, **역할 전환**.
+- iOS Safe Area(`env(safe-area-inset-bottom)`) 자동 패딩 적용 및 글래스모피즘(`backdrop-blur-md bg-white/90`) 적용.
+
+#### [MODIFY] [Header.tsx](file:///c:/dev/voice-pin-web/src/components/common/Header.tsx)
+- 모바일 화면(`lg` 미만)에서 햄버거 메뉴 버튼(`Menu` / `X`) 추가.
+- 모바일 드로어(Sidebar Drawer) 열림/닫힘 상태 관리 및 부드러운 슬라이드 인 애니메이션.
+- 모바일에서 로고와 회차/청취 배지가 간결하고 직관적으로 표시되도록 헤더 컴팩트 모드 적용.
+
+#### [MODIFY] [Sidebar.tsx](file:///c:/dev/voice-pin-web/src/components/common/Sidebar.tsx)
+- 데스크톱(`hidden lg:flex`)에서는 기존의 깔끔한 고정 사이드바로 유지.
+- 모바일에서는 드로어 모달 형태로 백드롭 블러와 함께 슬라이드 오버되도록 지원 (`isOpen`, `onClose` props 지원).
+
+#### [MODIFY] [App.tsx](file:///c:/dev/voice-pin-web/src/App.tsx)
+- `AppLayout`에서 모바일 하단 탭 바(`MobileBottomNav`) 통합.
+- 모바일에서 하단 네비게이션이 콘텐츠를 가리지 않도록 `pb-20 lg:pb-0` 패딩 및 `overflow-x-hidden` 처리.
+- 모바일 헤더 드로어 상태를 제어할 수 있도록 레이아웃 구조 개선.
+
+---
+
+### 3.2 페이지별 모바일 UI/UX 최적화
+
+#### [MODIFY] [LiveHomePage.tsx](file:///c:/dev/voice-pin-web/src/pages/seller/LiveHomePage.tsx)
+- 상단 컨트롤 바의 모바일 레이아웃 최적화:
+  - 오디오 소스 선택(방송 탭/마이크)을 모바일에서 터치하기 쉬운 토글 바로 배치.
+  - [라이브 청취 시작/중지], [지정 영역 즉시 캡처], [AI 키 설정] 버튼의 모바일 2x2 또는 직관적 그리드 배치.
+- 오디오 파형 및 2분할 실시간 자막 스트림 박스:
+  - 모바일 세로 화면 비율에 맞추어 스크롤 영역 높이 및 폰트 사이즈 최적화.
+- 빠른 테스트 멘트 주입 툴바:
+  - 모바일에서 가로 스와이프 가능한 가로 스크롤 칩 바(`overflow-x-auto no-scrollbar`) 형태로 변경하여 한 손으로 터치 테스트 가능하도록 구현.
+- 이번 회차 판매 통계 및 판매 내역 리스트 카드 모바일 터치 인터랙션 강화.
+
+#### [MODIFY] [RecognitionRulesPage.tsx](file:///c:/dev/voice-pin-web/src/pages/seller/RecognitionRulesPage.tsx)
+- **모바일 터치 이벤트 완벽 지원**:
+  - `onTouchStart`, `onTouchMove`, `onTouchEnd` 핸들러를 캔버스 및 4개 모서리 리사이즈 핸들에 연동하여 스마트폰에서도 손가락 터치 드래그로 캡처 영역을 완벽하게 이동/크기 조절 가능하도록 구현.
+- 모바일 프리셋 버튼 및 해상도 선택 바의 반응형 flex-wrap / 탭 전환.
+- 픽셀 & 비율 미세조정 패널을 모바일에서 슬라이더 조작이 쾌적하도록 터치 감도 및 레이아웃 개선.
+- 단어 규칙 추가 폼 및 목록 카드를 모바일 1열 카드 뷰로 최적화.
+
+#### [MODIFY] [SalesListPage.tsx](file:///c:/dev/voice-pin-web/src/pages/seller/SalesListPage.tsx)
+- 방송 회차 선택 탭을 모바일 가로 스크롤 칩 리스트로 최적화.
+- [구매자별 묶어보기] / [건별 개별 보기] 탭 전환을 모바일 풀 위드 세그먼트 컨트롤로 개선.
+- 상태 필터 및 정렬 옵션을 모바일에서 한 손으로 쉽게 선택할 수 있는 컴팩트 바 형태로 재구성.
+- 구매자 카드 및 개별 주문 카드의 터치 타깃 확장 및 다건 구매자 강조 UI 모바일 최적화.
+
+#### [MODIFY] [SalesReviewPage.tsx](file:///c:/dev/voice-pin-web/src/pages/seller/SalesReviewPage.tsx)
+- 모바일 화면에서 일괄 선택 및 확정 처리를 위한 하단 플로팅 액션 바(Sticky/Floating Action Bar) 적용.
+- 모바일에서 판매 건별 캡처 썸네일과 원본 발화 텍스트, 보류 상태 확인이 한눈에 들어오도록 카드 밀도 최적화.
+
+#### [MODIFY] [SalesDetailPage.tsx](file:///c:/dev/voice-pin-web/src/pages/seller/SalesDetailPage.tsx)
+- 닉네임, 금액, 처리 상태 변경 입력 폼의 모바일 터치 인풋 높이(44px+) 및 키보드 입력 편의성 개선.
+- 연결된 댓글창 캡처 이미지의 모바일 풀스크린 뷰어 연동.
+
+#### [MODIFY] [SettlementPage.tsx](file:///c:/dev/voice-pin-web/src/pages/seller/SettlementPage.tsx)
+- 4대 정산 요약 지표 카드(총 확정액, 건수, 평균단가, 보류건수) 모바일 2x2 그리드 최적화.
+- 일자별 아코디언 카드 터치 영역 및 CSV 다운로드 버튼 모바일 최적화.
+
+#### [MODIFY] [VoiceTrainingPage.tsx](file:///c:/dev/voice-pin-web/src/pages/seller/VoiceTrainingPage.tsx)
+- 모바일 마이크 녹음 시 카운트다운 팝업 및 녹음 인터페이스 화면 크기 자동 조절.
+- 문장별 재훈련/반복 훈련 버튼의 모바일 터치 편의성 확보.
+
+#### [MODIFY] [Subscription & Auth & Admin & My Pages](file:///c:/dev/voice-pin-web/src/pages/)
+- `PlanSelectionPage.tsx`, `PaymentPage.tsx`: 모바일 요금제 카드 스택 및 결제 승인 버튼 최적화.
+- `LoginPage.tsx`, `SignupPage.tsx`, `OnboardingPage.tsx`: 모바일 폼 패딩 및 소프트웨어 키보드 대응.
+- `AdminDashboardPage.tsx`, `MemberManagementPage.tsx`, `ReportManagementPage.tsx`, `AdminStatsPage.tsx`: 모바일 가로 스크롤 테이블 래퍼 및 모바일 카드 뷰 변환.
+- `MyPage.tsx`, `NotificationSettingsPage.tsx`: 모바일 설정 스위치 및 백업 다운로드 버튼 최적화.
+
+---
+
+### 3.3 전역 모바일 뷰포트 & 스타일 최적화
+
+#### [MODIFY] [index.html](file:///c:/dev/voice-pin-web/index.html)
+- `viewport` 메타 태그를 `width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover`로 고도화하여 iOS 노치/다이나믹 아일랜드 및 모바일 브라우저 줌 방지.
+- 모바일 웹 앱(PWA) 친화적인 메타 태그(`apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`, `mobile-web-app-capable`) 추가.
+
+#### [MODIFY] [src/index.css](file:///c:/dev/voice-pin-web/src/index.css)
+- 모바일 Safe Area 유틸리티 클래스 (`pb-safe`, `pt-safe`, `h-safe`) 정의.
+- 모바일 브라우저의 파란색/회색 탭 하이라이트 제거 (`-webkit-tap-highlight-color: transparent`).
+- 스크롤바 숨김 유틸리티 (`.no-scrollbar`) 추가.
+- 모바일 텍스트 렌더링 및 부드러운 스크롤 최적화.
+
+---
+
+## 4. 검증 계획 (Verification Plan)
+
+### 4.1 빌드 및 타입 무결성 검증
+```bash
+npm run build
+```
+- TypeScript 컴파일 오류 0건 및 Vite 프로덕션 빌드 정상 완료 확인.
+
+### 4.2 브라우저 서브에이전트 및 모바일 뷰포트 실시간 검증
+1. **로컬 개발 서버 구동 (`npm run dev`)**:
+   - `http://localhost:5173`에서 실행.
+2. **다양한 모바일 뷰포트(해상도) 실시간 테스트**:
+   - **iPhone 14/15 Pro (393 x 852 px)**
+   - **Samsung Galaxy S22/S23 (360 x 800 px)**
+   - **iPad / 태블릿 세로 및 가로 모드 (768 x 1024 px)**
+3. **핵심 기능 모바일 인터랙션 검증**:
+   - 하단 탭 바 네비게이션 전환 (라이브 ↔ 판매목록 ↔ 규칙 ↔ 정산 ↔ 마이페이지).
+   - 헤더 햄버거 메뉴 클릭 시 사이드바 드로어 정상 작동 여부.
+   - `LiveHomePage`: 모바일에서 청취 시작/중지, 테스트 멘트 주입 칩 가로 스크롤, 실시간 자막 박스 렌더링.
+   - `RecognitionRulesPage`: 모바일 터치 드래그로 캡처 박스 영역 이동 및 크기 조절 테스트.
+   - `SalesListPage` & `SalesReviewPage`: 모바일 회차 필터, 구매자 아코디언, 일괄 검토/확정 동작.
+   - `SettlementPage`: 일자별 정산 카드 및 모바일 CSV 내보내기.
+   - `VoiceTrainingPage`: 모바일 녹음 시뮬레이션 및 게이지 업데이트.
+   - 역할 스위처(판매자 ↔ 관리자) 전환 후 모바일 전용 관리자 탭/대시보드 표시 확인.

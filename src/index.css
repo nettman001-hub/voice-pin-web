@@ -5,13 +5,35 @@
 @layer base {
   body {
     font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
   }
+}
+
+/* iOS Safe Area 유틸리티 */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 1rem);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0.5rem);
+}
+.h-safe-screen {
+  height: calc(100vh - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px));
+}
+
+/* 스크롤바 숨김 유틸리티 */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* 커스텀 스크롤바 (밝은 모드) */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -19,7 +41,7 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(203, 213, 225, 1);
+  background: rgba(203, 213, 225, 0.8);
   border-radius: 9999px;
 }
 

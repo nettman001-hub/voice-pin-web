@@ -73,28 +73,28 @@ export const LiveHomePage: React.FC = () => {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="p-3.5 sm:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6">
       {/* 상단 헤더 & 제어 바 */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white border border-slate-200 p-6 rounded-3xl shadow-sm">
-        <div className="flex items-center space-x-4">
-          <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-md transition-all ${
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white border border-slate-200 p-4 sm:p-6 rounded-3xl shadow-sm">
+        <div className="flex items-center space-x-3 sm:space-x-4">
+          <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center shadow-md transition-all flex-shrink-0 ${
             isListening
               ? 'bg-rose-500 text-white shadow-rose-500/20 animate-pulse'
               : 'bg-slate-100 text-slate-500'
           }`}>
-            <Radio className={`w-8 h-8 ${isListening ? 'animate-spin' : ''}`} />
+            <Radio className={`w-6 h-6 sm:w-8 sm:h-8 ${isListening ? 'animate-spin' : ''}`} />
           </div>
           <div>
-            <div className="flex items-center space-x-2">
-              <h1 className="text-2xl font-black text-slate-900 tracking-tight">라이브 청취 홈</h1>
-              <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+            <div className="flex items-center space-x-2 flex-wrap gap-1">
+              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">라이브 청취 홈</h1>
+              <span className={`px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-bold ${
                 isListening ? 'bg-rose-50 text-rose-600 border border-rose-200' : 'bg-slate-100 text-slate-600'
               }`}>
-                {isListening ? 'ON AIR (방송 소리 청취 중)' : '대기 중'}
+                {isListening ? 'ON AIR' : '대기 중'}
               </span>
             </div>
-            <p className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-2">
-              <span>현재 방송 회차: <strong className="text-slate-900 font-mono">{currentSessionId}</strong></span>
+            <p className="text-[11px] sm:text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <span>회차: <strong className="text-slate-900 font-mono">{currentSessionId}</strong></span>
               <span>•</span>
               <span className="flex items-center space-x-1.5">
                 <span className={`w-2 h-2 rounded-full ${
@@ -108,66 +108,68 @@ export const LiveHomePage: React.FC = () => {
           </div>
         </div>
 
-        {/* 오디오 소스 선택 및 제어 버튼 */}
-        <div className="flex flex-wrap items-center gap-3">
+        {/* 오디오 소스 선택 및 제어 버튼 (모바일 뷰 친화적 그리드) */}
+        <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 sm:gap-3">
           {/* 소리 입력 소스 선택 셀렉터 */}
-          <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200 text-xs">
+          <div className="grid grid-cols-2 sm:flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200 text-xs">
             <button
               onClick={() => setAudioSourceMode('TAB_AUDIO')}
               disabled={isListening}
-              className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center space-x-1.5 ${
+              className={`px-3 py-2 sm:py-1.5 rounded-xl font-bold transition flex items-center justify-center space-x-1.5 ${
                 audioSourceMode === 'TAB_AUDIO'
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              <span>📺 방송 탭 소리 청취</span>
+              <span>📺 방송 탭 소리</span>
             </button>
             <button
               onClick={() => setAudioSourceMode('MIC')}
               disabled={isListening}
-              className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center space-x-1.5 ${
+              className={`px-3 py-2 sm:py-1.5 rounded-xl font-bold transition flex items-center justify-center space-x-1.5 ${
                 audioSourceMode === 'MIC'
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              <span>🎙️ 내 마이크 소리</span>
+              <span>🎙️ 내 마이크</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:flex items-center gap-2 sm:gap-3">
+            <button
+              onClick={() => {
+                if (isAdmin) {
+                  setKeyInput(deepgramApiKey || '');
+                  setShowKeyModal(true);
+                } else {
+                  setShowAdminOnlyModal(true);
+                }
+              }}
+              className={`px-3 py-2.5 sm:px-3.5 sm:py-3 rounded-xl text-xs font-bold border flex items-center justify-center space-x-1.5 transition ${
+                isAdmin
+                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200 cursor-pointer'
+                  : 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed opacity-80'
+              }`}
+              title={isAdmin ? 'Deepgram AI Key 설정 (관리자 전용)' : 'AI 키 설정은 관리자만 변경할 수 있습니다'}
+            >
+              <Key className={`w-3.5 h-3.5 ${isAdmin ? 'text-amber-500' : 'text-slate-400'}`} />
+              <span>AI 키 {deepgramApiKey ? '연결됨' : '설정'}</span>
+              {!isAdmin && <span className="text-[9px] text-slate-400 bg-slate-200/60 px-1 py-0.2 rounded">관리자</span>}
+            </button>
+
+            <button
+              onClick={() => captureCurrentScreen()}
+              className="px-3 py-2.5 sm:px-4 sm:py-3 rounded-xl bg-cyan-50 hover:bg-cyan-100 text-cyan-800 text-xs font-bold border border-cyan-200 flex items-center justify-center space-x-1.5 transition shadow-sm"
+            >
+              <Camera className="w-3.5 h-3.5 text-cyan-600" />
+              <span>즉시 캡처</span>
             </button>
           </div>
 
           <button
-            onClick={() => {
-              if (isAdmin) {
-                setKeyInput(deepgramApiKey || '');
-                setShowKeyModal(true);
-              } else {
-                setShowAdminOnlyModal(true);
-              }
-            }}
-            className={`px-3.5 py-3 rounded-xl text-xs font-bold border flex items-center space-x-1.5 transition ${
-              isAdmin
-                ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200 cursor-pointer'
-                : 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed opacity-80'
-            }`}
-            title={isAdmin ? 'Deepgram AI Key 설정 (관리자 전용)' : 'AI 키 설정은 관리자만 변경할 수 있습니다'}
-          >
-            <Key className={`w-4 h-4 ${isAdmin ? 'text-amber-500' : 'text-slate-400'}`} />
-            <span>AI 키 {deepgramApiKey ? '연결됨' : '설정'}</span>
-            {!isAdmin && <span className="text-[10px] text-slate-400 bg-slate-200/60 px-1.5 py-0.5 rounded">관리자 전용</span>}
-          </button>
-
-          <button
-            onClick={() => captureCurrentScreen()}
-            className="px-4 py-3 rounded-xl bg-cyan-50 hover:bg-cyan-100 text-cyan-800 text-xs font-bold border border-cyan-200 flex items-center space-x-2 transition shadow-sm"
-          >
-            <Camera className="w-4 h-4 text-cyan-600" />
-            <span>지정 영역 즉시 캡처</span>
-          </button>
-
-          <button
             onClick={handleToggleListening}
-            className={`px-6 py-3 rounded-xl font-bold text-sm shadow-md flex items-center space-x-2 transition transform hover:-translate-y-0.5 ${
+            className={`w-full sm:w-auto px-6 py-3.5 sm:py-3 rounded-xl font-black text-sm shadow-md flex items-center justify-center space-x-2 transition transform active:scale-95 ${
               isListening
                 ? 'bg-slate-100 hover:bg-slate-200 text-rose-600 border border-rose-200'
                 : 'bg-gradient-to-r from-brand-600 via-brand-500 to-rose-500 text-white shadow-brand-500/20'
@@ -190,55 +192,55 @@ export const LiveHomePage: React.FC = () => {
 
       {/* 방송 소리 청취 안내 배너 */}
       {isListening && (
-        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-sm animate-in fade-in">
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-sm animate-in fade-in">
           <div className="flex items-center space-x-2.5">
-            <span className="w-3 h-3 rounded-full bg-emerald-500 animate-ping"></span>
+            <span className="w-3 h-3 rounded-full bg-emerald-500 animate-ping flex-shrink-0"></span>
             <div>
-              <span className="text-sm font-black text-emerald-950">
+              <span className="text-xs sm:text-sm font-black text-emerald-950 block">
                 {audioSourceMode === 'TAB_AUDIO' ? '📺 라이브 방송 탭 소리를 실시간 분석 중입니다!' : '🎙️ 실제 마이크 음성을 실시간 청취 중입니다!'}
               </span>
-              <p className="text-xs text-emerald-700 font-normal mt-0.5">
+              <p className="text-[11px] sm:text-xs text-emerald-700 font-normal mt-0.5">
                 {audioSourceMode === 'TAB_AUDIO'
                   ? '방송에서 나오는 "구매확정 닉네임 금액" 소리를 AI가 실시간으로 포착하여 판매 내역에 자동 등록합니다.'
                   : '마이크에 대고 "구매확정 러블리샵 삼만 오천원"이라고 말씀하시면 판매 내역에 등록됩니다.'}
               </p>
             </div>
           </div>
-          <div className="px-3 py-1 bg-white rounded-xl border border-emerald-200 text-emerald-800 text-[11px] font-bold shadow-sm whitespace-nowrap">
-            ⚡ {audioSourceMode === 'TAB_AUDIO' ? '방송 탭 오디오 AI 분석 중' : '실시간 마이크 STT 가동 중'}
+          <div className="px-2.5 py-1 bg-white rounded-xl border border-emerald-200 text-emerald-800 text-[10px] sm:text-[11px] font-bold shadow-sm whitespace-nowrap self-end sm:self-center">
+            ⚡ {audioSourceMode === 'TAB_AUDIO' ? '방송 탭 AI 분석 중' : '실시간 마이크 STT 가동 중'}
           </div>
         </div>
       )}
 
       {/* 음성 수정 명령 배너 */}
       {isVoiceEditing && (
-        <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-400 text-amber-900 text-xs font-bold flex items-center justify-between animate-pulse shadow-sm">
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-50 border-2 border-amber-400 text-amber-900 text-xs font-bold flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 animate-pulse shadow-sm">
           <div className="flex items-center space-x-3">
-            <Edit3 className="w-5 h-5 text-amber-600" />
+            <Edit3 className="w-5 h-5 text-amber-600 flex-shrink-0" />
             <div>
-              <span className="text-sm font-black">🎙️ 방송 중 음성 수정 모드 작동 중!</span>
-              <p className="text-xs text-amber-800 font-normal mt-0.5">{editingFieldInfo}</p>
+              <span className="text-xs sm:text-sm font-black block">🎙️ 방송 중 음성 수정 모드 작동 중!</span>
+              <p className="text-[11px] sm:text-xs text-amber-800 font-normal mt-0.5">{editingFieldInfo}</p>
             </div>
           </div>
-          <span className="text-[11px] bg-amber-500 text-white px-2.5 py-1 rounded-lg font-bold">
+          <span className="text-[10px] sm:text-[11px] bg-amber-500 text-white px-2.5 py-1 rounded-lg font-bold whitespace-nowrap">
             "수정 완료"를 말씀하세요
           </span>
         </div>
       )}
 
       {/* 메인 2열 그리드 */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
         {/* 좌측 영역 (7 cols) */}
-        <div className="lg:col-span-7 space-y-6">
+        <div className="lg:col-span-7 space-y-4 sm:space-y-6">
           {/* 오디오 파형 & 실시간 자막 */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+          <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
                 <Volume2 className="w-4 h-4 text-brand-600" />
                 <span>실시간 오디오 스트림 & 파형 분석</span>
               </h3>
-              <div className="text-xs text-slate-500 font-mono">
-                입력 레벨: <span className="text-brand-600 font-bold">{audioLevel}%</span>
+              <div className="text-[11px] sm:text-xs text-slate-500 font-mono">
+                레벨: <span className="text-brand-600 font-bold">{audioLevel}%</span>
               </div>
             </div>
 
@@ -247,11 +249,11 @@ export const LiveHomePage: React.FC = () => {
             {/* 실시간 STT 변환 자막 박스 (상/하단 2단 분할 - 밝은색 화이트 테마) */}
             <div className="rounded-2xl border border-slate-200 overflow-hidden bg-white shadow-sm">
               {/* [상단] 실시간 전체 인식 자막 스트림 (밝은색 배경) */}
-              <div className="p-4 bg-slate-50/60 border-b border-slate-200">
+              <div className="p-3.5 sm:p-4 bg-slate-50/60 border-b border-slate-200">
                 <div className="flex items-center justify-between mb-2 flex-wrap gap-1">
                   <div className="text-[11px] font-bold text-brand-700 uppercase tracking-wider flex items-center">
                     <span className={`w-2 h-2 rounded-full mr-1.5 ${isListening ? 'bg-emerald-500 animate-ping' : 'bg-slate-400'}`}></span>
-                    <span>1. 실시간 음성인식 전체 자막 스트림</span>
+                    <span>1. 실시간 전체 자막 스트림</span>
                   </div>
                   <div className="flex items-center space-x-1.5">
                     <button
@@ -259,21 +261,21 @@ export const LiveHomePage: React.FC = () => {
                       className="px-2 py-0.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-[10px] border border-emerald-200 transition"
                       title="실제 발화 멘트 주입 테스트"
                     >
-                      ⚡ 구매확정 3.5만 테스트
+                      ⚡ 3.5만 구매확정
                     </button>
                     <button
                       onClick={() => injectTestMent('댓글창 화면 캡처 부탁드립니다.')}
                       className="px-2 py-0.5 rounded-lg bg-cyan-50 hover:bg-cyan-100 text-cyan-700 font-bold text-[10px] border border-cyan-200 transition"
                       title="캡처 명령 테스트"
                     >
-                      📸 캡처 테스트
+                      📸 캡처
                     </button>
                   </div>
                 </div>
 
                 <div
                   ref={flowContainerRef}
-                  className="max-h-[130px] min-h-[65px] overflow-y-auto space-y-1.5 pr-1 font-sans text-xs text-slate-800 flex flex-col justify-end scroll-smooth"
+                  className="max-h-[120px] sm:max-h-[140px] min-h-[60px] overflow-y-auto space-y-1.5 pr-1 font-sans text-xs text-slate-800 flex flex-col justify-end scroll-smooth"
                 >
                   {liveTranscriptFlow.length === 0 && !currentInterimTranscript ? (
                     <div className="text-slate-400 text-xs italic py-2">
@@ -284,13 +286,13 @@ export const LiveHomePage: React.FC = () => {
                       {liveTranscriptFlow.slice(-6).map((flow) => (
                         <div key={flow.id} className="leading-relaxed flex items-baseline space-x-2 text-slate-700 font-medium">
                           <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">{flow.timestamp}</span>
-                          <span>{flow.text}</span>
+                          <span className="break-words">{flow.text}</span>
                         </div>
                       ))}
                       {currentInterimTranscript && (
                         <div className="leading-relaxed flex items-baseline space-x-2 text-brand-600 font-bold animate-pulse">
                           <span className="text-[10px] text-brand-400 font-mono flex-shrink-0">듣는 중...</span>
-                          <span>{currentInterimTranscript}</span>
+                          <span className="break-words">{currentInterimTranscript}</span>
                         </div>
                       )}
                     </>
@@ -299,7 +301,7 @@ export const LiveHomePage: React.FC = () => {
               </div>
 
               {/* [하단] 규칙 지정된 문장 & 액션 하이라이트 박스 (밝은색 배경) */}
-              <div className="p-4 bg-amber-50/40 border-t border-amber-100">
+              <div className="p-3.5 sm:p-4 bg-amber-50/40 border-t border-amber-100">
                 <div className="flex items-center justify-between mb-1.5">
                   <div className="text-[11px] font-bold text-amber-800 uppercase tracking-wider flex items-center space-x-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-amber-600" />
@@ -324,7 +326,7 @@ export const LiveHomePage: React.FC = () => {
                         {lastMatchedRuleItem.action}
                       </span>
                     </div>
-                    <p className="text-sm font-black text-slate-900 tracking-tight leading-snug">
+                    <p className="text-xs sm:text-sm font-black text-slate-900 tracking-tight leading-snug break-words">
                       "{lastMatchedRuleItem.text}"
                     </p>
                   </div>
@@ -338,16 +340,16 @@ export const LiveHomePage: React.FC = () => {
           </div>
 
           {/* 최근 전사 로그 */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
+          <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-3 sm:mb-4">
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
                 <Clock className="w-4 h-4 text-brand-600" />
                 <span>최근 실시간 전사 로그 ({transcriptLogs.length}건)</span>
               </h3>
-              <span className="text-[11px] text-slate-400">자동 스크롤</span>
+              <span className="text-[10px] sm:text-[11px] text-slate-400">자동 스크롤</span>
             </div>
 
-            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-[250px] sm:max-h-[300px] overflow-y-auto pr-1">
               {transcriptLogs.length === 0 ? (
                 <div className="py-8 text-center text-xs text-slate-400">
                   아직 전사된 발화 로그가 없습니다.
@@ -369,62 +371,62 @@ export const LiveHomePage: React.FC = () => {
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-[10px] text-slate-400 font-mono">{log.timestamp}</span>
                       {log.actionTriggered === 'SALE_SAVED' && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700">
-                          🛍️ 판매 자동 저장됨
+                        <span className="text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700">
+                          🛍️ 판매 자동 저장
                         </span>
                       )}
                       {log.actionTriggered === 'SCREEN_CAPTURED' && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700">
-                          📸 댓글창 캡처됨
+                        <span className="text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700">
+                          📸 댓글창 캡처
                         </span>
                       )}
                       {log.actionTriggered === 'VOICE_EDIT_START' && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                        <span className="text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
                           ✏️ 수정 모드 진입
                         </span>
                       )}
                     </div>
-                    <p className="font-semibold text-slate-900">{log.text}</p>
+                    <p className="font-semibold text-slate-900 break-words">{log.text}</p>
                   </div>
                 ))
               )}
             </div>
           </div>
 
-          {/* 테스트 멘트 주입 툴바 */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-5 text-xs shadow-sm space-y-2">
+          {/* 테스트 멘트 주입 툴바 (모바일 가로 스크롤 지원) */}
+          <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 text-xs shadow-sm space-y-2">
             <p className="font-bold text-slate-700 flex items-center">
               <Sparkles className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
               <span>빠른 시연 & 테스트 멘트 주입 버튼</span>
             </p>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar pb-1">
               <button
                 onClick={() => injectTestMent('구매확정 됐습니다! 구매하신 분은 러블리님 이시구요 금액은 3만5천원입니다.')}
-                className="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold"
+                className="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
               >
                 + "러블리님 35,000원"
               </button>
               <button
                 onClick={() => injectTestMent('구매확정! 닉네임 민트초코님 가격 19,900원입니다. 댓글 캡처 부탁드려요.')}
-                className="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold"
+                className="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
               >
                 + "민트초코 19,900원 + 캡처"
               </button>
               <button
                 onClick={() => injectTestMent('수정 시작')}
-                className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold"
+                className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold whitespace-nowrap active:scale-95 transition"
               >
                 + "수정 시작"
               </button>
               <button
                 onClick={() => injectTestMent('닉네임은 달콤한하루님, 금액은 48,000원')}
-                className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold"
+                className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold whitespace-nowrap active:scale-95 transition"
               >
                 + "닉네임/금액 수정"
               </button>
               <button
                 onClick={() => injectTestMent('수정 완료')}
-                className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold"
+                className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold whitespace-nowrap active:scale-95 transition"
               >
                 + "수정 완료"
               </button>
@@ -433,39 +435,39 @@ export const LiveHomePage: React.FC = () => {
         </div>
 
         {/* 우측 영역 (5 cols) */}
-        <div className="lg:col-span-5 space-y-6">
+        <div className="lg:col-span-5 space-y-4 sm:space-y-6">
           {/* 요약 카드 */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
-              <span className="text-xs text-slate-500 font-medium">이번 회차 판매</span>
-              <div className="text-3xl font-black text-slate-900 mt-1">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4">
+            <div className="p-4 sm:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
+              <span className="text-[11px] sm:text-xs text-slate-500 font-medium">이번 회차 판매</span>
+              <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-1">
                 {currentSessionSales.length} <span className="text-xs font-normal text-slate-400">건</span>
               </div>
             </div>
-            <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
-              <span className="text-xs text-slate-500 font-medium">실시간 합계</span>
-              <div className="text-3xl font-black text-brand-600 mt-1">
+            <div className="p-4 sm:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
+              <span className="text-[11px] sm:text-xs text-slate-500 font-medium">실시간 합계</span>
+              <div className="text-xl sm:text-3xl font-black text-brand-600 mt-1 truncate">
                 {todayTotalAmount.toLocaleString()} <span className="text-xs font-normal text-slate-400">원</span>
               </div>
             </div>
           </div>
 
           {/* 판매 내역 카드 리스트 */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
+          <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-3 sm:mb-4">
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                 <span>자동 적재된 판매 내역</span>
               </h3>
               <Link to="/sales/review" className="text-xs text-brand-600 hover:underline font-bold flex items-center">
                 <span>일괄 검토</span>
-                <ArrowRight className="w-3 h-3 ml-1" />
+                <ArrowRight className="w-3.5 h-3.5 ml-1" />
               </Link>
             </div>
 
-            <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
+            <div className="space-y-2.5 sm:space-y-3 max-h-[360px] overflow-y-auto pr-1">
               {currentSessionSales.length === 0 ? (
-                <div className="py-12 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-2xl">
+                <div className="py-10 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-2xl">
                   이번 방송 회차에서 저장된 판매 내역이 없습니다.<br />
                   "구매확정" 멘트를 말씀하시면 자동 등록됩니다.
                 </div>
@@ -474,7 +476,7 @@ export const LiveHomePage: React.FC = () => {
                   <Link
                     key={sale.id}
                     to={`/sales/${sale.id}`}
-                    className={`block p-4 rounded-2xl border transition hover:shadow-sm ${
+                    className={`block p-3.5 sm:p-4 rounded-2xl border transition active:scale-[0.99] hover:shadow-sm ${
                       sale.status === '보류'
                         ? 'bg-amber-50/70 border-amber-200 text-amber-900'
                         : sale.status === '수동수정'
@@ -482,11 +484,11 @@ export const LiveHomePage: React.FC = () => {
                         : 'bg-slate-50/70 border-slate-200 text-slate-800'
                     }`}
                   >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <span className="font-bold text-sm text-slate-900">{sale.buyerNickname}</span>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center space-x-2 flex-wrap gap-1">
+                          <span className="font-bold text-sm text-slate-900 truncate">{sale.buyerNickname}</span>
+                          <span className={`text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold ${
                             sale.status === '보류'
                               ? 'bg-amber-400 text-slate-950'
                               : sale.status === '수동수정'
@@ -502,7 +504,7 @@ export const LiveHomePage: React.FC = () => {
                       </div>
 
                       {sale.captureImageUrls && sale.captureImageUrls.length > 0 && (
-                        <div className="w-10 h-10 rounded-xl overflow-hidden border border-slate-200 flex-shrink-0 shadow-sm">
+                        <div className="w-12 h-12 sm:w-10 sm:h-10 rounded-xl overflow-hidden border border-slate-200 flex-shrink-0 shadow-sm">
                           <img src={sale.captureImageUrls[0]} alt="캡처" className="w-full h-full object-cover" />
                         </div>
                       )}
@@ -519,17 +521,17 @@ export const LiveHomePage: React.FC = () => {
 
           {/* 최근 캡처 이미지 스트립 */}
           {recentCaptures.length > 0 && (
-            <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center space-x-2">
+            <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm">
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 mb-3 flex items-center space-x-2">
                 <Camera className="w-4 h-4 text-cyan-600" />
                 <span>최근 화면 캡처 ({recentCaptures.length}장)</span>
               </h3>
-              <div className="flex space-x-3 overflow-x-auto pb-2">
+              <div className="flex space-x-2.5 sm:space-x-3 overflow-x-auto pb-2 no-scrollbar">
                 {recentCaptures.map((cap) => (
                   <div
                     key={cap.id}
                     onClick={() => setSelectedCaptureModal(cap.imageUrl)}
-                    className="w-20 h-28 flex-shrink-0 rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 cursor-pointer hover:opacity-85 transition relative group shadow-sm"
+                    className="w-20 h-28 flex-shrink-0 rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 cursor-pointer hover:opacity-85 active:scale-95 transition relative group shadow-sm"
                   >
                     <img src={cap.imageUrl} alt="캡처" className="w-full h-full object-cover" />
                     <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[10px] text-white font-bold transition">
@@ -542,6 +544,30 @@ export const LiveHomePage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* 캡처 이미지 확대 모달 */}
+      {selectedCaptureModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in"
+          onClick={() => setSelectedCaptureModal(null)}
+        >
+          <div className="relative max-w-2xl w-full max-h-[85vh] bg-slate-900 rounded-3xl overflow-hidden shadow-2xl flex flex-col p-2">
+            <button
+              onClick={() => setSelectedCaptureModal(null)}
+              className="absolute top-4 right-4 p-2 rounded-full bg-black/60 text-white hover:bg-black/80 z-10 transition"
+              aria-label="닫기"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <div className="flex-1 flex items-center justify-center overflow-auto">
+              <img src={selectedCaptureModal} alt="확대 캡처" className="max-w-full max-h-[75vh] object-contain rounded-2xl" />
+            </div>
+            <div className="text-center py-2 text-xs text-slate-300">
+              화면을 탭하거나 우상단 X 버튼을 눌러 닫습니다.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Deepgram API Key 설정 모달 */}
       {showKeyModal && (

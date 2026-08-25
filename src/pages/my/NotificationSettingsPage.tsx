@@ -24,23 +24,23 @@ export const NotificationSettingsPage: React.FC = () => {
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
-      <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div className="p-3.5 sm:p-6 max-w-4xl mx-auto space-y-4 sm:space-y-6">
+      <div className="bg-white border border-slate-200 p-4 sm:p-6 rounded-3xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2">
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">알림 설정</h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 text-xs font-bold border border-brand-200">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">알림 설정</h1>
+            <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 text-[10px] sm:text-xs font-bold border border-brand-200">
               실시간 피드백
             </span>
           </div>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-[11px] sm:text-xs text-slate-500 mt-1">
             판매 자동 저장, 보류 건 발생 시 푸시 및 이메일 알림 수신 여부를 설정합니다.
           </p>
         </div>
 
         <button
           onClick={handleTestSound}
-          className="px-4 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold shadow-md shadow-brand-500/20 transition flex items-center space-x-1.5"
+          className="w-full sm:w-auto px-4 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold shadow-md shadow-brand-500/20 transition flex items-center justify-center space-x-1.5 active:scale-95 text-center"
         >
           <Volume2 className="w-4 h-4" />
           <span>테스트 알림 발송</span>
@@ -55,19 +55,19 @@ export const NotificationSettingsPage: React.FC = () => {
       )}
 
       {/* 설정 항목들 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
-        <div className="space-y-3">
+      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
+        <div className="space-y-2.5 sm:space-y-3">
           {notifications.map((item) => (
             <div
               key={item.id}
-              className="flex items-center justify-between p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs"
+              className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs"
             >
               <div>
-                <div className="font-bold text-slate-900 text-sm">{item.eventType}</div>
-                <div className="text-slate-500 mt-0.5">해당 이벤트 발생 시 지정된 채널로 즉시 알립니다.</div>
+                <div className="font-bold text-slate-900 text-xs sm:text-sm">{item.eventType}</div>
+                <div className="text-[11px] text-slate-500 mt-0.5">해당 이벤트 발생 시 지정된 채널로 즉시 알립니다.</div>
               </div>
 
-              <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-4 self-end sm:self-auto border-t sm:border-t-0 border-slate-200/60 pt-2 sm:pt-0 w-full sm:w-auto justify-end">
                 <label className="flex items-center space-x-1.5 cursor-pointer">
                   <input
                     type="checkbox"
@@ -75,7 +75,7 @@ export const NotificationSettingsPage: React.FC = () => {
                     onChange={() => toggleNotification(item.id, 'push')}
                     className="rounded border-slate-300 text-brand-600 w-4 h-4"
                   />
-                  <span className="font-semibold text-slate-700">푸시</span>
+                  <span className="font-semibold text-slate-700 text-xs">푸시 알림</span>
                 </label>
 
                 <label className="flex items-center space-x-1.5 cursor-pointer">
@@ -85,7 +85,7 @@ export const NotificationSettingsPage: React.FC = () => {
                     onChange={() => toggleNotification(item.id, 'email')}
                     className="rounded border-slate-300 text-brand-600 w-4 h-4"
                   />
-                  <span className="font-semibold text-slate-700">이메일</span>
+                  <span className="font-semibold text-slate-700 text-xs">이메일</span>
                 </label>
               </div>
             </div>

@@ -43,17 +43,17 @@ export const AdminDashboardPage: React.FC = () => {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="p-3.5 sm:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6">
       {/* 헤더 */}
-      <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200 p-4 sm:p-6 rounded-3xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2">
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">관리자 통합 대시보드</h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-700 text-xs font-bold border border-purple-200">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">관리자 통합 대시보드</h1>
+            <span className="px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-700 text-[10px] sm:text-xs font-bold border border-purple-200">
               전체 시스템 관제
             </span>
           </div>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-[11px] sm:text-xs text-slate-500 mt-1">
             VoiceCAP 서비스의 핵심 KPI 지표, 회원 현황, STT 클라우드 API Key 및 신고 처리 상태를 중앙 관제합니다.
           </p>
         </div>
@@ -61,7 +61,7 @@ export const AdminDashboardPage: React.FC = () => {
         <div className="flex items-center space-x-2">
           <span className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-            <span>STT 서버 정상 가동 중 (Nova-3)</span>
+            <span>STT 서버 정상 (Nova-3)</span>
           </span>
         </div>
       </div>
@@ -74,23 +74,23 @@ export const AdminDashboardPage: React.FC = () => {
       )}
 
       {/* 🔑 Deepgram Nova-3 클라우드 STT API Key 중앙 관리 카드 (관리자 전용) */}
-      <div className="bg-gradient-to-br from-white via-brand-50/20 to-purple-50/30 border-2 border-brand-200 rounded-3xl p-6 shadow-sm space-y-4">
+      <div className="bg-gradient-to-br from-white via-brand-50/20 to-purple-50/30 border-2 border-brand-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-2xl bg-brand-600 text-white flex items-center justify-center shadow-md shadow-brand-500/20">
+            <div className="w-10 h-10 rounded-2xl bg-brand-600 text-white flex items-center justify-center shadow-md shadow-brand-500/20 flex-shrink-0">
               <KeyRound className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center space-x-2">
-                <h3 className="text-base font-black text-slate-900">Deepgram Nova-3 음성인식 API Key 관리</h3>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+              <div className="flex items-center space-x-2 flex-wrap gap-1">
+                <h3 className="text-sm sm:text-base font-black text-slate-900">Deepgram Nova-3 음성인식 API Key 관리</h3>
+                <span className={`text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full ${
                   deepgramApiKey ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
                 }`}>
-                  {deepgramApiKey ? '✅ 실제 키 연동됨 (전체 판매자 공통 적용)' : '⚠️ 미등록 (시뮬레이터 모드)'}
+                  {deepgramApiKey ? '✅ 실제 키 연동됨' : '⚠️ 미등록 (시뮬레이터 모드)'}
                 </span>
               </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                여기서 등록한 API Key는 모든 판매자의 라이브 방송 음성인식(Nova-3 한국어)에 자동으로 공통 적용됩니다. 판매자는 별도로 키를 입력할 필요가 없습니다.
+              <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
+                여기서 등록한 API Key는 모든 판매자의 라이브 방송 음성인식(Nova-3 한국어)에 자동으로 공통 적용됩니다.
               </p>
             </div>
           </div>
@@ -118,7 +118,7 @@ export const AdminDashboardPage: React.FC = () => {
 
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-500/20 flex items-center justify-center space-x-1.5 transition"
+              className="px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-500/20 flex items-center justify-center space-x-1.5 transition active:scale-95"
             >
               <Save className="w-4 h-4" />
               <span>API Key 저장 & 전체 적용</span>
@@ -128,69 +128,77 @@ export const AdminDashboardPage: React.FC = () => {
       </div>
 
       {/* 4대 KPI 요약 카드 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
         <Link
           to="/admin/members"
-          className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm hover:border-slate-300 transition block group"
+          className="p-3.5 sm:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm hover:border-slate-300 transition block group"
         >
           <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-medium">전체 회원 수</span>
+            <span className="text-[10px] sm:text-xs font-medium">전체 회원 수</span>
             <Users className="w-4 h-4 text-brand-600 group-hover:scale-110 transition-transform" />
           </div>
-          <div className="text-2xl font-black text-slate-900 mt-2">
+          <div className="text-lg sm:text-2xl font-black text-slate-900 mt-1 sm:mt-2 truncate">
             {totalMembers} <span className="text-xs font-normal text-slate-400">명</span>
           </div>
-          <div className="text-[11px] text-emerald-600 mt-2 flex items-center font-semibold">
-            <span>활성 계정: {activeMembers}명</span>
+          <div className="text-[10px] sm:text-[11px] text-emerald-600 mt-1 sm:mt-2 flex items-center font-semibold truncate">
+            <span>활성: {activeMembers}명</span>
           </div>
         </Link>
 
         <Link
           to="/admin/reports"
-          className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm hover:border-slate-300 transition block group"
+          className="p-3.5 sm:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm hover:border-slate-300 transition block group"
         >
           <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-medium">미처리 신고 건수</span>
+            <span className="text-[10px] sm:text-xs font-medium">신규 접수 신고</span>
             <AlertTriangle className="w-4 h-4 text-amber-500 group-hover:scale-110 transition-transform" />
           </div>
-          <div className="text-2xl font-black text-amber-600 mt-2">
+          <div className="text-lg sm:text-2xl font-black text-amber-600 mt-1 sm:mt-2 truncate">
             {pendingReports} <span className="text-xs font-normal text-slate-400">건</span>
           </div>
-          <div className="text-[11px] text-slate-400 mt-2">
-            <span>총 접수: {reports.length}건</span>
+          <div className="text-[10px] sm:text-[11px] text-slate-400 mt-1 sm:mt-2 truncate">
+            <span>처리기한 준수</span>
           </div>
         </Link>
 
-        <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
+        <Link
+          to="/sales"
+          className="p-3.5 sm:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm hover:border-slate-300 transition block group"
+        >
           <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-medium">전체 거래 발생액</span>
-            <CreditCard className="w-4 h-4 text-purple-600" />
+            <span className="text-[10px] sm:text-xs font-medium">총 누적 거래액</span>
+            <CreditCard className="w-4 h-4 text-brand-600 group-hover:scale-110 transition-transform" />
           </div>
-          <div className="text-2xl font-black text-slate-900 mt-2">
+          <div className="text-lg sm:text-2xl font-black text-slate-900 mt-1 sm:mt-2 truncate">
             {totalRevenue.toLocaleString()} <span className="text-xs font-normal text-slate-400">원</span>
           </div>
-          <div className="text-[11px] text-purple-700 mt-2 font-semibold">
-            <span>총 {sales.length}건의 판매 기록</span>
+          <div className="text-[10px] sm:text-[11px] text-brand-600 mt-1 sm:mt-2 truncate font-semibold">
+            <span>실시간 정산 연동</span>
           </div>
-        </div>
+        </Link>
 
-        <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
+        <Link
+          to="/admin/stats"
+          className="p-3.5 sm:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm hover:border-slate-300 transition block group"
+        >
           <div className="flex items-center justify-between text-slate-500">
-            <span className="text-xs font-medium">시스템 가동률</span>
-            <Activity className="w-4 h-4 text-emerald-600" />
+            <span className="text-[10px] sm:text-xs font-medium">STT 인식 성공률</span>
+            <Activity className="w-4 h-4 text-emerald-500 group-hover:scale-110 transition-transform" />
           </div>
-          <div className="text-2xl font-black text-emerald-600 mt-2">99.98%</div>
-          <div className="text-[11px] text-slate-400 mt-2">
-            <span>Deepgram API 레이턴시: 120ms</span>
+          <div className="text-lg sm:text-2xl font-black text-emerald-600 mt-1 sm:mt-2 truncate">
+            99.2 <span className="text-xs font-normal text-slate-400">%</span>
           </div>
-        </div>
+          <div className="text-[10px] sm:text-[11px] text-emerald-600 mt-1 sm:mt-2 truncate font-semibold">
+            <span>Nova-3 180ms</span>
+          </div>
+        </Link>
       </div>
 
       {/* 최근 신고 및 주요 관리자 숏컷 */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-7 bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
+        <div className="lg:col-span-7 bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
+            <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
               <AlertTriangle className="w-4 h-4 text-amber-500" />
               <span>최근 접수된 사용자 신고 목록</span>
             </h3>

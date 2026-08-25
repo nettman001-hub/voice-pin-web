@@ -48,24 +48,24 @@ export const SettlementPage: React.FC = () => {
   };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-3.5 sm:p-6 max-w-6xl mx-auto space-y-4 sm:space-y-6">
       {/* 헤더 */}
-      <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200 p-4 sm:p-6 rounded-3xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2">
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">판매 정산 & CSV 내보내기</h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 text-xs font-bold border border-brand-200">
-              엑셀 호환 UTF-8 BOM
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">판매 정산 & CSV 내보내기</h1>
+            <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 text-[10px] sm:text-xs font-bold border border-brand-200">
+              UTF-8 BOM 지원
             </span>
           </div>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-[11px] sm:text-xs text-slate-500 mt-1">
             일자별, 회차별로 집계된 판매 내역을 조회하고 엑셀에서 바로 열리는 CSV 파일로 다운로드합니다.
           </p>
         </div>
 
         <button
           onClick={handleExportAll}
-          className="px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center space-x-1.5 transition"
+          className="w-full md:w-auto px-5 py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center justify-center space-x-1.5 transition active:scale-95"
         >
           <Download className="w-4 h-4" />
           <span>전체 판매 내역 CSV 다운로드</span>
@@ -73,39 +73,39 @@ export const SettlementPage: React.FC = () => {
       </div>
 
       {/* 4대 정산 요약 카드 */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
-          <span className="text-xs text-slate-500 font-medium">총 판매 확정액</span>
-          <div className="text-2xl font-black text-brand-600 mt-1">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+        <div className="p-3.5 sm:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
+          <span className="text-[10px] sm:text-xs text-slate-500 font-medium">총 판매 확정액</span>
+          <div className="text-lg sm:text-2xl font-black text-brand-600 mt-1 truncate">
             {totalRevenue.toLocaleString()} <span className="text-xs font-normal text-slate-500">원</span>
           </div>
         </div>
 
-        <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
-          <span className="text-xs text-slate-500 font-medium">총 확정 주문 건수</span>
-          <div className="text-2xl font-black text-slate-900 mt-1">
+        <div className="p-3.5 sm:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
+          <span className="text-[10px] sm:text-xs text-slate-500 font-medium">총 확정 주문 건수</span>
+          <div className="text-lg sm:text-2xl font-black text-slate-900 mt-1">
             {totalCount} <span className="text-xs font-normal text-slate-500">건</span>
           </div>
         </div>
 
-        <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
-          <span className="text-xs text-slate-500 font-medium">건당 평균 단가</span>
-          <div className="text-2xl font-black text-purple-700 mt-1">
+        <div className="p-3.5 sm:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
+          <span className="text-[10px] sm:text-xs text-slate-500 font-medium">건당 평균 단가</span>
+          <div className="text-lg sm:text-2xl font-black text-purple-700 mt-1 truncate">
             {avgOrderPrice.toLocaleString()} <span className="text-xs font-normal text-slate-500">원</span>
           </div>
         </div>
 
-        <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
-          <span className="text-xs text-slate-500 font-medium">미확인 보류 건수</span>
-          <div className="text-2xl font-black text-amber-600 mt-1">
+        <div className="p-3.5 sm:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
+          <span className="text-[10px] sm:text-xs text-slate-500 font-medium">미확인 보류 건수</span>
+          <div className="text-lg sm:text-2xl font-black text-amber-600 mt-1">
             {pendingCount} <span className="text-xs font-normal text-slate-500">건</span>
           </div>
         </div>
       </div>
 
       {/* 일자별 아코디언 정산 목록 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
-        <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
+      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
+        <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
           <Calendar className="w-4 h-4 text-brand-600" />
           <span>일자별 판매 정산 목록</span>
         </h3>
@@ -128,10 +128,10 @@ export const SettlementPage: React.FC = () => {
                 >
                   <div
                     onClick={() => toggleDate(dateStr)}
-                    className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-100/80 transition"
+                    className="p-3.5 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 cursor-pointer hover:bg-slate-100/80 transition"
                   >
-                    <div className="flex items-center space-x-3">
-                      <div className="p-2 rounded-xl bg-brand-50 text-brand-700">
+                    <div className="flex items-center space-x-3 w-full sm:w-auto">
+                      <div className="p-2 rounded-xl bg-brand-50 text-brand-700 flex-shrink-0">
                         <Calendar className="w-4 h-4" />
                       </div>
                       <div>
@@ -140,10 +140,10 @@ export const SettlementPage: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center space-x-4">
-                      <div className="text-right">
-                        <span className="text-[10px] text-slate-400">일매출 합계</span>
-                        <div className="text-base font-black text-brand-600">
+                    <div className="flex items-center justify-between sm:justify-end space-x-3 sm:space-x-4 w-full sm:w-auto border-t sm:border-t-0 border-slate-200/60 pt-2 sm:pt-0">
+                      <div className="text-left sm:text-right">
+                        <span className="text-[10px] text-slate-400 block">일매출 합계</span>
+                        <div className="text-sm sm:text-base font-black text-brand-600">
                           {dateTotal.toLocaleString()}원
                         </div>
                       </div>
@@ -153,7 +153,7 @@ export const SettlementPage: React.FC = () => {
                           e.stopPropagation();
                           handleExportDate(dateStr);
                         }}
-                        className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200 flex items-center space-x-1 shadow-sm"
+                        className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200 flex items-center space-x-1 shadow-sm active:scale-95"
                       >
                         <Download className="w-3.5 h-3.5" />
                         <span>CSV</span>
@@ -166,22 +166,22 @@ export const SettlementPage: React.FC = () => {
                   </div>
 
                   {isExpanded && (
-                    <div className="p-4 border-t border-slate-100 bg-white space-y-2">
+                    <div className="p-3 sm:p-4 border-t border-slate-100 bg-white space-y-2">
                       {list.map((rec) => (
                         <div
                           key={rec.id}
-                          className="p-3 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between text-xs"
+                          className="p-2.5 sm:p-3 rounded-xl bg-slate-50 border border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 text-xs"
                         >
-                          <div className="flex items-center space-x-3">
+                          <div className="flex items-center space-x-2 sm:space-x-3 flex-wrap gap-1">
                             <span className="font-bold text-slate-900">{rec.buyerNickname}</span>
                             <span className="text-slate-500 font-mono text-[11px]">
                               {new Date(rec.recognizedAt).toLocaleTimeString('ko-KR')}
                             </span>
-                            <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">
+                            <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded">
                               회차: {rec.sessionId}
                             </span>
                           </div>
-                          <div className="font-bold text-slate-900">
+                          <div className="font-bold text-slate-900 self-end sm:self-auto">
                             {rec.amount.toLocaleString()}원
                           </div>
                         </div>

@@ -65,26 +65,26 @@ export const SalesReviewPage: React.FC = () => {
   };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-3.5 sm:p-6 max-w-6xl mx-auto space-y-4 sm:space-y-6">
       {/* 헤더 */}
-      <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200 p-4 sm:p-6 rounded-3xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2">
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">방송 후 일괄 확인</h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 text-xs font-bold border border-amber-200">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">방송 후 일괄 확인</h1>
+            <span className="px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 text-[10px] sm:text-xs font-bold border border-amber-200">
               보류 {pendingCount}건
             </span>
           </div>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-[11px] sm:text-xs text-slate-500 mt-1">
             방송 중 닉네임이나 금액이 불분명했던 '보류' 건을 확인하고 인라인으로 즉시 수정/일괄 확정합니다.
           </p>
         </div>
 
-        <div className="flex items-center space-x-3">
+        <div className="w-full md:w-auto">
           <button
             onClick={handleBulkConfirm}
             disabled={pendingCount === 0}
-            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-emerald-600 hover:from-brand-500 hover:to-emerald-500 disabled:opacity-40 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center space-x-1.5 transition"
+            className="w-full sm:w-auto px-5 py-3 rounded-xl bg-gradient-to-r from-brand-600 to-emerald-600 hover:from-brand-500 hover:to-emerald-500 disabled:opacity-40 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center justify-center space-x-1.5 transition active:scale-95"
           >
             <CheckCircle2 className="w-4 h-4" />
             <span>남은 보류 건 일괄 확정</span>
@@ -99,12 +99,12 @@ export const SalesReviewPage: React.FC = () => {
         </div>
       )}
 
-      {/* 회차 선택 탭 */}
-      <div className="flex items-center space-x-2 overflow-x-auto pb-1 text-xs">
-        <span className="text-slate-500 font-bold px-2">방송 회차:</span>
+      {/* 회차 선택 탭 (모바일 가로 스크롤) */}
+      <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-1 text-xs">
+        <span className="text-slate-500 font-bold px-1 flex-shrink-0">방송 회차:</span>
         <button
           onClick={() => setSessionFilter('ALL')}
-          className={`px-3 py-1.5 rounded-xl font-bold transition ${
+          className={`px-3 py-1.5 rounded-xl font-bold transition flex-shrink-0 ${
             sessionFilter === 'ALL'
               ? 'bg-brand-600 text-white shadow-sm'
               : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
@@ -116,7 +116,7 @@ export const SalesReviewPage: React.FC = () => {
           <button
             key={s}
             onClick={() => setSessionFilter(s)}
-            className={`px-3 py-1.5 rounded-xl font-mono font-bold transition ${
+            className={`px-3 py-1.5 rounded-xl font-mono font-bold transition flex-shrink-0 ${
               sessionFilter === s
                 ? 'bg-brand-600 text-white shadow-sm'
                 : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
@@ -128,7 +128,7 @@ export const SalesReviewPage: React.FC = () => {
       </div>
 
       {/* 테이블 형태의 일괄 검토 뷰 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
         {targetSales.length === 0 ? (
           <div className="py-16 text-center text-xs text-slate-400">
             해당 회차에 검토할 판매 내역이 없습니다.
@@ -144,59 +144,59 @@ export const SalesReviewPage: React.FC = () => {
               return (
                 <div
                   key={sale.id}
-                  className={`p-4 rounded-2xl border transition flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 ${
+                  className={`p-3.5 sm:p-4 rounded-2xl border transition flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 sm:gap-4 ${
                     isPending
                       ? 'bg-amber-50/70 border-amber-300 shadow-sm'
                       : 'bg-slate-50 border-slate-200'
                   }`}
                 >
-                  <div className="flex-1 space-y-1.5">
-                    <div className="flex items-center space-x-2">
+                  <div className="flex-1 space-y-1.5 w-full">
+                    <div className="flex items-center space-x-2 flex-wrap gap-1">
                       <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        className={`text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full ${
                           isPending ? 'bg-amber-400 text-slate-950 font-black' : 'bg-emerald-100 text-emerald-800'
                         }`}
                       >
                         {sale.status}
                       </span>
-                      <span className="text-xs text-slate-400 font-mono">
+                      <span className="text-[11px] sm:text-xs text-slate-400 font-mono">
                         {new Date(sale.recognizedAt).toLocaleTimeString('ko-KR')}
                       </span>
-                      <span className="text-[10px] text-slate-500 font-mono bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                      <span className="text-[10px] text-slate-500 font-mono bg-white px-1.5 py-0.2 rounded border border-slate-200">
                         {sale.sessionId}
                       </span>
                     </div>
 
-                    <p className="text-xs text-slate-800 font-medium">
+                    <p className="text-xs text-slate-800 font-medium break-words">
                       "{sale.rawTranscript}"
                     </p>
                   </div>
 
-                  {/* 인라인 수정 인풋들 */}
-                  <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+                  {/* 인라인 수정 인풋들 (모바일 반응형 flex) */}
+                  <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto border-t lg:border-t-0 border-slate-200/60 pt-2 lg:pt-0">
                     <input
                       type="text"
                       value={curNickname}
                       onChange={(e) => handleInputChange(sale.id, 'nickname', e.target.value)}
                       placeholder="닉네임"
-                      className="w-28 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-brand-500 font-bold"
+                      className="flex-1 sm:w-28 min-w-[100px] px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-brand-500 font-bold"
                     />
 
-                    <div className="relative">
+                    <div className="relative flex-1 sm:w-28 min-w-[100px]">
                       <input
                         type="number"
                         value={curAmount}
                         onChange={(e) => handleInputChange(sale.id, 'amount', e.target.value)}
                         placeholder="금액"
-                        className="w-28 pl-3 pr-6 py-1.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-brand-500 font-bold"
+                        className="w-full pl-3 pr-6 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-brand-500 font-bold"
                       />
-                      <span className="text-[10px] text-slate-400 absolute right-2 top-2">원</span>
+                      <span className="text-[10px] text-slate-400 absolute right-2 top-2.5">원</span>
                     </div>
 
                     {sale.captureImageUrls && sale.captureImageUrls.length > 0 && (
                       <Link
                         to={`/sales/${sale.id}/capture`}
-                        className="p-1.5 rounded-xl bg-white border border-slate-200 text-cyan-600 hover:bg-slate-50"
+                        className="p-2 rounded-xl bg-white border border-slate-200 text-cyan-600 hover:bg-slate-50 active:scale-95"
                         title="캡처 이미지 보기"
                       >
                         <Camera className="w-4 h-4" />
@@ -205,7 +205,7 @@ export const SalesReviewPage: React.FC = () => {
 
                     <button
                       onClick={() => handleSaveRow(sale)}
-                      className="px-3 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-sm flex items-center space-x-1"
+                      className="px-3.5 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-sm flex items-center space-x-1 active:scale-95"
                     >
                       <Save className="w-3.5 h-3.5" />
                       <span>저장</span>
@@ -213,7 +213,7 @@ export const SalesReviewPage: React.FC = () => {
 
                     <button
                       onClick={() => deleteSale(sale.id)}
-                      className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                      className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 active:scale-95"
                       title="삭제"
                     >
                       <Trash2 className="w-4 h-4" />

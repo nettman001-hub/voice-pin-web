@@ -21,7 +21,7 @@ import {
 interface NavItem {
   name: string;
   path: string;
-  icon: React.FC<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string }>;
   badge?: string;
   isLiveOnly?: boolean;
 }
@@ -31,7 +31,12 @@ interface NavGroup {
   items: NavItem[];
 }
 
-export const Sidebar: React.FC = () => {
+interface SidebarProps {
+  isMobileOpen?: boolean;
+  onCloseMobile?: () => void;
+}
+
+export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile }) => {
   const { user } = useAuth();
   const { isListening } = useLive();
 
@@ -79,15 +84,26 @@ export const Sidebar: React.FC = () => {
 
   const currentGroups = user?.role === '관리자' ? adminGroups : sellerGroups;
 
-  return (
-    <aside className="w-64 bg-white border-r border-slate-200 text-slate-700 flex flex-col h-[calc(100vh-4rem)] sticky top-16 select-none shadow-sm">
+  const content = (
+    <div className="flex flex-col h-full select-none">
       <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-        <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-          {user?.role === '관리자' ? '관리자 시스템 관제' : '판매자 방송 관제 센터'}
+        <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+          {user?.role === '관리자' ? '관리자 관제 센터' : '판매자 방송 관제'}
         </span>
-        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-brand-50 text-brand-700 border border-brand-200">
-          v1.0.0
-        </span>
+        <div className="flex items-center space-x-2">
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-brand-50 text-brand-700 border border-brand-200">
+            v1.0.0
+          </span>
+          {onCloseMobile && (
+            <button
+              onClick={onCloseMobile}
+              className="lg:hidden p-1 rounded-lg hover:bg-slate-100 text-slate-400"
+              aria-label="메뉴 닫기"
+            >
+              <span className="text-lg leading-none font-bold">×</span>
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
@@ -103,6 +119,7 @@ export const Sidebar: React.FC = () => {
                   <NavLink
                     key={item.path}
                     to={item.path}
+                    onClick={() => onCloseMobile && onCloseMobile()}
                     end={item.path === '/live' || item.path === '/admin' || item.path === '/sales'}
                     className={({ isActive }) =>
                       `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition ${
@@ -145,6 +162,30 @@ export const Sidebar: React.FC = () => {
           </span>
         </div>
       </div>
-    </aside>
+    </div>
+  );
+
+  return (
+    <>
+      {/* 1. 데스크톱 고정 사이드바 */}
+      <aside className="hidden lg:flex w-64 bg-white border-r border-slate-200 text-slate-700 flex-col h-[calc(100vh-4rem)] sticky top-16 select-none shadow-sm">
+        {content}
+      </aside>
+
+      {/* 2. 모바일 슬라이드 드로어 */}
+      {isMobileOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden flex">
+          {/* 백드롭 */}
+          <div
+            className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm animate-in fade-in"
+            onClick={onCloseMobile}
+          />
+          {/* 드로어 컨텐츠 */}
+          <div className="relative w-72 max-w-[85vw] bg-white h-full shadow-2xl z-10 flex flex-col animate-in slide-in-from-left duration-200">
+            {content}
+          </div>
+        </div>
+      )}
+    </>
   );
 };

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SalesProvider } from './context/SalesContext';
@@ -6,6 +6,7 @@ import { LiveProvider } from './context/LiveContext';
 import { AppDataProvider } from './context/AppDataContext';
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
+import { MobileBottomNav } from './components/common/MobileBottomNav';
 
 // 페이지 목록
 import { OnboardingPage } from './pages/auth/OnboardingPage';
@@ -36,24 +37,34 @@ import { ReportManagementPage } from './pages/admin/ReportManagementPage';
 import { AdminStatsPage } from './pages/admin/AdminStatsPage';
 
 const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated } = useAuth();
   const location = useLocation();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // 온보딩 및 인증 페이지는 사이드바 숨김
+  // 온보딩 및 인증 페이지는 사이드바 및 하단 바 숨김
   const authRoutes = ['/onboarding', '/login', '/signup', '/password/reset', '/pricing'];
   const isAuthRoute = authRoutes.some((route) => location.pathname === route);
 
-  const showSidebar = isAuthenticated && !isAuthRoute;
+  const showNav = isAuthenticated && !isAuthRoute;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col selection:bg-brand-500 selection:text-white">
-      <Header />
-      <div className="flex-1 flex flex-row">
-        {showSidebar && <Sidebar />}
-        <main className="flex-1 overflow-x-hidden min-h-[calc(100vh-4rem)]">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col selection:bg-brand-500 selection:text-white antialiased">
+      <Header
+        onToggleMobileMenu={showNav ? () => setIsMobileMenuOpen(!isMobileMenuOpen) : undefined}
+        isMobileMenuOpen={isMobileMenuOpen}
+      />
+      <div className="flex-1 flex flex-row relative">
+        {showNav && (
+          <Sidebar
+            isMobileOpen={isMobileMenuOpen}
+            onCloseMobile={() => setIsMobileMenuOpen(false)}
+          />
+        )}
+        <main className={`flex-1 overflow-x-hidden min-h-[calc(100vh-4rem)] ${showNav ? 'pb-20 lg:pb-0' : ''}`}>
           {children}
         </main>
       </div>
+      {showNav && <MobileBottomNav />}
     </div>
   );
 };
