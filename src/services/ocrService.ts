@@ -53,39 +53,86 @@ export const recognizeCanvas = async (canvas: HTMLCanvasElement): Promise<string
 
 const normalize = (text: string) => text.replace(/\s+/g, ' ').trim();
 
+// 시스템 메시지(팔로우/참여/입장)와 상단 공지는 댓글에서 제외한다.
+const SYSTEM_KEYWORDS = ['팔로우했습니다', '팔로우 했습니다', '참여함', '입장했습니다', '호스트를'];
+const NOTICE_KEYWORDS = [
+  '라이브에 오신',
+  '환영합니다',
+  '가이드라인',
+  '크리에이터',
+  '커뮤니티',
+  '실시간으로 소통',
+  '18세',
+  '19세',
+  '선물을 보내려면',
+  '진행하려면'
+];
+
+/**
+ * 닉네임 줄에 섞인 배지 토큰을 제거한다.
+ * 예: "12 댓글자 동수맘 3위" -> "동수맘"
+ */
+const cleanBadgeTokens = (line: string): string =>
+  normalize(
+    line
+      .replace(/^\s*\d{1,3}\s+/, '')   // 레벨 배지 숫자 (△12 등)
+      .replace(/댓글자/g, '')           // 댓글자 배지
+      .replace(/\s*\d{1,2}위\s*$/g, '') // 하트 랭킹 (❤3위)
+      .replace(/[△▲]/g, '')
+  );
+
+const isSkippableLine = (line: string): boolean =>
+  SYSTEM_KEYWORDS.some((k) => line.includes(k)) || NOTICE_KEYWORDS.some((k) => line.includes(k));
+
+/**
+ * 틱톡 라이브 댓글의 닉네임 줄은 공백 없는 짧은 문자열이다.
+ * 내용("9900", "1" 등 숫자만)과 구분하기 위해 문자 포함 + 숫자 전용 제외 조건을 둔다.
+ */
+const looksLikeNickname = (line: string): boolean => {
+  if (line.length < 1 || line.length > 20) return false;
+  if (/\s/.test(line)) return false;              // 닉네임 줄은 공백이 없다
+  if (!/[가-힣a-zA-Z]/.test(line)) return false;  // 숫자/기호만 있는 줄 제외
+  if (isSkippableLine(line)) return false;
+  return true;
+};
+
 /**
  * OCR 원문을 댓글 목록(닉네임 + 내용)으로 파싱한다.
- * 라이브 채팅 패턴: "닉네임: 내용" / "닉네임 : 내용" / "닉네임 내용"
+ *
+ * 틱톡 라이브 채팅은 2줄 구조다:
+ *   [배지줄] 12 댓글자 동수맘 3위   <- 닉네임 (배지 토큰 포함)
+ *   [내용줄] 9900                  <- 내용
+ * 시스템 메시지("호스트를 팔로우했습니다", "참여함")와 상단 공지는 제외한다.
  */
 export const parseCommentsFromOcr = (rawText: string): Array<{ nickname: string; content: string }> => {
   const results: Array<{ nickname: string; content: string }> = [];
 
   const lines = rawText
     .split(/\r?\n/)
-    .map((line) => normalize(line))
-    .filter((line) => line.length >= 2);
+    .map((line) => cleanBadgeTokens(line))
+    .filter((line) => line.length >= 1);
+
+  let pendingNickname: string | null = null;
 
   for (const line of lines) {
-    // 1. "닉네임: 내용" 구분자 패턴
-    const colon = line.match(/^(.{1,20}?)\s*[:：]\s*(.+)$/);
-    if (colon) {
-      const nickname = normalize(colon[1]).replace(/[^가-힣a-zA-Z0-9_ ]/g, '').trim();
-      const content = normalize(colon[2]);
-      if (nickname && content) {
-        results.push({ nickname, content });
-        continue;
-      }
+    if (isSkippableLine(line)) continue;
+
+    // 직전 줄이 닉네임이었다면 이 줄은 무조건 내용이다.
+    if (pendingNickname !== null) {
+      results.push({ nickname: pendingNickname, content: line });
+      pendingNickname = null;
+      continue;
     }
 
-    // 2. 공백 분리 패턴 (첫 토큰을 닉네임으로 간주)
-    const spaced = line.match(/^([^\s]{1,15})\s+(.{2,})$/);
-    if (spaced) {
-      const nickname = spaced[1];
-      const content = normalize(spaced[2]);
-      // 숫자/시각/퍼센트 등 노이즈 토큰은 닉네임에서 제외
-      if (!/^[\d:.,%]+$/.test(nickname)) {
-        results.push({ nickname, content });
-      }
+    // 닉네임과 내용이 한 줄로 붙어 나온 경우 ("동수맘 9900")
+    const inline = line.match(/^([^\s]{2,15})\s+([가-힣a-zA-Z].{1,})$/);
+    if (inline && looksLikeNickname(inline[1])) {
+      results.push({ nickname: inline[1], content: normalize(inline[2]) });
+      continue;
+    }
+
+    if (looksLikeNickname(line)) {
+      pendingNickname = line;
     }
   }
 
