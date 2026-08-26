@@ -48,3 +48,9 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(148, 163, 184, 1);
 }
+
+/* 댓글 알림창 카운트다운 애니메이션 */
+@keyframes shrink-width {
+  from { width: 100%; }
+  to { width: 0%; }
+}

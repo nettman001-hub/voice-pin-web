@@ -18,6 +18,10 @@ import {
 interface CaptureAreaStudioModalProps {
   isOpen: boolean;
   onClose: () => void;
+  title?: string;
+  /** 미지정 시 앱의 기본 캡처 영역을 사용한다 (댓글 캡처 영역 등 별도 영역 지정 가능) */
+  areaConfig?: CaptureAreaConfig;
+  onSave?: (config: CaptureAreaConfig) => void;
 }
 
 type DragAction = 'CREATE' | 'MOVE' | 'RESIZE_TL' | 'RESIZE_TR' | 'RESIZE_BL' | 'RESIZE_BR';
@@ -26,13 +30,22 @@ type DragAction = 'CREATE' | 'MOVE' | 'RESIZE_TL' | 'RESIZE_TR' | 'RESIZE_BL' | 
  * 실시간 공유 화면 위에서 캡처 영역을 직접 지정하는 스튜디오 모달.
  * 공유 항목의 전체 화면을 라이브 비디오로 보여주고 그 위에 캡처 영역 박스를 드래그/리사이즈한다.
  */
-export const CaptureAreaStudioModal: React.FC<CaptureAreaStudioModalProps> = ({ isOpen, onClose }) => {
+export const CaptureAreaStudioModal: React.FC<CaptureAreaStudioModalProps> = ({
+  isOpen,
+  onClose,
+  title = '실시간 화면 캡처 영역 설정',
+  areaConfig,
+  onSave
+}) => {
   const { captureAreaConfig, setCaptureAreaConfig } = useAppData();
   const { captureCurrentScreen, isListening, stopListening } = useLive();
 
+  const savedConfig = areaConfig ?? captureAreaConfig;
+  const persist = onSave ?? setCaptureAreaConfig;
+
   const [stream, setStream] = useState<MediaStream | null>(() => screenCaptureService.getActiveStream());
   const [connection, setConnection] = useState<ScreenCaptureConnectionState>(() => screenCaptureService.getConnectionState());
-  const [area, setArea] = useState<CaptureAreaConfig>(captureAreaConfig);
+  const [area, setArea] = useState<CaptureAreaConfig>(savedConfig);
   const [videoSize, setVideoSize] = useState<{ width: number; height: number } | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
@@ -46,16 +59,21 @@ export const CaptureAreaStudioModal: React.FC<CaptureAreaStudioModalProps> = ({ 
     startX: 0,
     startY: 0
   });
+  const savedConfigRef = useRef(savedConfig);
+
+  useEffect(() => {
+    savedConfigRef.current = savedConfig;
+  }, [savedConfig]);
 
   // 열릴 때 저장된 설정과 현재 공유 스트림을 동기화한다.
   useEffect(() => {
     if (isOpen) {
-      setArea(captureAreaConfig);
+      setArea(savedConfigRef.current);
       setStream(screenCaptureService.getActiveStream());
       setLastCaptureUrl(null);
       setSavedFlash(false);
     }
-  }, [isOpen, captureAreaConfig]);
+  }, [isOpen]);
 
   // 공유 연결 상태 변경을 실시간 반영한다.
   useEffect(() => screenCaptureService.subscribeConnection((state) => {
@@ -203,7 +221,7 @@ export const CaptureAreaStudioModal: React.FC<CaptureAreaStudioModalProps> = ({ 
   };
 
   const handleSave = () => {
-    setCaptureAreaConfig(area);
+    persist(area);
     setSavedFlash(true);
     window.setTimeout(() => setSavedFlash(false), 2000);
   };
@@ -237,7 +255,7 @@ export const CaptureAreaStudioModal: React.FC<CaptureAreaStudioModalProps> = ({ 
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="실시간 화면 캡처 영역 설정"
+      title={title}
       maxWidth="max-w-4xl"
     >
       <div className="space-y-4">

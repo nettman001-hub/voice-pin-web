@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useAppData, CAPTURE_PRESETS } from '../../context/AppDataContext';
 import { useLive } from '../../context/LiveContext';
+import { useCommentCapture } from '../../context/CommentCaptureContext';
 import { RecognitionWordRule, RuleAction, CaptureAreaPreset, CaptureAreaConfig } from '../../types/rules';
 import { screenCaptureService } from '../../services/screenCaptureService';
 import { CaptureAreaStudioModal } from './CaptureAreaStudioModal';
@@ -23,7 +25,13 @@ import {
   Tv,
   Camera,
   Layers,
-  Settings2
+  Settings2,
+  MessageSquareText,
+  BellRing,
+  Timer,
+  Play,
+  Square,
+  ArrowRight
 } from 'lucide-react';
 
 export const RecognitionRulesPage: React.FC = () => {
@@ -37,6 +45,23 @@ export const RecognitionRulesPage: React.FC = () => {
     setCaptureAreaConfig
   } = useAppData();
   const { isListening, stopListening, disconnectScreenShare } = useLive();
+  const {
+    config: commentConfig,
+    saveConfig: saveCommentConfig,
+    isActive: isCommentActive,
+    isRunning: isCommentRunning,
+    isProcessing: isCommentProcessing,
+    lastRunAt: commentLastRunAt,
+    newCount: commentNewCount,
+    startCapture: startCommentCapture,
+    stopCapture: stopCommentCapture
+  } = useCommentCapture();
+
+  const [showCommentStudio, setShowCommentStudio] = useState(false);
+  const [commentIntervalSec, setCommentIntervalSec] = useState(String(commentConfig.intervalSec));
+  const [commentAlertWords, setCommentAlertWords] = useState(commentConfig.alertWords.join(', '));
+  const [commentAlertDuration, setCommentAlertDuration] = useState(String(commentConfig.alertDurationSec));
+  const [commentAlertCommand, setCommentAlertCommand] = useState(commentConfig.alertVoiceCommand);
 
   const [newWord, setNewWord] = useState('');
   const [newAction, setNewAction] = useState<RuleAction>('DB_SAVE');
@@ -760,6 +785,165 @@ export const RecognitionRulesPage: React.FC = () => {
         </div>
       </div>
 
+      {/* 1-5. 댓글 자동 캡처 & 키워드 알림 설정 */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 sm:space-y-5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div>
+            <h3 className="text-sm sm:text-base font-black text-slate-900 flex items-center space-x-2">
+              <MessageSquareText className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-600" />
+              <span>댓글 자동 캡처 & 키워드 알림</span>
+            </h3>
+            <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
+              라이브 청취 중 지정한 주기마다 댓글 영역을 OCR로 읽어 닉네임/내용을 자동 기록합니다. 설정 단어가 잡히면 큰 알림창이 뜹니다.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold border ${
+              isCommentRunning
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                : isCommentActive
+                ? 'bg-amber-50 text-amber-800 border-amber-200'
+                : 'bg-slate-100 text-slate-600 border-slate-200'
+            }`}>
+              {isCommentRunning ? '자동 캡처 동작 중' : isCommentActive ? '대기 중 (라이브 청취 필요)' : '중지됨'}
+            </span>
+
+            <button
+              onClick={() => (isCommentActive ? stopCommentCapture() : startCommentCapture())}
+              className={`px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md flex items-center space-x-1.5 transition active:scale-95 ${
+                isCommentActive
+                  ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-500/20'
+                  : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20'
+              }`}
+            >
+              {isCommentActive ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+              <span>{isCommentActive ? '자동 캡처 정지' : '자동 캡처 시작'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 상태 요약 */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
+            <div className="text-slate-500 text-[10px] font-bold">신규 누적</div>
+            <div className="text-lg font-black text-slate-900">{commentNewCount} <span className="text-[10px] font-normal text-slate-400">건</span></div>
+          </div>
+          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
+            <div className="text-slate-500 text-[10px] font-bold">마지막 캡처</div>
+            <div className="text-sm font-black text-slate-900 truncate">{commentLastRunAt || '-'}</div>
+          </div>
+          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
+            <div className="text-slate-500 text-[10px] font-bold">OCR 처리</div>
+            <div className="text-sm font-black text-slate-900">{isCommentProcessing ? '분석 중...' : '대기'}</div>
+          </div>
+          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+            <div className="text-slate-500 text-[10px] font-bold">캡처 기록</div>
+            <Link to="/comments" className="text-brand-600 hover:underline font-bold text-[11px] flex items-center">
+              보기 <ArrowRight className="w-3 h-3 ml-0.5" />
+            </Link>
+          </div>
+        </div>
+
+        {/* 댓글 캡처 영역 */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+          <div className="text-xs">
+            <div className="font-bold text-slate-700 flex items-center space-x-1.5">
+              <Crop className="w-3.5 h-3.5 text-cyan-600" />
+              <span>댓글 캡처 영역: <span className="text-slate-900">{commentConfig.area.name}</span></span>
+            </div>
+            <div className="text-slate-500 mt-0.5 font-mono text-[10px]">
+              X {(commentConfig.area.xRatio * 100).toFixed(0)}% · Y {(commentConfig.area.yRatio * 100).toFixed(0)}% · W {(commentConfig.area.widthRatio * 100).toFixed(0)}% · H {(commentConfig.area.heightRatio * 100).toFixed(0)}%
+            </div>
+          </div>
+          <button
+            onClick={() => setShowCommentStudio(true)}
+            className="px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-sm flex items-center justify-center space-x-1.5 transition active:scale-95"
+          >
+            <Eye className="w-3.5 h-3.5" />
+            <span>공유 화면에서 영역 지정</span>
+          </button>
+        </div>
+
+        {/* 세부 설정 폼 */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          <div className="space-y-1.5">
+            <label className="font-bold text-slate-700 flex items-center space-x-1">
+              <Timer className="w-3.5 h-3.5 text-slate-400" />
+              <span>자동 캡처 주기 (초, 최소 3초)</span>
+            </label>
+            <input
+              type="number"
+              min={3}
+              value={commentIntervalSec}
+              onChange={(e) => setCommentIntervalSec(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 font-mono text-slate-900 focus:outline-none focus:border-brand-500"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="font-bold text-slate-700 flex items-center space-x-1">
+              <BellRing className="w-3.5 h-3.5 text-rose-400" />
+              <span>알림 단어 (쉼표 구분, 예: 저요, 구매)</span>
+            </label>
+            <input
+              type="text"
+              value={commentAlertWords}
+              onChange={(e) => setCommentAlertWords(e.target.value)}
+              placeholder="저요, 구매"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="font-bold text-slate-700">알림창 자동 닫힘 시간 (초)</label>
+            <input
+              type="number"
+              min={3}
+              value={commentAlertDuration}
+              onChange={(e) => setCommentAlertDuration(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 font-mono text-slate-900 focus:outline-none focus:border-brand-500"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="font-bold text-slate-700">알림창 닫는 음성 명령</label>
+            <input
+              type="text"
+              value={commentAlertCommand}
+              onChange={(e) => setCommentAlertCommand(e.target.value)}
+              placeholder="닫아"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            onClick={() => {
+              const interval = Math.max(3, parseInt(commentIntervalSec, 10) || 10);
+              const duration = Math.max(3, parseInt(commentAlertDuration, 10) || 15);
+              const words = commentAlertWords.split(',').map((w) => w.trim()).filter(Boolean);
+              const command = commentAlertCommand.trim() || '닫아';
+              saveCommentConfig({
+                ...commentConfig,
+                intervalSec: interval,
+                alertWords: words,
+                alertDurationSec: duration,
+                alertVoiceCommand: command
+              });
+              setCommentIntervalSec(String(interval));
+              setCommentAlertDuration(String(duration));
+              setCommentAlertCommand(command);
+              showNotice(`댓글 캡처 설정이 저장되었습니다. (주기 ${interval}초 · 알림 단어 ${words.length}개 · 알림 ${duration}초)`, '💬 댓글 캡처 설정 저장', 'success');
+            }}
+            className="px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-500/20 transition"
+          >
+            댓글 캡처 설정 저장하기
+          </button>
+        </div>
+      </div>
+
       {/* 2. 단어 인식 규칙 목록 & 추가 */}
       <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 sm:space-y-6">
         <div className="border-b border-slate-100 pb-3 sm:pb-4">
@@ -958,6 +1142,18 @@ export const RecognitionRulesPage: React.FC = () => {
 
       {/* 실시간 공유 화면 위에서 캡처 영역을 설정하는 스튜디오 모달 */}
       <CaptureAreaStudioModal isOpen={showAreaStudio} onClose={() => setShowAreaStudio(false)} />
+
+      {/* 댓글 캡처 영역 전용 스튜디오 모달 */}
+      <CaptureAreaStudioModal
+        isOpen={showCommentStudio}
+        onClose={() => setShowCommentStudio(false)}
+        title="실시간 화면에서 댓글 캡처 영역 설정"
+        areaConfig={commentConfig.area}
+        onSave={(area) => {
+          saveCommentConfig({ ...commentConfig, area });
+          showNotice('댓글 캡처 영역이 저장되었습니다! 💾', '💬 댓글 영역 저장 완료', 'success');
+        }}
+      />
     </div>
   );
 };

@@ -4,6 +4,7 @@ import { RecognitionWordRule, CaptureAreaConfig } from '../types/rules';
 import { TrainingSentence } from '../types/training';
 import { PaymentHistoryItem, PaymentCard } from '../types/subscription';
 import { ReportItem, SystemErrorLog, NotificationSetting } from '../types/admin';
+import { CommentRecord, CommentCaptureConfig, DEFAULT_COMMENT_CAPTURE_CONFIG } from '../types/comment';
 
 // 기본 방송 회차 생성 (YYYYMMDD_HH 형식)
 export function generateSessionId(): string {
@@ -173,7 +174,9 @@ const KEYS = {
   LOGS: 'dadryeo_logs',
   NOTIFICATIONS: 'dadryeo_notifications',
   DEEPGRAM_API_KEY: 'dadryeo_deepgram_api_key',
-  CAPTURE_AREA: 'voicecap_capture_area_config'
+  CAPTURE_AREA: 'voicecap_capture_area_config',
+  COMMENT_RECORDS: 'voicecap_comment_records',
+  COMMENT_CAPTURE_CONFIG: 'voicecap_comment_capture_config'
 };
 
 export class StorageService {
@@ -347,6 +350,34 @@ export class StorageService {
   }
   public saveCaptureAreaConfig(config: CaptureAreaConfig) {
     this.setItem(KEYS.CAPTURE_AREA, config);
+  }
+
+  // 댓글 캡처 설정
+  public getCommentCaptureConfig(): CommentCaptureConfig {
+    return this.getItem<CommentCaptureConfig>(KEYS.COMMENT_CAPTURE_CONFIG, DEFAULT_COMMENT_CAPTURE_CONFIG);
+  }
+  public saveCommentCaptureConfig(config: CommentCaptureConfig) {
+    this.setItem(KEYS.COMMENT_CAPTURE_CONFIG, config);
+  }
+
+  // 댓글 캡처 기록
+  public getCommentRecords(): CommentRecord[] {
+    return this.getItem<CommentRecord[]>(KEYS.COMMENT_RECORDS, []);
+  }
+  public saveCommentRecords(records: CommentRecord[]) {
+    this.setItem(KEYS.COMMENT_RECORDS, records);
+  }
+  public addCommentRecords(records: CommentRecord[]) {
+    if (records.length === 0) return;
+    const list = this.getCommentRecords();
+    this.saveCommentRecords([...records, ...list].slice(0, 5000));
+  }
+  public deleteCommentRecord(id: string) {
+    this.saveCommentRecords(this.getCommentRecords().filter((r) => r.id !== id));
+  }
+  public deleteCommentRecords(ids: string[]) {
+    const idSet = new Set(ids);
+    this.saveCommentRecords(this.getCommentRecords().filter((r) => !idSet.has(r.id)));
   }
 }
 

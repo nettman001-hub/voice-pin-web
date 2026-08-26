@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLive } from '../../context/LiveContext';
+import { useCommentCapture } from '../../context/CommentCaptureContext';
 import { useSales } from '../../context/SalesContext';
 import { AudioVisualizer } from '../../components/common/AudioVisualizer';
 import { CaptureAreaStudioModal } from './CaptureAreaStudioModal';
@@ -18,7 +19,8 @@ import {
   Edit3,
   Sparkles,
   Key,
-  X
+  X,
+  MessageSquareText
 } from 'lucide-react';
 
 export const LiveHomePage: React.FC = () => {
@@ -46,6 +48,13 @@ export const LiveHomePage: React.FC = () => {
 
   const { user } = useAuth();
   const isAdmin = user?.role === '관리자';
+  const {
+    isActive: isCommentCaptureActive,
+    isRunning: isCommentCaptureRunning,
+    newCount: commentNewCount,
+    startCapture: startCommentCapture,
+    stopCapture: stopCommentCapture
+  } = useCommentCapture();
 
   const { sales } = useSales();
   const [selectedCaptureModal, setSelectedCaptureModal] = useState<string | null>(null);
@@ -183,6 +192,26 @@ export const LiveHomePage: React.FC = () => {
             >
               <Camera className="w-3.5 h-3.5 text-cyan-600" />
               <span>{isPreparingStudio ? '화면 연결 중...' : '즉시 캡처'}</span>
+            </button>
+
+            <button
+              onClick={() => (isCommentCaptureActive ? stopCommentCapture() : startCommentCapture())}
+              title="라이브 청취 중 지정한 주기로 댓글 영역을 자동 OCR 캡처합니다"
+              className={`px-3 py-2.5 sm:px-4 sm:py-3 rounded-xl text-xs font-bold border flex items-center justify-center space-x-1.5 transition shadow-sm ${
+                isCommentCaptureActive
+                  ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
+                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+              }`}
+            >
+              <MessageSquareText className={`w-3.5 h-3.5 ${isCommentCaptureRunning ? 'text-rose-500 animate-pulse' : ''}`} />
+              <span>
+                댓글 캡처 {isCommentCaptureActive ? '중지' : '시작'}
+                {commentNewCount > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-black">
+                    +{commentNewCount}
+                  </span>
+                )}
+              </span>
             </button>
           </div>
 

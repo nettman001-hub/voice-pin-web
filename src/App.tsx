@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'rea
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SalesProvider } from './context/SalesContext';
 import { LiveProvider } from './context/LiveContext';
+import { CommentCaptureProvider } from './context/CommentCaptureContext';
 import { AppDataProvider } from './context/AppDataContext';
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
@@ -18,6 +19,7 @@ import { PricingPage } from './pages/auth/PricingPage';
 import { LiveHomePage } from './pages/seller/LiveHomePage';
 import { VoiceTrainingPage } from './pages/seller/VoiceTrainingPage';
 import { RecognitionRulesPage } from './pages/seller/RecognitionRulesPage';
+import { CommentRecordsPage } from './pages/seller/CommentRecordsPage';
 import { SalesListPage } from './pages/seller/SalesListPage';
 import { SalesDetailPage } from './pages/seller/SalesDetailPage';
 import { SalesReviewPage } from './pages/seller/SalesReviewPage';
@@ -99,8 +101,9 @@ export const App: React.FC = () => {
       <AuthProvider>
         <SalesProvider>
           <LiveProvider>
-            <AppDataProvider>
-              <AppLayout>
+            <CommentCaptureProvider>
+              <AppDataProvider>
+                <AppLayout>
                 <Routes>
                   {/* 루트 리다이렉트 */}
                   <Route path="/" element={<RootRedirect />} />
@@ -119,6 +122,7 @@ export const App: React.FC = () => {
                     <Route path="/training" element={<VoiceTrainingPage />} />
                     <Route path="/recognition-rules" element={<RecognitionRulesPage />} />
                     <Route path="/rules" element={<RecognitionRulesPage />} />
+                    <Route path="/comments" element={<CommentRecordsPage />} />
                     <Route path="/sales" element={<SalesListPage />} />
                     <Route path="/sales/:id" element={<SalesDetailPage />} />
                     <Route path="/sales/:id/capture" element={<SalesDetailPage />} />
@@ -156,7 +160,8 @@ export const App: React.FC = () => {
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </AppLayout>
-            </AppDataProvider>
+              </AppDataProvider>
+            </CommentCaptureProvider>
           </LiveProvider>
         </SalesProvider>
       </AuthProvider>

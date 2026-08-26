@@ -15,7 +15,8 @@ import {
   Shield,
   Users,
   AlertTriangle,
-  FileSpreadsheet
+  FileSpreadsheet,
+  MessageSquareText
 } from 'lucide-react';
 
 interface NavItem {
@@ -54,6 +55,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
       groupName: '판매 & 정산 관리',
       items: [
         { name: '판매 내역 목록', path: '/sales', icon: ShoppingBag },
+        { name: '댓글 캡처 기록', path: '/comments', icon: MessageSquareText },
         { name: '방송 후 일괄 확인', path: '/sales/review', icon: CheckSquare },
         { name: '정산 및 엑셀 다운로드', path: '/settlement', icon: FileSpreadsheet },
       ]

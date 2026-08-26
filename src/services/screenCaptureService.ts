@@ -181,24 +181,24 @@ export class ScreenCaptureService {
   }
 
   /**
-   * 지정된 비디오 스트림 또는 캐시된 윈도우 화면 공유에서 특정 영역(댓글창, OBS 송출창, 전체화면)을 캡처하여 Data URL (PNG)로 반환
+   * 지정된 비디오 스트림 또는 캐시된 윈도우 화면 공유에서 특정 영역을 잘라낸 순수 캔버스를 반환한다.
+   * 워터마크를 넣지 않으므로 댓글 OCR 등 이미지 분석 용도로 사용한다.
    */
-  public async captureArea(
+  public async captureAreaCanvas(
     stream: MediaStream | null,
-    areaConfig: CaptureAreaConfig,
-    metadata?: { nickname?: string; amount?: number; timestamp?: string }
-  ): Promise<string> {
+    areaConfig: CaptureAreaConfig
+  ): Promise<HTMLCanvasElement | null> {
     let activeStream = stream || this.getActiveStream();
 
     // 스트림이 아직 없다면 최초 1회 화면 공유 요청
     if (!activeStream) {
       activeStream = await this.getOrCreateStream(false);
-      if (!activeStream) return '';
+      if (!activeStream) return null;
     }
 
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    if (!ctx) return '';
+    if (!ctx) return null;
 
     // 실제 비디오 트랙이 있는 경우 (화면 공유 / 윈도우 창 캡처)
     const videoTrack = activeStream.getVideoTracks()[0];
@@ -210,7 +210,7 @@ export class ScreenCaptureService {
         video.playsInline = true;
         video.autoplay = true;
         video.srcObject = new MediaStream([videoTrack]);
-        
+
         // 브라우저 렌더러가 프레임을 실제로 디코딩하도록 DOM에 일시 부착
         video.style.position = 'fixed';
         video.style.top = '-9999px';
@@ -260,22 +260,12 @@ export class ScreenCaptureService {
 
         ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
 
-        // 캡처 워터마크 태그 부착
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
-        const badgeW = Math.min(160, Math.max(110, sw * 0.35));
-        const badgeH = 26;
-        ctx.fillRect(canvas.width - badgeW - 8, canvas.height - badgeH - 8, badgeW, badgeH);
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.fillText('🎙️ VoiceCAP 캡처', canvas.width - badgeW, canvas.height - 10);
-
         // 정리 작업
         if (video.parentNode) {
           video.parentNode.removeChild(video);
         }
 
-        const dataUrl = canvas.toDataURL('image/png');
-        return dataUrl;
+        return canvas;
       } catch (err) {
         console.warn('[ScreenCapture] 비디오 프레임 크롭 실패:', err);
         if (video && video.parentNode) {
@@ -284,7 +274,33 @@ export class ScreenCaptureService {
       }
     }
 
-    return '';
+    return null;
+  }
+
+  /**
+   * 지정된 비디오 스트림 또는 캐시된 윈도우 화면 공유에서 특정 영역(댓글창, OBS 송출창, 전체화면)을 캡처하여 Data URL (PNG)로 반환
+   */
+  public async captureArea(
+    stream: MediaStream | null,
+    areaConfig: CaptureAreaConfig,
+    metadata?: { nickname?: string; amount?: number; timestamp?: string }
+  ): Promise<string> {
+    const canvas = await this.captureAreaCanvas(stream, areaConfig);
+    if (!canvas) return '';
+
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      // 캡처 워터마크 태그 부착
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+      const badgeW = Math.min(160, Math.max(110, canvas.width * 0.35));
+      const badgeH = 26;
+      ctx.fillRect(canvas.width - badgeW - 8, canvas.height - badgeH - 8, badgeW, badgeH);
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillText('🎙️ VoiceCAP 캡처', canvas.width - badgeW, canvas.height - 10);
+    }
+
+    return canvas.toDataURL('image/png');
   }
 }
 
