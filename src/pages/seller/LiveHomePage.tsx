@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLive } from '../../context/LiveContext';
-import { useCommentCapture } from '../../context/CommentCaptureContext';
+import { useCommentCapture, getCommentStatusBadge } from '../../context/CommentCaptureContext';
 import { useSales } from '../../context/SalesContext';
 import { AudioVisualizer } from '../../components/common/AudioVisualizer';
 import { screenCaptureService } from '../../services/screenCaptureService';
@@ -52,10 +52,13 @@ export const LiveHomePage: React.FC = () => {
   const {
     isActive: isCommentCaptureActive,
     isRunning: isCommentCaptureRunning,
+    serverStatus: commentServerStatus,
+    serverMessage: commentServerMessage,
     newCount: commentNewCount,
     liveComments,
     startCapture: startCommentCapture,
-    stopCapture: stopCommentCapture
+    stopCapture: stopCommentCapture,
+    config: commentConfig
   } = useCommentCapture();
 
   const { sales } = useSales();
@@ -217,7 +220,7 @@ export const LiveHomePage: React.FC = () => {
                   ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
                   : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
               }`}
-              title="라이브 청취 시작 시 지정한 주기로 댓글 영역을 자동 OCR 캡처합니다"
+              title="라이브 청취 시작 시 로컬 수집 서버가 틱톡 라이브 댓글을 실시간 수집합니다"
             >
               <input
                 type="checkbox"
@@ -468,12 +471,26 @@ export const LiveHomePage: React.FC = () => {
           {/* 실시간 댓글 캡처 피드 (아래쪽이 최신글) */}
           <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2 flex-wrap gap-y-1">
                 <MessageSquareText className={`w-4 h-4 ${isCommentCaptureRunning ? 'text-rose-500 animate-pulse' : 'text-cyan-600'}`} />
                 <span>실시간 댓글 캡처 ({liveComments.length}건)</span>
-                {!isCommentCaptureActive && (
+                {!isCommentCaptureActive ? (
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
                     함께시작 꺼짐
+                  </span>
+                ) : (
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                      getCommentStatusBadge(commentServerStatus).tone === 'ok'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : getCommentStatusBadge(commentServerStatus).tone === 'warn'
+                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                        : getCommentStatusBadge(commentServerStatus).tone === 'bad'
+                        ? 'bg-rose-50 text-rose-600 border-rose-200'
+                        : 'bg-slate-100 text-slate-500 border-slate-200'
+                    }`}
+                  >
+                    {getCommentStatusBadge(commentServerStatus).label}
                   </span>
                 )}
               </h3>
@@ -483,12 +500,18 @@ export const LiveHomePage: React.FC = () => {
               </Link>
             </div>
 
+            {isCommentCaptureActive && (commentServerStatus === 'DISCONNECTED' || commentServerStatus === 'ERROR') && (
+              <p className="mb-3 px-3 py-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-bold">
+                ⚠️ {commentServerMessage || '로컬 댓글 수집 서버(server/)가 실행 중인지 확인하세요.'}
+              </p>
+            )}
+
             <div ref={commentFeedRef} className="max-h-[220px] min-h-[60px] overflow-y-auto space-y-1.5 pr-1">
               {liveComments.length === 0 ? (
                 <div className="py-6 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-2xl">
                   {isCommentCaptureRunning
-                    ? '댓글 영역을 읽는 중입니다... 새 댓글이 감지되면 여기에 표시됩니다.'
-                    : '"댓글캡처 함께시작" 체크 후 라이브 청취를 시작하면 캡처된 댓글이 표시됩니다.'}
+                    ? `@${commentConfig.tiktokUsername || '?'} 라이브 댓글을 실시간 수집 중입니다...`
+                    : '"댓글캡처 함께시작" 체크 후 라이브 청취를 시작하면 틱톡 댓글이 실시간 표시됩니다.'}
                 </div>
               ) : (
                 liveComments.map((c) => (

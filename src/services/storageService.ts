@@ -353,9 +353,10 @@ export class StorageService {
     this.setItem(KEYS.CAPTURE_AREA, config);
   }
 
-  // 댓글 캡처 설정
+  // 댓글 캡처 설정 (구버전 저장값과 신규 기본값을 병합해 반환)
   public getCommentCaptureConfig(): CommentCaptureConfig {
-    return this.getItem<CommentCaptureConfig>(KEYS.COMMENT_CAPTURE_CONFIG, DEFAULT_COMMENT_CAPTURE_CONFIG);
+    const stored = this.getItem<Partial<CommentCaptureConfig> | null>(KEYS.COMMENT_CAPTURE_CONFIG, null);
+    return { ...DEFAULT_COMMENT_CAPTURE_CONFIG, ...(stored || {}) };
   }
   public saveCommentCaptureConfig(config: CommentCaptureConfig) {
     this.setItem(KEYS.COMMENT_CAPTURE_CONFIG, config);

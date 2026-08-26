@@ -1,0 +1,21 @@
+{
+  "name": "voicecap-comment-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "VoiceCAP - TikTok 라이브 댓글 실시간 수집 로컬 서버 (TikTok-Live-Connector + Socket.IO)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1",
+    "tiktok-live-connector": "^2.4.4"
+  }
+}

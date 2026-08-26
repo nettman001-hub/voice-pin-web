@@ -25,3 +25,8 @@ dist-ssr
 
 .vercel
 .env*
+
+# Euler Stream API key (secret)
+eulerstream_key.txt
+server/node_modules
+!server/.env.example

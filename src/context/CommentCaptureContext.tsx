@@ -1,9 +1,13 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, MessageSquareText, X } from 'lucide-react';
+import { AlertTriangle, X } from 'lucide-react';
 import { useLive } from './LiveContext';
 import { storageService } from '../services/storageService';
-import { screenCaptureService } from '../services/screenCaptureService';
-import { buildNewCommentRecords, commentDedupeKey, recognizeCanvas, terminateOcr, warmUpOcr } from '../services/ocrService';
+import {
+  commentDedupeKey,
+  commentStreamService,
+  StreamedComment
+} from '../services/commentStreamService';
+import type { CommentStreamStatus } from '../services/commentStreamService';
 import { CommentCaptureConfig, CommentRecord } from '../types/comment';
 
 export interface CommentAlert {
@@ -15,12 +19,12 @@ export interface CommentAlert {
 }
 
 interface CommentCaptureContextType {
-  isActive: boolean;          // 사용자가 시작한 자동 댓글 캡처 토글
-  isRunning: boolean;         // 실제 동작 중 (토글 ON + 라이브 청취 중)
-  isProcessing: boolean;      // 현재 캡처/OCR 처리 중
-  lastRunAt: string | null;   // 마지막 캡처 시각
-  newCount: number;           // 토글 ON 이후 신규 누적 건수
-  liveComments: CommentRecord[]; // 현재 회차에서 캡처된 댓글 (아래쪽이 최신)
+  isActive: boolean;              // 사용자가 켠 댓글 수집 토글 (함께시작)
+  isRunning: boolean;             // 실제 수집 중 (토글 ON + 라이브 청취 중 + 서버 연결 + 틱톡 수집중)
+  serverStatus: CommentStreamStatus; // 로컬 수집 서버/틱톡 연결 상태
+  serverMessage: string;          // 상태 안내 메시지
+  newCount: number;               // 토글 ON 이후 신규 누적 건수
+  liveComments: CommentRecord[];  // 현재 회차에서 수집된 댓글 (아래쪽이 최신)
   activeAlert: CommentAlert | null;
   dismissAlert: () => void;
   startCapture: () => void;
@@ -36,22 +40,26 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
   // 라이브 청취와 함께 시작이 기본값(체크)이며, 사용자가 바꾼 체크 상태는 저장되어 유지된다.
   const [isActive, setIsActive] = useState<boolean>(() => storageService.getCommentCaptureActive());
-  const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [lastRunAt, setLastRunAt] = useState<string | null>(null);
+  const [serverStatus, setServerStatus] = useState<CommentStreamStatus>('DISCONNECTED');
+  const [serverMessage, setServerMessage] = useState<string>('로컬 댓글 수집 서버 미연결');
   const [newCount, setNewCount] = useState<number>(0);
   const [liveComments, setLiveComments] = useState<CommentRecord[]>([]);
   const [activeAlert, setActiveAlert] = useState<CommentAlert | null>(null);
   const [config, setConfig] = useState<CommentCaptureConfig>(() => storageService.getCommentCaptureConfig());
 
   const seenKeysRef = useRef<Set<string>>(new Set());
-  const processingRef = useRef<boolean>(false);
   const alertTimerRef = useRef<number | null>(null);
   const configRef = useRef<CommentCaptureConfig>(config);
   const isActiveRef = useRef<boolean>(false);
+  const sessionIdRef = useRef<string>(currentSessionId);
 
   useEffect(() => {
     configRef.current = config;
   }, [config]);
+
+  useEffect(() => {
+    sessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
 
   useEffect(() => {
     isActiveRef.current = isActive;
@@ -95,68 +103,103 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     }
   }, [transcriptLogs, activeAlert, dismissAlert]);
 
-  const runTick = useCallback(async () => {
-    if (processingRef.current || !isActiveRef.current || !isListening) return;
+  // 로컬 서버가 중계한 실시간 댓글 유입 처리
+  const ingestComment = useCallback(
+    (incoming: StreamedComment) => {
+      if (!isActiveRef.current) return;
 
-    const stream = screenCaptureService.getActiveStream();
-    if (!stream) return;
+      const nickname = (incoming.nickname || incoming.uniqueId || '알 수 없음').trim();
+      const content = String(incoming.content || '').trim();
+      if (!content || !nickname) return;
 
-    processingRef.current = true;
-    setIsProcessing(true);
+      const key = commentDedupeKey(nickname, content);
+      if (seenKeysRef.current.has(key)) return;
+      seenKeysRef.current.add(key);
 
-    try {
-      const canvas = await screenCaptureService.captureAreaCanvas(stream, configRef.current.area);
-      if (!canvas) return;
+      const cfg = configRef.current;
+      const matchedWord = cfg.alertWords.find((word) => word && content.includes(word));
 
-      const rawText = await recognizeCanvas(canvas);
-      if (!rawText.trim()) return;
+      const record: CommentRecord = {
+        id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        sessionId: sessionIdRef.current,
+        nickname,
+        uniqueId: incoming.uniqueId || undefined,
+        content,
+        capturedAt: incoming.receivedAt || new Date().toISOString(),
+        ...(matchedWord ? { matchedAlertWord: matchedWord } : {})
+      };
 
-      const { records, alertHits } = buildNewCommentRecords(
-        rawText,
-        currentSessionId,
-        seenKeysRef.current,
-        configRef.current.alertWords
-      );
+      storageService.addCommentRecords([record]);
+      setNewCount((prev) => prev + 1);
+      setLiveComments((prev) => [...prev, record].slice(-100));
 
-      if (records.length > 0) {
-        storageService.addCommentRecords(records);
-        setNewCount((prev) => prev + records.length);
-        setLiveComments((prev) => [...prev, ...records].slice(-100));
-
-        const firstHit = alertHits[0];
-        if (firstHit) {
-          showAlert(
-            {
-              id: firstHit.id,
-              nickname: firstHit.nickname,
-              word: firstHit.matchedAlertWord || '',
-              content: firstHit.content,
-              firedAt: new Date().toLocaleTimeString('ko-KR')
-            },
-            configRef.current.alertDurationSec
-          );
-        }
+      if (matchedWord) {
+        showAlert(
+          {
+            id: record.id,
+            nickname,
+            word: matchedWord,
+            content,
+            firedAt: new Date().toLocaleTimeString('ko-KR')
+          },
+          cfg.alertDurationSec
+        );
       }
+    },
+    [showAlert]
+  );
 
-      setLastRunAt(new Date().toLocaleTimeString('ko-KR'));
-    } catch (e) {
-      console.warn('[CommentCapture] 댓글 캡처 처리 실패:', e);
-    } finally {
-      processingRef.current = false;
-      setIsProcessing(false);
-    }
-  }, [currentSessionId, isListening, showAlert]);
-
-  // 토글 ON + 라이브 청취 중일 때만 주기 캡처 루프가 돈다. 알림창이 떠 있어도 루프는 계속된다.
+  // 서버 상태/댓글 리스너 등록 (마운트 1회)
   useEffect(() => {
-    if (!isActive || !isListening) return;
+    const offStatus = commentStreamService.onStatus((status, message) => {
+      setServerStatus(status);
+      if (message !== undefined && message !== null && message !== '') {
+        setServerMessage(message);
+      }
+    });
+    const offComment = commentStreamService.onComment(ingestComment);
+    return () => {
+      offStatus();
+      offComment();
+    };
+  }, [ingestComment]);
 
-    // 기존 기록의 중복 키를 미리 적재해 같은 댓글 재기록을 막는다.
+  // 토글/서버 URL 변경에 따른 로컬 서버 연결 생명주기 관리
+  useEffect(() => {
+    if (isActiveRef.current) {
+      commentStreamService.connect(configRef.current.serverUrl);
+    } else {
+      commentStreamService.stopCollecting();
+      commentStreamService.disconnect();
+      setServerStatus('DISCONNECTED');
+      setServerMessage('로컬 댓글 수집 서버 미연결');
+    }
+  }, [isActive, config.serverUrl]);
+
+  // 수집 시작 조건 충족 시 틱톡 수집 요청: 토글 ON + 라이브 청취 중 + 서버 소켓 연결됨
+  useEffect(() => {
+    if (!isActiveRef.current) return;
+
+    if (isListening && serverStatus === 'CONNECTED') {
+      const username = configRef.current.tiktokUsername.trim();
+      if (!username) {
+        setServerMessage('틱톡 ID 미설정 - "캡처 영역 & 단어 규칙" 페이지에서 설정하세요');
+        return;
+      }
+      commentStreamService.startCollecting(username);
+    }
+
+    if (!isListening) {
+      commentStreamService.stopCollecting();
+    }
+  }, [isListening, serverStatus]);
+
+  // 회차 시작/변경 시 중복 키 적재 및 현재 회차 피드 복원
+  useEffect(() => {
     seenKeysRef.current = new Set(
       storageService.getCommentRecords().map((r) => commentDedupeKey(r.nickname, r.content))
     );
 
-    // 현재 회차의 기존 캡처 댓글을 피드에 복원한다 (시간 오름차순 = 아래쪽이 최신).
     const sessionRecords = storageService
       .getCommentRecords()
       .filter((r) => r.sessionId === currentSessionId)
@@ -165,35 +208,29 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     setLiveComments(sessionRecords);
 
     setNewCount(0);
-    void warmUpOcr();
+  }, [isActive, isListening, currentSessionId]);
 
-    void runTick();
-    const timer = window.setInterval(() => {
-      void runTick();
-    }, Math.max(3, config.intervalSec) * 1000);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [isActive, isListening, config.intervalSec, runTick]);
-
-  // 언마운트 시 OCR 워커 정리
-  useEffect(() => () => {
-    void terminateOcr();
-  }, []);
+  // 언마운트 시 정리
+  useEffect(
+    () => () => {
+      commentStreamService.stopCollecting();
+      commentStreamService.disconnect();
+    },
+    []
+  );
 
   const startCapture = useCallback(() => setIsActive(true), []);
   const stopCapture = useCallback(() => setIsActive(false), []);
 
-  const isRunning = isActive && isListening;
+  const isRunning = isActive && isListening && serverStatus === 'COLLECTING';
 
   return (
     <CommentCaptureContext.Provider
       value={{
         isActive,
         isRunning,
-        isProcessing,
-        lastRunAt,
+        serverStatus,
+        serverMessage,
         newCount,
         liveComments,
         activeAlert,
@@ -226,7 +263,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
             <div className="px-5 py-4 space-y-1.5 text-center">
               <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                {activeAlert.firedAt} 댓글 캡처 감지
+                {activeAlert.firedAt} 틱톡 댓글 감지
               </div>
               <div className="text-2xl sm:text-3xl font-black text-slate-900 break-words">
                 {activeAlert.nickname}
@@ -255,6 +292,28 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   );
 };
 
+// 상태 배지 렌더링용 헬퍼 (페이지에서 재사용)
+export function getCommentStatusBadge(status: CommentStreamStatus): { label: string; tone: 'ok' | 'warn' | 'bad' | 'idle' } {
+  switch (status) {
+    case 'COLLECTING':
+      return { label: '실시간 수집중', tone: 'ok' };
+    case 'WAITING_LIVE':
+      return { label: '방송 시작 대기중', tone: 'warn' };
+    case 'CONNECTING_TIKTOK':
+      return { label: '틱톡 연결중', tone: 'warn' };
+    case 'CONNECTED':
+      return { label: '서버 연결됨', tone: 'idle' };
+    case 'ENDED':
+      return { label: '방송 종료됨', tone: 'idle' };
+    case 'ERROR':
+      return { label: '수집 오류', tone: 'bad' };
+    case 'CONNECTING':
+      return { label: '서버 연결중', tone: 'idle' };
+    default:
+      return { label: '로컬 서버 미실행', tone: 'bad' };
+  }
+}
+
 export const useCommentCapture = () => {
   const context = useContext(CommentCaptureContext);
   if (!context) {
@@ -263,4 +322,4 @@ export const useCommentCapture = () => {
   return context;
 };
 
-export type { CommentRecord };
+export type { CommentRecord, CommentStreamStatus };
