@@ -306,9 +306,9 @@ export const LiveHomePage: React.FC = () => {
       {/* 메인 2열 그리드 */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
         {/* 좌측 영역 (7 cols) */}
-        <div className="lg:col-span-7 space-y-4 sm:space-y-6">
+        <div className="lg:col-span-7 flex flex-col gap-4 sm:gap-6">
           {/* 오디오 파형 & 실시간 자막 */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
+          <div className="order-1 bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
                 <Volume2 className="w-4 h-4 text-brand-600" />
@@ -415,7 +415,7 @@ export const LiveHomePage: React.FC = () => {
           </div>
 
           {/* 최근 전사 로그 */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm">
+          <div className="order-3 bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm">
             <div className="flex items-center justify-between mb-3 sm:mb-4">
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
                 <Clock className="w-4 h-4 text-brand-600" />
@@ -469,7 +469,7 @@ export const LiveHomePage: React.FC = () => {
           </div>
 
           {/* 실시간 댓글 캡처 피드 (아래쪽이 최신글) */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm">
+          <div className="order-2 bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2 flex-wrap gap-y-1">
                 <MessageSquareText className={`w-4 h-4 ${isCommentCaptureRunning ? 'text-rose-500 animate-pulse' : 'text-cyan-600'}`} />
@@ -542,7 +542,7 @@ export const LiveHomePage: React.FC = () => {
           </div>
 
           {/* 테스트 멘트 주입 툴바 (모바일 가로 스크롤 지원) */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 text-xs shadow-sm space-y-2">
+          <div className="order-4 bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 text-xs shadow-sm space-y-2">
             <p className="font-bold text-slate-700 flex items-center">
               <Sparkles className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
               <span>빠른 시연 & 테스트 멘트 주입 버튼</span>
