@@ -176,7 +176,8 @@ const KEYS = {
   DEEPGRAM_API_KEY: 'dadryeo_deepgram_api_key',
   CAPTURE_AREA: 'voicecap_capture_area_config',
   COMMENT_RECORDS: 'voicecap_comment_records',
-  COMMENT_CAPTURE_CONFIG: 'voicecap_comment_capture_config'
+  COMMENT_CAPTURE_CONFIG: 'voicecap_comment_capture_config',
+  COMMENT_CAPTURE_ACTIVE: 'voicecap_comment_capture_active'
 };
 
 export class StorageService {
@@ -358,6 +359,14 @@ export class StorageService {
   }
   public saveCommentCaptureConfig(config: CommentCaptureConfig) {
     this.setItem(KEYS.COMMENT_CAPTURE_CONFIG, config);
+  }
+
+  // 댓글 캡처 함께 시작 체크 상태 (기본값: 체크)
+  public getCommentCaptureActive(): boolean {
+    return this.getItem<boolean>(KEYS.COMMENT_CAPTURE_ACTIVE, true);
+  }
+  public saveCommentCaptureActive(active: boolean) {
+    this.setItem(KEYS.COMMENT_CAPTURE_ACTIVE, active);
   }
 
   // 댓글 캡처 기록

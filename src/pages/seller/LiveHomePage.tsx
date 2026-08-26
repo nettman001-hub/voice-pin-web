@@ -202,25 +202,28 @@ export const LiveHomePage: React.FC = () => {
               <span>{isCapturingNow ? '캡처 중...' : '즉시 캡처'}</span>
             </button>
 
-            <button
-              onClick={() => (isCommentCaptureActive ? stopCommentCapture() : startCommentCapture())}
-              title="라이브 청취 중 지정한 주기로 댓글 영역을 자동 OCR 캡처합니다"
-              className={`px-3 py-2.5 sm:px-4 sm:py-3 rounded-xl text-xs font-bold border flex items-center justify-center space-x-1.5 transition shadow-sm ${
+            <label
+              className={`px-3 py-2.5 sm:px-3.5 sm:py-3 rounded-xl text-xs font-bold border flex items-center justify-center space-x-2 cursor-pointer transition select-none ${
                 isCommentCaptureActive
                   ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
-                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                  : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
               }`}
+              title="라이브 청취 시작 시 지정한 주기로 댓글 영역을 자동 OCR 캡처합니다"
             >
-              <MessageSquareText className={`w-3.5 h-3.5 ${isCommentCaptureRunning ? 'text-rose-500 animate-pulse' : ''}`} />
-              <span>
-                댓글 캡처 {isCommentCaptureActive ? '중지' : '시작'}
-                {commentNewCount > 0 && (
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-black">
-                    +{commentNewCount}
-                  </span>
-                )}
-              </span>
-            </button>
+              <input
+                type="checkbox"
+                checked={isCommentCaptureActive}
+                onChange={(e) => (e.target.checked ? startCommentCapture() : stopCommentCapture())}
+                className="w-4 h-4 accent-rose-600 cursor-pointer"
+              />
+              <MessageSquareText className={`w-3.5 h-3.5 ${isCommentCaptureRunning ? 'text-rose-500 animate-pulse' : 'text-slate-400'}`} />
+              <span>댓글캡처 함께시작</span>
+              {commentNewCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-black">
+                  +{commentNewCount}
+                </span>
+              )}
+            </label>
           </div>
 
           <button

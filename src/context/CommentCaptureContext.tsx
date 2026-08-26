@@ -33,7 +33,8 @@ const CommentCaptureContext = createContext<CommentCaptureContextType | undefine
 export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isListening, currentSessionId, transcriptLogs } = useLive();
 
-  const [isActive, setIsActive] = useState<boolean>(false);
+  // 라이브 청취와 함께 시작이 기본값(체크)이며, 사용자가 바꾼 체크 상태는 저장되어 유지된다.
+  const [isActive, setIsActive] = useState<boolean>(() => storageService.getCommentCaptureActive());
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [newCount, setNewCount] = useState<number>(0);
@@ -52,6 +53,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
   useEffect(() => {
     isActiveRef.current = isActive;
+    storageService.saveCommentCaptureActive(isActive);
   }, [isActive]);
 
   const saveConfig = useCallback((next: CommentCaptureConfig) => {
