@@ -15,7 +15,7 @@ export interface CommentCaptureConfig {
   serverUrl: string;          // 로컬 댓글 수집 서버 URL
   alertWords: string[];       // 알림 표시 단어 목록 (예: "저요")
   alertDurationSec: number;   // 알림창 자동 닫힘 시간 (초)
-  alertVoiceCommand: string;  // 알림창을 음성으로 닫는 명령 단어 (예: "닫아")
+  alertVoiceCommand: string;  // 쉼표로 구분한 알림창 닫기 음성 명령 (예: "닫아, 알림 닫기")
 }
 
 export const DEFAULT_COMMENT_CAPTURE_CONFIG: CommentCaptureConfig = {

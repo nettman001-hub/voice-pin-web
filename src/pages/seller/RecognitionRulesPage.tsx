@@ -822,12 +822,12 @@ export const RecognitionRulesPage: React.FC = () => {
           </div>
 
           <div className="space-y-1.5">
-            <label className="font-bold text-slate-700">알림창 닫는 음성 명령</label>
+            <label className="font-bold text-slate-700">알림창 닫는 음성 명령 (쉼표 구분)</label>
             <input
               type="text"
               value={commentAlertCommand}
               onChange={(e) => setCommentAlertCommand(e.target.value)}
-              placeholder="닫아"
+              placeholder="닫아, 알림 닫기"
               className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
             />
           </div>
@@ -840,7 +840,10 @@ export const RecognitionRulesPage: React.FC = () => {
               const serverUrl = commentServerUrl.trim() || 'http://127.0.0.1:2137';
               const duration = Math.max(3, parseInt(commentAlertDuration, 10) || 15);
               const words = commentAlertWords.split(',').map((w) => w.trim()).filter(Boolean);
-              const command = commentAlertCommand.trim() || '닫아';
+              const commands = Array.from(new Set(
+                commentAlertCommand.split(',').map((command) => command.trim()).filter(Boolean)
+              ));
+              const command = commands.length > 0 ? commands.join(', ') : '닫아';
               saveCommentConfig({
                 tiktokUsername: username,
                 serverUrl,

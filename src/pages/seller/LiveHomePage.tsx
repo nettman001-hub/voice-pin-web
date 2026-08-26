@@ -20,8 +20,12 @@ import {
   Sparkles,
   Key,
   X,
-  MessageSquareText
+  MessageSquareText,
+  VolumeX
 } from 'lucide-react';
+
+const SILENCE_WARNING_DELAY_MS = 5 * 60 * 1000;
+const SILENCE_STOP_COUNTDOWN_SECONDS = 20;
 
 export const LiveHomePage: React.FC = () => {
   const {
@@ -68,10 +72,62 @@ export const LiveHomePage: React.FC = () => {
   const [showAdminOnlyModal, setShowAdminOnlyModal] = useState<boolean>(false);
   const [showAreaNotSetModal, setShowAreaNotSetModal] = useState<boolean>(false);
   const [isCapturingNow, setIsCapturingNow] = useState<boolean>(false);
+  const [silenceCountdown, setSilenceCountdown] = useState<number | null>(null);
   const [keyInput, setKeyInput] = useState<string>(deepgramApiKey || '');
   const [audioSourceMode, setAudioSourceMode] = useState<'TAB_AUDIO' | 'MIC'>('TAB_AUDIO');
   const flowContainerRef = React.useRef<HTMLDivElement | null>(null);
   const commentFeedRef = React.useRef<HTMLDivElement | null>(null);
+  const silenceWarningTimerRef = React.useRef<number | null>(null);
+
+  const latestCaptionId = liveTranscriptFlow[liveTranscriptFlow.length - 1]?.id
+    || transcriptLogs[0]?.id
+    || '';
+
+  // 청취 시작 또는 마지막 자막 생성 후 5분 동안 새 자막이 없으면 자동 중지 경고를 연다.
+  React.useEffect(() => {
+    if (silenceWarningTimerRef.current !== null) {
+      window.clearTimeout(silenceWarningTimerRef.current);
+      silenceWarningTimerRef.current = null;
+    }
+
+    setSilenceCountdown(null);
+    if (!isListening) return;
+
+    silenceWarningTimerRef.current = window.setTimeout(() => {
+      setSilenceCountdown(SILENCE_STOP_COUNTDOWN_SECONDS);
+      silenceWarningTimerRef.current = null;
+    }, SILENCE_WARNING_DELAY_MS);
+
+    return () => {
+      if (silenceWarningTimerRef.current !== null) {
+        window.clearTimeout(silenceWarningTimerRef.current);
+        silenceWarningTimerRef.current = null;
+      }
+    };
+  }, [isListening, latestCaptionId, currentInterimTranscript]);
+
+  // 경고 후에도 20초 동안 자막이 없으면 경고창을 닫고 청취와 댓글 캡처를 함께 중지한다.
+  React.useEffect(() => {
+    if (silenceCountdown === null) return;
+
+    if (!isListening) {
+      setSilenceCountdown(null);
+      return;
+    }
+
+    if (silenceCountdown <= 0) {
+      setSilenceCountdown(null);
+      stopListening();
+      stopCommentCapture();
+      return;
+    }
+
+    const countdownTimer = window.setTimeout(() => {
+      setSilenceCountdown((seconds) => seconds === null ? null : seconds - 1);
+    }, 1000);
+
+    return () => window.clearTimeout(countdownTimer);
+  }, [isListening, silenceCountdown, stopCommentCapture, stopListening]);
 
   React.useEffect(() => {
     if (flowContainerRef.current) {
@@ -693,6 +749,38 @@ export const LiveHomePage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* 5분 무자막 지속 시 자동 청취 중지 경고 */}
+      {silenceCountdown !== null && isListening && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="silence-warning-title"
+        >
+          <div className="max-w-sm w-full bg-white p-6 rounded-3xl border border-amber-200 shadow-2xl space-y-5 text-center animate-in zoom-in-95">
+            <div className="w-14 h-14 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center mx-auto">
+              <VolumeX className="w-7 h-7" />
+            </div>
+            <div>
+              <h3 id="silence-warning-title" className="text-lg font-black text-slate-900">무음 지속 감지</h3>
+              <p className="text-sm text-slate-600 mt-2 leading-relaxed">
+                5분 동안 생성된 자막이 없습니다.<br />
+                무음이 지속되어 <strong className="text-rose-600">{silenceCountdown}초 뒤</strong> 청취를 중지합니다.
+              </p>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-1000 ease-linear"
+                style={{ width: `${(silenceCountdown / SILENCE_STOP_COUNTDOWN_SECONDS) * 100}%` }}
+              />
+            </div>
+            <p className="text-[11px] text-slate-500">
+              새 자막이 생성되면 경고가 자동으로 해제됩니다.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* 캡처 이미지 확대 모달 */}
       {selectedCaptureModal && (

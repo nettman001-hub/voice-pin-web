@@ -97,8 +97,11 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     if (!latest || latest.id === lastTranscriptIdRef.current) return;
     lastTranscriptIdRef.current = latest.id;
 
-    const command = configRef.current.alertVoiceCommand.trim();
-    if (command && activeAlert && latest.text.includes(command)) {
+    const commands = configRef.current.alertVoiceCommand
+      .split(',')
+      .map((command) => command.trim())
+      .filter(Boolean);
+    if (activeAlert && commands.some((command) => latest.text.includes(command))) {
       dismissAlert();
     }
   }, [transcriptLogs, activeAlert, dismissAlert]);
@@ -270,7 +273,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
               </div>
               <p className="text-xs text-slate-500 pt-1 break-words">"{activeAlert.content}"</p>
               <p className="text-[10px] text-slate-400 pt-1">
-                {config.alertDurationSec}초 후 자동으로 닫히거나 "{config.alertVoiceCommand}"라고 말씀하세요.
+                {config.alertDurationSec}초 후 자동으로 닫히거나 "{config.alertVoiceCommand.split(',').map((command) => command.trim()).filter(Boolean).join(' / ')}" 중 하나를 말씀하세요.
               </p>
             </div>
 
