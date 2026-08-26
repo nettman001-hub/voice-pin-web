@@ -4,6 +4,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useLive } from '../../context/LiveContext';
 import { useSales } from '../../context/SalesContext';
 import { AudioVisualizer } from '../../components/common/AudioVisualizer';
+import { CaptureAreaStudioModal } from './CaptureAreaStudioModal';
+import { screenCaptureService } from '../../services/screenCaptureService';
 import {
   Radio,
   Square,
@@ -39,8 +41,7 @@ export const LiveHomePage: React.FC = () => {
     hasScreenShareAudio,
     startListening,
     stopListening,
-    injectTestMent,
-    captureCurrentScreen
+    injectTestMent
   } = useLive();
 
   const { user } = useAuth();
@@ -50,6 +51,8 @@ export const LiveHomePage: React.FC = () => {
   const [selectedCaptureModal, setSelectedCaptureModal] = useState<string | null>(null);
   const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
   const [showAdminOnlyModal, setShowAdminOnlyModal] = useState<boolean>(false);
+  const [showAreaStudio, setShowAreaStudio] = useState<boolean>(false);
+  const [isPreparingStudio, setIsPreparingStudio] = useState<boolean>(false);
   const [keyInput, setKeyInput] = useState<string>(deepgramApiKey || '');
   const [audioSourceMode, setAudioSourceMode] = useState<'TAB_AUDIO' | 'MIC'>('TAB_AUDIO');
   const flowContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -71,6 +74,20 @@ export const LiveHomePage: React.FC = () => {
     } else {
       startListening(audioSourceMode);
     }
+  };
+
+  // 즉시 캡처: 최초 1회 공유 항목을 선택받은 뒤 실시간 화면 위에서 캡처 영역을 설정하는 스튜디오를 연다.
+  const handleInstantCapture = async () => {
+    if (!screenCaptureService.getActiveStream()) {
+      setIsPreparingStudio(true);
+      try {
+        const stream = await screenCaptureService.getOrCreateStream(false);
+        if (!stream) return;
+      } finally {
+        setIsPreparingStudio(false);
+      }
+    }
+    setShowAreaStudio(true);
   };
 
   return (
@@ -160,11 +177,12 @@ export const LiveHomePage: React.FC = () => {
             </button>
 
             <button
-              onClick={() => captureCurrentScreen()}
-              className="px-3 py-2.5 sm:px-4 sm:py-3 rounded-xl bg-cyan-50 hover:bg-cyan-100 text-cyan-800 text-xs font-bold border border-cyan-200 flex items-center justify-center space-x-1.5 transition shadow-sm"
+              onClick={handleInstantCapture}
+              disabled={isPreparingStudio}
+              className="px-3 py-2.5 sm:px-4 sm:py-3 rounded-xl bg-cyan-50 hover:bg-cyan-100 text-cyan-800 text-xs font-bold border border-cyan-200 flex items-center justify-center space-x-1.5 transition shadow-sm disabled:opacity-60"
             >
               <Camera className="w-3.5 h-3.5 text-cyan-600" />
-              <span>즉시 캡처</span>
+              <span>{isPreparingStudio ? '화면 연결 중...' : '즉시 캡처'}</span>
             </button>
           </div>
 
@@ -650,6 +668,9 @@ export const LiveHomePage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* 실시간 공유 화면 위에서 캡처 영역을 설정하는 스튜디오 모달 */}
+      <CaptureAreaStudioModal isOpen={showAreaStudio} onClose={() => setShowAreaStudio(false)} />
     </div>
   );
 };

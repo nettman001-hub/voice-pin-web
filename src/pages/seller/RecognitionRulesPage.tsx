@@ -3,6 +3,7 @@ import { useAppData, CAPTURE_PRESETS } from '../../context/AppDataContext';
 import { useLive } from '../../context/LiveContext';
 import { RecognitionWordRule, RuleAction, CaptureAreaPreset, CaptureAreaConfig } from '../../types/rules';
 import { screenCaptureService } from '../../services/screenCaptureService';
+import { CaptureAreaStudioModal } from './CaptureAreaStudioModal';
 import {
   Sliders,
   Plus,
@@ -69,6 +70,7 @@ export const RecognitionRulesPage: React.FC = () => {
 
   const [testCaptureUrl, setTestCaptureUrl] = useState<string | null>(null);
   const [isTestingCapture, setIsTestingCapture] = useState(false);
+  const [showAreaStudio, setShowAreaStudio] = useState(false);
   const [isScreenConnected, setIsScreenConnected] = useState<boolean>(() => !!screenCaptureService.getActiveStream());
 
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
@@ -110,24 +112,23 @@ export const RecognitionRulesPage: React.FC = () => {
   };
 
   // 실시간 윈도우 창/화면 캡처 (1회 연결 후 다음부터는 공유창 없이 즉시 캡처)
+  // 연결된 공유 화면의 전체 뷰 위에서 캡처 영역을 직접 설정하는 스튜디오를 연다.
   const handleTestCapture = async () => {
-    setIsTestingCapture(true);
     const hadStream = !!screenCaptureService.getActiveStream();
     if (!hadStream) {
-      showNotice('최초 1회 캡처할 윈도우 창(틱톡 라이브 스튜디오/OBS)을 선택해 주세요. 이후부터는 자동으로 즉시 캡처됩니다.', '🪟 윈도우 화면 연결 안내', 'info');
+      showNotice('최초 1회 캡처할 윈도우 창(틱톡 라이브 스튜디오/OBS)을 선택해 주세요. 선택하면 실시간 화면 위에서 캡처 영역을 지정할 수 있습니다.', '🪟 윈도우 화면 연결 안내', 'info');
     }
+    setIsTestingCapture(true);
     try {
-      const imgUrl = await screenCaptureService.captureArea(null, currentArea, {
-        nickname: '러블리샵',
-        amount: 35000,
-        timestamp: new Date().toLocaleTimeString('ko-KR')
-      });
-      if (imgUrl) {
+      const stream = await screenCaptureService.getOrCreateStream(false);
+      if (stream) {
         setIsScreenConnected(true);
-        setTestCaptureUrl(imgUrl);
+        setShowAreaStudio(true);
       } else {
         setIsScreenConnected(!!screenCaptureService.getActiveStream());
-        showNotice('화면 공유가 취소되었거나 창이 선택되지 않았습니다.', 'ℹ️ 안내', 'warning');
+        if (hadStream) {
+          showNotice('화면 공유가 취소되었거나 창이 선택되지 않았습니다.', 'ℹ️ 안내', 'warning');
+        }
       }
     } catch (e) {
       console.error(e);
@@ -954,6 +955,9 @@ export const RecognitionRulesPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* 실시간 공유 화면 위에서 캡처 영역을 설정하는 스튜디오 모달 */}
+      <CaptureAreaStudioModal isOpen={showAreaStudio} onClose={() => setShowAreaStudio(false)} />
     </div>
   );
 };
