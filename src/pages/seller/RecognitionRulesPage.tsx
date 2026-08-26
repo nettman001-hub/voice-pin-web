@@ -380,8 +380,8 @@ export const RecognitionRulesPage: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {isScreenConnected ? (
+          {previewStream && isScreenConnected && (
+            <div className="flex flex-wrap items-center gap-2">
               <>
                 <span className="px-2.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] sm:text-xs font-bold flex items-center space-x-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -414,17 +414,8 @@ export const RecognitionRulesPage: React.FC = () => {
                   해제
                 </button>
               </>
-            ) : (
-              <button
-                onClick={handleTestCapture}
-                disabled={isTestingCapture}
-                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 via-brand-600 to-indigo-600 hover:from-cyan-500 hover:to-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center justify-center space-x-2 transition transform active:scale-95"
-              >
-                <Camera className="w-4 h-4" />
-                <span>{isTestingCapture ? '화면 연결 중...' : '실시간 캡처영역설정'}</span>
-              </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* 2열 스튜디오 그리드 */}
@@ -460,6 +451,20 @@ export const RecognitionRulesPage: React.FC = () => {
                 style={{ aspectRatio: `${desktopResolution.width} / ${desktopResolution.height}` }}
                 aria-label={previewStream ? '선택한 공유 화면의 캡처 영역 설정' : '비어 있는 캡처 화면 영역'}
               >
+                {(!previewStream || !isScreenConnected) && (
+                  <div className="absolute inset-0 flex items-center justify-center p-4">
+                    <button
+                      type="button"
+                      onClick={handleTestCapture}
+                      disabled={isTestingCapture}
+                      className="px-5 py-3 rounded-xl bg-gradient-to-r from-cyan-600 via-brand-600 to-indigo-600 hover:from-cyan-500 hover:to-brand-500 disabled:opacity-60 disabled:cursor-wait text-white text-xs sm:text-sm font-bold shadow-lg shadow-brand-500/25 flex items-center justify-center space-x-2 transition transform active:scale-95"
+                    >
+                      <Camera className="w-4 h-4" />
+                      <span>{isTestingCapture ? '화면 연결 중...' : '실시간 캡처영역설정'}</span>
+                    </button>
+                  </div>
+                )}
+
                 {previewStream && isScreenConnected && (
                   <>
                     <video
