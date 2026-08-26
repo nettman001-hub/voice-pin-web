@@ -146,7 +146,8 @@ const io = new Server(httpServer, {
       if (!origin || ALLOWED_ORIGINS.has(origin)) return cb(null, true);
       return cb(new Error(`허용되지 않은 오리진: ${origin}`));
     },
-    methods: ['GET', 'POST']
+    // 크롬의 WebSocket PNA preflight가 요청할 수 있는 메서드 전부 허용
+    methods: ['GET', 'POST', 'OPTIONS', 'CONNECT']
   }
 });
 
