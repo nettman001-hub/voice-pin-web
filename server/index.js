@@ -57,6 +57,7 @@ if (EULER_API_KEY) {
 
 const DEFAULT_ORIGINS = [
   'https://voicecap.shop',
+  'https://www.voicecap.shop',
   'https://voice-pin-web.vercel.app',
   'http://localhost:5173',
   'http://localhost:3000',
@@ -164,7 +165,10 @@ httpServer.prependListener('request', (req, res) => {
 const PNA_HEADER = 'Access-Control-Allow-Private-Network: true';
 httpServer.prependListener('upgrade', (req, socket) => {
   const origin = String(req.headers.origin || '');
-  if (!origin || !ALLOWED_ORIGINS.has(origin)) return;
+  if (!origin || !ALLOWED_ORIGINS.has(origin)) {
+    if (origin) log(`WS 핸드셰이크 거부 예상 - 허용되지 않은 오리진: ${origin}`);
+    return;
+  }
 
   const origWrite = socket.write.bind(socket);
   socket.write = (chunk, ...rest) => {
