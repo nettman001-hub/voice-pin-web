@@ -159,6 +159,23 @@ httpServer.prependListener('request', (req, res) => {
   }
 });
 
+// 크롬 일부 버전은 WebSocket 핸드셰이크(101) 응답에서도 PNA 헤더를 확인하므로,
+// 허용 오리진의 WS 핸드셰이크 응답에 헤더를 강제로 주입한다.
+const PNA_HEADER = 'Access-Control-Allow-Private-Network: true';
+httpServer.prependListener('upgrade', (req, socket) => {
+  const origin = String(req.headers.origin || '');
+  if (!origin || !ALLOWED_ORIGINS.has(origin)) return;
+
+  const origWrite = socket.write.bind(socket);
+  socket.write = (chunk, ...rest) => {
+    if (typeof chunk === 'string' && chunk.startsWith('HTTP/1.1 101')) {
+      const [head, ...tail] = chunk.split('\r\n');
+      return origWrite([head, PNA_HEADER, ...tail].join('\r\n'), ...rest);
+    }
+    return origWrite(chunk, ...rest);
+  };
+});
+
 function statusPayload() {
   return {
     state: serverState,
