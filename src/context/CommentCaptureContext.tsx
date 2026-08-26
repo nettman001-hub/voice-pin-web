@@ -164,15 +164,12 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     };
   }, [ingestComment]);
 
-  // 토글/서버 URL 변경에 따른 로컬 서버 연결 생명주기 관리
+  // 자동 수집이 중지되어도 서버 생존 상태를 표시할 수 있도록 로컬 서버 연결은 유지한다.
   useEffect(() => {
-    if (isActiveRef.current) {
-      commentStreamService.connect(configRef.current.serverUrl);
-    } else {
+    commentStreamService.connect(configRef.current.serverUrl);
+
+    if (!isActiveRef.current) {
       commentStreamService.stopCollecting();
-      commentStreamService.disconnect();
-      setServerStatus('DISCONNECTED');
-      setServerMessage('로컬 댓글 수집 서버 미연결');
     }
   }, [isActive, config.serverUrl]);
 
@@ -302,7 +299,7 @@ export function getCommentStatusBadge(status: CommentStreamStatus): { label: str
     case 'CONNECTING_TIKTOK':
       return { label: '틱톡 연결중', tone: 'warn' };
     case 'CONNECTED':
-      return { label: '로컬 서버 대기중', tone: 'idle' };
+      return { label: '로컬서버 대기중', tone: 'idle' };
     case 'ENDED':
       return { label: '방송 종료됨', tone: 'idle' };
     case 'ERROR':

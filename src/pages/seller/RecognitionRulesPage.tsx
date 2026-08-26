@@ -400,6 +400,11 @@ export const RecognitionRulesPage: React.FC = () => {
   const pixelH = Math.round(currentArea.heightRatio * desktopResolution.height);
   const hasLivePreview = !!(previewStream && isScreenConnected);
   const hasDisplayedScreen = hasLivePreview || !!savedPreview;
+  const localServerStatusLabel = commentServerStatus === 'DISCONNECTED'
+    ? '로컬 서버 미실행'
+    : commentServerStatus === 'CONNECTING'
+      ? '로컬 서버 연결중'
+      : '로컬서버 대기중';
 
   return (
     <div className="p-3.5 sm:p-6 max-w-7xl mx-auto space-y-6 sm:space-y-8">
@@ -741,7 +746,7 @@ export const RecognitionRulesPage: React.FC = () => {
           </div>
           <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
             <div className="text-slate-500 text-[10px] font-bold">로컬 서버 상태</div>
-            <div className="text-sm font-black text-slate-900 truncate">{getCommentStatusBadge(commentServerStatus).label}</div>
+            <div className="text-sm font-black text-slate-900 truncate">{localServerStatusLabel}</div>
           </div>
           <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
             <div className="text-slate-500 text-[10px] font-bold">수집 대상</div>

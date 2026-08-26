@@ -94,6 +94,7 @@ export const LiveHomePage: React.FC = () => {
   const handleToggleListening = () => {
     if (isListening) {
       stopListening();
+      stopCommentCapture();
     } else {
       startListening(audioSourceMode);
     }
