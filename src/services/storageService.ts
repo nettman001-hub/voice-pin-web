@@ -362,9 +362,9 @@ export class StorageService {
     this.setItem(KEYS.COMMENT_CAPTURE_CONFIG, config);
   }
 
-  // 댓글 캡처 함께 시작 체크 상태 (기본값: 체크)
+  // 댓글 캡처 활성화 상태 (기본값: 중지)
   public getCommentCaptureActive(): boolean {
-    return this.getItem<boolean>(KEYS.COMMENT_CAPTURE_ACTIVE, true);
+    return this.getItem<boolean>(KEYS.COMMENT_CAPTURE_ACTIVE, false);
   }
   public saveCommentCaptureActive(active: boolean) {
     this.setItem(KEYS.COMMENT_CAPTURE_ACTIVE, active);

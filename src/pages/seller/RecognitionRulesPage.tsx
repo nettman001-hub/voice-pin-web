@@ -1,30 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { useAppData, CAPTURE_PRESETS } from '../../context/AppDataContext';
+import { useAppData } from '../../context/AppDataContext';
 import { useLive } from '../../context/LiveContext';
 import { useCommentCapture, getCommentStatusBadge } from '../../context/CommentCaptureContext';
 import { RecognitionWordRule, RuleAction, CaptureAreaPreset, CaptureAreaConfig } from '../../types/rules';
 import { screenCaptureService } from '../../services/screenCaptureService';
-import { CaptureAreaStudioModal } from './CaptureAreaStudioModal';
 import {
   Sliders,
   Plus,
   Trash2,
   Shield,
   Crop,
-  Move,
   Maximize2,
-  MousePointer,
   Sparkles,
   X,
-  RotateCcw,
   CheckCircle2,
   AlertCircle,
   Monitor,
-  Tv,
   Camera,
-  Layers,
-  Settings2,
   MessageSquareText,
   BellRing,
   Play,
@@ -82,29 +75,44 @@ export const RecognitionRulesPage: React.FC = () => {
   });
 
   // 선택 모드
-  const [selectMode, setSelectMode] = useState<'DRAG' | 'CLICK_POINTS'>('DRAG');
-  const [clickPointStep, setClickPointStep] = useState<1 | 2>(1);
-  const [firstPoint, setFirstPoint] = useState<{ x: number; y: number } | null>(null);
-
-  const [currentArea, setCurrentArea] = useState<CaptureAreaConfig>(captureAreaConfig);
+  const [currentArea, setCurrentArea] = useState<CaptureAreaConfig>({
+    ...captureAreaConfig,
+    preset: 'CUSTOM',
+    name: '사용자 지정 영역'
+  });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [dragAction, setDragAction] = useState<'CREATE' | 'MOVE' | 'RESIZE_TL' | 'RESIZE_TR' | 'RESIZE_BL' | 'RESIZE_BR' | null>(null);
 
-  const [testCaptureUrl, setTestCaptureUrl] = useState<string | null>(null);
   const [isTestingCapture, setIsTestingCapture] = useState(false);
-  const [showAreaStudio, setShowAreaStudio] = useState(false);
   const [isScreenConnected, setIsScreenConnected] = useState<boolean>(() => !!screenCaptureService.getActiveStream());
+  const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
 
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
-    setCurrentArea(captureAreaConfig);
+    setCurrentArea({
+      ...captureAreaConfig,
+      preset: 'CUSTOM',
+      name: '사용자 지정 영역'
+    });
   }, [captureAreaConfig]);
 
   useEffect(() => screenCaptureService.subscribeConnection((state) => {
     setIsScreenConnected(state.isConnected);
+    if (!state.isConnected) setPreviewStream(null);
   }), []);
+
+  useEffect(() => {
+    const video = previewVideoRef.current;
+    if (!video) return;
+
+    video.srcObject = previewStream;
+    if (previewStream) {
+      void video.play().catch(() => {});
+    }
+  }, [previewStream]);
 
   // 화면 스트림 변경 요청
   const handleChangeScreen = async () => {
@@ -120,6 +128,7 @@ export const RecognitionRulesPage: React.FC = () => {
       const stream = await screenCaptureService.getOrCreateStream(true);
       if (stream) {
         setIsScreenConnected(true);
+        setPreviewStream(stream);
         showNotice('새로운 윈도우 화면으로 성공적으로 변경되었습니다!', '✅ 화면 변경 완료', 'success');
       }
     } finally {
@@ -131,27 +140,22 @@ export const RecognitionRulesPage: React.FC = () => {
   const handleDisconnectScreen = () => {
     disconnectScreenShare();
     setIsScreenConnected(false);
+    setPreviewStream(null);
     showNotice('윈도우 화면 연결이 정상적으로 해제되었습니다.', '🔌 연결 해제 안내', 'info');
   };
 
   // 실시간 윈도우 창/화면 캡처 (1회 연결 후 다음부터는 공유창 없이 즉시 캡처)
-  // 연결된 공유 화면의 전체 뷰 위에서 캡처 영역을 직접 설정하는 스튜디오를 연다.
+  // 선택한 공유 화면을 페이지 안의 빈 캡처 박스에 표시한다.
   const handleTestCapture = async () => {
-    const hadStream = !!screenCaptureService.getActiveStream();
-    if (!hadStream) {
-      showNotice('최초 1회 캡처할 윈도우 창(틱톡 라이브 스튜디오/OBS)을 선택해 주세요. 선택하면 실시간 화면 위에서 캡처 영역을 지정할 수 있습니다.', '🪟 윈도우 화면 연결 안내', 'info');
-    }
     setIsTestingCapture(true);
     try {
       const stream = await screenCaptureService.getOrCreateStream(false);
       if (stream) {
         setIsScreenConnected(true);
-        setShowAreaStudio(true);
+        setPreviewStream(stream);
       } else {
         setIsScreenConnected(!!screenCaptureService.getActiveStream());
-        if (hadStream) {
-          showNotice('화면 공유가 취소되었거나 창이 선택되지 않았습니다.', 'ℹ️ 안내', 'warning');
-        }
+        showNotice('화면 공유가 취소되었거나 창이 선택되지 않았습니다.', 'ℹ️ 안내', 'warning');
       }
     } catch (e) {
       console.error(e);
@@ -181,12 +185,6 @@ export const RecognitionRulesPage: React.FC = () => {
     }
   };
 
-  const handleSelectPreset = (preset: CaptureAreaConfig) => {
-    setCurrentArea(preset);
-    setCaptureAreaConfig(preset);
-    showNotice(`'${preset.name}' 윈도우 데스크톱 영역 프리셋이 적용되었습니다.`, '🪟 프리셋 적용', 'success');
-  };
-
   const getNormalizedCoordinates = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!canvasContainerRef.current) return { x: 0, y: 0 };
     const rect = canvasContainerRef.current.getBoundingClientRect();
@@ -204,7 +202,6 @@ export const RecognitionRulesPage: React.FC = () => {
   };
 
   const startDrag = (x: number, y: number, actionType: 'CREATE' | 'MOVE' | 'RESIZE_TL' | 'RESIZE_TR' | 'RESIZE_BL' | 'RESIZE_BR') => {
-    if (selectMode === 'CLICK_POINTS') return;
     setIsDragging(true);
     setDragAction(actionType);
     setDragStart({ x, y });
@@ -222,7 +219,7 @@ export const RecognitionRulesPage: React.FC = () => {
   };
 
   const processDrag = (x: number, y: number) => {
-    if (!isDragging || !dragStart || selectMode === 'CLICK_POINTS') return;
+    if (!isDragging || !dragStart) return;
 
     if (dragAction === 'CREATE') {
       const minX = Math.min(dragStart.x, x);
@@ -271,6 +268,24 @@ export const RecognitionRulesPage: React.FC = () => {
         widthRatio: newWidth,
         heightRatio: newHeight
       }));
+    } else if (dragAction === 'RESIZE_TR') {
+      const newY = Math.max(0, Math.min(currentArea.yRatio + currentArea.heightRatio - 0.04, y));
+      const newWidth = Math.max(0.04, Math.min(1 - currentArea.xRatio, x - currentArea.xRatio));
+      setCurrentArea((prev) => ({
+        ...prev,
+        yRatio: newY,
+        widthRatio: newWidth,
+        heightRatio: prev.yRatio + prev.heightRatio - newY
+      }));
+    } else if (dragAction === 'RESIZE_BL') {
+      const newX = Math.max(0, Math.min(currentArea.xRatio + currentArea.widthRatio - 0.04, x));
+      const newHeight = Math.max(0.04, Math.min(1 - currentArea.yRatio, y - currentArea.yRatio));
+      setCurrentArea((prev) => ({
+        ...prev,
+        xRatio: newX,
+        widthRatio: prev.xRatio + prev.widthRatio - newX,
+        heightRatio: newHeight
+      }));
     }
   };
 
@@ -316,39 +331,6 @@ export const RecognitionRulesPage: React.FC = () => {
     endDrag();
   };
 
-  const handleCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (selectMode !== 'CLICK_POINTS') return;
-
-    const { x, y } = getNormalizedCoordinates(e);
-
-    if (clickPointStep === 1) {
-      setFirstPoint({ x, y });
-      setClickPointStep(2);
-      showNotice('대각선 끝 지점(우하단)을 클릭하여 캡처 영역을 완성하세요.', '📍 2단계 지점 클릭', 'info');
-    } else {
-      if (!firstPoint) return;
-      const minX = Math.min(firstPoint.x, x);
-      const minY = Math.min(firstPoint.y, y);
-      const width = Math.max(0.04, Math.abs(x - firstPoint.x));
-      const height = Math.max(0.04, Math.abs(y - firstPoint.y));
-
-      const updated: CaptureAreaConfig = {
-        preset: 'CUSTOM',
-        name: '2점 클릭 지정 영역',
-        xRatio: minX,
-        yRatio: minY,
-        widthRatio: Math.min(1 - minX, width),
-        heightRatio: Math.min(1 - minY, height)
-      };
-
-      setCurrentArea(updated);
-      setCaptureAreaConfig(updated);
-      setClickPointStep(1);
-      setFirstPoint(null);
-      showNotice(`2점 꼭짓점 클릭으로 윈도우 캡처 영역이 지정되었습니다!`, '🎉 캡처 영역 지정 완료', 'success');
-    }
-  };
-
   const handleSliderChange = (field: keyof CaptureAreaConfig, value: number) => {
     const updated = {
       ...currentArea,
@@ -383,30 +365,6 @@ export const RecognitionRulesPage: React.FC = () => {
           </p>
         </div>
 
-        {/* 윈도우 해상도 선택 셀렉터 (모바일 가로 스크롤) */}
-        <div className="flex items-center space-x-1.5 bg-slate-50 p-1.5 rounded-2xl border border-slate-200 text-xs overflow-x-auto no-scrollbar max-w-full">
-          <span className="text-slate-500 font-bold px-1 flex items-center space-x-1 whitespace-nowrap flex-shrink-0">
-            <Tv className="w-3.5 h-3.5 text-brand-600" />
-            <span>기준 해상도:</span>
-          </span>
-          {[
-            { width: 3840, height: 2160, name: '3840x2160 (4K UHD)' },
-            { width: 2560, height: 1440, name: '2560x1440 (QHD)' },
-            { width: 1920, height: 1080, name: '1920x1080 (FHD)' },
-          ].map((res) => (
-            <button
-              key={res.name}
-              onClick={() => setDesktopResolution({ ...res, name: `${res.width} x ${res.height}` })}
-              className={`px-3 py-1.5 rounded-xl font-bold transition whitespace-nowrap flex-shrink-0 ${
-                desktopResolution.width === res.width
-                  ? 'bg-slate-800 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              {res.name}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* 1. 윈도우 데스크톱 화면 캡처 영역 설정 스튜디오 (핵심) */}
@@ -418,7 +376,7 @@ export const RecognitionRulesPage: React.FC = () => {
               <span>윈도우 데스크톱 캡처 영역 스튜디오</span>
             </h3>
             <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
-              16:9 가로형 모니터 화면에서 댓글창 또는 OBS 송출창 위치를 마우스/터치로 직접 지정하세요.
+              [실시간 캡처영역설정] 버튼으로 화면을 불러온 후 원하는 캡처 영역을 설정하세요.
             </p>
           </div>
 
@@ -436,7 +394,7 @@ export const RecognitionRulesPage: React.FC = () => {
                   className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-500/20 flex items-center space-x-1.5 transition active:scale-95"
                 >
                   <Camera className="w-3.5 h-3.5" />
-                  <span>{isTestingCapture ? '캡처 중...' : '실시간 즉시 캡처'}</span>
+                  <span>{isTestingCapture ? '화면 불러오는 중...' : '실시간 캡처영역설정'}</span>
                 </button>
 
                 <button
@@ -469,199 +427,93 @@ export const RecognitionRulesPage: React.FC = () => {
           </div>
         </div>
 
-        {/* 툴바 & 프리셋 (모바일 가로 스크롤 지원) */}
-        <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center justify-between gap-2.5 sm:gap-3 bg-slate-50 p-2.5 sm:p-3 rounded-2xl border border-slate-200">
-          <div className="grid grid-cols-2 sm:flex items-center gap-1.5 text-xs">
-            <button
-              onClick={() => setSelectMode('DRAG')}
-              className={`px-3 py-2 sm:py-1.5 rounded-xl font-bold flex items-center justify-center space-x-1 transition ${
-                selectMode === 'DRAG'
-                  ? 'bg-brand-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900 bg-white sm:bg-transparent border sm:border-0 border-slate-200'
-              }`}
-            >
-              <Move className="w-3.5 h-3.5" />
-              <span>직접 드래그/터치</span>
-            </button>
-            <button
-              onClick={() => { setSelectMode('CLICK_POINTS'); setClickPointStep(1); setFirstPoint(null); }}
-              className={`px-3 py-2 sm:py-1.5 rounded-xl font-bold flex items-center justify-center space-x-1 transition ${
-                selectMode === 'CLICK_POINTS'
-                  ? 'bg-purple-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900 bg-white sm:bg-transparent border sm:border-0 border-slate-200'
-              }`}
-            >
-              <MousePointer className="w-3.5 h-3.5" />
-              <span>2회 터치 지정</span>
-            </button>
-          </div>
-
-          <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-1 text-xs">
-            <span className="text-slate-500 px-1 font-semibold flex-shrink-0">프리셋:</span>
-            {CAPTURE_PRESETS.map((p, idx) => (
-              <button
-                key={idx}
-                onClick={() => handleSelectPreset(p)}
-                className={`px-2.5 py-1.5 rounded-xl font-semibold border transition whitespace-nowrap flex-shrink-0 ${
-                  currentArea.name === p.name
-                    ? 'bg-brand-50 border-brand-300 text-brand-700 font-bold shadow-sm'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {p.name}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {/* 2열 스튜디오 그리드 */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start">
           {/* 좌측 16:9 와이드 윈도우 데스크톱 캔버스 */}
           <div className="lg:col-span-7 flex flex-col items-center">
-            <div className="text-center text-xs font-semibold text-slate-600 mb-2 flex items-center space-x-1">
-              <Sparkles className="w-3.5 h-3.5 text-brand-600" />
-              <span>
-                {selectMode === 'DRAG'
-                  ? '화면 위를 손가락/마우스로 드래그하거나 모서리 핸들을 조절하세요'
-                  : clickPointStep === 1
-                  ? '📍 [1단계] 시작할 좌상단 지점을 터치하세요'
-                  : '📍 [2단계] 대각선 끝 우하단 지점을 터치하세요'}
-              </span>
-            </div>
-
-            {/* 16:9 와이드 데스크톱 프레임 */}
-            <div className="w-full bg-slate-800 rounded-3xl p-2.5 sm:p-3 shadow-2xl border-4 border-slate-700">
-              {/* 윈도우 타이틀 바 */}
-              <div className="flex items-center justify-between px-2 pb-2 text-[10px] sm:text-[11px] text-slate-400 select-none">
-                <div className="flex items-center space-x-2 truncate">
-                  <Monitor className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                  <span className="font-bold text-slate-200 truncate">TikTok Live Studio ({desktopResolution.width}x{desktopResolution.height})</span>
+            <div className={`w-full overflow-hidden rounded-3xl border-2 ${
+              previewStream && isScreenConnected
+                ? 'bg-slate-900 border-slate-700 shadow-2xl'
+                : 'bg-white border-dashed border-slate-300'
+            }`}>
+              {previewStream && isScreenConnected && (
+                <div className="flex items-center space-x-2 px-3 py-2 text-[10px] sm:text-[11px] text-slate-300 select-none">
+                  <Monitor className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span className="font-bold truncate">
+                    선택한 공유 화면 ({desktopResolution.width}x{desktopResolution.height})
+                  </span>
                 </div>
-                <div className="flex items-center space-x-1.5 flex-shrink-0">
-                  <span className="w-2 sm:w-2.5 h-2 sm:h-2.5 rounded-full bg-slate-500"></span>
-                  <span className="w-2 sm:w-2.5 h-2 sm:h-2.5 rounded-full bg-slate-500"></span>
-                  <span className="w-2 sm:w-2.5 h-2 sm:h-2.5 rounded-full bg-rose-500"></span>
-                </div>
-              </div>
+              )}
 
-              {/* 16:9 캔버스 본체 (touch-none 적용으로 모바일 터치 드래그 완벽 지원) */}
               <div
                 ref={canvasContainerRef}
-                onMouseDown={(e) => handleMouseDown(e, 'CREATE')}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onTouchStart={(e) => handleTouchStart(e, 'CREATE')}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
-                onClick={handleCanvasClick}
-                className="relative w-full aspect-video bg-slate-950 rounded-2xl overflow-hidden cursor-crosshair select-none border border-slate-700 shadow-inner grid grid-cols-12 gap-1.5 sm:gap-2 p-1.5 sm:p-2 touch-none"
-                style={{
-                  backgroundImage: 'radial-gradient(circle at 50% 50%, #1e1b4b 0%, #0f172a 100%)'
-                }}
+                onMouseDown={previewStream ? (e) => handleMouseDown(e, 'CREATE') : undefined}
+                onMouseMove={previewStream ? handleMouseMove : undefined}
+                onMouseUp={previewStream ? handleMouseUp : undefined}
+                onMouseLeave={previewStream ? handleMouseUp : undefined}
+                onTouchStart={previewStream ? (e) => handleTouchStart(e, 'CREATE') : undefined}
+                onTouchMove={previewStream ? handleTouchMove : undefined}
+                onTouchEnd={previewStream ? handleTouchEnd : undefined}
+                className={`relative w-full overflow-hidden select-none touch-none ${
+                  previewStream && isScreenConnected ? 'bg-black cursor-crosshair' : 'bg-white'
+                }`}
+                style={{ aspectRatio: `${desktopResolution.width} / ${desktopResolution.height}` }}
+                aria-label={previewStream ? '선택한 공유 화면의 캡처 영역 설정' : '비어 있는 캡처 화면 영역'}
               >
-                {/* 윈도우 데스크톱 내부 UI: 1) 좌측 도구창 */}
-                <div className="col-span-3 bg-slate-900/80 rounded-xl p-1.5 sm:p-2.5 border border-white/5 pointer-events-none flex flex-col justify-between text-[8px] sm:text-[10px]">
-                  <div className="space-y-1">
-                    <div className="text-cyan-400 font-bold flex items-center space-x-1">
-                      <Settings2 className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                      <span className="truncate">스튜디오 설정</span>
+                {previewStream && isScreenConnected && (
+                  <>
+                    <video
+                      ref={previewVideoRef}
+                      muted
+                      autoPlay
+                      playsInline
+                      onLoadedMetadata={(e) => {
+                        const video = e.currentTarget;
+                        if (video.videoWidth && video.videoHeight) {
+                          setDesktopResolution({
+                            width: video.videoWidth,
+                            height: video.videoHeight,
+                            name: `${video.videoWidth} x ${video.videoHeight}`
+                          });
+                        }
+                      }}
+                      className="absolute inset-0 w-full h-full object-fill pointer-events-none"
+                    />
+
+                    <div
+                      onMouseDown={(e) => handleMouseDown(e, 'MOVE')}
+                      onTouchStart={(e) => handleTouchStart(e, 'MOVE')}
+                      className="absolute border-2 border-cyan-400 bg-cyan-400/20 shadow-2xl cursor-move z-20 touch-none"
+                      style={{
+                        left: `${currentArea.xRatio * 100}%`,
+                        top: `${currentArea.yRatio * 100}%`,
+                        width: `${currentArea.widthRatio * 100}%`,
+                        height: `${currentArea.heightRatio * 100}%`
+                      }}
+                    >
+                      <div className="absolute -top-5 sm:-top-6 left-0 bg-cyan-500 text-slate-950 text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded shadow whitespace-nowrap z-30">
+                        📸 {currentArea.name} ({pixelW}x{pixelH}px)
+                      </div>
+
+                      {(['RESIZE_TL', 'RESIZE_TR', 'RESIZE_BL', 'RESIZE_BR'] as const).map((action) => (
+                        <div
+                          key={action}
+                          onMouseDown={(e) => handleMouseDown(e, action)}
+                          onTouchStart={(e) => handleTouchStart(e, action)}
+                          className={`absolute w-5 h-5 bg-white border-2 border-cyan-500 rounded-full shadow z-30 touch-none transition-transform hover:scale-125 active:scale-150 ${
+                            action === 'RESIZE_TL' ? '-top-2.5 -left-2.5 cursor-nwse-resize'
+                            : action === 'RESIZE_TR' ? '-top-2.5 -right-2.5 cursor-nesw-resize'
+                            : action === 'RESIZE_BL' ? '-bottom-2.5 -left-2.5 cursor-nesw-resize'
+                            : '-bottom-2.5 -right-2.5 cursor-nwse-resize'
+                          }`}
+                        />
+                      ))}
+
+                      <div className="w-full h-full flex items-center justify-center opacity-30 pointer-events-none">
+                        <Maximize2 className="w-4 h-4 sm:w-6 sm:h-6 text-white" />
+                      </div>
                     </div>
-                    <div className="bg-white/5 p-1 rounded text-slate-300 truncate">🎙️ Mic</div>
-                    <div className="bg-white/5 p-1 rounded text-slate-300 truncate">📹 1080p</div>
-                  </div>
-                  <div className="p-1 sm:p-1.5 bg-rose-500/20 border border-rose-500/40 rounded text-rose-300 font-bold text-center text-[8px] sm:text-[9px]">
-                    🔴 LIVE
-                  </div>
-                </div>
-
-                {/* 윈도우 데스크톱 내부 UI: 2) 중앙 라이브 방송 메인 프리뷰 */}
-                <div className="col-span-5 bg-black/60 rounded-xl p-1.5 sm:p-2 border border-white/5 pointer-events-none flex flex-col justify-between items-center text-center">
-                  <div className="w-full flex items-center justify-between text-[8px] sm:text-[10px] text-white">
-                    <span className="bg-rose-600 px-1.5 py-0.2 rounded font-bold">LIVE</span>
-                    <span className="text-cyan-300 font-bold text-[8px] sm:text-[10px]">3,842명</span>
-                  </div>
-
-                  <div className="p-1.5 sm:p-2.5 bg-white/10 rounded-xl border border-white/10 text-white space-y-0.5 sm:space-y-1">
-                    <div className="text-[8px] sm:text-[10px] text-amber-300 font-bold">✨ 실시간 특가</div>
-                    <div className="text-[9px] sm:text-xs font-bold truncate">린넨 셔츠</div>
-                    <div className="text-[10px] sm:text-sm font-black text-white">35,000원</div>
-                  </div>
-
-                  <div className="w-full text-[8px] sm:text-[9px] text-slate-400 bg-black/40 py-0.5 rounded truncate">
-                    OBS 송출 화면
-                  </div>
-                </div>
-
-                {/* 윈도우 데스크톱 내부 UI: 3) 우측 틱톡 실시간 댓글 및 주문 패널 */}
-                <div className="col-span-4 bg-slate-900/90 rounded-xl p-1.5 sm:p-2.5 border border-white/10 pointer-events-none flex flex-col justify-between text-[8px] sm:text-[10px]">
-                  <div className="font-bold text-cyan-300 border-b border-white/10 pb-1 flex items-center justify-between">
-                    <span className="truncate">💬 댓글창</span>
-                    <span className="text-[8px] text-slate-400">실시간</span>
-                  </div>
-
-                  <div className="space-y-1 my-1 overflow-hidden text-left text-[8px] sm:text-[9px]">
-                    <div className="bg-white/5 p-1 rounded text-slate-200 truncate">
-                      <strong className="text-brand-300">러블리:</strong> 구매확정!
-                    </div>
-                    <div className="bg-white/5 p-1 rounded text-slate-200 truncate">
-                      <strong className="text-purple-300">달콤:</strong> 구매할게요
-                    </div>
-                  </div>
-
-                  <div className="p-1 bg-brand-500/20 border border-brand-500/30 rounded text-center text-brand-300 font-bold text-[8px]">
-                    캡처 타겟
-                  </div>
-                </div>
-
-                {/* 사용자 인터랙티브 바운딩 박스 (오버레이) */}
-                <div
-                  onMouseDown={(e) => handleMouseDown(e, 'MOVE')}
-                  onTouchStart={(e) => handleTouchStart(e, 'MOVE')}
-                  className="absolute border-2 border-cyan-400 bg-cyan-400/20 shadow-2xl transition-all cursor-move group z-20 touch-none"
-                  style={{
-                    left: `${currentArea.xRatio * 100}%`,
-                    top: `${currentArea.yRatio * 100}%`,
-                    width: `${currentArea.widthRatio * 100}%`,
-                    height: `${currentArea.heightRatio * 100}%`
-                  }}
-                >
-                  <div className="absolute -top-5 sm:-top-6 left-0 bg-cyan-500 text-slate-950 text-[9px] sm:text-[10px] font-black px-1.5 py-0.2 sm:py-0.5 rounded shadow whitespace-nowrap z-30">
-                    📸 {currentArea.name} ({pixelW}x{pixelH}px)
-                  </div>
-
-                  {/* 4개 모서리 리사이즈 핸들 (모바일 터치 타깃 w-5 h-5 이상으로 확대) */}
-                  <div
-                    onMouseDown={(e) => handleMouseDown(e, 'RESIZE_TL')}
-                    onTouchStart={(e) => handleTouchStart(e, 'RESIZE_TL')}
-                    className="absolute -top-2.5 -left-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full cursor-nwse-resize hover:scale-125 active:scale-150 transition-transform shadow z-30 touch-none"
-                  />
-                  <div
-                    onMouseDown={(e) => handleMouseDown(e, 'RESIZE_TR')}
-                    onTouchStart={(e) => handleTouchStart(e, 'RESIZE_TR')}
-                    className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full cursor-nesw-resize hover:scale-125 active:scale-150 transition-transform shadow z-30 touch-none"
-                  />
-                  <div
-                    onMouseDown={(e) => handleMouseDown(e, 'RESIZE_BL')}
-                    onTouchStart={(e) => handleTouchStart(e, 'RESIZE_BL')}
-                    className="absolute -bottom-2.5 -left-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full cursor-nesw-resize hover:scale-125 active:scale-150 transition-transform shadow z-30 touch-none"
-                  />
-                  <div
-                    onMouseDown={(e) => handleMouseDown(e, 'RESIZE_BR')}
-                    onTouchStart={(e) => handleTouchStart(e, 'RESIZE_BR')}
-                    className="absolute -bottom-2.5 -right-2.5 w-5 h-5 bg-white border-2 border-cyan-500 rounded-full cursor-nwse-resize hover:scale-125 active:scale-150 transition-transform shadow z-30 touch-none"
-                  />
-
-                  <div className="w-full h-full flex items-center justify-center opacity-30 pointer-events-none">
-                    <Maximize2 className="w-4 h-4 sm:w-6 sm:h-6 text-white" />
-                  </div>
-                </div>
-
-                {/* 2점 클릭 모드 1단계 핑 애니메이션 */}
-                {selectMode === 'CLICK_POINTS' && firstPoint && (
-                  <div
-                    className="absolute w-5 h-5 bg-rose-500 border-2 border-white rounded-full -translate-x-1/2 -translate-y-1/2 shadow-lg animate-ping z-30 pointer-events-none"
-                    style={{ left: `${firstPoint.x * 100}%`, top: `${firstPoint.y * 100}%` }}
-                  />
+                  </>
                 )}
               </div>
             </div>
@@ -669,19 +521,10 @@ export const RecognitionRulesPage: React.FC = () => {
 
           {/* 우측 윈도우 데스크톱 수치 정밀 조정 패널 */}
           <div className="lg:col-span-5 space-y-4 bg-slate-50 p-4 sm:p-6 rounded-3xl border border-slate-200">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-1.5">
-                <Sliders className="w-4 h-4 text-brand-600" />
-                <span>데스크톱 픽셀 & 비율 미세조정</span>
-              </h4>
-              <button
-                onClick={() => handleSelectPreset(CAPTURE_PRESETS[0])}
-                className="text-[10px] sm:text-[11px] text-slate-500 hover:text-slate-800 flex items-center space-x-1"
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>초기화</span>
-              </button>
-            </div>
+            <h4 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-1.5">
+              <Sliders className="w-4 h-4 text-brand-600" />
+              <span>데스크톱 픽셀 & 비율 미세조정</span>
+            </h4>
 
             {/* 현재 영역 요약 카드 */}
             <div className="p-3.5 rounded-2xl bg-white border border-slate-200 space-y-2 text-xs">
@@ -1102,46 +945,6 @@ export const RecognitionRulesPage: React.FC = () => {
         </div>
       )}
 
-      {/* 실시간 캡처 테스트 결과 모달 */}
-      {testCaptureUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white border border-slate-200 rounded-3xl max-w-2xl w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="text-base font-bold text-slate-900 flex items-center space-x-2">
-                  <Camera className="w-5 h-5 text-cyan-600" />
-                  <span>실시간 윈도우 캡처 테스트 결과</span>
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  지정한 윈도우 영역({pixelW}x{pixelH}px)이 잘 캡처되었는지 확인하세요.
-                </p>
-              </div>
-              <button
-                onClick={() => setTestCaptureUrl(null)}
-                className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-950 flex items-center justify-center p-2">
-              <img src={testCaptureUrl} alt="캡처 테스트 결과" className="max-h-[350px] w-auto rounded-lg object-contain" />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setTestCaptureUrl(null)}
-                className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs"
-              >
-                확인 및 닫기
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 실시간 공유 화면 위에서 캡처 영역을 설정하는 스튜디오 모달 */}
-      <CaptureAreaStudioModal isOpen={showAreaStudio} onClose={() => setShowAreaStudio(false)} />
     </div>
   );
 };
