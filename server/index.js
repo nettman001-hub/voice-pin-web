@@ -56,6 +56,7 @@ if (EULER_API_KEY) {
 }
 
 const DEFAULT_ORIGINS = [
+  'https://voicecap.shop',
   'https://voice-pin-web.vercel.app',
   'http://localhost:5173',
   'http://localhost:3000',
@@ -103,6 +104,16 @@ function normalizeUsername(raw) {
 // Express + Socket.IO
 // ---------------------------------------------------------------------------
 const app = express();
+
+// 최신 크롬 Private Network Access(PNA): 공개 HTTPS 페이지에서 로컬(127.0.0.1) 서버로
+// 접속할 때 브라우저가 preflight에 이 헤더를 요구하므로 반드시 응답해야 한다.
+app.use((req, res, next) => {
+  if (String(req.headers['access-control-request-private-network'] || '').toLowerCase() === 'true') {
+    res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  }
+  next();
+});
+
 app.use(
   cors({
     origin(origin, cb) {

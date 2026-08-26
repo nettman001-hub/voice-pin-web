@@ -42,7 +42,9 @@ pm2-startup install
 ## 포트/보안
 
 - `127.0.0.1:2137` 에서만 리슨 → 외부 노출 없음
-- CORS: `ALLOWED_ORIGINS`(기본: vercel 앱 + localhost 개발 서버)만 허용
+- CORS: `ALLOWED_ORIGINS`(기본: voicecap.shop + vercel 앱 + localhost 개발 서버)만 허용
+- 최신 크롬의 Private Network Access(PNA) 요구에 대응해 preflight에
+  `Access-Control-Allow-Private-Network: true` 를 자동 응답한다.
 
 ## 웹앱과의 이벤트 규격 (Socket.IO)
 
