@@ -30,3 +30,6 @@ dist-ssr
 eulerstream_key.txt
 server/node_modules
 !server/.env.example
+
+# chrome net-export 진단 로그
+chrome-net-export-log.json
