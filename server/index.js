@@ -150,6 +150,14 @@ const io = new Server(httpServer, {
   }
 });
 
+// engine.io가 /socket.io/ OPTIONS preflight를 직접 처리하므로(express 미들웨어보다 먼저),
+// 리스너 배열 맨 앞에 붙여 PNA 헤더를 모든 응답(특히 socket.io preflight)에 보장한다.
+httpServer.prependListener('request', (req, res) => {
+  if (String(req.headers['access-control-request-private-network'] || '').toLowerCase() === 'true') {
+    res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  }
+});
+
 function statusPayload() {
   return {
     state: serverState,
