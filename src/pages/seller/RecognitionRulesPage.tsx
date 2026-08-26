@@ -465,7 +465,7 @@ export const RecognitionRulesPage: React.FC = () => {
                 className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 via-brand-600 to-indigo-600 hover:from-cyan-500 hover:to-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center justify-center space-x-2 transition transform active:scale-95"
               >
                 <Camera className="w-4 h-4" />
-                <span>{isTestingCapture ? '화면 연결 중...' : '실시간 캡처 테스트 (1회 화면 연결)'}</span>
+                <span>{isTestingCapture ? '화면 연결 중...' : '실시간 캡처영역설정'}</span>
               </button>
             )}
           </div>

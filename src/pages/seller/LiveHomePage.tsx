@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLive } from '../../context/LiveContext';
 import { useCommentCapture } from '../../context/CommentCaptureContext';
 import { useSales } from '../../context/SalesContext';
 import { AudioVisualizer } from '../../components/common/AudioVisualizer';
-import { CaptureAreaStudioModal } from './CaptureAreaStudioModal';
 import { screenCaptureService } from '../../services/screenCaptureService';
+import { storageService } from '../../services/storageService';
 import {
   Radio,
   Square,
@@ -43,7 +43,8 @@ export const LiveHomePage: React.FC = () => {
     hasScreenShareAudio,
     startListening,
     stopListening,
-    injectTestMent
+    injectTestMent,
+    captureCurrentScreen
   } = useLive();
 
   const { user } = useAuth();
@@ -57,11 +58,12 @@ export const LiveHomePage: React.FC = () => {
   } = useCommentCapture();
 
   const { sales } = useSales();
+  const navigate = useNavigate();
   const [selectedCaptureModal, setSelectedCaptureModal] = useState<string | null>(null);
   const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
   const [showAdminOnlyModal, setShowAdminOnlyModal] = useState<boolean>(false);
-  const [showAreaStudio, setShowAreaStudio] = useState<boolean>(false);
-  const [isPreparingStudio, setIsPreparingStudio] = useState<boolean>(false);
+  const [showAreaNotSetModal, setShowAreaNotSetModal] = useState<boolean>(false);
+  const [isCapturingNow, setIsCapturingNow] = useState<boolean>(false);
   const [keyInput, setKeyInput] = useState<string>(deepgramApiKey || '');
   const [audioSourceMode, setAudioSourceMode] = useState<'TAB_AUDIO' | 'MIC'>('TAB_AUDIO');
   const flowContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -85,18 +87,24 @@ export const LiveHomePage: React.FC = () => {
     }
   };
 
-  // 즉시 캡처: 최초 1회 공유 항목을 선택받은 뒤 실시간 화면 위에서 캡처 영역을 설정하는 스튜디오를 연다.
+  // 즉시 캡처: 저장된 캡처 영역으로 바로 캡처한다.
+  // 영역이 설정되지 않았으면 안내창을 띄우고 캡처 영역 & 단어 규칙 페이지로 안내한다.
   const handleInstantCapture = async () => {
-    if (!screenCaptureService.getActiveStream()) {
-      setIsPreparingStudio(true);
-      try {
+    if (!storageService.getCaptureAreaConfig()) {
+      setShowAreaNotSetModal(true);
+      return;
+    }
+
+    setIsCapturingNow(true);
+    try {
+      if (!screenCaptureService.getActiveStream()) {
         const stream = await screenCaptureService.getOrCreateStream(false);
         if (!stream) return;
-      } finally {
-        setIsPreparingStudio(false);
       }
+      await captureCurrentScreen();
+    } finally {
+      setIsCapturingNow(false);
     }
-    setShowAreaStudio(true);
   };
 
   return (
@@ -187,11 +195,11 @@ export const LiveHomePage: React.FC = () => {
 
             <button
               onClick={handleInstantCapture}
-              disabled={isPreparingStudio}
+              disabled={isCapturingNow}
               className="px-3 py-2.5 sm:px-4 sm:py-3 rounded-xl bg-cyan-50 hover:bg-cyan-100 text-cyan-800 text-xs font-bold border border-cyan-200 flex items-center justify-center space-x-1.5 transition shadow-sm disabled:opacity-60"
             >
               <Camera className="w-3.5 h-3.5 text-cyan-600" />
-              <span>{isPreparingStudio ? '화면 연결 중...' : '즉시 캡처'}</span>
+              <span>{isCapturingNow ? '캡처 중...' : '즉시 캡처'}</span>
             </button>
 
             <button
@@ -698,8 +706,39 @@ export const LiveHomePage: React.FC = () => {
         </div>
       )}
 
-      {/* 실시간 공유 화면 위에서 캡처 영역을 설정하는 스튜디오 모달 */}
-      <CaptureAreaStudioModal isOpen={showAreaStudio} onClose={() => setShowAreaStudio(false)} />
+      {/* 캡처 영역 미설정 안내창 → 캡처 영역 & 단어 규칙 페이지로 안내 */}
+      {showAreaNotSetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="max-w-sm w-full bg-white p-6 rounded-3xl border border-slate-200 shadow-2xl space-y-4 animate-in zoom-in-95 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-cyan-50 text-cyan-600 border border-cyan-200 flex items-center justify-center mx-auto">
+              <Camera className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-black text-slate-900">캡처 영역이 설정되지 않았습니다</h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                먼저 <strong className="text-slate-800">캡처 영역 & 단어 규칙</strong> 페이지에서 화면을 연결하고 캡처할 영역을 지정해 주세요.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => {
+                  setShowAreaNotSetModal(false);
+                  navigate('/recognition-rules');
+                }}
+                className="w-full py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold transition shadow-md shadow-brand-500/20"
+              >
+                캡처 영역 설정하러 이동
+              </button>
+              <button
+                onClick={() => setShowAreaNotSetModal(false)}
+                className="w-full py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition"
+              >
+                나중에 하기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
