@@ -53,6 +53,7 @@ export const LiveHomePage: React.FC = () => {
     isActive: isCommentCaptureActive,
     isRunning: isCommentCaptureRunning,
     newCount: commentNewCount,
+    liveComments,
     startCapture: startCommentCapture,
     stopCapture: stopCommentCapture
   } = useCommentCapture();
@@ -67,12 +68,20 @@ export const LiveHomePage: React.FC = () => {
   const [keyInput, setKeyInput] = useState<string>(deepgramApiKey || '');
   const [audioSourceMode, setAudioSourceMode] = useState<'TAB_AUDIO' | 'MIC'>('TAB_AUDIO');
   const flowContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const commentFeedRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     if (flowContainerRef.current) {
       flowContainerRef.current.scrollTop = flowContainerRef.current.scrollHeight;
     }
   }, [liveTranscriptFlow, currentInterimTranscript]);
+
+  // 댓글 피드: 아래쪽이 최신글이 되도록 새 댓글이 오면 자동 스크롤한다.
+  React.useEffect(() => {
+    if (commentFeedRef.current) {
+      commentFeedRef.current.scrollTop = commentFeedRef.current.scrollHeight;
+    }
+  }, [liveComments]);
 
   const currentSessionSales = sales.filter((s) => s.sessionId === currentSessionId);
   const todayTotalAmount = currentSessionSales
@@ -450,6 +459,59 @@ export const LiveHomePage: React.FC = () => {
                       )}
                     </div>
                     <p className="font-semibold text-slate-900 break-words">{log.text}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* 실시간 댓글 캡처 피드 (아래쪽이 최신글) */}
+          <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
+                <MessageSquareText className={`w-4 h-4 ${isCommentCaptureRunning ? 'text-rose-500 animate-pulse' : 'text-cyan-600'}`} />
+                <span>실시간 댓글 캡처 ({liveComments.length}건)</span>
+                {!isCommentCaptureActive && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+                    함께시작 꺼짐
+                  </span>
+                )}
+              </h3>
+              <Link to="/comments" className="text-xs text-brand-600 hover:underline font-bold flex items-center">
+                <span>전체 기록</span>
+                <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              </Link>
+            </div>
+
+            <div ref={commentFeedRef} className="max-h-[220px] min-h-[60px] overflow-y-auto space-y-1.5 pr-1">
+              {liveComments.length === 0 ? (
+                <div className="py-6 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-2xl">
+                  {isCommentCaptureRunning
+                    ? '댓글 영역을 읽는 중입니다... 새 댓글이 감지되면 여기에 표시됩니다.'
+                    : '"댓글캡처 함께시작" 체크 후 라이브 청취를 시작하면 캡처된 댓글이 표시됩니다.'}
+                </div>
+              ) : (
+                liveComments.map((c) => (
+                  <div
+                    key={c.id}
+                    className={`flex items-baseline space-x-2 p-2 rounded-xl border text-xs ${
+                      c.matchedAlertWord
+                        ? 'bg-rose-50/70 border-rose-200'
+                        : 'bg-slate-50/70 border-slate-200'
+                    }`}
+                  >
+                    <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">
+                      {new Date(c.capturedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
+                    <span className={`font-bold flex-shrink-0 max-w-[110px] truncate ${c.matchedAlertWord ? 'text-rose-700' : 'text-brand-700'}`}>
+                      {c.nickname}
+                    </span>
+                    <span className="text-slate-800 font-medium break-words min-w-0 flex-1">{c.content}</span>
+                    {c.matchedAlertWord && (
+                      <span className="flex-shrink-0 px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black whitespace-nowrap">
+                        {c.matchedAlertWord}
+                      </span>
+                    )}
                   </div>
                 ))
               )}

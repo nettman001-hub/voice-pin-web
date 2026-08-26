@@ -20,6 +20,7 @@ interface CommentCaptureContextType {
   isProcessing: boolean;      // 현재 캡처/OCR 처리 중
   lastRunAt: string | null;   // 마지막 캡처 시각
   newCount: number;           // 토글 ON 이후 신규 누적 건수
+  liveComments: CommentRecord[]; // 현재 회차에서 캡처된 댓글 (아래쪽이 최신)
   activeAlert: CommentAlert | null;
   dismissAlert: () => void;
   startCapture: () => void;
@@ -38,6 +39,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [newCount, setNewCount] = useState<number>(0);
+  const [liveComments, setLiveComments] = useState<CommentRecord[]>([]);
   const [activeAlert, setActiveAlert] = useState<CommentAlert | null>(null);
   const [config, setConfig] = useState<CommentCaptureConfig>(() => storageService.getCommentCaptureConfig());
 
@@ -119,6 +121,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       if (records.length > 0) {
         storageService.addCommentRecords(records);
         setNewCount((prev) => prev + records.length);
+        setLiveComments((prev) => [...prev, ...records].slice(-100));
 
         const firstHit = alertHits[0];
         if (firstHit) {
@@ -152,6 +155,15 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     seenKeysRef.current = new Set(
       storageService.getCommentRecords().map((r) => commentDedupeKey(r.nickname, r.content))
     );
+
+    // 현재 회차의 기존 캡처 댓글을 피드에 복원한다 (시간 오름차순 = 아래쪽이 최신).
+    const sessionRecords = storageService
+      .getCommentRecords()
+      .filter((r) => r.sessionId === currentSessionId)
+      .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime())
+      .slice(-100);
+    setLiveComments(sessionRecords);
+
     setNewCount(0);
     void warmUpOcr();
 
@@ -183,6 +195,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         isProcessing,
         lastRunAt,
         newCount,
+        liveComments,
         activeAlert,
         dismissAlert,
         startCapture,
