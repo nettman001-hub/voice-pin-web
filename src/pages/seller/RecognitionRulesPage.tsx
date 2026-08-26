@@ -352,7 +352,7 @@ export const RecognitionRulesPage: React.FC = () => {
 
     const video = previewVideoRef.current;
     if (previewStream && isScreenConnected && video?.videoWidth && video.videoHeight) {
-      const maxPreviewWidth = 1280;
+      const maxPreviewWidth = 960;
       const scale = Math.min(1, maxPreviewWidth / video.videoWidth);
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
@@ -366,22 +366,31 @@ export const RecognitionRulesPage: React.FC = () => {
 
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       const snapshot = {
-        imageUrl: canvas.toDataURL('image/jpeg', 0.82),
+        imageUrl: canvas.toDataURL('image/jpeg', 0.72),
         width: video.videoWidth,
         height: video.videoHeight,
         savedAt: new Date().toISOString()
       };
 
-      if (!storageService.saveCaptureAreaSnapshot(snapshot)) {
-        showNotice('영역 설정은 저장했지만 브라우저 저장 공간 부족으로 현재 화면을 보관하지 못했습니다.', '⚠️ 화면 저장 실패', 'warning');
+      // 영구 저장 결과와 관계없이 화면은 즉시 고정하고 메뉴 이동 시 메모리에서 복원한다.
+      setSavedPreview(snapshot);
+      setPreviewStream(null);
+      const isPersisted = storageService.saveCaptureAreaSnapshot(snapshot);
+
+      if (!isPersisted) {
+        showNotice('현재 화면은 고정되었지만 브라우저 저장 공간 부족으로 브라우저를 완전히 닫은 뒤에는 복원되지 않을 수 있습니다.', '⚠️ 화면 고정 완료', 'warning');
         return;
       }
 
-      setSavedPreview(snapshot);
-      setPreviewStream(null);
+      showNotice(`윈도우 캡처 영역(${pixelW}x${pixelH}px)과 현재 화면이 저장되었습니다! 💾`, '💾 설정 저장 완료', 'success');
+      return;
     }
 
-    showNotice(`윈도우 캡처 영역(${pixelW}x${pixelH}px)과 현재 화면이 저장되었습니다! 💾`, '💾 설정 저장 완료', 'success');
+    if (savedPreview) {
+      showNotice(`윈도우 캡처 영역(${pixelW}x${pixelH}px)과 고정 화면이 저장되어 있습니다. 💾`, '💾 설정 저장 완료', 'success');
+    } else {
+      showNotice('영역 설정은 저장했지만 고정할 실시간 화면이 없습니다. 먼저 실시간 캡처영역설정을 실행해 주세요.', '⚠️ 화면 없음', 'warning');
+    }
   };
 
   // 현재 해상도 기준 픽셀 계산

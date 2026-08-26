@@ -6,6 +6,13 @@ import { PaymentHistoryItem, PaymentCard } from '../types/subscription';
 import { ReportItem, SystemErrorLog, NotificationSetting } from '../types/admin';
 import { CommentRecord, CommentCaptureConfig, DEFAULT_COMMENT_CAPTURE_CONFIG } from '../types/comment';
 
+export interface CaptureAreaSnapshot {
+  imageUrl: string;
+  width: number;
+  height: number;
+  savedAt: string;
+}
+
 // 기본 방송 회차 생성 (YYYYMMDD_HH 형식)
 export function generateSessionId(): string {
   const now = new Date();
@@ -182,6 +189,8 @@ const KEYS = {
 };
 
 export class StorageService {
+  private captureAreaSnapshotCache: CaptureAreaSnapshot | null | undefined;
+
   private getItem<T>(key: string, defaultValue: T): T {
     try {
       const data = localStorage.getItem(key);
@@ -355,10 +364,17 @@ export class StorageService {
   }
 
   // 영역 설정 완료 시 고정해 둔 마지막 공유 화면
-  public getCaptureAreaSnapshot(): { imageUrl: string; width: number; height: number; savedAt: string } | null {
-    return this.getItem<{ imageUrl: string; width: number; height: number; savedAt: string } | null>(KEYS.CAPTURE_AREA_SNAPSHOT, null);
+  public getCaptureAreaSnapshot(): CaptureAreaSnapshot | null {
+    if (this.captureAreaSnapshotCache !== undefined) {
+      return this.captureAreaSnapshotCache;
+    }
+
+    this.captureAreaSnapshotCache = this.getItem<CaptureAreaSnapshot | null>(KEYS.CAPTURE_AREA_SNAPSHOT, null);
+    return this.captureAreaSnapshotCache;
   }
-  public saveCaptureAreaSnapshot(snapshot: { imageUrl: string; width: number; height: number; savedAt: string }): boolean {
+  public saveCaptureAreaSnapshot(snapshot: CaptureAreaSnapshot): boolean {
+    // 메뉴 이동 후에는 저장 용량과 관계없이 메모리 캐시에서 즉시 복원한다.
+    this.captureAreaSnapshotCache = snapshot;
     try {
       localStorage.setItem(KEYS.CAPTURE_AREA_SNAPSHOT, JSON.stringify(snapshot));
       return true;
