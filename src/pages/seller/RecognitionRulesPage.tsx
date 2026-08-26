@@ -5,6 +5,7 @@ import { useLive } from '../../context/LiveContext';
 import { useCommentCapture, getCommentStatusBadge } from '../../context/CommentCaptureContext';
 import { RecognitionWordRule, RuleAction, CaptureAreaPreset, CaptureAreaConfig } from '../../types/rules';
 import { screenCaptureService } from '../../services/screenCaptureService';
+import { storageService } from '../../services/storageService';
 import {
   Sliders,
   Plus,
@@ -67,12 +68,16 @@ export const RecognitionRulesPage: React.FC = () => {
     setModalNotice({ title, message, type });
   };
 
+  const [savedPreview, setSavedPreview] = useState(() => storageService.getCaptureAreaSnapshot());
+
   // 윈도우 데스크톱 해상도 기준 설정
-  const [desktopResolution, setDesktopResolution] = useState<{ width: number; height: number; name: string }>({
-    width: 1920,
-    height: 1080,
-    name: '1920 x 1080 (FHD 데스크톱 기본)'
-  });
+  const [desktopResolution, setDesktopResolution] = useState<{ width: number; height: number; name: string }>(() => ({
+    width: savedPreview?.width || 1920,
+    height: savedPreview?.height || 1080,
+    name: savedPreview
+      ? `${savedPreview.width} x ${savedPreview.height}`
+      : '1920 x 1080 (FHD 데스크톱 기본)'
+  }));
 
   // 선택 모드
   const [currentArea, setCurrentArea] = useState<CaptureAreaConfig>({
@@ -342,11 +347,50 @@ export const RecognitionRulesPage: React.FC = () => {
     setCaptureAreaConfig(updated);
   };
 
+  const handleSaveCaptureArea = () => {
+    setCaptureAreaConfig(currentArea);
+
+    const video = previewVideoRef.current;
+    if (previewStream && isScreenConnected && video?.videoWidth && video.videoHeight) {
+      const maxPreviewWidth = 1280;
+      const scale = Math.min(1, maxPreviewWidth / video.videoWidth);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+
+      const context = canvas.getContext('2d');
+      if (!context) {
+        showNotice('영역 설정은 저장했지만 현재 화면을 고정하지 못했습니다.', '⚠️ 화면 저장 실패', 'warning');
+        return;
+      }
+
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const snapshot = {
+        imageUrl: canvas.toDataURL('image/jpeg', 0.82),
+        width: video.videoWidth,
+        height: video.videoHeight,
+        savedAt: new Date().toISOString()
+      };
+
+      if (!storageService.saveCaptureAreaSnapshot(snapshot)) {
+        showNotice('영역 설정은 저장했지만 브라우저 저장 공간 부족으로 현재 화면을 보관하지 못했습니다.', '⚠️ 화면 저장 실패', 'warning');
+        return;
+      }
+
+      setSavedPreview(snapshot);
+      setPreviewStream(null);
+    }
+
+    showNotice(`윈도우 캡처 영역(${pixelW}x${pixelH}px)과 현재 화면이 저장되었습니다! 💾`, '💾 설정 저장 완료', 'success');
+  };
+
   // 현재 해상도 기준 픽셀 계산
   const pixelX = Math.round(currentArea.xRatio * desktopResolution.width);
   const pixelY = Math.round(currentArea.yRatio * desktopResolution.height);
   const pixelW = Math.round(currentArea.widthRatio * desktopResolution.width);
   const pixelH = Math.round(currentArea.heightRatio * desktopResolution.height);
+  const hasLivePreview = !!(previewStream && isScreenConnected);
+  const hasDisplayedScreen = hasLivePreview || !!savedPreview;
 
   return (
     <div className="p-3.5 sm:p-6 max-w-7xl mx-auto space-y-6 sm:space-y-8">
@@ -380,23 +424,28 @@ export const RecognitionRulesPage: React.FC = () => {
             </p>
           </div>
 
-          {previewStream && isScreenConnected && (
+          {hasDisplayedScreen && (
             <div className="flex flex-wrap items-center gap-2">
-              <>
-                <span className="px-2.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] sm:text-xs font-bold flex items-center space-x-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>화면 연결됨</span>
-                </span>
+              <span className={`px-2.5 py-1.5 rounded-xl border text-[11px] sm:text-xs font-bold flex items-center space-x-1.5 ${
+                hasLivePreview
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                  : 'bg-sky-50 text-sky-800 border-sky-200'
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${hasLivePreview ? 'bg-emerald-500 animate-pulse' : 'bg-sky-500'}`}></span>
+                <span>{hasLivePreview ? '화면 연결됨' : '저장 화면 표시 중'}</span>
+              </span>
 
-                <button
-                  onClick={handleTestCapture}
-                  disabled={isTestingCapture}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-500/20 flex items-center space-x-1.5 transition active:scale-95"
-                >
-                  <Camera className="w-3.5 h-3.5" />
-                  <span>{isTestingCapture ? '화면 불러오는 중...' : '실시간 캡처영역설정'}</span>
-                </button>
+              <button
+                onClick={handleTestCapture}
+                disabled={isTestingCapture}
+                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-500/20 flex items-center space-x-1.5 transition active:scale-95"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>{isTestingCapture ? '화면 불러오는 중...' : '실시간 캡처영역설정'}</span>
+              </button>
 
+              {hasLivePreview && (
+                <>
                 <button
                   onClick={handleChangeScreen}
                   disabled={isTestingCapture}
@@ -413,7 +462,8 @@ export const RecognitionRulesPage: React.FC = () => {
                 >
                   해제
                 </button>
-              </>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -423,35 +473,35 @@ export const RecognitionRulesPage: React.FC = () => {
           {/* 좌측 16:9 와이드 윈도우 데스크톱 캔버스 */}
           <div className="lg:col-span-7 flex flex-col items-center">
             <div className={`w-full overflow-hidden rounded-3xl border-2 ${
-              previewStream && isScreenConnected
+              hasDisplayedScreen
                 ? 'bg-slate-900 border-slate-700 shadow-2xl'
                 : 'bg-white border-dashed border-slate-300'
             }`}>
-              {previewStream && isScreenConnected && (
+              {hasDisplayedScreen && (
                 <div className="flex items-center space-x-2 px-3 py-2 text-[10px] sm:text-[11px] text-slate-300 select-none">
                   <Monitor className="w-3.5 h-3.5 flex-shrink-0" />
                   <span className="font-bold truncate">
-                    선택한 공유 화면 ({desktopResolution.width}x{desktopResolution.height})
+                    {hasLivePreview ? '선택한 공유 화면' : '마지막 저장 화면'} ({desktopResolution.width}x{desktopResolution.height})
                   </span>
                 </div>
               )}
 
               <div
                 ref={canvasContainerRef}
-                onMouseDown={previewStream ? (e) => handleMouseDown(e, 'CREATE') : undefined}
-                onMouseMove={previewStream ? handleMouseMove : undefined}
-                onMouseUp={previewStream ? handleMouseUp : undefined}
-                onMouseLeave={previewStream ? handleMouseUp : undefined}
-                onTouchStart={previewStream ? (e) => handleTouchStart(e, 'CREATE') : undefined}
-                onTouchMove={previewStream ? handleTouchMove : undefined}
-                onTouchEnd={previewStream ? handleTouchEnd : undefined}
+                onMouseDown={hasDisplayedScreen ? (e) => handleMouseDown(e, 'CREATE') : undefined}
+                onMouseMove={hasDisplayedScreen ? handleMouseMove : undefined}
+                onMouseUp={hasDisplayedScreen ? handleMouseUp : undefined}
+                onMouseLeave={hasDisplayedScreen ? handleMouseUp : undefined}
+                onTouchStart={hasDisplayedScreen ? (e) => handleTouchStart(e, 'CREATE') : undefined}
+                onTouchMove={hasDisplayedScreen ? handleTouchMove : undefined}
+                onTouchEnd={hasDisplayedScreen ? handleTouchEnd : undefined}
                 className={`relative w-full overflow-hidden select-none touch-none ${
-                  previewStream && isScreenConnected ? 'bg-black cursor-crosshair' : 'bg-white'
+                  hasDisplayedScreen ? 'bg-black cursor-crosshair' : 'bg-white'
                 }`}
                 style={{ aspectRatio: `${desktopResolution.width} / ${desktopResolution.height}` }}
-                aria-label={previewStream ? '선택한 공유 화면의 캡처 영역 설정' : '비어 있는 캡처 화면 영역'}
+                aria-label={hasDisplayedScreen ? '선택한 공유 화면의 캡처 영역 설정' : '비어 있는 캡처 화면 영역'}
               >
-                {(!previewStream || !isScreenConnected) && (
+                {!hasDisplayedScreen && (
                   <div className="absolute inset-0 flex items-center justify-center p-4">
                     <button
                       type="button"
@@ -465,27 +515,36 @@ export const RecognitionRulesPage: React.FC = () => {
                   </div>
                 )}
 
-                {previewStream && isScreenConnected && (
-                  <>
-                    <video
-                      ref={previewVideoRef}
-                      muted
-                      autoPlay
-                      playsInline
-                      onLoadedMetadata={(e) => {
-                        const video = e.currentTarget;
-                        if (video.videoWidth && video.videoHeight) {
-                          setDesktopResolution({
-                            width: video.videoWidth,
-                            height: video.videoHeight,
-                            name: `${video.videoWidth} x ${video.videoHeight}`
-                          });
-                        }
-                      }}
-                      className="absolute inset-0 w-full h-full object-fill pointer-events-none"
-                    />
+                {hasLivePreview && (
+                  <video
+                    ref={previewVideoRef}
+                    muted
+                    autoPlay
+                    playsInline
+                    onLoadedMetadata={(e) => {
+                      const video = e.currentTarget;
+                      if (video.videoWidth && video.videoHeight) {
+                        setDesktopResolution({
+                          width: video.videoWidth,
+                          height: video.videoHeight,
+                          name: `${video.videoWidth} x ${video.videoHeight}`
+                        });
+                      }
+                    }}
+                    className="absolute inset-0 w-full h-full object-fill pointer-events-none"
+                  />
+                )}
 
-                    <div
+                {!hasLivePreview && savedPreview && (
+                  <img
+                    src={savedPreview.imageUrl}
+                    alt="마지막으로 저장한 캡처 영역 화면"
+                    className="absolute inset-0 w-full h-full object-fill pointer-events-none"
+                  />
+                )}
+
+                {hasDisplayedScreen && (
+                  <div
                       onMouseDown={(e) => handleMouseDown(e, 'MOVE')}
                       onTouchStart={(e) => handleTouchStart(e, 'MOVE')}
                       className="absolute border-2 border-cyan-400 bg-cyan-400/20 shadow-2xl cursor-move z-20 touch-none"
@@ -517,8 +576,7 @@ export const RecognitionRulesPage: React.FC = () => {
                       <div className="w-full h-full flex items-center justify-center opacity-30 pointer-events-none">
                         <Maximize2 className="w-4 h-4 sm:w-6 sm:h-6 text-white" />
                       </div>
-                    </div>
-                  </>
+                  </div>
                 )}
               </div>
             </div>
@@ -618,10 +676,7 @@ export const RecognitionRulesPage: React.FC = () => {
 
             <div className="pt-2">
               <button
-                onClick={() => {
-                  setCaptureAreaConfig(currentArea);
-                  showNotice(`윈도우 캡처 영역(${pixelW}x${pixelH}px) 설정이 안전하게 저장되었습니다! 💾`, '💾 설정 저장 완료', 'success');
-                }}
+                onClick={handleSaveCaptureArea}
                 className="w-full py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-500/20 transition"
               >
                 현재 윈도우 영역 설정 저장하기

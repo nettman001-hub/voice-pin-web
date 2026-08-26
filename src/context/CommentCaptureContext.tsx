@@ -302,7 +302,7 @@ export function getCommentStatusBadge(status: CommentStreamStatus): { label: str
     case 'CONNECTING_TIKTOK':
       return { label: '틱톡 연결중', tone: 'warn' };
     case 'CONNECTED':
-      return { label: '서버 연결됨', tone: 'idle' };
+      return { label: '로컬 서버 대기중', tone: 'idle' };
     case 'ENDED':
       return { label: '방송 종료됨', tone: 'idle' };
     case 'ERROR':

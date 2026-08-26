@@ -175,6 +175,7 @@ const KEYS = {
   NOTIFICATIONS: 'dadryeo_notifications',
   DEEPGRAM_API_KEY: 'dadryeo_deepgram_api_key',
   CAPTURE_AREA: 'voicecap_capture_area_config',
+  CAPTURE_AREA_SNAPSHOT: 'voicecap_capture_area_snapshot',
   COMMENT_RECORDS: 'voicecap_comment_records',
   COMMENT_CAPTURE_CONFIG: 'voicecap_comment_capture_config',
   COMMENT_CAPTURE_ACTIVE: 'voicecap_comment_capture_active'
@@ -351,6 +352,20 @@ export class StorageService {
   }
   public saveCaptureAreaConfig(config: CaptureAreaConfig) {
     this.setItem(KEYS.CAPTURE_AREA, config);
+  }
+
+  // 영역 설정 완료 시 고정해 둔 마지막 공유 화면
+  public getCaptureAreaSnapshot(): { imageUrl: string; width: number; height: number; savedAt: string } | null {
+    return this.getItem<{ imageUrl: string; width: number; height: number; savedAt: string } | null>(KEYS.CAPTURE_AREA_SNAPSHOT, null);
+  }
+  public saveCaptureAreaSnapshot(snapshot: { imageUrl: string; width: number; height: number; savedAt: string }): boolean {
+    try {
+      localStorage.setItem(KEYS.CAPTURE_AREA_SNAPSHOT, JSON.stringify(snapshot));
+      return true;
+    } catch (e) {
+      console.error('[Storage] Failed to save capture area snapshot', e);
+      return false;
+    }
   }
 
   // 댓글 캡처 설정 (구버전 저장값과 신규 기본값을 병합해 반환)
