@@ -16,12 +16,14 @@ import {
   Users,
   AlertTriangle,
   FileSpreadsheet,
+  Smartphone,
+  MessageCircle,
   MessageSquareText
 } from 'lucide-react';
 
 interface NavItem {
   name: string;
-  path: string;
+  path?: string;
   icon: React.ComponentType<{ className?: string }>;
   badge?: string;
   isLiveOnly?: boolean;
@@ -58,6 +60,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
         { name: '댓글 캡처 기록', path: '/comments', icon: MessageSquareText },
         { name: '방송 후 일괄 확인', path: '/sales/review', icon: CheckSquare },
         { name: '정산 및 엑셀 다운로드', path: '/settlement', icon: FileSpreadsheet },
+      ]
+    },
+    {
+      groupName: '고객 관리',
+      items: [
+        { name: '고객 관리 (모바일)', icon: Smartphone },
+        { name: '고객 관리 (카카오톡)', icon: MessageCircle },
       ]
     },
     {
@@ -117,6 +126,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
             <div className="space-y-1">
               {group.items.map((item) => {
                 const Icon = item.icon;
+                if (!item.path) {
+                  return (
+                    <button
+                      key={item.name}
+                      type="button"
+                      disabled
+                      title="준비 중인 메뉴입니다"
+                      className="flex w-full items-center px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-500 cursor-not-allowed"
+                    >
+                      <div className="flex items-center space-x-2.5">
+                        <Icon className="w-4 h-4 flex-shrink-0" />
+                        <span>{item.name}</span>
+                      </div>
+                    </button>
+                  );
+                }
+
                 return (
                   <NavLink
                     key={item.path}
