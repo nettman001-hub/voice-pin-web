@@ -17,6 +17,9 @@ public final class SmsSyncManager {
     private SmsSyncManager() { }
 
     public static String syncNow(Context context) {
+        if (!BridgePreferences.hasDataTransferConsent(context)) return "문자 정보 전송 동의가 필요합니다.";
+        if (!SmsRoleUtils.isDefaultSmsApp(context)) return "기본 SMS 앱으로 설정되어 있지 않아 동기화를 중단했습니다.";
+        if (!SmsRoleUtils.hasSmsPermissions(context)) return "SMS/MMS 권한이 없어 동기화를 중단했습니다.";
         if (!BridgePreferences.configured(context)) return "서버 URL과 판매자 ID를 먼저 저장해 주세요.";
         int sent = syncRecentSms(context);
         sent += syncRecentMms(context);
@@ -37,6 +40,7 @@ public final class SmsSyncManager {
                 String body = cursor.getString(2);
                 String externalId = "device-sms-" + id;
                 if (isUploaded(context, externalId)) continue;
+                if (!isPurchaseMessage(body)) continue;
                 if (BridgeClient.postIncoming(context, externalId, phone == null ? "알 수 없음" : phone, body == null ? "" : body, new ArrayList<>())) {
                     markUploaded(context, externalId); count++;
                 }
@@ -58,6 +62,7 @@ public final class SmsSyncManager {
                 List<BridgeClient.ImageAttachment> images = readMmsImages(context, id);
                 String body = readMmsText(context, id, cursor.getString(2));
                 String phone = readMmsAddress(context, id);
+                if (!isPurchaseMessage(body)) continue;
                 if (phone.isEmpty()) continue;
                 if (BridgeClient.postIncoming(context, externalId, phone, body, images)) {
                     markUploaded(context, externalId); count++;
@@ -137,4 +142,13 @@ public final class SmsSyncManager {
 
     private static boolean isUploaded(Context context, String id) { return BridgePreferences.get(context).getBoolean("uploaded_" + id, false); }
     private static void markUploaded(Context context, String id) { BridgePreferences.get(context).edit().putBoolean("uploaded_" + id, true).apply(); }
+
+    private static boolean isPurchaseMessage(String body) {
+        if (body == null) return false;
+        String compact = body.replace(" ", "").toLowerCase(java.util.Locale.ROOT);
+        boolean hasNickname = compact.contains("닉네임") || compact.contains("구매자") || compact.contains("buyer");
+        boolean hasAddress = compact.contains("주소") || compact.contains("배송지") || compact.contains("address");
+        boolean hasOrder = compact.contains("상품") || compact.contains("제품") || compact.contains("가격") || compact.contains("금액") || compact.contains("price");
+        return hasNickname && hasAddress && hasOrder;
+    }
 }

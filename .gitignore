@@ -34,6 +34,9 @@ android/voicecapSMS/local.properties
 android/voicecapSMS/.gradle/
 android/voicecapSMS/build/
 android/voicecapSMS/app/build/
+android/voicecapSMS/signing/
+android/voicecapSMS/*.jks
+android/voicecapSMS/*.keystore
 !server/.env.example
 
 # chrome net-export 진단 로그

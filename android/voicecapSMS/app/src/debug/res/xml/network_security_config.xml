@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 개발 빌드에서만 동일 사내망의 로컬 브리지 접속을 허용한다. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
