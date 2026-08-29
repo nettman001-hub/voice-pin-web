@@ -38,7 +38,7 @@ const CommentCaptureContext = createContext<CommentCaptureContextType | undefine
 export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isListening, currentSessionId, transcriptLogs } = useLive();
 
-  // 기본값은 중지이며, 사용자가 바꾼 활성화 상태는 저장되어 유지된다.
+  // 기본값은 함께 시작이며, 사용자가 바꾼 활성화 상태는 저장되어 유지된다.
   const [isActive, setIsActive] = useState<boolean>(() => storageService.getCommentCaptureActive());
   const [serverStatus, setServerStatus] = useState<CommentStreamStatus>('DISCONNECTED');
   const [serverMessage, setServerMessage] = useState<string>('로컬 댓글 수집 서버 미연결');
