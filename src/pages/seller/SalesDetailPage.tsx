@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
 import { SaleStatus } from '../../types/live';
+import { BuyerReconciliationPanel } from '../../components/sales/BuyerReconciliationPanel';
 import {
   ShoppingBag,
   ArrowLeft,
@@ -21,6 +22,7 @@ export const SalesDetailPage: React.FC = () => {
   const sale = sales.find((s) => s.id === id);
 
   const [buyerNickname, setBuyerNickname] = useState(sale?.buyerNickname || '');
+  const [productName, setProductName] = useState(sale?.productName || '');
   const [amount, setAmount] = useState(sale?.amount.toString() || '0');
   const [status, setStatus] = useState<SaleStatus>(sale?.status || '자동저장');
   const [note, setNote] = useState(sale?.note || '');
@@ -42,6 +44,7 @@ export const SalesDetailPage: React.FC = () => {
     const updated = {
       ...sale,
       buyerNickname,
+      productName,
       amount: parseInt(amount, 10) || 0,
       status,
       note
@@ -127,7 +130,7 @@ export const SalesDetailPage: React.FC = () => {
 
         {/* 수정 폼 */}
         <form onSubmit={handleSave} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">구매자 닉네임</label>
               <input
@@ -135,6 +138,17 @@ export const SalesDetailPage: React.FC = () => {
                 required
                 value={buyerNickname}
                 onChange={(e) => setBuyerNickname(e.target.value)}
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-brand-500 font-bold"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">판매 상품명</label>
+              <input
+                type="text"
+                value={productName}
+                onChange={(e) => setProductName(e.target.value)}
+                placeholder="상품명 입력"
                 className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-brand-500 font-bold"
               />
             </div>
@@ -214,6 +228,14 @@ export const SalesDetailPage: React.FC = () => {
             </div>
           </div>
         )}
+
+        <div className="border-t border-slate-100 pt-5 sm:pt-6">
+          <BuyerReconciliationPanel
+            buyerNickname={sale.buyerNickname}
+            records={[sale]}
+            captureImageUrls={sale.captureImageUrls || []}
+          />
+        </div>
       </div>
     </div>
   );

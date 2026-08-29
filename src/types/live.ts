@@ -8,6 +8,7 @@ export interface SaleRecord {
   recognizedAt: string;        // 인식 일시 (ISO string)
   rawTranscript: string;       // 원본 전사 문장
   status: SaleStatus;          // 상태 (자동저장, 수동수정, 확정, 보류)
+  productName?: string;        // 판매 상품명 (판매자 직접 입력 또는 음성 추출)
   captureImageUrls?: string[]; // 연결된 화면 캡처 이미지 URL 목록
   note?: string;               // 메모
 }

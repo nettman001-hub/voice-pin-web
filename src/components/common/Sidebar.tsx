@@ -18,7 +18,9 @@ import {
   FileSpreadsheet,
   Smartphone,
   MessageCircle,
-  MessageSquareText
+  MessageSquareText,
+  ReceiptText,
+  Truck
 } from 'lucide-react';
 
 interface NavItem {
@@ -59,6 +61,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
         { name: '판매 내역 목록', path: '/sales', icon: ShoppingBag },
         { name: '댓글 캡처 기록', path: '/comments', icon: MessageSquareText },
         { name: '방송 후 일괄 확인', path: '/sales/review', icon: CheckSquare },
+        { name: '정산서 관리 & 발송', path: '/invoices', icon: ReceiptText },
+        { name: '택배발송 관리', path: '/shipments', icon: Truck },
         { name: '정산 및 엑셀 다운로드', path: '/settlement', icon: FileSpreadsheet },
       ]
     },

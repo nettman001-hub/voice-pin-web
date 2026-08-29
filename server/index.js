@@ -16,6 +16,8 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
 const { Server } = require('socket.io');
+const { BridgeStore } = require('./bridgeStore');
+const { createBridgeRouter } = require('./bridgeApi');
 const {
   TikTokLiveConnection,
   WebcastEvent,
@@ -27,6 +29,8 @@ const {
 // ---------------------------------------------------------------------------
 const PORT = parseInt(process.env.PORT || '2137', 10);
 const HOST = process.env.HOST || '127.0.0.1';
+const SMS_BRIDGE_API_KEY = String(process.env.SMS_BRIDGE_API_KEY || '').trim();
+const SMS_BRIDGE_DATA_FILE = process.env.SMS_BRIDGE_DATA_FILE || path.join(__dirname, 'data', 'bridge.json');
 
 function resolveEulerApiKey() {
   const fromEnv = (process.env.EULERSTREAM_API_KEY || '').trim();
@@ -105,6 +109,7 @@ function normalizeUsername(raw) {
 // Express + Socket.IO
 // ---------------------------------------------------------------------------
 const app = express();
+app.use(express.json({ limit: '16mb' }));
 
 // 최신 크롬 Private Network Access(PNA): 공개 HTTPS 페이지에서 로컬(127.0.0.1) 서버로
 // 접속할 때 브라우저가 preflight에 이 헤더를 요구하므로 반드시 응답해야 한다.
@@ -151,6 +156,13 @@ const io = new Server(httpServer, {
     methods: ['GET', 'POST', 'OPTIONS', 'CONNECT']
   }
 });
+
+const bridgeStore = new BridgeStore(SMS_BRIDGE_DATA_FILE);
+app.use('/api', createBridgeRouter({
+  store: bridgeStore,
+  apiKey: SMS_BRIDGE_API_KEY,
+  onEvent: (eventName, payload) => io.emit(eventName, payload)
+}));
 
 // engine.io가 /socket.io/ OPTIONS preflight를 직접 처리하므로(express 미들웨어보다 먼저),
 // 리스너 배열 맨 앞에 붙여 PNA 헤더를 모든 응답(특히 socket.io preflight)에 보장한다.
@@ -393,6 +405,7 @@ async function connectTikTok(username) {
 httpServer.listen(PORT, HOST, () => {
   log(`VoiceCAP 댓글 수집 서버 기동: http://${HOST}:${PORT}`);
   log(`허용 오리진: ${[...ALLOWED_ORIGINS].join(', ')}`);
+  log(`voicecapSMS 브리지: ${SMS_BRIDGE_API_KEY ? 'API 키 인증 사용' : 'API 키 없음 (로컬 개발 전용)'}`);
 });
 
 process.on('SIGINT', shutdown);

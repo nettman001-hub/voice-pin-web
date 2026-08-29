@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
 import { SaleRecord } from '../../types/live';
+import { BuyerReconciliationPanel, BuyerStatusBadges } from '../../components/sales/BuyerReconciliationPanel';
 import {
   ShoppingBag,
   Search,
@@ -88,7 +89,11 @@ export const SalesListPage: React.FC = () => {
         group.latestRecognizedAt = sale.recognizedAt;
       }
       if (sale.captureImageUrls) {
-        group.captureImageUrls.push(...sale.captureImageUrls);
+        sale.captureImageUrls.forEach((imageUrl) => {
+          if (imageUrl && !group.captureImageUrls.includes(imageUrl)) {
+            group.captureImageUrls.push(imageUrl);
+          }
+        });
       }
       if (!group.sessionIds.includes(sale.sessionId)) {
         group.sessionIds.push(sale.sessionId);
@@ -335,6 +340,7 @@ export const SalesListPage: React.FC = () => {
             ) : (
               buyerGroupedList.map((buyer) => {
                 const isExpanded = expandedBuyers.includes(buyer.buyerNickname);
+                const buyerSaleIds = buyer.records.map((record) => record.id);
 
                 return (
                   <div
@@ -345,9 +351,11 @@ export const SalesListPage: React.FC = () => {
                         : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'
                     }`}
                   >
-                    <div
+                    <button
+                      type="button"
                       onClick={() => toggleBuyerExpand(buyer.buyerNickname)}
-                      className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 cursor-pointer hover:bg-slate-50/80 transition"
+                      aria-expanded={isExpanded}
+                      className="w-full p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left cursor-pointer hover:bg-slate-50/80 transition"
                     >
                       <div className="flex items-center space-x-3.5">
                         <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-brand-600 to-purple-600 text-white flex items-center justify-center font-bold text-sm shadow">
@@ -355,7 +363,7 @@ export const SalesListPage: React.FC = () => {
                         </div>
 
                         <div>
-                          <div className="flex items-center space-x-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <span className="font-bold text-base text-slate-900">{buyer.buyerNickname}</span>
                             <span className="text-xs px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 font-bold border border-brand-200">
                               총 {buyer.orderCount}건 구매
@@ -370,6 +378,7 @@ export const SalesListPage: React.FC = () => {
                                 보류 포함
                               </span>
                             )}
+                            <BuyerStatusBadges saleIds={buyerSaleIds} />
                           </div>
                           <div className="text-[11px] text-slate-500 mt-1 flex items-center space-x-2">
                             <span>최근 주문: {new Date(buyer.latestRecognizedAt).toLocaleTimeString('ko-KR')}</span>
@@ -391,10 +400,16 @@ export const SalesListPage: React.FC = () => {
                           {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                         </div>
                       </div>
-                    </div>
+                    </button>
 
                     {isExpanded && (
-                      <div className="p-4 border-t border-slate-100 bg-slate-50/70 space-y-2">
+                      <div className="p-4 border-t border-slate-100 bg-slate-50/70 space-y-4">
+                        <BuyerReconciliationPanel
+                          buyerNickname={buyer.buyerNickname}
+                          records={buyer.records}
+                          captureImageUrls={buyer.captureImageUrls}
+                        />
+
                         <div className="text-[11px] font-bold text-slate-600 mb-2 flex items-center justify-between">
                           <span>{buyer.buyerNickname}님의 상세 구매 목록 ({buyer.records.length}건):</span>
                           <span className="text-slate-400">항목 클릭 시 상세 수정 가능</span>
@@ -473,6 +488,7 @@ export const SalesListPage: React.FC = () => {
                           >
                             {sale.status}
                           </span>
+                          <BuyerStatusBadges saleIds={[sale.id]} />
                           <span className="text-[10px] text-slate-600 font-mono bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                             회차: {sale.sessionId}
                           </span>

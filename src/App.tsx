@@ -24,6 +24,10 @@ import { SalesListPage } from './pages/seller/SalesListPage';
 import { SalesDetailPage } from './pages/seller/SalesDetailPage';
 import { SalesReviewPage } from './pages/seller/SalesReviewPage';
 import { SettlementPage } from './pages/seller/SettlementPage';
+import { CaptureViewerModal } from './pages/seller/CaptureViewerModal';
+import { InvoiceManagementPage } from './pages/seller/InvoiceManagementPage';
+import { ShipmentManagementPage } from './pages/seller/ShipmentManagementPage';
+import { CommerceProvider } from './context/CommerceContext';
 
 import { PlanSelectionPage } from './pages/subscription/PlanSelectionPage';
 import { PaymentPage } from './pages/subscription/PaymentPage';
@@ -100,6 +104,7 @@ export const App: React.FC = () => {
     <BrowserRouter>
       <AuthProvider>
         <SalesProvider>
+          <CommerceProvider>
           <LiveProvider>
             <CommentCaptureProvider>
               <AppDataProvider>
@@ -125,8 +130,10 @@ export const App: React.FC = () => {
                     <Route path="/comments" element={<CommentRecordsPage />} />
                     <Route path="/sales" element={<SalesListPage />} />
                     <Route path="/sales/:id" element={<SalesDetailPage />} />
-                    <Route path="/sales/:id/capture" element={<SalesDetailPage />} />
+                    <Route path="/sales/:id/capture" element={<CaptureViewerModal />} />
                     <Route path="/sales/review" element={<SalesReviewPage />} />
+                    <Route path="/invoices" element={<InvoiceManagementPage />} />
+                    <Route path="/shipments" element={<ShipmentManagementPage />} />
                     <Route path="/settlement" element={<SettlementPage />} />
 
                     {/* 3. 구독 섹션 (PG-014 ~ PG-017) */}
@@ -163,6 +170,7 @@ export const App: React.FC = () => {
               </AppDataProvider>
             </CommentCaptureProvider>
           </LiveProvider>
+          </CommerceProvider>
         </SalesProvider>
       </AuthProvider>
     </BrowserRouter>

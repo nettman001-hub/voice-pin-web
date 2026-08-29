@@ -29,6 +29,11 @@ dist-ssr
 # Euler Stream API key (secret)
 eulerstream_key.txt
 server/node_modules
+server/data
+android/voicecapSMS/local.properties
+android/voicecapSMS/.gradle/
+android/voicecapSMS/build/
+android/voicecapSMS/app/build/
 !server/.env.example
 
 # chrome net-export 진단 로그

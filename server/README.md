@@ -46,6 +46,17 @@ pm2-startup install
 - 최신 크롬의 Private Network Access(PNA) 요구에 대응해 preflight에
   `Access-Control-Allow-Private-Network: true` 를 자동 응답한다.
 
+## voicecapSMS 문자 연동
+
+웹앱의 **정산서 관리 & 발송**과 구매 정보 대조는 이 서버의 SMS 브리지 API를 사용한다.
+
+1. `.env`에서 `SMS_BRIDGE_API_KEY`를 예측하기 어려운 긴 값으로 바꾼다.
+2. Android 폰과 이 PC가 같은 Wi-Fi에 있을 때만 `HOST=0.0.0.0`으로 변경하고, Windows 방화벽에서 포트 `2137`을 사설 네트워크로만 허용한다.
+3. `android/voicecapSMS`를 Android Studio에서 열어 앱을 설치한다. 앱에 PC의 사설 IP 주소(예: `http://192.168.0.10:2137`), 같은 API 키, 웹앱과 같은 판매자 ID를 입력한다.
+4. 앱에서 문자 권한과 기본 SMS 앱 역할을 허용한 뒤 **지금 동기화 및 발송 처리**를 누른다.
+
+Android 앱은 SMS/MMS 수신 내용을 `/api/sms/incoming`으로 보내며 MMS 이미지는 최대 8개, 각각 4MB로 제한한다. 웹에서 큐에 넣은 문자는 `/api/sms/outbox`를 통해 폰이 전송한다. `SENT`는 Android OS에 전송을 요청한 상태이며, 통신사 수신 성공을 뜻하지는 않는다. 입금 알림 연동은 이후 앱에서 `/api/payments/incoming`으로 추가할 수 있도록 API만 준비되어 있다.
+
 ## 웹앱과의 이벤트 규격 (Socket.IO)
 
 | 방향 | 이벤트 | 내용 |

@@ -5,6 +5,7 @@ import { TrainingSentence } from '../types/training';
 import { PaymentHistoryItem, PaymentCard } from '../types/subscription';
 import { ReportItem, SystemErrorLog, NotificationSetting } from '../types/admin';
 import { CommentRecord, CommentCaptureConfig, DEFAULT_COMMENT_CAPTURE_CONFIG } from '../types/comment';
+import { CommerceState } from '../types/commerce';
 
 export interface CaptureAreaSnapshot {
   imageUrl: string;
@@ -54,6 +55,7 @@ export const INITIAL_SALES: SaleRecord[] = [
     recognizedAt: new Date(Date.now() - 3600000 * 5).toISOString(),
     rawTranscript: '구매확정 됐습니다. 닉네임 러블리샵님 금액은 32,000원입니다.',
     status: '확정',
+    productName: '라이브 의류 1점',
     captureImageUrls: ['https://images.unsplash.com/photo-1512436991641-6745cdb1723f?w=600&q=80']
   },
   {
@@ -64,6 +66,7 @@ export const INITIAL_SALES: SaleRecord[] = [
     recognizedAt: new Date(Date.now() - 3600000 * 4).toISOString(),
     rawTranscript: '구매확정! 구매하신 분은 달콤한하루님 이시구요 가격 4만 5천원입니다.',
     status: '확정',
+    productName: '라이브 의류 세트',
   },
   {
     id: 's3',
@@ -167,6 +170,52 @@ export const INITIAL_ERROR_LOGS: SystemErrorLog[] = [
   { id: 'err-3', timestamp: '2026-08-23 18:30:22', level: 'ERROR', message: '네트워크 일시 단절로 인한 STT 재연결 시도 (1/3)', source: 'NetworkWatcher' }
 ];
 
+const SAMPLE_MESSAGE_TIME = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+const SAMPLE_CUSTOMER_CAPTURE = 'https://images.unsplash.com/photo-1512436991641-6745cdb1723f?w=600&q=80';
+
+export const INITIAL_COMMERCE_STATE: CommerceState = {
+  messages: [
+    {
+      id: 'sms-sample-in-1',
+      sellerId: 'u-seller-1',
+      externalId: 'sample-incoming-1',
+      phoneNumber: '010-2345-6789',
+      body: '닉네임: 러블리샵\n주소: 서울시 마포구 월드컵로 10\n구매상품: 라이브 의류 1점\n금액: 32,000원',
+      direction: 'INCOMING',
+      category: 'PURCHASE_INFO',
+      status: 'RECEIVED',
+      saleIds: ['s1'],
+      attachments: [
+        { id: 'sms-sample-image-1', mimeType: 'image/jpeg', dataUrl: SAMPLE_CUSTOMER_CAPTURE, fileName: '구매상품.jpg' }
+      ],
+      createdAt: SAMPLE_MESSAGE_TIME,
+      receivedAt: SAMPLE_MESSAGE_TIME
+    }
+  ],
+  claims: [
+    {
+      id: 'claim-sms-sample-in-1',
+      messageId: 'sms-sample-in-1',
+      phoneNumber: '010-2345-6789',
+      nickname: '러블리샵',
+      address: '서울시 마포구 월드컵로 10',
+      productName: '라이브 의류 1점',
+      amount: 32000,
+      captureImageUrls: [SAMPLE_CUSTOMER_CAPTURE],
+      saleIds: ['s1'],
+      matchStatus: 'MATCHED',
+      fieldMatches: { nickname: true, amount: true, capture: true },
+      sellerNote: '',
+      createdAt: SAMPLE_MESSAGE_TIME,
+      updatedAt: SAMPLE_MESSAGE_TIME
+    }
+  ],
+  invoices: [],
+  payments: [],
+  shipments: [],
+  verifiedSaleIds: []
+};
+
 // 로컬 스토리지 키
 const KEYS = {
   USERS: 'dadryeo_users',
@@ -185,7 +234,8 @@ const KEYS = {
   CAPTURE_AREA_SNAPSHOT: 'voicecap_capture_area_snapshot',
   COMMENT_RECORDS: 'voicecap_comment_records',
   COMMENT_CAPTURE_CONFIG: 'voicecap_comment_capture_config',
-  COMMENT_CAPTURE_ACTIVE: 'voicecap_comment_capture_active'
+  COMMENT_CAPTURE_ACTIVE: 'voicecap_comment_capture_active',
+  COMMERCE_STATE: 'voicecap_commerce_state'
 };
 
 export class StorageService {
@@ -231,6 +281,9 @@ export class StorageService {
     if (!localStorage.getItem(KEYS.LOGS)) {
       this.setItem(KEYS.LOGS, INITIAL_ERROR_LOGS);
     }
+    if (!localStorage.getItem(KEYS.COMMERCE_STATE)) {
+      this.setItem(KEYS.COMMERCE_STATE, INITIAL_COMMERCE_STATE);
+    }
   }
 
   // Deepgram API Key
@@ -252,6 +305,7 @@ export class StorageService {
       trainingSentences: this.getTrainingSentences(),
       payments: this.getPayments(),
       notifications: this.getNotifications(),
+      commerce: this.getCommerceState(),
       deepgramApiKey: this.getDeepgramApiKey()
     };
     return JSON.stringify(backupData, null, 2);
@@ -267,6 +321,7 @@ export class StorageService {
       if (data.trainingSentences) this.saveTrainingSentences(data.trainingSentences);
       if (data.payments) localStorage.setItem(KEYS.PAYMENTS, JSON.stringify(data.payments));
       if (data.notifications) localStorage.setItem(KEYS.NOTIFICATIONS, JSON.stringify(data.notifications));
+      if (data.commerce) this.saveCommerceState(data.commerce);
       if (data.deepgramApiKey) this.setDeepgramApiKey(data.deepgramApiKey);
       return true;
     } catch (e) {
@@ -362,6 +417,20 @@ export class StorageService {
   public saveCaptureAreaConfig(config: CaptureAreaConfig) {
     this.setItem(KEYS.CAPTURE_AREA, config);
   }
+
+  // 고객 문자 대조, 정산서, 입금 및 택배 업무 상태
+  public getCommerceState(): CommerceState {
+    const stored = this.getItem<Partial<CommerceState> | null>(KEYS.COMMERCE_STATE, null);
+    return {
+      messages: stored?.messages || INITIAL_COMMERCE_STATE.messages,
+      claims: stored?.claims || INITIAL_COMMERCE_STATE.claims,
+      invoices: stored?.invoices || [],
+      payments: stored?.payments || [],
+      shipments: stored?.shipments || [],
+      verifiedSaleIds: stored?.verifiedSaleIds || []
+    };
+  }
+  public saveCommerceState(state: CommerceState) { this.setItem(KEYS.COMMERCE_STATE, state); }
 
   // 영역 설정 완료 시 고정해 둔 마지막 공유 화면
   public getCaptureAreaSnapshot(): CaptureAreaSnapshot | null {
