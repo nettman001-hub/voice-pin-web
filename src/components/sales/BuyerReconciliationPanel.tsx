@@ -114,7 +114,7 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
   const productNames = Array.from(new Set(records.map((record) => record.productName).filter(Boolean)));
   const [draft, setDraft] = useState<CustomerPurchaseClaim | null>(claim || null);
   const [questionPhone, setQuestionPhone] = useState(claim?.phoneNumber || '');
-  const [question, setQuestion] = useState('구매정보를 다시 확인해 주세요. 닉네임, 상품명, 금액, 배송주소를 회신 부탁드립니다.');
+  const [question, setQuestion] = useState('');
   const [feedback, setFeedback] = useState('');
 
   useEffect(() => {
@@ -233,13 +233,14 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
 
       <section className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
         <h4 className="mb-2 flex items-center gap-1.5 text-xs font-bold text-slate-800">
-          <MessageCircleQuestion className="h-4 w-4 text-purple-600" /> 고객에게 문자로 질문
+          <MessageCircleQuestion className="h-4 w-4 text-purple-600" /> 고객에게 문자 보내기
         </h4>
+        <p className="mb-2 text-[10px] text-slate-500">배송 문의 답변, 입금 확인, 계좌번호 안내 등 거래에 필요한 내용을 자유롭게 보낼 수 있습니다.</p>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-[11rem_1fr_auto]">
           <input value={questionPhone} onChange={(event) => setQuestionPhone(event.target.value)} placeholder="010-0000-0000" className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs" />
-          <textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={2} className="resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs" />
+          <textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={2} placeholder="예: 입금 계좌는 OO은행 000-0000-0000 예금주 OOO입니다." className="resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs" />
           <button onClick={handleQuestionSend} className="flex items-center justify-center gap-1.5 rounded-xl bg-purple-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-purple-500">
-            <Send className="h-3.5 w-3.5" /> 질문 발송
+            <Send className="h-3.5 w-3.5" /> 문자 발송
           </button>
         </div>
       </section>
@@ -268,6 +269,7 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
                 <div className={`max-w-[88%] rounded-2xl px-3 py-2 text-xs ${message.direction === 'OUTGOING' ? 'bg-brand-600 text-white' : 'border border-slate-200 bg-slate-50 text-slate-700'}`}>
                   <div className="mb-1 flex items-center gap-2 text-[10px] opacity-75">
                     <span>{message.direction === 'OUTGOING' ? '발신' : '수신'} · {message.phoneNumber}</span>
+                    {message.category === 'CUSTOMER_INQUIRY' && <span>고객문의</span>}
                     <span>{message.status === 'FAILED' ? '실패' : message.status === 'SENT' ? '발송완료' : message.status === 'QUEUED' ? '발송대기' : '수신완료'}</span>
                   </div>
                   <p className="whitespace-pre-wrap break-words">{message.body}</p>
@@ -281,4 +283,3 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
     </div>
   );
 };
-

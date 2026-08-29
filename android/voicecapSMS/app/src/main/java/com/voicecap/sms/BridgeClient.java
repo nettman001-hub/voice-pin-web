@@ -33,7 +33,7 @@ public final class BridgeClient {
 
     private BridgeClient() { }
 
-    public static boolean postIncoming(Context context, String externalId, String phoneNumber, String body, List<ImageAttachment> images) {
+    public static boolean postIncoming(Context context, String externalId, String phoneNumber, String body, String category, List<ImageAttachment> images) {
         if (!BridgePreferences.configured(context)) return false;
         try {
             JSONObject payload = new JSONObject();
@@ -41,7 +41,7 @@ public final class BridgeClient {
             payload.put("externalId", externalId);
             payload.put("phoneNumber", phoneNumber);
             payload.put("body", body.isEmpty() ? "(이미지 첨부 문자)" : body);
-            payload.put("category", "PURCHASE_INFO");
+            payload.put("category", category);
             payload.put("receivedAt", java.time.Instant.now().toString());
             JSONArray attachments = new JSONArray();
             for (ImageAttachment image : images) {
@@ -71,6 +71,25 @@ public final class BridgeClient {
             for (int index = 0; index < messages.length(); index++) result.add(messages.getJSONObject(index));
         } catch (Exception ignored) { }
         return result;
+    }
+
+    public static void refreshBusinessContacts(Context context) {
+        if (!BridgePreferences.configured(context)) return;
+        try {
+            String seller = java.net.URLEncoder.encode(BridgePreferences.value(context, BridgePreferences.SELLER_ID), "UTF-8");
+            String response = requestText(context, "GET", "/api/sms/messages?sellerId=" + seller + "&limit=2000", null);
+            JSONArray messages = new JSONObject(response).optJSONArray("messages");
+            if (messages == null) return;
+            for (int index = 0; index < messages.length(); index++) {
+                JSONObject message = messages.optJSONObject(index);
+                if (message == null) continue;
+                String direction = message.optString("direction");
+                String category = message.optString("category");
+                if ("OUTGOING".equals(direction) || "PURCHASE_INFO".equals(category)) {
+                    BusinessContactStore.register(context, message.optString("phoneNumber"));
+                }
+            }
+        } catch (Exception ignored) { }
     }
 
     public static void updateOutboxStatus(Context context, String id, String status, String error) {

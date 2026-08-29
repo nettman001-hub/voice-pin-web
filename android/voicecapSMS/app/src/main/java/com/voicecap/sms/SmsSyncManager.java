@@ -21,6 +21,7 @@ public final class SmsSyncManager {
         if (!SmsRoleUtils.isDefaultSmsApp(context)) return "기본 SMS 앱으로 설정되어 있지 않아 동기화를 중단했습니다.";
         if (!SmsRoleUtils.hasSmsPermissions(context)) return "SMS/MMS 권한이 없어 동기화를 중단했습니다.";
         if (!BridgePreferences.configured(context)) return "서버 URL과 판매자 ID를 먼저 저장해 주세요.";
+        BridgeClient.refreshBusinessContacts(context);
         int sent = syncRecentSms(context);
         sent += syncRecentMms(context);
         int queued = sendOutbox(context);
@@ -40,8 +41,11 @@ public final class SmsSyncManager {
                 String body = cursor.getString(2);
                 String externalId = "device-sms-" + id;
                 if (isUploaded(context, externalId)) continue;
-                if (!isPurchaseMessage(body)) continue;
-                if (BridgeClient.postIncoming(context, externalId, phone == null ? "알 수 없음" : phone, body == null ? "" : body, new ArrayList<>())) {
+                boolean purchaseMessage = isPurchaseMessage(body);
+                if (!purchaseMessage && !BusinessContactStore.contains(context, phone)) continue;
+                if (purchaseMessage) BusinessContactStore.register(context, phone);
+                String category = purchaseMessage ? "PURCHASE_INFO" : "CUSTOMER_INQUIRY";
+                if (BridgeClient.postIncoming(context, externalId, phone == null ? "알 수 없음" : phone, body == null ? "" : body, category, new ArrayList<>())) {
                     markUploaded(context, externalId); count++;
                 }
             }
@@ -62,9 +66,12 @@ public final class SmsSyncManager {
                 List<BridgeClient.ImageAttachment> images = readMmsImages(context, id);
                 String body = readMmsText(context, id, cursor.getString(2));
                 String phone = readMmsAddress(context, id);
-                if (!isPurchaseMessage(body)) continue;
                 if (phone.isEmpty()) continue;
-                if (BridgeClient.postIncoming(context, externalId, phone, body, images)) {
+                boolean purchaseMessage = isPurchaseMessage(body);
+                if (!purchaseMessage && !BusinessContactStore.contains(context, phone)) continue;
+                if (purchaseMessage) BusinessContactStore.register(context, phone);
+                String category = purchaseMessage ? "PURCHASE_INFO" : "CUSTOMER_INQUIRY";
+                if (BridgeClient.postIncoming(context, externalId, phone, body, category, images)) {
                     markUploaded(context, externalId); count++;
                 }
             }
@@ -79,6 +86,7 @@ public final class SmsSyncManager {
             try {
                 String phone = message.getString("phoneNumber");
                 String body = message.getString("body");
+                BusinessContactStore.register(context, phone);
                 SmsManager manager = context.getSystemService(SmsManager.class);
                 ArrayList<String> parts = manager.divideMessage(body);
                 BridgeClient.updateOutboxStatus(context, id, "SENDING", null);

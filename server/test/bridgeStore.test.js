@@ -51,6 +51,23 @@ test('outgoing SMS moves from queue to sent state', (t) => {
   assert.equal(fixture.store.listOutbox('seller-1').length, 0);
 });
 
+test('registered customer inquiry keeps its conversation category', (t) => {
+  const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.directory, { recursive: true, force: true }));
+
+  const inquiry = fixture.store.addIncoming({
+    sellerId: 'seller-1',
+    externalId: 'customer-inquiry-1',
+    phoneNumber: '01012345678',
+    body: '택배는 언제 도착하나요?',
+    category: 'CUSTOMER_INQUIRY'
+  });
+
+  assert.equal(inquiry.created, true);
+  assert.equal(inquiry.message.category, 'CUSTOMER_INQUIRY');
+  assert.equal(fixture.store.listMessages('seller-1')[0].body, '택배는 언제 도착하나요?');
+});
+
 test('bridge API authenticates and exposes queued messages', async (t) => {
   const fixture = createFixture();
   t.after(() => fs.rmSync(fixture.directory, { recursive: true, force: true }));
@@ -80,4 +97,3 @@ test('bridge API authenticates and exposes queued messages', async (t) => {
   assert.equal(outbox.messages.length, 1);
   assert.equal(outbox.messages[0].category, 'INVOICE');
 });
-

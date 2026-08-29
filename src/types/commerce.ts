@@ -1,6 +1,6 @@
 export type MatchStatus = 'NOT_RECEIVED' | 'MATCHED' | 'MISMATCH' | 'NEEDS_REVIEW';
 export type SmsDirection = 'INCOMING' | 'OUTGOING';
-export type SmsCategory = 'PURCHASE_INFO' | 'QUESTION' | 'ANSWER' | 'INVOICE' | 'SHIPPING' | 'GENERAL';
+export type SmsCategory = 'PURCHASE_INFO' | 'CUSTOMER_INQUIRY' | 'QUESTION' | 'ANSWER' | 'INVOICE' | 'SHIPPING' | 'GENERAL';
 export type SmsDeliveryStatus = 'RECEIVED' | 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED';
 export type InvoiceStatus = 'DRAFT' | 'QUEUED' | 'SENT' | 'PAID' | 'CANCELLED';
 export type PaymentMatchStatus = 'UNMATCHED' | 'MATCHED' | 'NEEDS_REVIEW';
@@ -112,4 +112,3 @@ export interface CommerceState {
   shipments: Shipment[];
   verifiedSaleIds: string[];
 }
-

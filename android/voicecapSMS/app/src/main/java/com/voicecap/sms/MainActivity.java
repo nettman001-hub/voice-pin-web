@@ -47,7 +47,7 @@ public final class MainActivity extends Activity {
 
         column.addView(text("VoiceCAP SMS Bridge", 24));
         column.addView(text("판매 고객이 보낸 구매정보 문자만 VoiceCAP 서버로 전송하고, 웹앱에서 판매자가 요청한 정산·배송·문의 문자를 발송합니다.", 14));
-        column.addView(text("전송 조건: 문자에 닉네임, 주소, 상품 또는 금액 항목이 함께 있어야 합니다. 인증번호·은행·일반 개인 문자는 전송하지 않습니다.", 13));
+        column.addView(text("첫 구매정보 문자 또는 판매자 발신으로 등록된 고객 번호는 이후 배송·입금·계좌 문의도 업무 대화로 동기화합니다. 등록되지 않은 번호의 인증번호·은행·개인 문자는 전송하지 않습니다.", 13));
 
         urlInput = input("서버 주소 (운영: HTTPS, 사내망 예: http://192.168.0.10:2137)");
         keyInput = input("VoiceCAP API 키");

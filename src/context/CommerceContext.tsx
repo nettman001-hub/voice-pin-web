@@ -41,6 +41,12 @@ interface CommerceContextType extends CommerceState {
 const CommerceContext = createContext<CommerceContextType | undefined>(undefined);
 
 const normalize = (value: string) => value.replace(/\s+/g, '').replace(/님$/u, '').toLowerCase();
+const normalizePhone = (value: string) => {
+  const compact = value.replace(/[^0-9+]/g, '');
+  if (compact.startsWith('+82')) return `0${compact.slice(3)}`;
+  if (compact.startsWith('82') && compact.length >= 11) return `0${compact.slice(2)}`;
+  return compact.replace(/\D/g, '');
+};
 const intersects = (left: string[], right: string[]) => left.some((id) => right.includes(id));
 
 const mergeById = <T extends { id: string }>(local: T[], remote: T[]): T[] => {
@@ -120,12 +126,25 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         const claims = [...previous.claims];
         messages
-          .filter((message) => message.direction === 'INCOMING' && !claims.some((claim) => claim.messageId === message.id))
+          .filter((message) => message.direction === 'INCOMING' && message.category === 'PURCHASE_INFO' && !claims.some((claim) => claim.messageId === message.id))
           .forEach((message) => {
             const claim = buildClaimFromMessage(message, sales);
             claims.unshift(claim);
             message.saleIds = claim.saleIds;
           });
+
+        const saleIdsByPhone = new Map<string, string[]>();
+        claims.forEach((claim) => {
+          if (claim.saleIds.length > 0) saleIdsByPhone.set(normalizePhone(claim.phoneNumber), claim.saleIds);
+        });
+        messages.forEach((message) => {
+          if (message.saleIds.length > 0) saleIdsByPhone.set(normalizePhone(message.phoneNumber), message.saleIds);
+        });
+        messages.forEach((message) => {
+          if (message.saleIds.length > 0) return;
+          const linkedSaleIds = saleIdsByPhone.get(normalizePhone(message.phoneNumber));
+          if (linkedSaleIds) message.saleIds = linkedSaleIds;
+        });
 
         const payments = matchPayments(mergeById(previous.payments, remotePayments));
         const paidInvoiceIds = new Set(payments.filter((payment) => payment.matchStatus === 'MATCHED').map((p) => p.invoiceId).filter(Boolean));
@@ -347,4 +366,3 @@ export const useCommerce = () => {
   if (!context) throw new Error('useCommerce must be used within a CommerceProvider');
   return context;
 };
-
