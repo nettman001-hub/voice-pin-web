@@ -20,6 +20,16 @@
 
 ## 2. 새 PC에서 가장 먼저 할 일
 
+권장 방법은 새 PC 초기화 스크립트를 실행하는 것이다. Git 제외 파일 중 재생성 가능한 항목을 만들고 전체 빌드까지 확인한다.
+
+```powershell
+cd C:\dev\voice-pin-anti
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\bootstrap-new-pc.ps1 -EnableLanBridge
+```
+
+항목별 설명과 서명키 생성 방법은 `NEW_PC_SETUP.md`를 참고한다. 수동으로 진행하려면 아래 명령을 사용한다.
+
 ```powershell
 git clone https://github.com/nettman001-hub/voice-pin-web.git C:\dev\voice-pin-anti
 cd C:\dev\voice-pin-anti

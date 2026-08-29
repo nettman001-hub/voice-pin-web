@@ -37,6 +37,7 @@ android/voicecapSMS/app/build/
 android/voicecapSMS/signing/
 android/voicecapSMS/*.jks
 android/voicecapSMS/*.keystore
+new-pc-local-secrets.txt
 !server/.env.example
 
 # chrome net-export 진단 로그
