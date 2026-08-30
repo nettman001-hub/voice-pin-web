@@ -19,9 +19,13 @@ android {
         applicationId 'shop.voicecap.smsbridge'
         minSdk 26
         targetSdk 35
-        versionCode 2
-        versionName '1.1.0'
+        versionCode 4
+        versionName '1.3.0'
+        def apiBaseUrl = (project.findProperty('VOICECAP_API_BASE_URL') ?: 'https://ymegrhxpbeanvxwdzfym.supabase.co/functions/v1').toString().replaceAll('/+$', '')
+        buildConfigField 'String', 'VOICECAP_API_BASE_URL', '"' + apiBaseUrl.replace('"', '\\"') + '"'
     }
+
+    buildFeatures { buildConfig true }
 
     signingConfigs {
         release {

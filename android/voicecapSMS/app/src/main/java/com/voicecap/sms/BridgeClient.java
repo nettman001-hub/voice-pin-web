@@ -33,11 +33,36 @@ public final class BridgeClient {
 
     private BridgeClient() { }
 
+    public static boolean claimDevice(Context context, String code, String deviceName) {
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("action", "claim");
+            payload.put("code", code.trim().toUpperCase());
+            payload.put("deviceName", deviceName.trim());
+            payload.put("appVersion", BuildConfig.VERSION_NAME);
+            JSONObject result = requestText(context, false, "device-pair", payload);
+            if (!result.optBoolean("ok")) return false;
+            String deviceId = result.optString("deviceId");
+            String token = result.optString("deviceToken");
+            String workspaceId = result.optString("workspaceId");
+            if (deviceId.isEmpty() || token.isEmpty() || workspaceId.isEmpty()) return false;
+            BridgePreferences.get(context).edit()
+                    .putString(BridgePreferences.DEVICE_ID, deviceId)
+                    .putString(BridgePreferences.DEVICE_TOKEN, token)
+                    .putString(BridgePreferences.WORKSPACE_ID, workspaceId)
+                    .putString(BridgePreferences.DEVICE_NAME, deviceName.trim())
+                    .apply();
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     public static boolean postIncoming(Context context, String externalId, String phoneNumber, String body, String category, List<ImageAttachment> images) {
         if (!BridgePreferences.configured(context)) return false;
         try {
             JSONObject payload = new JSONObject();
-            payload.put("sellerId", BridgePreferences.value(context, BridgePreferences.SELLER_ID));
+            payload.put("action", "incoming");
             payload.put("externalId", externalId);
             payload.put("phoneNumber", phoneNumber);
             payload.put("body", body.isEmpty() ? "(이미지 첨부 문자)" : body);
@@ -47,13 +72,13 @@ public final class BridgeClient {
             for (ImageAttachment image : images) {
                 if (image.bytes.length > MAX_IMAGE_BYTES) continue;
                 JSONObject attachment = new JSONObject();
-                attachment.put("name", image.name);
+                attachment.put("fileName", image.name);
                 attachment.put("mimeType", image.mimeType);
                 attachment.put("dataUrl", "data:" + image.mimeType + ";base64," + Base64.encodeToString(image.bytes, Base64.NO_WRAP));
                 attachments.put(attachment);
             }
             payload.put("attachments", attachments);
-            return request(context, "POST", "/api/sms/incoming", payload.toString()) >= 200;
+            return requestText(context, true, "sms-bridge", payload).optBoolean("ok");
         } catch (Exception ignored) {
             return false;
         }
@@ -63,10 +88,8 @@ public final class BridgeClient {
         List<JSONObject> result = new ArrayList<>();
         if (!BridgePreferences.configured(context)) return result;
         try {
-            String seller = java.net.URLEncoder.encode(BridgePreferences.value(context, BridgePreferences.SELLER_ID), "UTF-8");
-            String response = requestText(context, "GET", "/api/sms/outbox?sellerId=" + seller, null);
-            JSONObject root = new JSONObject(response);
-            JSONArray messages = root.optJSONArray("messages");
+            JSONObject response = requestText(context, true, "sms-bridge", new JSONObject().put("action", "outbox-claim").put("limit", 20));
+            JSONArray messages = response.optJSONArray("messages");
             if (messages == null) return result;
             for (int index = 0; index < messages.length(); index++) result.add(messages.getJSONObject(index));
         } catch (Exception ignored) { }
@@ -76,9 +99,8 @@ public final class BridgeClient {
     public static void refreshBusinessContacts(Context context) {
         if (!BridgePreferences.configured(context)) return;
         try {
-            String seller = java.net.URLEncoder.encode(BridgePreferences.value(context, BridgePreferences.SELLER_ID), "UTF-8");
-            String response = requestText(context, "GET", "/api/sms/messages?sellerId=" + seller + "&limit=2000", null);
-            JSONArray messages = new JSONObject(response).optJSONArray("messages");
+            JSONObject response = requestText(context, true, "sms-bridge", new JSONObject().put("action", "messages").put("limit", 2000));
+            JSONArray messages = response.optJSONArray("messages");
             if (messages == null) return;
             for (int index = 0; index < messages.length(); index++) {
                 JSONObject message = messages.optJSONObject(index);
@@ -86,7 +108,7 @@ public final class BridgeClient {
                 String direction = message.optString("direction");
                 String category = message.optString("category");
                 if ("OUTGOING".equals(direction) || "PURCHASE_INFO".equals(category)) {
-                    BusinessContactStore.register(context, message.optString("phoneNumber"));
+                    BusinessContactStore.register(context, message.optString("phone_number", message.optString("phoneNumber")));
                 }
             }
         } catch (Exception ignored) { }
@@ -94,28 +116,38 @@ public final class BridgeClient {
 
     public static void updateOutboxStatus(Context context, String id, String status, String error) {
         try {
-            JSONObject payload = new JSONObject().put("status", status);
+            JSONObject payload = new JSONObject().put("action", "outbox-status").put("id", id).put("status", status);
             if (error != null && !error.isEmpty()) payload.put("error", error);
-            request(context, "PATCH", "/api/sms/outbox/" + id + "/status", payload.toString());
+            requestText(context, true, "sms-bridge", payload);
         } catch (Exception ignored) { }
     }
 
-    private static int request(Context context, String method, String path, String payload) throws Exception {
-        HttpURLConnection connection = open(context, method, path);
-        if (payload != null) {
-            connection.setDoOutput(true);
-            try (OutputStream output = connection.getOutputStream()) { output.write(payload.getBytes(StandardCharsets.UTF_8)); }
+    public static boolean getStatus(Context context) {
+        try {
+            return requestText(context, true, "sms-bridge", new JSONObject().put("action", "status")).optBoolean("ok");
+        } catch (Exception ignored) {
+            return false;
         }
-        int code = connection.getResponseCode();
-        connection.disconnect();
-        return code;
     }
 
-    private static String requestText(Context context, String method, String path, String payload) throws Exception {
-        HttpURLConnection connection = open(context, method, path);
-        if (payload != null) {
-            connection.setDoOutput(true);
-            try (OutputStream output = connection.getOutputStream()) { output.write(payload.getBytes(StandardCharsets.UTF_8)); }
+    public static void revokeDevice(Context context) {
+        try {
+            requestText(context, true, "device-pair", new JSONObject().put("action", "revoke-self"));
+        } catch (Exception ignored) { }
+        BridgePreferences.clearDevice(context);
+    }
+
+    private static JSONObject requestText(Context context, boolean deviceAuth, String functionName, JSONObject payload) throws Exception {
+        String endpoint = BridgePreferences.apiBaseUrl() + "/" + functionName;
+        HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection();
+        connection.setRequestMethod("POST");
+        connection.setConnectTimeout(8000);
+        connection.setReadTimeout(15000);
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        if (deviceAuth) connection.setRequestProperty("X-VoiceCAP-Device-Token", BridgePreferences.value(context, BridgePreferences.DEVICE_TOKEN));
+        try (OutputStream output = connection.getOutputStream()) {
+            output.write(payload.toString().getBytes(StandardCharsets.UTF_8));
         }
         InputStream stream = connection.getResponseCode() < 400 ? connection.getInputStream() : connection.getErrorStream();
         StringBuilder text = new StringBuilder();
@@ -123,19 +155,7 @@ public final class BridgeClient {
             String line; while ((line = reader.readLine()) != null) text.append(line);
         }
         connection.disconnect();
-        return text.toString();
-    }
-
-    private static HttpURLConnection open(Context context, String method, String path) throws Exception {
-        String base = BridgePreferences.value(context, BridgePreferences.URL).replaceAll("/+$", "");
-        HttpURLConnection connection = (HttpURLConnection) new URL(base + path).openConnection();
-        connection.setRequestMethod(method);
-        connection.setConnectTimeout(8000);
-        connection.setReadTimeout(12000);
-        connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-        String key = BridgePreferences.value(context, BridgePreferences.API_KEY);
-        if (!key.isEmpty()) connection.setRequestProperty("X-VoiceCAP-Key", key);
-        return connection;
+        return new JSONObject(text.toString());
     }
 
     public static byte[] readLimited(InputStream input) throws Exception {

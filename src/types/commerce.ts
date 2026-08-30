@@ -10,6 +10,7 @@ export interface SmsAttachment {
   id: string;
   mimeType: string;
   dataUrl: string;
+  path?: string;
   fileName?: string;
 }
 

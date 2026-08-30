@@ -5,7 +5,7 @@ import { UserRole } from '../../types/auth';
 import { Mic, Mail, Lock, User, CheckCircle2, AlertCircle, Shield } from 'lucide-react';
 
 export const SignupPage: React.FC = () => {
-  const { signup } = useAuth();
+  const { signup, isRemoteAuth } = useAuth();
   const navigate = useNavigate();
 
   const [step, setStep] = useState<'INPUT' | 'VERIFY'>('INPUT');
@@ -20,8 +20,9 @@ export const SignupPage: React.FC = () => {
   const [verifyCode, setVerifyCode] = useState('');
   const [generatedCode, setGeneratedCode] = useState('123456');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleRequestCode = (e: React.FormEvent) => {
+  const handleRequestCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
@@ -42,21 +43,42 @@ export const SignupPage: React.FC = () => {
       return;
     }
 
+    if (isRemoteAuth) {
+      setIsSubmitting(true);
+      const result = await signup(email, password, role, nickname || '라이브판매자');
+      setIsSubmitting(false);
+      if (!result.success) {
+        setErrorMsg(result.message || '회원가입에 실패했습니다.');
+        return;
+      }
+      if (result.requiresEmailConfirmation) {
+        setGeneratedCode('');
+        setStep('VERIFY');
+        return;
+      }
+      navigate('/live');
+      return;
+    }
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     setGeneratedCode(code);
     setStep('VERIFY');
   };
 
-  const handleConfirmVerify = (e: React.FormEvent) => {
+  const handleConfirmVerify = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+
+    if (isRemoteAuth) {
+      navigate('/login');
+      return;
+    }
 
     if (verifyCode !== generatedCode && verifyCode !== '123456') {
       setErrorMsg('인증 코드가 일치하지 않습니다. (테스트용 코드: ' + generatedCode + ')');
       return;
     }
 
-    const res = signup(email, password, role, nickname || (role === '판매자' ? '라이브판매자' : '관리자'));
+    const res = await signup(email, password, role, nickname || (role === '판매자' ? '라이브판매자' : '관리자'));
     if (!res.success) {
       setErrorMsg(res.message || '회원가입에 실패했습니다.');
     } else {
@@ -200,21 +222,19 @@ export const SignupPage: React.FC = () => {
               type="submit"
               className="w-full py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-500/20 transition mt-4"
             >
-              이메일 인증번호 받기
+              {isSubmitting ? '가입 처리 중...' : '이메일 인증번호 받기'}
             </button>
           </form>
         ) : (
           <form onSubmit={handleConfirmVerify} className="space-y-4">
             <div className="p-4 rounded-2xl bg-brand-50 border border-brand-200 text-center">
-              <p className="text-xs text-brand-700">
-                <strong>{email}</strong> 주소로<br />6자리 인증 코드를 발송했습니다.
-              </p>
-              <div className="mt-2 text-sm font-mono font-bold text-slate-900 bg-white py-1 px-3 rounded-lg inline-block border border-brand-200 shadow-sm">
-                발송된 코드: {generatedCode}
-              </div>
+              {isRemoteAuth ? <p className="text-xs text-brand-700"><strong>{email}</strong> 주소로 인증 링크를 보냈습니다.<br />메일의 링크를 연 뒤 로그인해 주세요.</p> : <>
+                <p className="text-xs text-brand-700"><strong>{email}</strong> 주소로<br />6자리 인증 코드를 발송했습니다.</p>
+                <div className="mt-2 text-sm font-mono font-bold text-slate-900 bg-white py-1 px-3 rounded-lg inline-block border border-brand-200 shadow-sm">발송된 코드: {generatedCode}</div>
+              </>}
             </div>
 
-            <div>
+            {!isRemoteAuth && <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">인증 코드 (6자리)</label>
               <input
                 type="text"
@@ -225,7 +245,7 @@ export const SignupPage: React.FC = () => {
                 placeholder="6자리 숫자 입력"
                 className="w-full text-center tracking-widest text-lg font-bold py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-brand-500 transition"
               />
-            </div>
+            </div>}
 
             <div className="flex gap-2">
               <button
@@ -239,7 +259,7 @@ export const SignupPage: React.FC = () => {
                 type="submit"
                 className="w-2/3 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20"
               >
-                인증 확인 및 가입 완료
+                {isRemoteAuth ? '로그인 화면으로 이동' : '인증 확인 및 가입 완료'}
               </button>
             </div>
           </form>

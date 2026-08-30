@@ -25,6 +25,7 @@ dist-ssr
 
 .vercel
 .env*
+supabase/.temp/
 
 # Euler Stream API key (secret)
 eulerstream_key.txt

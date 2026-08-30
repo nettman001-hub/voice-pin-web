@@ -1,0 +1,10 @@
+project_id = "voicecap"
+
+[functions.voicecap-onboard]
+verify_jwt = false
+
+[functions.device-pair]
+verify_jwt = false
+
+[functions.sms-bridge]
+verify_jwt = false

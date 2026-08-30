@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Mic, Mail, Lock, CheckCircle2, AlertCircle, ArrowLeft } from 'lucide-react';
 
 export const PasswordResetPage: React.FC = () => {
-  const { resetPassword } = useAuth();
+  const { resetPassword, isRemoteAuth } = useAuth();
   const navigate = useNavigate();
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -16,11 +16,20 @@ export const PasswordResetPage: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const handleSendCode = (e: React.FormEvent) => {
+  const handleSendCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     if (!email.includes('@')) {
       setErrorMsg('올바른 이메일을 입력해주세요.');
+      return;
+    }
+    if (isRemoteAuth) {
+      const result = await resetPassword(email);
+      if (!result.success) {
+        setErrorMsg(result.message || '비밀번호 재설정 이메일 전송에 실패했습니다.');
+        return;
+      }
+      setSuccessMsg(result.message || '비밀번호 재설정 링크를 이메일로 보냈습니다.');
       return;
     }
     const code = Math.floor(100000 + Math.random() * 900000).toString();
@@ -38,7 +47,7 @@ export const PasswordResetPage: React.FC = () => {
     setStep(3);
   };
 
-  const handleResetPassword = (e: React.FormEvent) => {
+  const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     if (newPassword.length < 8) {
@@ -50,7 +59,11 @@ export const PasswordResetPage: React.FC = () => {
       return;
     }
 
-    resetPassword(email, newPassword);
+    const result = await resetPassword(email, newPassword);
+    if (!result.success) {
+      setErrorMsg(result.message || '비밀번호 변경에 실패했습니다.');
+      return;
+    }
     setSuccessMsg('비밀번호가 성공적으로 변경되었습니다! 로그인 페이지로 이동합니다.');
     setTimeout(() => {
       navigate('/login');

@@ -14,14 +14,18 @@ import {
   Database,
   RefreshCw
 } from 'lucide-react';
+import { Smartphone } from 'lucide-react';
+import { devicePairingService, PairingCode } from '../../services/devicePairingService';
 
 export const MyPage: React.FC = () => {
-  const { user, updateProfile, logout } = useAuth();
+  const { user, updateProfile, logout, isRemoteAuth, workspaceId } = useAuth();
   const { disconnectScreenShare } = useLive();
 
   const [nickname, setNickname] = useState(user?.nickname || '');
   const [phone, setPhone] = useState('010-1234-5678');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [pairing, setPairing] = useState<PairingCode | null>(null);
+  const [pairingBusy, setPairingBusy] = useState(false);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,6 +79,21 @@ export const MyPage: React.FC = () => {
     }
   };
 
+  const createPairingCode = async () => {
+    if (!workspaceId) {
+      setToastMsg('판매자 작업공간을 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
+      return;
+    }
+    setPairingBusy(true);
+    try {
+      setPairing(await devicePairingService.createCode(workspaceId));
+    } catch (error) {
+      setToastMsg(error instanceof Error ? error.message : '연결 코드 생성에 실패했습니다.');
+    } finally {
+      setPairingBusy(false);
+    }
+  };
+
   return (
     <div className="p-3.5 sm:p-6 max-w-4xl mx-auto space-y-4 sm:space-y-6">
       {/* 헤더 */}
@@ -89,6 +108,14 @@ export const MyPage: React.FC = () => {
           계정 프로필 정보 및 판매 데이터의 전체 백업/복원을 안전하게 관리합니다.
         </p>
       </div>
+
+      {isRemoteAuth && (
+        <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3">
+          <div className="flex items-start gap-3"><div className="rounded-2xl bg-cyan-50 p-2.5"><Smartphone className="w-5 h-5 text-cyan-700" /></div><div><h3 className="text-sm font-black text-slate-900">voicecapSMS 휴대폰 연결</h3><p className="mt-1 text-[11px] text-slate-500">휴대폰 앱에서 이 코드만 입력하면 이 스토어에 연결됩니다. 코드는 10분 뒤 자동으로 만료되며 한 번만 사용할 수 있습니다.</p></div></div>
+          {pairing ? <div className="rounded-2xl border border-cyan-200 bg-cyan-50 p-4 text-center"><p className="text-[11px] font-bold text-cyan-800">휴대폰 앱의 ‘기기 연결 코드’에 입력하세요</p><code className="mt-2 block select-all text-2xl font-black tracking-[0.2em] text-slate-900">{pairing.code}</code><p className="mt-2 text-[10px] text-cyan-700">만료: {new Date(pairing.expiresAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</p></div> : <button type="button" onClick={() => void createPairingCode()} disabled={pairingBusy} className="w-full rounded-xl bg-cyan-600 px-4 py-3 text-xs font-bold text-white disabled:opacity-50">{pairingBusy ? '연결 코드 생성 중…' : '휴대폰 연결 코드 만들기'}</button>}
+          {pairing && <button type="button" onClick={() => void createPairingCode()} disabled={pairingBusy} className="w-full rounded-xl border border-cyan-200 bg-white px-4 py-2.5 text-xs font-bold text-cyan-700 disabled:opacity-50">새 코드 만들기</button>}
+        </div>
+      )}
 
       {toastMsg && (
         <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center space-x-2 animate-in fade-in">

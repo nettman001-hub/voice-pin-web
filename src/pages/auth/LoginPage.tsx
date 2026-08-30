@@ -4,37 +4,46 @@ import { useAuth } from '../../context/AuthContext';
 import { Mic, Lock, Mail, AlertCircle } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
-  const { login, isLocked, lockUntil, loginAttempts } = useAuth();
+  const { login, isLocked, lockUntil, loginAttempts, isRemoteAuth } = useAuth();
   const navigate = useNavigate();
 
-  const [email, setEmail] = useState('seller@dadryeo.com');
-  const [password, setPassword] = useState('password123!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [autoLogin, setAutoLogin] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    setIsSubmitting(true);
 
-    const res = login(email, password, autoLogin);
-    if (!res.success) {
-      setErrorMessage(res.message || '로그인에 실패했습니다.');
-    } else {
+    try {
+      const res = await login(email, password, autoLogin);
+      if (!res.success) {
+        setErrorMessage(res.message || '로그인에 실패했습니다.');
+        return;
+      }
+
       if (email.includes('admin')) {
         navigate('/admin');
       } else {
         navigate('/live');
       }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '로그인 중 오류가 발생했습니다.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const fillDemoAccount = (role: 'seller' | 'admin') => {
     if (role === 'seller') {
       setEmail('seller@dadryeo.com');
-      setPassword('password123!');
+      setPassword('local-demo');
     } else {
       setEmail('admin@dadryeo.com');
-      setPassword('admin123!');
+      setPassword('local-admin-demo');
     }
   };
 
@@ -127,15 +136,15 @@ export const LoginPage: React.FC = () => {
 
           <button
             type="submit"
-            disabled={isLocked}
+            disabled={isLocked || isSubmitting}
             className="w-full mt-2 py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-500/20 transition disabled:opacity-50"
           >
-            로그인
+            {isSubmitting ? '로그인 중...' : '로그인'}
           </button>
         </form>
 
         {/* 데모 빠른 계정 채우기 */}
-        <div className="mt-6 pt-6 border-t border-slate-100 text-center">
+        {!isRemoteAuth && <div className="mt-6 pt-6 border-t border-slate-100 text-center">
           <p className="text-[11px] text-slate-500 mb-2 font-medium">체험용 빠른 계정 선택</p>
           <div className="flex justify-center gap-2">
             <button
@@ -153,7 +162,7 @@ export const LoginPage: React.FC = () => {
               🛡️ 관리자 계정
             </button>
           </div>
-        </div>
+        </div>}
 
         {/* 하단 링크 */}
         <div className="mt-6 text-center text-xs text-slate-500">

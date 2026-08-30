@@ -20,7 +20,7 @@ public final class SmsSyncManager {
         if (!BridgePreferences.hasDataTransferConsent(context)) return "문자 정보 전송 동의가 필요합니다.";
         if (!SmsRoleUtils.isDefaultSmsApp(context)) return "기본 SMS 앱으로 설정되어 있지 않아 동기화를 중단했습니다.";
         if (!SmsRoleUtils.hasSmsPermissions(context)) return "SMS/MMS 권한이 없어 동기화를 중단했습니다.";
-        if (!BridgePreferences.configured(context)) return "서버 URL과 판매자 ID를 먼저 저장해 주세요.";
+        if (!BridgePreferences.configured(context)) return "웹앱에서 만든 기기 연결 코드를 먼저 입력해 주세요.";
         BridgeClient.refreshBusinessContacts(context);
         int sent = syncRecentSms(context);
         sent += syncRecentMms(context);
@@ -84,12 +84,11 @@ public final class SmsSyncManager {
         for (JSONObject message : BridgeClient.getOutbox(context)) {
             String id = message.optString("id");
             try {
-                String phone = message.getString("phoneNumber");
+                String phone = message.optString("phone_number", message.optString("phoneNumber"));
                 String body = message.getString("body");
                 BusinessContactStore.register(context, phone);
                 SmsManager manager = context.getSystemService(SmsManager.class);
                 ArrayList<String> parts = manager.divideMessage(body);
-                BridgeClient.updateOutboxStatus(context, id, "SENDING", null);
                 if (parts.size() > 1) manager.sendMultipartTextMessage(phone, null, parts, null, null);
                 else manager.sendTextMessage(phone, null, body, null, null);
                 BridgeClient.updateOutboxStatus(context, id, "SENT", null);

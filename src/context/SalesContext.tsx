@@ -1,7 +1,9 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { SaleRecord, SaleStatus } from '../types/live';
 import { storageService } from '../services/storageService';
 import { exportSalesToCsv } from '../services/csvExporter';
+import { useAuth } from './AuthContext';
+import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
 
 interface SettlementSummary {
   totalCount: number;
@@ -28,132 +30,121 @@ interface SalesContextType {
 const SalesContext = createContext<SalesContextType | undefined>(undefined);
 
 export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [sales, setSales] = useState<SaleRecord[]>([]);
+  const { workspaceId, isRemoteAuth } = useAuth();
+  const [sales, setSales] = useState<SaleRecord[]>(() => storageService.getSales());
+  const [remoteReady, setRemoteReady] = useState(false);
 
   useEffect(() => {
-    setSales(storageService.getSales());
-  }, []);
+    if (!isRemoteAuth || !workspaceId) {
+      setRemoteReady(false);
+      setSales(storageService.getSales());
+      return;
+    }
+    let active = true;
+    let timer: number | undefined;
+    const load = async () => {
+      try {
+        const rows = await remoteWorkspaceService.loadSales(workspaceId);
+        if (!active) return;
+        setSales(rows);
+        storageService.saveSales(rows);
+        setRemoteReady(true);
+      } catch (error) {
+        console.error('[Sales] remote load failed', error);
+        if (active) setRemoteReady(false);
+      }
+    };
+    void load();
+    const unsubscribe = remoteWorkspaceService.subscribe(workspaceId, () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void load(), 350);
+    });
+    return () => { active = false; window.clearTimeout(timer); unsubscribe(); };
+  }, [isRemoteAuth, workspaceId]);
+
+  const persist = (sale: SaleRecord) => {
+    storageService.updateSale(sale);
+    if (isRemoteAuth && workspaceId && remoteReady) {
+      void remoteWorkspaceService.saveSale(workspaceId, sale).catch((error) => console.error('[Sales] remote save failed', error));
+    }
+  };
 
   const addSale = (saleData: Omit<SaleRecord, 'id'>): SaleRecord => {
-    const newSale: SaleRecord = {
-      ...saleData,
-      id: `s-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
-    };
+    const newSale: SaleRecord = { ...saleData, id: `s-${crypto.randomUUID()}` };
+    setSales((previous) => [newSale, ...previous]);
     storageService.addSale(newSale);
-    setSales(storageService.getSales());
+    if (isRemoteAuth && workspaceId && remoteReady) {
+      void remoteWorkspaceService.saveSale(workspaceId, newSale).catch((error) => console.error('[Sales] remote add failed', error));
+    }
     return newSale;
   };
 
   const updateSale = (updated: SaleRecord) => {
-    storageService.updateSale(updated);
-    setSales(storageService.getSales());
+    setSales((previous) => previous.map((sale) => sale.id === updated.id ? updated : sale));
+    persist(updated);
   };
 
   const deleteSale = (id: string) => {
+    setSales((previous) => previous.filter((sale) => sale.id !== id));
     storageService.deleteSale(id);
-    setSales(storageService.getSales());
+    if (isRemoteAuth && workspaceId && remoteReady) {
+      void remoteWorkspaceService.deleteSale(workspaceId, id).catch((error) => console.error('[Sales] remote delete failed', error));
+    }
   };
 
   const confirmBatchSales = (saleIds: string[]) => {
-    const current = storageService.getSales();
-    const updated = current.map((s) => (saleIds.includes(s.id) ? { ...s, status: '확정' as SaleStatus } : s));
-    storageService.saveSales(updated);
-    setSales(updated);
+    setSales((previous) => previous.map((sale) => saleIds.includes(sale.id) ? { ...sale, status: '확정' as SaleStatus } : sale));
+    const current = storageService.getSales().map((sale) => saleIds.includes(sale.id) ? { ...sale, status: '확정' as SaleStatus } : sale);
+    storageService.saveSales(current);
+    if (isRemoteAuth && workspaceId && remoteReady) {
+      void Promise.all(current.filter((sale) => saleIds.includes(sale.id)).map((sale) => remoteWorkspaceService.saveSale(workspaceId, sale)))
+        .catch((error) => console.error('[Sales] remote batch save failed', error));
+    }
   };
 
-  const exportCsv = (filteredRecords?: SaleRecord[], filename?: string) => {
-    const targetList = filteredRecords || sales.filter((s) => s.status === '확정');
-    return exportSalesToCsv(targetList, filename);
-  };
-
-  const getSalesBySession = (sessionId: string) => {
-    return sales.filter((s) => s.sessionId === sessionId);
-  };
+  const exportCsv = (filteredRecords?: SaleRecord[], filename?: string) => exportSalesToCsv(filteredRecords || sales.filter((sale) => sale.status === '확정'), filename);
+  const getSalesBySession = (sessionId: string) => sales.filter((sale) => sale.sessionId === sessionId);
 
   const getSettlementSummary = (period: 'TODAY' | 'WEEK' | 'MONTH' | 'CUSTOM', customRange?: { start: string; end: string }) => {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-
-    const filtered = sales.filter((s) => {
-      const recTime = new Date(s.recognizedAt).getTime();
-      if (period === 'TODAY') {
-        return recTime >= todayStart;
-      } else if (period === 'WEEK') {
-        const weekStart = todayStart - 6 * 24 * 3600000;
-        return recTime >= weekStart;
-      } else if (period === 'MONTH') {
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-        return recTime >= monthStart;
-      } else if (period === 'CUSTOM' && customRange) {
-        const start = new Date(customRange.start).getTime();
-        const end = new Date(customRange.end).setHours(23, 59, 59, 999);
-        return recTime >= start && recTime <= end;
-      }
+    const filtered = sales.filter((sale) => {
+      const recordedAt = new Date(sale.recognizedAt).getTime();
+      if (period === 'TODAY') return recordedAt >= todayStart;
+      if (period === 'WEEK') return recordedAt >= todayStart - 6 * 24 * 3600000;
+      if (period === 'MONTH') return recordedAt >= new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+      if (period === 'CUSTOM' && customRange) return recordedAt >= new Date(customRange.start).getTime() && recordedAt <= new Date(customRange.end).setHours(23, 59, 59, 999);
       return true;
     });
-
-    // 집계 계산 (보류 건은 금액 및 건수 합산에서 제외하고 별도 카운트)
-    const validSales = filtered.filter((s) => s.status !== '보류');
-    const pendingSales = filtered.filter((s) => s.status === '보류');
-
-    const totalCount = validSales.length;
-    const totalAmount = validSales.reduce((sum, item) => sum + (item.amount || 0), 0);
-    const uniqueBuyers = new Set(validSales.map((s) => s.buyerNickname).filter(Boolean));
-    const pendingCount = pendingSales.length;
-
-    // 일자별 그룹화
-    const groups: { [key: string]: SaleRecord[] } = {};
-    validSales.forEach((s) => {
-      const dateKey = new Date(s.recognizedAt).toISOString().split('T')[0];
-      if (!groups[dateKey]) groups[dateKey] = [];
-      groups[dateKey].push(s);
+    const validSales = filtered.filter((sale) => sale.status !== '보류');
+    const pendingSales = filtered.filter((sale) => sale.status === '보류');
+    const groups: Record<string, SaleRecord[]> = {};
+    validSales.forEach((sale) => {
+      const date = new Date(sale.recognizedAt).toISOString().split('T')[0];
+      (groups[date] ||= []).push(sale);
     });
-
     const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
-    const groupedByDate = Object.keys(groups)
-      .sort((a, b) => b.localeCompare(a))
-      .map((dateStr) => {
-        const list = groups[dateStr];
-        const d = new Date(dateStr);
-        const dayName = dayNames[d.getDay()];
-        const amountSum = list.reduce((sum, item) => sum + item.amount, 0);
-        return {
-          date: dateStr,
-          dayName,
-          count: list.length,
-          totalAmount: amountSum,
-          records: list
-        };
-      });
-
     return {
       summary: {
-        totalCount,
-        totalAmount,
-        uniqueBuyersCount: uniqueBuyers.size,
-        pendingCount
+        totalCount: validSales.length,
+        totalAmount: validSales.reduce((sum, sale) => sum + (sale.amount || 0), 0),
+        uniqueBuyersCount: new Set(validSales.map((sale) => sale.buyerNickname).filter(Boolean)).size,
+        pendingCount: pendingSales.length,
       },
       records: filtered,
-      groupedByDate
+      groupedByDate: Object.keys(groups).sort((left, right) => right.localeCompare(left)).map((date) => ({
+        date,
+        dayName: dayNames[new Date(date).getDay()],
+        count: groups[date].length,
+        totalAmount: groups[date].reduce((sum, sale) => sum + sale.amount, 0),
+        records: groups[date],
+      })),
     };
   };
 
-  return (
-    <SalesContext.Provider
-      value={{
-        sales,
-        addSale,
-        updateSale,
-        deleteSale,
-        confirmBatchSales,
-        exportCsv,
-        getSalesBySession,
-        getSettlementSummary
-      }}
-    >
-      {children}
-    </SalesContext.Provider>
-  );
+  return <SalesContext.Provider value={{ sales, addSale, updateSale, deleteSale, confirmBatchSales, exportCsv, getSalesBySession, getSettlementSummary }}>
+    {children}
+  </SalesContext.Provider>;
 };
 
 export const useSales = () => {

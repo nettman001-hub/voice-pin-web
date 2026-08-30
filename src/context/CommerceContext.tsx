@@ -4,6 +4,7 @@ import { useSales } from './SalesContext';
 import { buildClaimFromMessage, compareClaimWithSales } from '../services/customerMessageParser';
 import { smsBridgeService } from '../services/smsBridgeService';
 import { storageService } from '../services/storageService';
+import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
 import {
   CommerceState,
   CustomerPurchaseClaim,
@@ -56,7 +57,7 @@ const mergeById = <T extends { id: string }>(local: T[], remote: T[]): T[] => {
 };
 
 export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user } = useAuth();
+  const { user, workspaceId, isRemoteAuth } = useAuth();
   const { sales } = useSales();
   const [state, setState] = useState<CommerceState>(() => storageService.getCommerceState());
   const [bridgeConfig, setBridgeConfig] = useState<SmsBridgeConfig>(() =>
@@ -64,21 +65,65 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   );
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>('CHECKING');
   const [bridgeMessage, setBridgeMessage] = useState('연동 서버 확인 중');
+  const [remoteReady, setRemoteReady] = useState(false);
 
   const commit = useCallback((updater: (previous: CommerceState) => CommerceState) => {
     setState((previous) => {
       const next = updater(previous);
       storageService.saveCommerceState(next);
+      if (isRemoteAuth && workspaceId && remoteReady) {
+        void remoteWorkspaceService.saveCommerce(workspaceId, next).catch((error) => {
+          console.error('[Commerce] remote save failed', error);
+          setBridgeStatus('OFFLINE');
+          setBridgeMessage('클라우드 저장에 실패했습니다. 네트워크를 확인해 주세요.');
+        });
+      }
       return next;
     });
-  }, []);
+  }, [isRemoteAuth, remoteReady, workspaceId]);
 
   useEffect(() => {
-    if (!user?.id || bridgeConfig.sellerId === user.id) return;
-    const next = { ...bridgeConfig, sellerId: user.id };
+    const identity = workspaceId || user?.id;
+    if (!identity || bridgeConfig.sellerId === identity) return;
+    const next = { ...bridgeConfig, sellerId: identity };
     setBridgeConfig(next);
     smsBridgeService.saveConfig(next);
-  }, [user?.id, bridgeConfig]);
+  }, [user?.id, workspaceId, bridgeConfig]);
+
+  useEffect(() => {
+    if (!isRemoteAuth || !workspaceId) {
+      setRemoteReady(false);
+      return;
+    }
+    let active = true;
+    let timer: number | undefined;
+    const load = async () => {
+      try {
+        const remote = await remoteWorkspaceService.loadCommerce(workspaceId);
+        if (!active) return;
+        setState(remote);
+        storageService.saveCommerceState(remote);
+        setRemoteReady(true);
+        setBridgeStatus('ONLINE');
+        setBridgeMessage('VoiceCAP 클라우드 연동 정상');
+      } catch (error) {
+        if (!active) return;
+        setRemoteReady(false);
+        setBridgeStatus('OFFLINE');
+        setBridgeMessage(error instanceof Error ? error.message : '클라우드 데이터를 불러오지 못했습니다.');
+      }
+    };
+    void load();
+    const unsubscribe = remoteWorkspaceService.subscribe(workspaceId, () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void load(), 350);
+    });
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [isRemoteAuth, workspaceId]);
 
   useEffect(() => {
     if (sales.length === 0) return;
@@ -113,7 +158,22 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const syncBridge = useCallback(async () => {
     setBridgeStatus('CHECKING');
-    setBridgeMessage('voicecapSMS 연동 확인 중');
+    setBridgeMessage(isRemoteAuth ? 'VoiceCAP 클라우드 동기화 중' : 'voicecapSMS 연동 확인 중');
+    if (isRemoteAuth && workspaceId) {
+      try {
+        const remote = await remoteWorkspaceService.loadCommerce(workspaceId);
+        setState(remote);
+        storageService.saveCommerceState(remote);
+        setRemoteReady(true);
+        setBridgeStatus('ONLINE');
+        setBridgeMessage('VoiceCAP 클라우드 연동 정상');
+        return true;
+      } catch (error) {
+        setBridgeStatus('OFFLINE');
+        setBridgeMessage(error instanceof Error ? error.message : '클라우드 서버에 연결할 수 없습니다.');
+        return false;
+      }
+    }
     try {
       await smsBridgeService.getStatus(bridgeConfig);
       const [remoteMessages, remotePayments] = await Promise.all([
@@ -161,7 +221,7 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setBridgeMessage(error instanceof Error ? error.message : '연동 서버에 연결할 수 없습니다.');
       return false;
     }
-  }, [bridgeConfig, commit, matchPayments, sales]);
+  }, [bridgeConfig, commit, isRemoteAuth, matchPayments, sales, workspaceId]);
 
   useEffect(() => {
     void syncBridge();
@@ -218,6 +278,22 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const sendSms = async (phoneNumber: string, body: string, category: SmsCategory, saleIds: string[]) => {
+    if (isRemoteAuth && workspaceId) {
+      const message: SmsMessage = {
+        id: `sms-${crypto.randomUUID()}`,
+        sellerId: workspaceId,
+        phoneNumber,
+        body,
+        direction: 'OUTGOING',
+        category,
+        status: 'QUEUED',
+        saleIds,
+        attachments: [],
+        createdAt: new Date().toISOString()
+      };
+      commit((previous) => ({ ...previous, messages: mergeById(previous.messages, [message]) }));
+      return message;
+    }
     try {
       const message = await smsBridgeService.queueMessage(bridgeConfig, { phoneNumber, body, category, saleIds });
       commit((previous) => ({ ...previous, messages: mergeById(previous.messages, [message]) }));
