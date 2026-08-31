@@ -1,0 +1,20 @@
+# 웹앱 배포에 포함하지 않는 로컬/데스크톱 빌드 파일
+node_modules/
+server/node_modules/
+desktop/
+android/
+release/
+dist/
+.git/
+.vercel/
+
+# 로컬 비밀값과 개발용 환경 파일
+eulerstream_key.txt
+server/.env
+.env.local
+.env.*.local
+
+# 로컬 진단/문서 파일
+chrome-net-export-log.json
+HANDOFF.md
+NEW_PC_SETUP.md
