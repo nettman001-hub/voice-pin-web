@@ -20,7 +20,7 @@ export interface CommentAlert {
 }
 
 interface CommentCaptureContextType {
-  isActive: boolean;              // 사용자가 켠 댓글 수집 토글 (함께시작)
+  isActive: boolean;              // 사용자가 직접 켠 댓글 수집 상태
   isRunning: boolean;             // 실제 수집 중 (토글 ON + 라이브 청취 중 + 서버 연결 + 틱톡 수집중)
   serverStatus: CommentStreamStatus; // 로컬 수집 서버/틱톡 연결 상태
   serverMessage: string;          // 상태 안내 메시지
@@ -39,8 +39,9 @@ const CommentCaptureContext = createContext<CommentCaptureContextType | undefine
 export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isListening, currentSessionId, transcriptLogs } = useLive();
 
-  // 기본값은 함께 시작이며, 사용자가 바꾼 활성화 상태는 저장되어 유지된다.
-  const [isActive, setIsActive] = useState<boolean>(() => storageService.getCommentCaptureActive());
+  // 안전을 위해 브라우저를 새로 열거나 새로고침할 때마다 댓글 수집은 꺼진 상태로 시작한다.
+  // 판매자가 현재 방송에서 직접 시작 버튼을 눌렀을 때만 활성화한다.
+  const [isActive, setIsActive] = useState<boolean>(false);
   const [serverStatus, setServerStatus] = useState<CommentStreamStatus>('DISCONNECTED');
   const [serverMessage, setServerMessage] = useState<string>('VoiceCAP 댓글 도우미 미연결');
   const [newCount, setNewCount] = useState<number>(0);
@@ -64,7 +65,6 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
   useEffect(() => {
     isActiveRef.current = isActive;
-    storageService.saveCommentCaptureActive(isActive);
   }, [isActive]);
 
   const saveConfig = useCallback((next: CommentCaptureConfig) => {

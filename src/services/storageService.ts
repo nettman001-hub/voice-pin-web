@@ -234,7 +234,6 @@ const KEYS = {
   CAPTURE_AREA_SNAPSHOT: 'voicecap_capture_area_snapshot',
   COMMENT_RECORDS: 'voicecap_comment_records',
   COMMENT_CAPTURE_CONFIG: 'voicecap_comment_capture_config',
-  COMMENT_CAPTURE_ACTIVE: 'voicecap_comment_capture_active',
   COMMERCE_STATE: 'voicecap_commerce_state'
 };
 
@@ -468,14 +467,6 @@ export class StorageService {
       ...config,
       serverUrl: DEFAULT_COMMENT_SERVER_URL
     });
-  }
-
-  // 댓글 캡처 활성화 상태 (기본값: 함께 시작)
-  public getCommentCaptureActive(): boolean {
-    return this.getItem<boolean>(KEYS.COMMENT_CAPTURE_ACTIVE, true);
-  }
-  public saveCommentCaptureActive(active: boolean) {
-    this.setItem(KEYS.COMMENT_CAPTURE_ACTIVE, active);
   }
 
   // 댓글 캡처 기록

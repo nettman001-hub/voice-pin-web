@@ -55,6 +55,9 @@ export const RecognitionRulesPage: React.FC = () => {
   const [commentAlertWords, setCommentAlertWords] = useState(commentConfig.alertWords.join(', '));
   const [commentAlertDuration, setCommentAlertDuration] = useState(String(commentConfig.alertDurationSec));
   const [commentAlertCommand, setCommentAlertCommand] = useState(commentConfig.alertVoiceCommand);
+  const [commentHelperCheckComplete, setCommentHelperCheckComplete] = useState(
+    commentServerStatus !== 'DISCONNECTED'
+  );
 
   const [newWord, setNewWord] = useState('');
   const [newAction, setNewAction] = useState<RuleAction>('DB_SAVE');
@@ -119,6 +122,20 @@ export const RecognitionRulesPage: React.FC = () => {
       void video.play().catch(() => {});
     }
   }, [previewStream]);
+
+  // 페이지 진입 직후에는 도우미가 시작되는 시간을 잠시 기다린다.
+  // 브라우저는 '미설치'와 '설치됐지만 꺼짐'을 구분할 수 없으므로 연결 실패가
+  // 일정 시간 지속될 때 실행 안내와 다운로드 버튼을 함께 표시한다.
+  useEffect(() => {
+    if (commentServerStatus !== 'DISCONNECTED') {
+      setCommentHelperCheckComplete(true);
+      return;
+    }
+
+    setCommentHelperCheckComplete(false);
+    const timer = window.setTimeout(() => setCommentHelperCheckComplete(true), 2500);
+    return () => window.clearTimeout(timer);
+  }, [commentServerStatus]);
 
   // 화면 스트림 변경 요청
   const handleChangeScreen = async () => {
@@ -401,11 +418,9 @@ export const RecognitionRulesPage: React.FC = () => {
   const pixelH = Math.round(currentArea.heightRatio * desktopResolution.height);
   const hasLivePreview = !!(previewStream && isScreenConnected);
   const hasDisplayedScreen = hasLivePreview || !!savedPreview;
-  const localServerStatusLabel = commentServerStatus === 'DISCONNECTED'
-    ? '댓글 도우미 미연결'
-    : commentServerStatus === 'CONNECTING'
-      ? '댓글 도우미 연결중'
-      : '댓글 도우미 대기중';
+  const localServerStatusLabel = getCommentStatusBadge(commentServerStatus).label;
+  const shouldShowCommentHelperInstall =
+    commentHelperCheckComplete && commentServerStatus === 'DISCONNECTED';
 
   return (
     <div className="p-3.5 sm:p-6 max-w-7xl mx-auto space-y-6 sm:space-y-8">
@@ -761,29 +776,35 @@ export const RecognitionRulesPage: React.FC = () => {
           </div>
         </div>
 
-        {isCommentActive && (commentServerStatus === 'DISCONNECTED' || commentServerStatus === 'ERROR') && (
-          <div className="px-3.5 py-3.5 rounded-2xl bg-rose-50 border border-rose-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        {shouldShowCommentHelperInstall && (
+          <div className="px-3.5 py-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-rose-700 text-[11px] font-black break-words">
-                ⚠️ 댓글 받기 프로그램이 실행되지 않았습니다.
+              <p className="text-amber-900 text-[11px] font-black break-words">
+                댓글 받기 프로그램을 확인해 주세요.
               </p>
-              <p className="mt-1 text-rose-600/90 text-[10px] leading-relaxed break-words">
-                아래 프로그램을 한 번 설치하면 컴퓨터를 켤 때 자동으로 실행됩니다. 설치 후 이 페이지를 새로고침해 주세요.
+              <p className="mt-1 text-amber-800/90 text-[10px] leading-relaxed break-words">
+                먼저 Windows 시작 메뉴에서 <strong>VoiceCAP 댓글 도우미</strong>를 실행해 주세요. 프로그램이 없다면 다운로드하여 한 번만 설치하면 됩니다.
               </p>
-              {commentServerMessage && !commentServerMessage.includes('VoiceCAP 댓글 도우미') && (
-                <p className="mt-1 text-rose-500/80 text-[10px] break-words">{commentServerMessage}</p>
-              )}
+              <p className="mt-1 text-amber-700/80 text-[10px] break-words">
+                실행 또는 설치 후에는 이 페이지를 새로고침해 주세요.
+              </p>
             </div>
             <a
               href={COMMENT_HELPER_DOWNLOAD_URL}
               target="_blank"
               rel="noreferrer"
-              className="shrink-0 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black shadow-sm transition"
+              className="shrink-0 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-black shadow-sm transition"
             >
               <Download className="w-3.5 h-3.5" />
               프로그램 다운로드
             </a>
           </div>
+        )}
+
+        {isCommentActive && commentServerStatus === 'ERROR' && (
+          <p className="px-3.5 py-2.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-bold break-words">
+            ⚠️ 댓글 받기 프로그램은 연결됐지만 수집 중 문제가 발생했습니다. {commentServerMessage}
+          </p>
         )}
 
         {/* 세부 설정 폼 */}
