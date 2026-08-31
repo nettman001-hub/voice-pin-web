@@ -1,6 +1,6 @@
 {
   "name": "voicecap-comment-helper",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "VoiceCAP TikTok LIVE comment helper for Windows",
   "main": "main.cjs",
   "author": "VoiceCAP",

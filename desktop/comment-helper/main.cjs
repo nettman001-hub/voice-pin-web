@@ -124,6 +124,14 @@ function startServer() {
   serverProcess.on('exit', (code) => {
     writeLog('helper', `서버 종료 (코드 ${code})`);
     serverProcess = null;
+
+    // 트레이 메뉴의 종료 요청으로 서버를 끈 경우에는 창·트레이가 이미 파기될 수 있다.
+    // 이때 상태를 다시 보내거나 서버를 재시작하지 않는다.
+    if (isQuitting) {
+      manualRestart = false;
+      return;
+    }
+
     state.helper = 'error';
     state.message = '댓글 서버가 중지되었습니다. 자동으로 다시 시작합니다.';
     publishStatus();
@@ -162,6 +170,8 @@ function restartServer() {
 }
 
 function requestHealth() {
+  if (isQuitting) return;
+
   const request = http.get(
     { hostname: SERVER_HOST, port: SERVER_PORT, path: '/status', timeout: 1800 },
     (response) => {
@@ -193,6 +203,7 @@ function requestHealth() {
 }
 
 function setHealthError(message) {
+  if (isQuitting) return;
   if (!serverProcess) state.helper = 'error';
   else if (state.helper !== 'starting') state.helper = 'starting';
   state.message = message;
@@ -214,11 +225,15 @@ function statusLabel() {
 }
 
 function publishStatus() {
+  if (isQuitting) return;
+
   const snapshot = statusSnapshot();
   const signature = JSON.stringify(snapshot);
   if (signature === lastStatusSignature) return;
   lastStatusSignature = signature;
-  mainWindow?.webContents.send('helper:status', snapshot);
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send('helper:status', snapshot);
+  }
   if (tray) {
     tray.setToolTip(`${APP_NAME} · ${statusLabel()}`);
     tray.setContextMenu(buildTrayMenu());
@@ -300,6 +315,9 @@ function createWindow() {
       mainWindow.hide();
     }
   });
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) shell.openExternal(url);
     return { action: 'deny' };
@@ -319,7 +337,7 @@ function createTray() {
 }
 
 function showWindow() {
-  if (!mainWindow) return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
