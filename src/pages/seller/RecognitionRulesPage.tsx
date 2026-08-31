@@ -762,16 +762,26 @@ export const RecognitionRulesPage: React.FC = () => {
         </div>
 
         {isCommentActive && (commentServerStatus === 'DISCONNECTED' || commentServerStatus === 'ERROR') && (
-          <div className="px-3.5 py-3 rounded-2xl bg-rose-50 border border-rose-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
-            <p className="text-rose-700 text-[11px] font-bold break-words">
-              ⚠️ {commentServerMessage || 'VoiceCAP 댓글 도우미가 실행 중인지 확인하세요.'}
-            </p>
+          <div className="px-3.5 py-3.5 rounded-2xl bg-rose-50 border border-rose-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-rose-700 text-[11px] font-black break-words">
+                ⚠️ 댓글 받기 프로그램이 실행되지 않았습니다.
+              </p>
+              <p className="mt-1 text-rose-600/90 text-[10px] leading-relaxed break-words">
+                아래 프로그램을 한 번 설치하면 컴퓨터를 켤 때 자동으로 실행됩니다. 설치 후 이 페이지를 새로고침해 주세요.
+              </p>
+              {commentServerMessage && !commentServerMessage.includes('VoiceCAP 댓글 도우미') && (
+                <p className="mt-1 text-rose-500/80 text-[10px] break-words">{commentServerMessage}</p>
+              )}
+            </div>
             <a
               href={COMMENT_HELPER_DOWNLOAD_URL}
-              className="shrink-0 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black shadow-sm transition"
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black shadow-sm transition"
             >
               <Download className="w-3.5 h-3.5" />
-              댓글 도우미 설치
+              프로그램 다운로드
             </a>
           </div>
         )}

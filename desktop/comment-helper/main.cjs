@@ -228,7 +228,7 @@ function buildTrayMenu() {
     { label: `상태: ${statusLabel()}`, enabled: false },
     { type: 'separator' },
     { label: '상태 화면 열기', click: showWindow },
-    { label: 'VoiceCAP 웹앱 열기', click: () => shell.openExternal(WEB_APP_URL) },
+    { label: 'VoiceCAP 홈페이지 열기', click: () => shell.openExternal(WEB_APP_URL) },
     { label: '댓글 서버 다시 시작', click: restartServer },
     { label: '업데이트 확인', click: checkForUpdates },
     { label: '진단 로그 열기', click: () => shell.showItemInFolder(logFile) },

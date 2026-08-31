@@ -1,12 +1,12 @@
 # VoiceCAP 댓글 도우미
 
-틱톡 라이브 댓글을 VoiceCAP 웹앱으로 전달하는 Windows용 설치 프로그램입니다.
+틱톡 라이브 댓글을 VoiceCAP 홈페이지로 전달하는 Windows용 설치 프로그램입니다.
 
 ## 판매자 사용법
 
 1. `VoiceCAP-Comment-Helper-Setup.exe`를 한 번 실행합니다.
 2. 설치가 끝나면 컴퓨터를 켤 때 댓글 도우미가 자동으로 실행됩니다.
-3. VoiceCAP 웹앱에서 틱톡 아이디를 설정하고 라이브를 시작합니다.
+3. VoiceCAP 홈페이지에서 틱톡 아이디를 설정하고 라이브를 시작합니다.
 
 PowerShell, Node.js, `npm install`, 환경변수, 포트 설정은 판매자가 알 필요가 없습니다. 창을 닫아도 작업표시줄 오른쪽의 VoiceCAP 아이콘에서 백그라운드로 계속 작동합니다.
 
