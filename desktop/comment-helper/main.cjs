@@ -307,7 +307,11 @@ function createWindow() {
 }
 
 function createTray() {
-  const trayImage = nativeImage.createFromPath(iconPath()).resize({ width: 20, height: 20 });
+  const sourceImage = nativeImage.createFromPath(iconPath());
+  if (sourceImage.isEmpty()) {
+    writeLog('helper', `트레이 아이콘을 읽을 수 없습니다: ${iconPath()}`);
+  }
+  const trayImage = sourceImage.resize({ width: 16, height: 16 });
   tray = new Tray(trayImage);
   tray.setToolTip(`${APP_NAME} · 시작 중`);
   tray.setContextMenu(buildTrayMenu());
