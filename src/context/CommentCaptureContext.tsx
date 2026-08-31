@@ -20,7 +20,7 @@ export interface CommentAlert {
 }
 
 interface CommentCaptureContextType {
-  isActive: boolean;              // 사용자가 직접 켠 댓글 수집 상태
+  isActive: boolean;              // 사용자가 켰거나 라이브 청취와 함께 시작된 댓글 수집 상태
   isRunning: boolean;             // 실제 수집 중 (토글 ON + 라이브 청취 중 + 서버 연결 + 틱톡 수집중)
   serverStatus: CommentStreamStatus; // 로컬 수집 서버/틱톡 연결 상태
   serverMessage: string;          // 상태 안내 메시지
@@ -66,6 +66,15 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   useEffect(() => {
     isActiveRef.current = isActive;
   }, [isActive]);
+
+  // 평상시 최초 상태는 OFF지만, 라이브 청취가 시작되면 댓글 수집도 함께 켠다.
+  // 라이브 중 판매자가 댓글 수집만 직접 끈 경우에는 isListening이 다시 바뀔 때까지
+  // 강제로 재활성화하지 않아 사용자의 수동 선택을 유지한다.
+  useEffect(() => {
+    if (isListening) {
+      setIsActive(true);
+    }
+  }, [isListening]);
 
   const saveConfig = useCallback((next: CommentCaptureConfig) => {
     setConfig(next);
@@ -181,7 +190,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
   // 수집 시작 조건 충족 시 틱톡 수집 요청: 토글 ON + 라이브 청취 중 + 서버 소켓 연결됨
   useEffect(() => {
-    if (!isActiveRef.current) return;
+    if (!isActive) return;
 
     if (isListening && serverStatus === 'CONNECTED') {
       const username = configRef.current.tiktokUsername.trim();
@@ -195,7 +204,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     if (!isListening) {
       commentStreamService.stopCollecting();
     }
-  }, [isListening, serverStatus]);
+  }, [isActive, isListening, serverStatus]);
 
   // 회차 시작/변경 시 중복 키 적재 및 현재 회차 피드 복원
   useEffect(() => {
