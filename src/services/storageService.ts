@@ -4,7 +4,7 @@ import { RecognitionWordRule, CaptureAreaConfig } from '../types/rules';
 import { TrainingSentence } from '../types/training';
 import { PaymentHistoryItem, PaymentCard } from '../types/subscription';
 import { ReportItem, SystemErrorLog, NotificationSetting } from '../types/admin';
-import { CommentRecord, CommentCaptureConfig, DEFAULT_COMMENT_CAPTURE_CONFIG } from '../types/comment';
+import { CommentRecord, CommentCaptureConfig, DEFAULT_COMMENT_CAPTURE_CONFIG, DEFAULT_COMMENT_SERVER_URL } from '../types/comment';
 import { CommerceState } from '../types/commerce';
 
 export interface CaptureAreaSnapshot {
@@ -456,10 +456,18 @@ export class StorageService {
   // 댓글 캡처 설정 (구버전 저장값과 신규 기본값을 병합해 반환)
   public getCommentCaptureConfig(): CommentCaptureConfig {
     const stored = this.getItem<Partial<CommentCaptureConfig> | null>(KEYS.COMMENT_CAPTURE_CONFIG, null);
-    return { ...DEFAULT_COMMENT_CAPTURE_CONFIG, ...(stored || {}) };
+    return {
+      ...DEFAULT_COMMENT_CAPTURE_CONFIG,
+      ...(stored || {}),
+      // 이전 버전의 PC 사설 IP 설정을 자동으로 폐기하고 설치형 도우미로 통일한다.
+      serverUrl: DEFAULT_COMMENT_SERVER_URL
+    };
   }
   public saveCommentCaptureConfig(config: CommentCaptureConfig) {
-    this.setItem(KEYS.COMMENT_CAPTURE_CONFIG, config);
+    this.setItem(KEYS.COMMENT_CAPTURE_CONFIG, {
+      ...config,
+      serverUrl: DEFAULT_COMMENT_SERVER_URL
+    });
   }
 
   // 댓글 캡처 활성화 상태 (기본값: 함께 시작)

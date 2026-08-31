@@ -559,7 +559,7 @@ export const LiveHomePage: React.FC = () => {
 
             {isCommentCaptureActive && (commentServerStatus === 'DISCONNECTED' || commentServerStatus === 'ERROR') && (
               <p className="mb-3 px-3 py-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-bold">
-                ⚠️ {commentServerMessage || '로컬 댓글 수집 서버(server/)가 실행 중인지 확인하세요.'}
+                ⚠️ {commentServerMessage || 'VoiceCAP 댓글 도우미가 실행 중인지 확인하세요.'}
               </p>
             )}
 

@@ -1,0 +1,78 @@
+{
+  "name": "voicecap-comment-helper",
+  "version": "1.0.0",
+  "description": "VoiceCAP TikTok LIVE comment helper for Windows",
+  "main": "main.cjs",
+  "author": "VoiceCAP",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "stage": "node scripts/stage-server.cjs",
+    "start": "npm run stage && electron .",
+    "pack": "npm run stage && electron-builder --dir --win x64",
+    "dist": "npm run stage && electron-builder --win nsis --x64"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "electron-updater": "^6.6.2",
+    "socket.io": "^4.8.1",
+    "tiktok-live-connector": "^2.4.4"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "shop.voicecap.commenthelper",
+    "productName": "VoiceCAP 댓글 도우미",
+    "copyright": "Copyright © VoiceCAP",
+    "asar": true,
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "ui/**/*",
+      "server/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build-runtime/runtime-config.json",
+        "to": "runtime-config.json"
+      }
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "artifactName": "VoiceCAP-Comment-Helper-Setup.${ext}",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "shortcutName": "VoiceCAP 댓글 도우미",
+      "uninstallDisplayName": "VoiceCAP 댓글 도우미"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "nettman001-hub",
+      "repo": "voice-pin-web",
+      "releaseType": "release"
+    }
+  }
+}

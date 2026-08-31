@@ -1,13 +1,13 @@
 import { io, Socket } from 'socket.io-client';
 
 /**
- * 로컬 댓글 수집 서버(server/)와의 Socket.IO 통신 래퍼.
+ * 설치된 VoiceCAP 댓글 도우미와의 Socket.IO 통신 래퍼.
  * 서버가 TikTok-Live-Connector로 받은 댓글을 그대로 중계받는다.
  */
 
 export type CommentStreamStatus =
-  | 'DISCONNECTED'      // 로컬 서버에 소켓 연결 안 됨 (서버 미실행 등)
-  | 'CONNECTING'        // 로컬 서버 소켓 연결 시도 중
+  | 'DISCONNECTED'      // 댓글 도우미에 소켓 연결 안 됨 (앱 미실행 등)
+  | 'CONNECTING'        // 댓글 도우미 소켓 연결 시도 중
   | 'CONNECTED'         // 서버 연결됨 · 틱톡 수집 대기
   | 'CONNECTING_TIKTOK' // 틱톡 라이브 연결 시도 중
   | 'COLLECTING'        // 댓글 실시간 수집 중
@@ -79,7 +79,7 @@ class CommentStreamService {
     this.lastMessage = '';
     this.url = target;
 
-    this.emitStatus('CONNECTING', '로컬 댓글 수집 서버 연결 중...');
+    this.emitStatus('CONNECTING', 'VoiceCAP 댓글 도우미에 연결 중...');
 
     this.socket = io(target, {
       transports: ['websocket'],
@@ -91,17 +91,17 @@ class CommentStreamService {
 
     this.socket.on('connect', () => {
       this.socketConnected = true;
-      this.emitStatus(mapServerState(this.lastServerState), this.lastMessage || '로컬 수집 서버 연결됨');
+      this.emitStatus(mapServerState(this.lastServerState), this.lastMessage || 'VoiceCAP 댓글 도우미 연결됨');
     });
 
     this.socket.on('disconnect', () => {
       this.socketConnected = false;
-      this.emitStatus('DISCONNECTED', '로컬 수집 서버 연결 끊김 - 서버 실행 여부 확인');
+      this.emitStatus('DISCONNECTED', 'VoiceCAP 댓글 도우미가 꺼져 있습니다. Windows 시작 메뉴에서 실행해 주세요.');
     });
 
     this.socket.on('connect_error', () => {
       if (!this.socketConnected) {
-        this.emitStatus('DISCONNECTED', '로컬 댓글 수집 서버 미실행 - server 폴더에서 npm start 필요');
+        this.emitStatus('DISCONNECTED', 'VoiceCAP 댓글 도우미가 설치되어 있는지 확인해 주세요.');
       }
     });
 

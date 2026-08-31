@@ -1,12 +1,14 @@
 # voicecap-comment-server
 
-틱톡 라이브 댓글을 **실시간으로 수집**해서 Vercel 웹앱(브라우저)으로 전달하는 윈도우 로컬 서버.
+틱톡 라이브 댓글을 **실시간으로 수집**해서 VoiceCAP 웹앱(브라우저)으로 전달하는 수집 서버.
+
+판매자는 이 폴더를 직접 실행하지 않습니다. Windows용 `VoiceCAP-Comment-Helper-Setup.exe`를 한 번 설치하면 Node.js와 이 서버가 함께 설치되고, 컴퓨터 시작 시 백그라운드에서 자동 실행됩니다.
 
 ```
 [TikTok LIVE] <--WSS-- [본 서버: tiktok-live-connector] --Socket.IO--> [웹앱 브라우저]
 ```
 
-## 최초 설정 (1회)
+## 개발자용 최초 설정 (1회)
 
 ```powershell
 cd server

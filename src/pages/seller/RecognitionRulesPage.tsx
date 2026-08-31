@@ -4,6 +4,7 @@ import { useAppData } from '../../context/AppDataContext';
 import { useLive } from '../../context/LiveContext';
 import { useCommentCapture, getCommentStatusBadge } from '../../context/CommentCaptureContext';
 import { RecognitionWordRule, RuleAction, CaptureAreaPreset, CaptureAreaConfig } from '../../types/rules';
+import { COMMENT_HELPER_DOWNLOAD_URL, DEFAULT_COMMENT_SERVER_URL } from '../../types/comment';
 import { screenCaptureService } from '../../services/screenCaptureService';
 import { storageService } from '../../services/storageService';
 import {
@@ -23,7 +24,8 @@ import {
   BellRing,
   Play,
   Square,
-  ArrowRight
+  ArrowRight,
+  Download
 } from 'lucide-react';
 
 export const RecognitionRulesPage: React.FC = () => {
@@ -50,7 +52,6 @@ export const RecognitionRulesPage: React.FC = () => {
   } = useCommentCapture();
 
   const [commentUsername, setCommentUsername] = useState(commentConfig.tiktokUsername);
-  const [commentServerUrl, setCommentServerUrl] = useState(commentConfig.serverUrl);
   const [commentAlertWords, setCommentAlertWords] = useState(commentConfig.alertWords.join(', '));
   const [commentAlertDuration, setCommentAlertDuration] = useState(String(commentConfig.alertDurationSec));
   const [commentAlertCommand, setCommentAlertCommand] = useState(commentConfig.alertVoiceCommand);
@@ -401,10 +402,10 @@ export const RecognitionRulesPage: React.FC = () => {
   const hasLivePreview = !!(previewStream && isScreenConnected);
   const hasDisplayedScreen = hasLivePreview || !!savedPreview;
   const localServerStatusLabel = commentServerStatus === 'DISCONNECTED'
-    ? '로컬 서버 미실행'
+    ? '댓글 도우미 미연결'
     : commentServerStatus === 'CONNECTING'
-      ? '로컬 서버 연결중'
-      : '로컬서버 대기중';
+      ? '댓글 도우미 연결중'
+      : '댓글 도우미 대기중';
 
   return (
     <div className="p-3.5 sm:p-6 max-w-7xl mx-auto space-y-6 sm:space-y-8">
@@ -709,7 +710,7 @@ export const RecognitionRulesPage: React.FC = () => {
               <span>댓글 자동 캡처 & 키워드 알림</span>
             </h3>
             <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
-              로컬 수집 서버가 틱톡 라이브 댓글을 실시간으로 받아 닉네임/내용을 100% 정확하게 자동 기록합니다. 설정 단어가 잡히면 큰 알림창이 뜹니다.
+              VoiceCAP 댓글 도우미가 틱톡 라이브 댓글을 실시간으로 받아 닉네임과 내용을 자동 기록합니다. 설정 단어가 잡히면 큰 알림창이 뜹니다.
             </p>
           </div>
 
@@ -745,7 +746,7 @@ export const RecognitionRulesPage: React.FC = () => {
             <div className="text-lg font-black text-slate-900">{commentNewCount} <span className="text-[10px] font-normal text-slate-400">건</span></div>
           </div>
           <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
-            <div className="text-slate-500 text-[10px] font-bold">로컬 서버 상태</div>
+            <div className="text-slate-500 text-[10px] font-bold">댓글 도우미 상태</div>
             <div className="text-sm font-black text-slate-900 truncate">{localServerStatusLabel}</div>
           </div>
           <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
@@ -761,9 +762,18 @@ export const RecognitionRulesPage: React.FC = () => {
         </div>
 
         {isCommentActive && (commentServerStatus === 'DISCONNECTED' || commentServerStatus === 'ERROR') && (
-          <p className="px-3.5 py-2.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-bold break-words">
-            ⚠️ {commentServerMessage || '로컬 댓글 수집 서버(server/)가 실행 중인지 확인하세요.'}
-          </p>
+          <div className="px-3.5 py-3 rounded-2xl bg-rose-50 border border-rose-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+            <p className="text-rose-700 text-[11px] font-bold break-words">
+              ⚠️ {commentServerMessage || 'VoiceCAP 댓글 도우미가 실행 중인지 확인하세요.'}
+            </p>
+            <a
+              href={COMMENT_HELPER_DOWNLOAD_URL}
+              className="shrink-0 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black shadow-sm transition"
+            >
+              <Download className="w-3.5 h-3.5" />
+              댓글 도우미 설치
+            </a>
+          </div>
         )}
 
         {/* 세부 설정 폼 */}
@@ -778,20 +788,6 @@ export const RecognitionRulesPage: React.FC = () => {
               value={commentUsername}
               onChange={(e) => setCommentUsername(e.target.value.replace(/^@/, '').trim())}
               placeholder="예: my_shop_official"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 font-mono text-slate-900 focus:outline-none focus:border-brand-500"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="font-bold text-slate-700 flex items-center space-x-1">
-              <Monitor className="w-3.5 h-3.5 text-slate-400" />
-              <span>로컬 수집 서버 URL</span>
-            </label>
-            <input
-              type="text"
-              value={commentServerUrl}
-              onChange={(e) => setCommentServerUrl(e.target.value)}
-              placeholder="http://127.0.0.1:2137"
               className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 font-mono text-slate-900 focus:outline-none focus:border-brand-500"
             />
           </div>
@@ -837,7 +833,6 @@ export const RecognitionRulesPage: React.FC = () => {
           <button
             onClick={() => {
               const username = commentUsername.trim().replace(/^@/, '');
-              const serverUrl = commentServerUrl.trim() || 'http://127.0.0.1:2137';
               const duration = Math.max(3, parseInt(commentAlertDuration, 10) || 15);
               const words = commentAlertWords.split(',').map((w) => w.trim()).filter(Boolean);
               const commands = Array.from(new Set(
@@ -846,13 +841,12 @@ export const RecognitionRulesPage: React.FC = () => {
               const command = commands.length > 0 ? commands.join(', ') : '닫아';
               saveCommentConfig({
                 tiktokUsername: username,
-                serverUrl,
+                serverUrl: DEFAULT_COMMENT_SERVER_URL,
                 alertWords: words,
                 alertDurationSec: duration,
                 alertVoiceCommand: command
               });
               setCommentUsername(username);
-              setCommentServerUrl(serverUrl);
               setCommentAlertDuration(String(duration));
               setCommentAlertCommand(command);
               showNotice(`댓글 수집 설정이 저장되었습니다. (@${username || '미설정'} · 알림 단어 ${words.length}개 · 알림 ${duration}초)`, '💬 댓글 수집 설정 저장', 'success');

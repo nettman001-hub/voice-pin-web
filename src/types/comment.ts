@@ -12,15 +12,19 @@ export interface CommentRecord {
 // 댓글 실시간 수집 설정
 export interface CommentCaptureConfig {
   tiktokUsername: string;     // 수집 대상 틱톡 ID (@ 제외)
-  serverUrl: string;          // 로컬 댓글 수집 서버 URL
+  serverUrl: string;          // 설치된 댓글 도우미 연결 주소 (사용자에게 노출하지 않음)
   alertWords: string[];       // 알림 표시 단어 목록 (예: "저요")
   alertDurationSec: number;   // 알림창 자동 닫힘 시간 (초)
   alertVoiceCommand: string;  // 쉼표로 구분한 알림창 닫기 음성 명령 (예: "닫아, 알림 닫기")
 }
 
+export const DEFAULT_COMMENT_SERVER_URL = 'http://127.0.0.1:2137';
+export const COMMENT_HELPER_DOWNLOAD_URL =
+  'https://github.com/nettman001-hub/voice-pin-web/releases/latest/download/VoiceCAP-Comment-Helper-Setup.exe';
+
 export const DEFAULT_COMMENT_CAPTURE_CONFIG: CommentCaptureConfig = {
   tiktokUsername: '',
-  serverUrl: 'http://127.0.0.1:2137',
+  serverUrl: DEFAULT_COMMENT_SERVER_URL,
   alertWords: ['저요'],
   alertDurationSec: 15,
   alertVoiceCommand: '닫아'

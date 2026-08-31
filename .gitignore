@@ -31,6 +31,10 @@ supabase/.temp/
 eulerstream_key.txt
 server/node_modules
 server/data
+desktop/comment-helper/node_modules/
+desktop/comment-helper/release/
+desktop/comment-helper/server/
+desktop/comment-helper/build-runtime/
 android/voicecapSMS/local.properties
 android/voicecapSMS/.gradle/
 android/voicecapSMS/build/

@@ -9,6 +9,7 @@ import {
 } from '../services/commentStreamService';
 import type { CommentStreamStatus } from '../services/commentStreamService';
 import { CommentCaptureConfig, CommentRecord } from '../types/comment';
+import { DEFAULT_COMMENT_SERVER_URL } from '../types/comment';
 
 export interface CommentAlert {
   id: string;
@@ -41,7 +42,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   // 기본값은 함께 시작이며, 사용자가 바꾼 활성화 상태는 저장되어 유지된다.
   const [isActive, setIsActive] = useState<boolean>(() => storageService.getCommentCaptureActive());
   const [serverStatus, setServerStatus] = useState<CommentStreamStatus>('DISCONNECTED');
-  const [serverMessage, setServerMessage] = useState<string>('로컬 댓글 수집 서버 미연결');
+  const [serverMessage, setServerMessage] = useState<string>('VoiceCAP 댓글 도우미 미연결');
   const [newCount, setNewCount] = useState<number>(0);
   const [liveComments, setLiveComments] = useState<CommentRecord[]>([]);
   const [activeAlert, setActiveAlert] = useState<CommentAlert | null>(null);
@@ -106,7 +107,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     }
   }, [transcriptLogs, activeAlert, dismissAlert]);
 
-  // 로컬 서버가 중계한 실시간 댓글 유입 처리
+  // 댓글 도우미가 중계한 실시간 댓글 유입 처리
   const ingestComment = useCallback(
     (incoming: StreamedComment) => {
       if (!isActiveRef.current) return;
@@ -167,14 +168,16 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     };
   }, [ingestComment]);
 
-  // 자동 수집이 중지되어도 서버 생존 상태를 표시할 수 있도록 로컬 서버 연결은 유지한다.
+  // 자동 수집이 중지되어도 댓글 도우미 생존 상태를 표시할 수 있도록 연결은 유지한다.
   useEffect(() => {
-    commentStreamService.connect(configRef.current.serverUrl);
+    // 연결 주소는 설치형 도우미의 고정 로컬 주소를 사용한다.
+    // 과거 버전에서 저장된 사설 IP 주소가 있어도 판매자에게 수동 수정을 요구하지 않는다.
+    commentStreamService.connect(DEFAULT_COMMENT_SERVER_URL);
 
     if (!isActiveRef.current) {
       commentStreamService.stopCollecting();
     }
-  }, [isActive, config.serverUrl]);
+  }, [isActive]);
 
   // 수집 시작 조건 충족 시 틱톡 수집 요청: 토글 ON + 라이브 청취 중 + 서버 소켓 연결됨
   useEffect(() => {
@@ -302,15 +305,15 @@ export function getCommentStatusBadge(status: CommentStreamStatus): { label: str
     case 'CONNECTING_TIKTOK':
       return { label: '틱톡 연결중', tone: 'warn' };
     case 'CONNECTED':
-      return { label: '로컬서버 대기중', tone: 'idle' };
+      return { label: '댓글 도우미 대기중', tone: 'idle' };
     case 'ENDED':
       return { label: '방송 종료됨', tone: 'idle' };
     case 'ERROR':
       return { label: '수집 오류', tone: 'bad' };
     case 'CONNECTING':
-      return { label: '서버 연결중', tone: 'idle' };
+      return { label: '댓글 도우미 연결중', tone: 'idle' };
     default:
-      return { label: '로컬 서버 미실행', tone: 'bad' };
+      return { label: '댓글 도우미 미연결', tone: 'bad' };
   }
 }
 

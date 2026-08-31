@@ -2,9 +2,41 @@ import { SaleRecord, SaleStatus } from '../types/live';
 
 /**
  * 한국어 금액 표현(예: "35,000원", "3만 5천원", "3만원", "42000원", "5천원")을 숫자(number)로 변환
+ *
+ * 라이브 판매에서 자주 쓰는 축약 발화도 지원한다.
+ * "가격 0.8"은 0.8만 원, 즉 8,000원으로 해석한다.
+ * 따라서 1.5 → 15,000원, 2.9 → 29,000원이다.
  */
 export function parseKoreanAmount(text: string): number | null {
   if (!text) return null;
+
+  // 0.8, 1.5, 2.9처럼 가격/금액 뒤에 붙는 '만 원 단위 축약 소수'
+  // (숫자에 10을 곱한 뒤 1,000원을 곱하는 것과 같은 의미 = 숫자 * 10,000원)
+  // 일반 소수(수량, 시간 등)를 가격으로 오인하지 않도록 가격 문맥 안에서만 적용한다.
+  const decimalMatch = text.match(/(\d{1,3})\s*(?:[.]|점)\s*(\d{1,2})/u);
+  if (decimalMatch) {
+    const decimalStart = decimalMatch.index ?? 0;
+    const decimalEnd = decimalStart + decimalMatch[0].length;
+    const contextStart = Math.max(0, decimalStart - 24);
+    const contextEnd = Math.min(text.length, decimalEnd + 24);
+    const nearbyContext = text.slice(contextStart, contextEnd);
+    const hasPriceContext = /(가격|금액|입금액|구매금액)/u.test(nearbyContext);
+    const followingUnit = text.slice(decimalEnd).match(/^\s*(만|천|백)/u);
+
+    if (hasPriceContext) {
+      const compactValue = Number(`${decimalMatch[1]}.${decimalMatch[2]}`);
+      if (Number.isFinite(compactValue) && compactValue > 0) {
+        // 단위가 생략된 0.8/1.5/2.9는 '만 원' 단위로 본다.
+        // 명시적으로 천/백 단위를 붙인 경우에는 그 단위를 우선한다.
+        const multiplier = followingUnit?.[1] === '천'
+          ? 1000
+          : followingUnit?.[1] === '백'
+            ? 100
+            : 10000;
+        return Math.round(compactValue * multiplier);
+      }
+    }
+  }
 
   // 1. 순수 숫자 + 쉼표 형식 (예: 35,000원, 35000원)
   const directNumMatch = text.match(/([0-9,]+)\s*원/);
