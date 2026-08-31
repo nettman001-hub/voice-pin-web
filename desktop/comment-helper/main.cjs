@@ -8,6 +8,8 @@ const APP_NAME = 'VoiceCAP 댓글 도우미';
 const WEB_APP_URL = 'https://www.voicecap.shop/live';
 const SERVER_HOST = '127.0.0.1';
 const SERVER_PORT = 2137;
+const LOGIN_ITEM_ARGS = ['--hidden'];
+const AUTO_START_INITIALIZED_FILE = 'auto-start-initialized';
 
 let mainWindow = null;
 let tray = null;
@@ -319,17 +321,60 @@ function showWindow() {
   mainWindow.focus();
 }
 
+function getAutoStartSettings() {
+  if (!app.isPackaged) return { openAtLogin: false };
+
+  try {
+    // setLoginItemSettings에 path/args를 지정했으므로 조회할 때도 같은 값을
+    // 전달해야 Electron이 해당 Run 항목의 활성화 상태를 정확히 판단한다.
+    return app.getLoginItemSettings({
+      path: process.execPath,
+      args: LOGIN_ITEM_ARGS
+    });
+  } catch (error) {
+    writeLog('helper', `자동 실행 상태 확인 실패: ${error.message}`);
+    return { openAtLogin: false };
+  }
+}
+
 function setAutoStart(enabled) {
   if (app.isPackaged) {
-    app.setLoginItemSettings({
-      openAtLogin: enabled,
-      path: process.execPath,
-      args: ['--hidden']
-    });
+    try {
+      app.setLoginItemSettings({
+        openAtLogin: Boolean(enabled),
+        path: process.execPath,
+        args: LOGIN_ITEM_ARGS,
+        enabled: Boolean(enabled)
+      });
+    } catch (error) {
+      writeLog('helper', `자동 실행 설정 실패: ${error.message}`);
+    }
   }
-  state.autoStart = app.isPackaged ? app.getLoginItemSettings().openAtLogin : enabled;
+  state.autoStart = app.isPackaged
+    ? Boolean(getAutoStartSettings().openAtLogin)
+    : Boolean(enabled);
   publishStatus();
   return state.autoStart;
+}
+
+function initializeAutoStart() {
+  const settings = getAutoStartSettings();
+  state.autoStart = Boolean(settings.openAtLogin);
+
+  if (!app.isPackaged) return;
+
+  // 기존 설치 사용자는 첫 실행 때만 기본 자동 실행을 등록한다.
+  // 사용자가 토글을 끈 뒤 다음 실행에서 다시 켜지는 문제를 방지한다.
+  const markerPath = path.join(app.getPath('userData'), AUTO_START_INITIALIZED_FILE);
+  if (!fs.existsSync(markerPath) && !state.autoStart) {
+    state.autoStart = setAutoStart(true);
+  }
+
+  try {
+    fs.writeFileSync(markerPath, '1\n', 'utf8');
+  } catch (error) {
+    writeLog('helper', `자동 실행 초기화 상태 저장 실패: ${error.message}`);
+  }
 }
 
 function quitApp() {
@@ -357,8 +402,7 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
   startServer();
-  state.autoStart = app.isPackaged ? app.getLoginItemSettings().openAtLogin : true;
-  if (app.isPackaged && !state.autoStart) setAutoStart(true);
+  initializeAutoStart();
   requestHealth();
   healthTimer = setInterval(requestHealth, 2500);
   if (app.isPackaged) {
