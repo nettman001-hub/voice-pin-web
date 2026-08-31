@@ -83,10 +83,15 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     && sale.buyerNickname !== '미확인(보류)'
   );
 
-  const hasPrintedContentChanged = (before: SaleRecord, after: SaleRecord) => (
+  // 판매 상세에서 판매자가 바꾼 정보는 전표에도 다시 확인할 수 있도록 재출력한다.
+  // 단, 자동 캡처 이미지 추가는 판매 수정으로 보지 않아 불필요한 재출력을 막는다.
+  const hasSellerEditChanged = (before: SaleRecord, after: SaleRecord) => (
     before.buyerNickname.trim() !== after.buyerNickname.trim()
     || before.amount !== after.amount
     || before.recognizedAt !== after.recognizedAt
+    || before.productName !== after.productName
+    || before.status !== after.status
+    || before.note !== after.note
   );
 
   const sendToPrinter = (sale: SaleRecord) => {
@@ -152,7 +157,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const updateSale = (updated: SaleRecord) => {
     const previous = storageService.getSales().find((sale) => sale.id === updated.id);
     const shouldPrint = previous
-      ? isPrintableSale(updated) && (!isPrintableSale(previous) || hasPrintedContentChanged(previous, updated))
+      ? isPrintableSale(updated) && (!isPrintableSale(previous) || hasSellerEditChanged(previous, updated))
       : false;
     if (shouldPrint) {
       queueSalePrint(updated, Math.max(previous?.printRevision || 0, updated.printRevision || 0) + 1);
