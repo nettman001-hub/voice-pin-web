@@ -5,6 +5,7 @@ import { audioCaptureService } from '../services/audioCaptureService';
 import { screenCaptureService } from '../services/screenCaptureService';
 import { extractSaleFromTranscript } from '../services/salesExtractor';
 import { parseVoiceCommand } from '../services/voiceCommandParser';
+import { nicknameVerificationNote, verifyNicknameFromComments } from '../services/commentNicknameVerifier';
 import { storageService, generateSessionId } from '../services/storageService';
 import { useSales } from './SalesContext';
 import { useAuth } from './AuthContext';
@@ -346,13 +347,33 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const saleResult = extractSaleFromTranscript(fullText, activeKeywords);
 
       if (saleResult) {
+        const recognizedAt = new Date().toISOString();
+        const nicknameVerification = verifyNicknameFromComments({
+          transcript: fullText,
+          spokenNickname: saleResult.buyerNickname,
+          sessionId: currentSessionId,
+          recognizedAt,
+          comments: storageService.getCommentRecords()
+        });
+        const hasVerifiedCommentNickname = Boolean(nicknameVerification.verifiedNickname);
+        const isSuffixReference = Boolean(nicknameVerification.suffixDigits);
+        const buyerNickname = hasVerifiedCommentNickname
+          ? nicknameVerification.verifiedNickname!
+          : isSuffixReference
+            ? '미확인(보류)'
+            : saleResult.buyerNickname;
+        const status = hasVerifiedCommentNickname
+          ? saleResult.status
+          : '보류';
+
         const saved = addSale({
           sessionId: currentSessionId,
-          buyerNickname: saleResult.buyerNickname,
+          buyerNickname,
           amount: saleResult.amount,
-          recognizedAt: new Date().toISOString(),
+          recognizedAt,
           rawTranscript: fullText,
-          status: saleResult.status
+          status,
+          note: nicknameVerificationNote(nicknameVerification)
         });
         lastSavedSaleRef.current = saved;
         actionTriggered = 'SALE_SAVED';

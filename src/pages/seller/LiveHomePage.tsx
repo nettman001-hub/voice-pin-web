@@ -702,6 +702,16 @@ export const LiveHomePage: React.FC = () => {
                           }`}>
                             {sale.status}
                           </span>
+                          {sale.note?.startsWith('댓글 닉네임 검증 완료') && (
+                            <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold bg-cyan-50 text-cyan-700 border border-cyan-200">
+                              댓글 닉네임 확인됨
+                            </span>
+                          )}
+                          {sale.note?.startsWith('댓글 닉네임 검증 필요') && (
+                            <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                              댓글 닉네임 확인 필요
+                            </span>
+                          )}
                         </div>
                         <div className="text-base font-black text-brand-600 mt-1">
                           {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}
