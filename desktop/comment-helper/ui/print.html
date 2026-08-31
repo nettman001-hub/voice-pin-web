@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self';" />
+    <title>VoiceCAP 판매 전표</title>
+    <style>
+      @page { margin: 0; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 12mm; color: #000; font-family: "Malgun Gothic", sans-serif; }
+      #line1 { font-size: 18pt; font-weight: 800; line-height: 1.45; }
+      #line2 { margin-top: 4mm; font-size: 11pt; line-height: 1.35; }
+    </style>
+  </head>
+  <body>
+    <div id="line1"></div>
+    <div id="line2"></div>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      document.querySelector('#line1').textContent = params.get('line1') || '';
+      document.querySelector('#line2').textContent = params.get('line2') || '';
+    </script>
+  </body>
+</html>

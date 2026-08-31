@@ -35,6 +35,21 @@ export interface StreamStatsPayload {
   hasEulerApiKey?: boolean;
 }
 
+export interface SalePrintRequest {
+  saleId: string;
+  printRevision: number;
+  buyerNickname: string;
+  amount: number;
+  recognizedAt: string;
+}
+
+export interface SalePrintResult {
+  ok: boolean;
+  status: 'PRINTED' | 'FAILED';
+  printedAt?: string;
+  error?: string;
+}
+
 type StatusListener = (status: CommentStreamStatus, message?: string) => void;
 type CommentListener = (comment: StreamedComment) => void;
 
@@ -129,6 +144,29 @@ class CommentStreamService {
 
   public stopCollecting(): void {
     this.socket?.emit('collect:stop');
+  }
+
+  /**
+   * 댓글 도우미의 Windows 인쇄 큐에 판매 전표를 전달한다.
+   * 도우미가 꺼져 있거나 프린터가 설정되지 않은 경우도 응답을 받아 웹 목록에 표시한다.
+   */
+  public printSale(payload: SalePrintRequest): Promise<SalePrintResult> {
+    if (!this.socket || !this.socketConnected) {
+      return Promise.resolve({ ok: false, status: 'FAILED', error: '댓글 도우미가 실행 중이 아닙니다.' });
+    }
+    return new Promise((resolve) => {
+      this.socket!.timeout(15000).emit('print:sale', payload, (error: Error | null, response?: SalePrintResult) => {
+        if (error) {
+          resolve({ ok: false, status: 'FAILED', error: '댓글 도우미의 인쇄 응답 시간이 초과되었습니다.' });
+          return;
+        }
+        if (!response || response.ok !== true) {
+          resolve({ ok: false, status: 'FAILED', error: response?.error || '인쇄 요청을 처리하지 못했습니다.' });
+          return;
+        }
+        resolve(response);
+      });
+    });
   }
 
   public disconnect(): void {

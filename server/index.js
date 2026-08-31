@@ -93,6 +93,37 @@ const stats = {
   reconnects: 0
 };
 
+// Electron utilityProcess에서 메인 프로세스(Windows 프린터 제어)로 전달할 인쇄 요청.
+// 이 서버는 브라우저와 통신만 맡고 실제 silent print 권한은 Electron 메인이 가진다.
+const pendingPrintRequests = new Map();
+
+function sendPrintToHelper(payload, acknowledge) {
+  if (!process.parentPort) {
+    acknowledge({ ok: false, status: 'FAILED', error: '댓글 도우미 앱에서만 자동 출력할 수 있습니다.' });
+    return;
+  }
+  const requestId = `print-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const timer = setTimeout(() => {
+    const pending = pendingPrintRequests.get(requestId);
+    if (!pending) return;
+    pendingPrintRequests.delete(requestId);
+    pending.acknowledge({ ok: false, status: 'FAILED', error: '댓글 도우미의 인쇄 응답 시간이 초과되었습니다.' });
+  }, 20000);
+  pendingPrintRequests.set(requestId, { acknowledge, timer });
+  process.parentPort.postMessage({ type: 'print:sale', requestId, payload });
+}
+
+if (process.parentPort) {
+  process.parentPort.on('message', (message) => {
+    if (!message || message.type !== 'print:result') return;
+    const pending = pendingPrintRequests.get(message.requestId);
+    if (!pending) return;
+    pendingPrintRequests.delete(message.requestId);
+    clearTimeout(pending.timer);
+    pending.acknowledge(message.result || { ok: false, status: 'FAILED', error: '인쇄 결과가 비어 있습니다.' });
+  });
+}
+
 function log(...args) {
   console.log(`[${new Date().toLocaleTimeString('ko-KR')}]`, ...args);
 }
@@ -238,6 +269,11 @@ io.on('connection', (socket) => {
 
   socket.on('collect:stop', () => {
     stopCollecting();
+  });
+
+  socket.on('print:sale', (payload, acknowledge) => {
+    const reply = typeof acknowledge === 'function' ? acknowledge : () => {};
+    sendPrintToHelper(payload || {}, reply);
   });
 
   socket.on('disconnect', () => {

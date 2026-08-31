@@ -26,6 +26,10 @@ const mapSale = async (row: Row): Promise<SaleRecord> => {
     productName: row.product_name || undefined,
     captureImageUrls: await imageUrls(storagePaths),
     note: row.note || undefined,
+    printStatus: row.print_status || 'NOT_REQUESTED',
+    printRevision: Number(row.print_revision || 0),
+    printedAt: row.printed_at || undefined,
+    printError: row.print_error || undefined,
     __voicecapStoragePaths: storagePaths,
   } as SaleRecord;
 };
@@ -63,7 +67,21 @@ const toSaleRow = async (workspaceId: string, sale: SaleRecord) => ({
     ),
   ),
   note: sale.note || null,
+  print_status: sale.printStatus || 'NOT_REQUESTED',
+  print_revision: sale.printRevision || 0,
+  printed_at: sale.printedAt || null,
+  print_error: sale.printError || null,
 });
+
+const withoutPrintMetadata = (row: Row) => {
+  const { print_status, print_revision, printed_at, print_error, ...legacyRow } = row;
+  return legacyRow;
+};
+
+const isMissingPrintColumnError = (error: { code?: string; message?: string } | null) => (
+  error?.code === 'PGRST204'
+  && /print_(status|revision|error)|printed_at/i.test(String(error.message || ''))
+);
 
 const mapMessage = async (row: Row, workspaceId: string): Promise<SmsMessage> => ({
   id: row.id,
@@ -169,8 +187,17 @@ export const remoteWorkspaceService = {
   },
 
   async saveSale(workspaceId: string, sale: SaleRecord) {
-    const { error } = await ensureEnabled().from('sales').upsert(await toSaleRow(workspaceId, sale));
-    if (error) throw error;
+    const row = await toSaleRow(workspaceId, sale);
+    const { error } = await ensureEnabled().from('sales').upsert(row);
+    if (!error) return;
+    // 운영 DB에 SQL 마이그레이션을 적용하기 전에도 기존 판매 저장 자체는 멈추지 않게 한다.
+    // 출력 상태만 현재 컴퓨터의 로컬 저장소에 남고, 마이그레이션 적용 뒤에는 자동으로 공유된다.
+    if (isMissingPrintColumnError(error)) {
+      const { error: legacyError } = await ensureEnabled().from('sales').upsert(withoutPrintMetadata(row));
+      if (!legacyError) return;
+      throw legacyError;
+    }
+    throw error;
   },
 
   async deleteSale(workspaceId: string, id: string) {

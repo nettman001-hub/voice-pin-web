@@ -10,6 +10,8 @@ const SERVER_HOST = '127.0.0.1';
 const SERVER_PORT = 2137;
 const LOGIN_ITEM_ARGS = ['--hidden'];
 const AUTO_START_INITIALIZED_FILE = 'auto-start-initialized';
+const PRINT_SETTINGS_FILE = 'print-settings.json';
+const PRINT_HISTORY_FILE = 'print-history.json';
 
 let mainWindow = null;
 let tray = null;
@@ -20,6 +22,14 @@ let isQuitting = false;
 let manualRestart = false;
 let lastStatusSignature = '';
 let logFile = '';
+let printQueue = Promise.resolve();
+let printedJobIds = [];
+
+const DEFAULT_PRINT_SETTINGS = {
+  enabled: false,
+  printerName: '',
+  paperSize: 'A4'
+};
 
 const state = {
   helper: 'starting',
@@ -31,7 +41,11 @@ const state = {
   lastCheckedAt: null,
   version: app.getVersion(),
   autoStart: false,
-  webAppUrl: WEB_APP_URL
+  webAppUrl: WEB_APP_URL,
+  print: {
+    ...DEFAULT_PRINT_SETTINGS,
+    message: '프린터를 선택하면 판매 전표를 자동으로 출력합니다.'
+  }
 };
 
 if (!app.requestSingleInstanceLock()) {
@@ -121,6 +135,17 @@ function startServer() {
 
   serverProcess.stdout?.on('data', (chunk) => writeLog('server', chunk.toString('utf8')));
   serverProcess.stderr?.on('data', (chunk) => writeLog('server-error', chunk.toString('utf8')));
+  serverProcess.on('message', (message) => {
+    const payload = message && message.data ? message.data : message;
+    if (!payload || payload.type !== 'print:sale') return;
+    void enqueuePrintJob(payload.payload).then((result) => {
+      try {
+        serverProcess?.postMessage({ type: 'print:result', requestId: payload.requestId, result });
+      } catch (error) {
+        writeLog('print', `인쇄 결과 전달 실패: ${error.message}`);
+      }
+    });
+  });
   serverProcess.on('exit', (code) => {
     writeLog('helper', `서버 종료 (코드 ${code})`);
     serverProcess = null;
@@ -267,9 +292,9 @@ function checkForUpdates() {
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 460,
-    height: 680,
+    height: 820,
     minWidth: 420,
-    minHeight: 620,
+    minHeight: 700,
     show: false,
     title: APP_NAME,
     icon: iconPath(),
@@ -399,6 +424,159 @@ function initializeAutoStart() {
   }
 }
 
+function printSettingsPath() {
+  return path.join(app.getPath('userData'), PRINT_SETTINGS_FILE);
+}
+
+function printHistoryPath() {
+  return path.join(app.getPath('userData'), PRINT_HISTORY_FILE);
+}
+
+function readJson(filePath, fallback) {
+  try {
+    if (fs.existsSync(filePath)) return { ...fallback, ...JSON.parse(fs.readFileSync(filePath, 'utf8')) };
+  } catch (error) {
+    writeLog('print', `설정 파일 읽기 실패: ${error.message}`);
+  }
+  return { ...fallback };
+}
+
+function saveJson(filePath, value) {
+  try {
+    fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  } catch (error) {
+    writeLog('print', `설정 파일 저장 실패: ${error.message}`);
+  }
+}
+
+function loadPrintSettings() {
+  const settings = readJson(printSettingsPath(), DEFAULT_PRINT_SETTINGS);
+  state.print = {
+    ...DEFAULT_PRINT_SETTINGS,
+    enabled: Boolean(settings.enabled),
+    printerName: String(settings.printerName || ''),
+    paperSize: ['A4', 'RECEIPT_80', 'RECEIPT_58'].includes(settings.paperSize) ? settings.paperSize : 'A4',
+    message: settings.enabled && settings.printerName
+      ? '자동 출력 준비 완료'
+      : '프린터를 선택하면 판매 전표를 자동으로 출력합니다.'
+  };
+  const history = readJson(printHistoryPath(), { jobIds: [] });
+  printedJobIds = Array.isArray(history.jobIds) ? history.jobIds.map(String).slice(-500) : [];
+}
+
+function savePrintSettings(next) {
+  const printerName = String(next && next.printerName || '').trim();
+  const paperSize = ['A4', 'RECEIPT_80', 'RECEIPT_58'].includes(next && next.paperSize) ? next.paperSize : 'A4';
+  const enabled = Boolean(next && next.enabled && printerName);
+  state.print = {
+    ...state.print,
+    enabled,
+    printerName,
+    paperSize,
+    message: enabled ? '자동 출력 준비 완료' : (printerName ? '자동 출력을 켜면 판매 전표가 출력됩니다.' : '프린터를 먼저 선택해 주세요.')
+  };
+  saveJson(printSettingsPath(), {
+    enabled: state.print.enabled,
+    printerName: state.print.printerName,
+    paperSize: state.print.paperSize
+  });
+  publishStatus();
+  return statusSnapshot();
+}
+
+async function getPrinters() {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return [];
+  try {
+    return await mainWindow.webContents.getPrintersAsync();
+  } catch (error) {
+    writeLog('print', `프린터 목록 조회 실패: ${error.message}`);
+    throw new Error('Windows 프린터 목록을 읽을 수 없습니다.');
+  }
+}
+
+function printPageSize(paperSize) {
+  if (paperSize === 'RECEIPT_80') return { width: 80000, height: 80000 };
+  if (paperSize === 'RECEIPT_58') return { width: 58000, height: 80000 };
+  return 'A4';
+}
+
+function normalizePrintJob(raw) {
+  const saleId = String(raw && raw.saleId || '').trim().slice(0, 160);
+  const revision = Math.max(1, Number.parseInt(raw && raw.printRevision, 10) || 1);
+  const buyerNickname = String(raw && raw.buyerNickname || '').trim().replace(/[\r\n]+/g, ' ').slice(0, 80);
+  const amount = Math.max(0, Number(raw && raw.amount) || 0);
+  const recognizedAt = new Date(raw && raw.recognizedAt || Date.now());
+  if (!saleId || !buyerNickname || !Number.isFinite(amount) || amount <= 0 || Number.isNaN(recognizedAt.getTime())) {
+    throw new Error('인쇄할 판매 정보가 올바르지 않습니다.');
+  }
+  return { saleId, revision, buyerNickname, amount, recognizedAt, jobId: `${saleId}:${revision}` };
+}
+
+function formatPrintDate(date) {
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
+  }).format(date);
+}
+
+async function printJob(job) {
+  if (!state.print.enabled || !state.print.printerName) {
+    return { ok: false, status: 'FAILED', error: '댓글 도우미에서 자동 출력용 프린터를 선택해 주세요.' };
+  }
+  if (printedJobIds.includes(job.jobId)) {
+    return { ok: true, status: 'PRINTED', printedAt: new Date().toISOString() };
+  }
+
+  const printWindow = new BrowserWindow({
+    show: false,
+    width: 360,
+    height: 180,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+  });
+  try {
+    await printWindow.loadFile(path.join(__dirname, 'ui', 'print.html'), {
+      query: {
+        line1: `${job.buyerNickname}, ${Math.round(job.amount).toLocaleString('ko-KR')}원`,
+        line2: formatPrintDate(job.recognizedAt)
+      }
+    });
+    const result = await new Promise((resolve) => {
+      printWindow.webContents.print({
+        silent: true,
+        deviceName: state.print.printerName,
+        printBackground: true,
+        pageSize: printPageSize(state.print.paperSize),
+        margins: { marginType: 'none' }
+      }, (success, failureReason) => resolve({ success, failureReason }));
+    });
+    if (!result.success) throw new Error(result.failureReason || 'Windows 프린터가 인쇄를 거부했습니다.');
+    printedJobIds = [...printedJobIds, job.jobId].slice(-500);
+    saveJson(printHistoryPath(), { jobIds: printedJobIds });
+    state.print.message = `${job.buyerNickname} 판매 전표 출력 완료`;
+    publishStatus();
+    return { ok: true, status: 'PRINTED', printedAt: new Date().toISOString() };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '인쇄에 실패했습니다.';
+    writeLog('print', `${job.jobId} 인쇄 실패: ${message}`);
+    state.print.message = `인쇄 실패: ${message}`;
+    publishStatus();
+    return { ok: false, status: 'FAILED', error: message };
+  } finally {
+    if (!printWindow.isDestroyed()) printWindow.destroy();
+  }
+}
+
+function enqueuePrintJob(raw) {
+  let job;
+  try {
+    job = normalizePrintJob(raw);
+  } catch (error) {
+    return Promise.resolve({ ok: false, status: 'FAILED', error: error.message });
+  }
+  const run = printQueue.then(() => printJob(job), () => printJob(job));
+  printQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
 function quitApp() {
   isQuitting = true;
   clearInterval(healthTimer);
@@ -415,12 +593,22 @@ ipcMain.handle('helper:restart', () => {
 ipcMain.handle('helper:open-webapp', () => shell.openExternal(WEB_APP_URL));
 ipcMain.handle('helper:open-logs', () => shell.showItemInFolder(logFile));
 ipcMain.handle('helper:set-auto-start', (_event, enabled) => setAutoStart(enabled));
+ipcMain.handle('helper:get-printers', () => getPrinters());
+ipcMain.handle('helper:save-print-settings', (_event, settings) => savePrintSettings(settings || {}));
+ipcMain.handle('helper:test-print', () => enqueuePrintJob({
+  saleId: `test-${Date.now()}`,
+  printRevision: 1,
+  buyerNickname: '테스트구매자',
+  amount: 15000,
+  recognizedAt: new Date().toISOString()
+}));
 ipcMain.handle('helper:hide-window', () => mainWindow?.hide());
 ipcMain.handle('helper:quit', quitApp);
 
 app.whenReady().then(() => {
   app.setAppUserModelId('shop.voicecap.commenthelper');
   prepareLogs();
+  loadPrintSettings();
   createWindow();
   createTray();
   startServer();

@@ -1,4 +1,5 @@
 export type SaleStatus = '자동저장' | '수동수정' | '확정' | '보류';
+export type SalePrintStatus = 'NOT_REQUESTED' | 'QUEUED' | 'PRINTED' | 'FAILED';
 
 export interface SaleRecord {
   id: string;
@@ -11,6 +12,12 @@ export interface SaleRecord {
   productName?: string;        // 판매 상품명 (판매자 직접 입력 또는 음성 추출)
   captureImageUrls?: string[]; // 연결된 화면 캡처 이미지 URL 목록
   note?: string;               // 메모
+  /** 댓글 도우미를 통한 로컬 프린터 출력 상태 */
+  printStatus?: SalePrintStatus;
+  /** 같은 판매를 수정하여 재출력할 때 증가하는 출력 작업 번호 */
+  printRevision?: number;
+  printedAt?: string;
+  printError?: string;
 }
 
 export interface CaptureItem {

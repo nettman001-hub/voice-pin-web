@@ -712,6 +712,21 @@ export const LiveHomePage: React.FC = () => {
                               댓글 닉네임 확인 필요
                             </span>
                           )}
+                          {sale.printStatus === 'QUEUED' && (
+                            <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold bg-sky-50 text-sky-700 border border-sky-200">
+                              전표 출력 중
+                            </span>
+                          )}
+                          {sale.printStatus === 'PRINTED' && (
+                            <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              전표 출력 완료
+                            </span>
+                          )}
+                          {sale.printStatus === 'FAILED' && (
+                            <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                              전표 출력 실패
+                            </span>
+                          )}
                         </div>
                         <div className="text-base font-black text-brand-600 mt-1">
                           {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}

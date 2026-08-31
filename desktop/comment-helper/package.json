@@ -1,6 +1,6 @@
 {
   "name": "voicecap-comment-helper",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "description": "VoiceCAP TikTok LIVE comment helper for Windows",
   "main": "main.cjs",
   "author": "VoiceCAP",
@@ -9,7 +9,7 @@
   "scripts": {
     "stage": "node scripts/stage-server.cjs",
     "start": "npm run stage && electron .",
-    "pack": "npm run stage && electron-builder --dir --win x64",
+    "pack": "npm run stage && electron-builder --dir --win --x64",
     "dist": "npm run stage && electron-builder --win nsis --x64"
   },
   "dependencies": {
