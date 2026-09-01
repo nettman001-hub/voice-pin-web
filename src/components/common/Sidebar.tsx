@@ -78,7 +78,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
       items: [
         { name: '요금제 및 멤버십', path: '/subscription/plans', icon: CreditCard },
         { name: '구독 & 결제 관리', path: '/subscription/manage', icon: BarChart3 },
-        { name: '알림 설정', path: '/settings/notifications', icon: Bell },
+        { name: '알림 설정', path: '/notifications/settings', icon: Bell },
         { name: '마이페이지 & 백업', path: '/my', icon: User },
       ]
     }

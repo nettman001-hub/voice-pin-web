@@ -144,6 +144,8 @@ export const App: React.FC = () => {
 
                     {/* 4. 마이 & 알림 설정 (PG-018 ~ PG-020) */}
                     <Route path="/notifications/settings" element={<NotificationSettingsPage />} />
+                    {/* 이전 메뉴 주소를 북마크한 경우에도 알림 설정으로 이동 */}
+                    <Route path="/settings/notifications" element={<Navigate to="/notifications/settings" replace />} />
                     <Route path="/my" element={<MyPage />} />
                     <Route
                       path="/error/permission"
