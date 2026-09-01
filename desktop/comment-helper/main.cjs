@@ -533,12 +533,20 @@ async function printJob(job) {
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
   });
   try {
+    const line1 = `${job.buyerNickname}, ${Math.round(job.amount).toLocaleString('ko-KR')}원`;
+    const line2 = formatPrintDate(job.recognizedAt);
     await printWindow.loadFile(path.join(__dirname, 'ui', 'print.html'), {
-      query: {
-        line1: `${job.buyerNickname}, ${Math.round(job.amount).toLocaleString('ko-KR')}원`,
-        line2: formatPrintDate(job.recognizedAt)
-      }
+      query: { line1, line2 }
     });
+    const rendered = await printWindow.webContents.executeJavaScript(`
+      Promise.resolve(document.fonts?.ready).then(() => ({
+        line1: document.querySelector('#line1')?.textContent || '',
+        line2: document.querySelector('#line2')?.textContent || ''
+      }))
+    `);
+    if (rendered.line1 !== line1 || rendered.line2 !== line2) {
+      throw new Error('판매 전표 텍스트를 인쇄 화면에 표시하지 못했습니다.');
+    }
     const result = await new Promise((resolve) => {
       printWindow.webContents.print({
         silent: true,

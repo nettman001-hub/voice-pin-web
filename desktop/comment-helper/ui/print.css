@@ -1,0 +1,5 @@
+@page { margin: 0; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 12mm; color: #000; font-family: "Malgun Gothic", sans-serif; }
+#line1 { font-size: 18pt; font-weight: 800; line-height: 1.45; }
+#line2 { margin-top: 4mm; font-size: 11pt; line-height: 1.35; }

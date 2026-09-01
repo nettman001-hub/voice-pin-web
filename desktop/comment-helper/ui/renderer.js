@@ -15,6 +15,9 @@ const printMessage = document.querySelector('#print-message');
 const savePrinterButton = document.querySelector('#save-printer');
 const testPrintButton = document.querySelector('#test-print');
 
+let printSettingsDirty = false;
+let printSettingsSaving = false;
+
 function viewState(status) {
   if (status.helper === 'error') return { tone: 'error', label: '연결에 문제가 있습니다', pill: '확인 필요' };
   if (status.helper !== 'running') return { tone: 'starting', label: '시작하는 중', pill: '잠시만요' };
@@ -34,10 +37,12 @@ function render(status) {
   autoStart.checked = Boolean(status.autoStart);
   version.textContent = `VoiceCAP 댓글 도우미 v${status.version || '-'}`;
   const print = status.print || {};
-  printEnabled.checked = Boolean(print.enabled);
-  paperSize.value = print.paperSize || 'A4';
+  if (!printSettingsDirty && !printSettingsSaving) {
+    printEnabled.checked = Boolean(print.enabled);
+    paperSize.value = print.paperSize || 'A4';
+    if (print.printerName && printerSelect.options.length) printerSelect.value = print.printerName;
+  }
   printMessage.textContent = print.message || '프린터를 선택하면 판매 전표를 자동으로 출력합니다.';
-  if (print.printerName && printerSelect.options.length) printerSelect.value = print.printerName;
   const hasLiveInfo = Boolean(status.tiktokUsername) || status.tiktokState === 'collecting';
   liveStats.hidden = !hasLiveInfo;
   tiktokUsername.textContent = status.tiktokUsername ? `@${status.tiktokUsername}` : '-';
@@ -77,19 +82,52 @@ document.querySelector('#open-logs').addEventListener('click', () => window.voic
 document.querySelector('#hide').addEventListener('click', () => window.voicecap.hideWindow());
 document.querySelector('#refresh-printers').addEventListener('click', () => loadPrinters(printerSelect.value));
 
+printerSelect.addEventListener('change', () => { printSettingsDirty = true; });
+paperSize.addEventListener('change', () => { printSettingsDirty = true; });
+
 autoStart.addEventListener('change', async () => {
   autoStart.disabled = true;
   try { autoStart.checked = await window.voicecap.setAutoStart(autoStart.checked); }
   finally { autoStart.disabled = false; }
 });
 
-savePrinterButton.addEventListener('click', async () => {
+async function saveCurrentPrintSettings() {
+  if (printSettingsSaving) return;
+  const requested = {
+    enabled: printEnabled.checked,
+    printerName: printerSelect.value,
+    paperSize: paperSize.value
+  };
+
+  printSettingsDirty = true;
+  printSettingsSaving = true;
+  printEnabled.disabled = true;
   savePrinterButton.disabled = true;
   try {
-    const status = await window.voicecap.savePrintSettings({ enabled: printEnabled.checked, printerName: printerSelect.value, paperSize: paperSize.value });
+    const status = await window.voicecap.savePrintSettings(requested);
+    printSettingsDirty = false;
+    printSettingsSaving = false;
     render(status);
-    if (printEnabled.checked && !status.print?.enabled) printMessage.textContent = '자동 출력을 켜려면 Windows 프린터를 선택해 주세요.';
-  } finally { savePrinterButton.disabled = false; }
+    if (requested.enabled && !status.print?.enabled) printMessage.textContent = '자동 출력을 켜려면 Windows 프린터를 선택해 주세요.';
+  } catch (error) {
+    printSettingsDirty = false;
+    printSettingsSaving = false;
+    try { render(await window.voicecap.getStatus()); } catch (_) { /* 기존 화면 상태를 유지한다. */ }
+    printMessage.textContent = error instanceof Error ? error.message : '프린터 설정을 저장하지 못했습니다.';
+  } finally {
+    printSettingsSaving = false;
+    printEnabled.disabled = false;
+    savePrinterButton.disabled = false;
+  }
+}
+
+printEnabled.addEventListener('change', () => {
+  printSettingsDirty = true;
+  void saveCurrentPrintSettings();
+});
+
+savePrinterButton.addEventListener('click', () => {
+  void saveCurrentPrintSettings();
 });
 
 testPrintButton.addEventListener('click', async () => {
