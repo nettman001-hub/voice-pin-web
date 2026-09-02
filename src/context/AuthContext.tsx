@@ -15,6 +15,8 @@ interface AuthContextType extends AuthState {
   workspaceId: string | null;
   login: (email: string, pass: string, autoLogin?: boolean) => Promise<AuthResult>;
   signup: (email: string, pass: string, role: UserRole, nickname: string) => Promise<AuthResult>;
+  confirmSignup: (email: string, code: string) => Promise<AuthResult>;
+  resendSignupCode: (email: string) => Promise<AuthResult>;
   logout: () => Promise<void>;
   resetPassword: (email: string, newPass?: string) => Promise<AuthResult>;
   updateProfile: (nickname: string, phone?: string) => Promise<void>;
@@ -149,7 +151,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         password: pass,
         options: {
           emailRedirectTo: window.location.origin,
-          data: { display_name: nickname, workspace_name: `${nickname}의 VoiceCAP` },
+          data: { display_name: nickname, workspace_name: `${nickname}의 VoiceCAP`, auth_app: 'voicecap' },
         },
       });
       if (error) return { success: false, message: error.message };
@@ -168,6 +170,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const nextToken = `token_${newUser.id}_${Date.now()}`;
     setUser(newUser); setToken(nextToken); storageService.setCurrentUser(newUser); storageService.setToken(nextToken);
     return { success: true };
+  };
+
+  const confirmSignup = async (email: string, code: string): Promise<AuthResult> => {
+    if (!isSupabaseConfigured) return { success: false, message: '인증번호 확인은 수파베이스 설정 후 사용할 수 있습니다.' };
+    const { data, error } = await requireSupabase().auth.verifyOtp({ email, token: code, type: 'email' });
+    if (error || !data.session?.user) return { success: false, message: error?.message || '인증번호를 확인하지 못했습니다. 새 인증번호를 요청해 주세요.' };
+    await syncRemoteIdentity(data.session.user, data.session.access_token);
+    return { success: true };
+  };
+
+  const resendSignupCode = async (email: string): Promise<AuthResult> => {
+    if (!isSupabaseConfigured) return { success: false, message: '인증번호 재발송은 수파베이스 설정 후 사용할 수 있습니다.' };
+    const { error } = await requireSupabase().auth.resend({
+      type: 'signup',
+      email,
+      options: { emailRedirectTo: window.location.origin },
+    });
+    return error ? { success: false, message: error.message } : { success: true, message: '새 인증번호를 이메일로 보냈습니다.' };
   };
 
   const logout = async () => {
@@ -205,7 +225,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   return <AuthContext.Provider value={{
     user, isAuthenticated: !!user, isInitialized, isRemoteAuth: isSupabaseConfigured, workspaceId,
-    token, autoLogin, loginAttempts, isLocked, lockUntil, login, signup, logout, resetPassword, updateProfile, switchUserRole,
+    token, autoLogin, loginAttempts, isLocked, lockUntil, login, signup, confirmSignup, resendSignupCode, logout, resetPassword, updateProfile, switchUserRole,
   }}>{children}</AuthContext.Provider>;
 };
 
