@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, shell, utilityProcess } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, Tray, nativeImage, shell, utilityProcess } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const http = require('http');
@@ -24,6 +24,8 @@ let lastStatusSignature = '';
 let logFile = '';
 let printQueue = Promise.resolve();
 let printedJobIds = [];
+let updateCheckInProgress = false;
+let updateInstallPromptVersion = '';
 
 const DEFAULT_PRINT_SETTINGS = {
   enabled: false,
@@ -272,21 +274,88 @@ function buildTrayMenu() {
     { label: '상태 화면 열기', click: showWindow },
     { label: 'VoiceCAP 홈페이지 열기', click: () => shell.openExternal(WEB_APP_URL) },
     { label: '댓글 서버 다시 시작', click: restartServer },
-    { label: '업데이트 확인', click: checkForUpdates },
+    { label: '업데이트 확인', click: () => checkForUpdates(true) },
     { label: '진단 로그 열기', click: () => shell.showItemInFolder(logFile) },
     { type: 'separator' },
     { label: '종료', click: quitApp }
   ]);
 }
 
-function checkForUpdates() {
+async function showUpdateDialog(options) {
+  if (!app.isReady()) return { response: -1 };
+  const dialogOptions = {
+    title: `${APP_NAME} 업데이트`,
+    noLink: true,
+    ...options
+  };
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return dialog.showMessageBox(mainWindow, dialogOptions);
+  }
+  return dialog.showMessageBox(dialogOptions);
+}
+
+async function checkForUpdates(interactive = false) {
   if (!app.isPackaged) {
     writeLog('update', '개발 실행에서는 업데이트 확인을 건너뜁니다.');
+    if (interactive) {
+      await showUpdateDialog({
+        type: 'info',
+        message: '개발 실행에서는 업데이트를 확인하지 않습니다.',
+        detail: `설치된 앱에서 다시 시도해 주세요. 현재 버전: ${app.getVersion()}`
+      });
+    }
     return;
   }
-  void autoUpdater.checkForUpdatesAndNotify().catch((error) => {
+
+  if (updateCheckInProgress) {
+    if (interactive) {
+      showWindow();
+      await showUpdateDialog({
+        type: 'info',
+        message: '이미 업데이트를 확인하고 있습니다.',
+        detail: '잠시만 기다려 주세요.'
+      });
+    }
+    return;
+  }
+
+  updateCheckInProgress = true;
+  if (interactive) {
+    showWindow();
+    writeLog('update', `사용자 요청으로 업데이트 확인 시작 (현재 ${app.getVersion()})`);
+  }
+
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    const latestVersion = String(result?.updateInfo?.version || app.getVersion());
+    if (!interactive) return;
+
+    if (latestVersion === app.getVersion()) {
+      await showUpdateDialog({
+        type: 'info',
+        message: '현재 최신 버전을 사용하고 있습니다.',
+        detail: `설치된 버전: ${app.getVersion()}`
+      });
+      return;
+    }
+
+    await showUpdateDialog({
+      type: 'info',
+      message: `새 버전 ${latestVersion}을(를) 찾았습니다.`,
+      detail: '업데이트를 자동으로 다운로드합니다. 완료되면 설치 여부를 다시 안내합니다.'
+    });
+  } catch (error) {
     writeLog('update', `업데이트 확인 실패: ${error.message}`);
-  });
+    if (interactive) {
+      await showUpdateDialog({
+        type: 'error',
+        message: '업데이트를 확인하지 못했습니다.',
+        detail: `${error.message}\n\n인터넷 연결을 확인한 뒤 다시 시도해 주세요.`
+      });
+    }
+  } finally {
+    updateCheckInProgress = false;
+  }
 }
 
 function createWindow() {
@@ -627,9 +696,29 @@ app.whenReady().then(() => {
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.on('update-available', (info) => writeLog('update', `업데이트 발견: ${info.version}`));
-    autoUpdater.on('update-downloaded', (info) => writeLog('update', `업데이트 다운로드 완료: ${info.version}. 다음 종료 시 설치합니다.`));
-    setTimeout(checkForUpdates, 10000);
-    setInterval(checkForUpdates, 6 * 60 * 60 * 1000);
+    autoUpdater.on('update-not-available', (info) => writeLog('update', `최신 버전 사용 중: ${info.version}`));
+    autoUpdater.on('update-downloaded', async (info) => {
+      writeLog('update', `업데이트 다운로드 완료: ${info.version}`);
+      if (updateInstallPromptVersion === info.version) return;
+      updateInstallPromptVersion = info.version;
+      showWindow();
+      const { response } = await showUpdateDialog({
+        type: 'info',
+        message: `업데이트 ${info.version} 다운로드가 완료됐습니다.`,
+        detail: '지금 앱을 다시 시작하고 업데이트를 설치하시겠습니까?',
+        buttons: ['지금 다시 시작', '나중에'],
+        defaultId: 0,
+        cancelId: 1
+      });
+      if (response === 0) {
+        writeLog('update', `업데이트 ${info.version} 즉시 설치 시작`);
+        isQuitting = true;
+        autoUpdater.quitAndInstall(false, true);
+      }
+    });
+    autoUpdater.on('error', (error) => writeLog('update', `자동 업데이트 오류: ${error.message}`));
+    setTimeout(() => checkForUpdates(false), 10000);
+    setInterval(() => checkForUpdates(false), 6 * 60 * 60 * 1000);
   }
 });
 
