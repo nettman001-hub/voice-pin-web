@@ -147,7 +147,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { data, error } = await requireSupabase().auth.signUp({
         email,
         password: pass,
-        options: { data: { display_name: nickname, workspace_name: `${nickname}의 VoiceCAP` } },
+        options: {
+          emailRedirectTo: window.location.origin,
+          data: { display_name: nickname, workspace_name: `${nickname}의 VoiceCAP` },
+        },
       });
       if (error) return { success: false, message: error.message };
       if (data.session?.user) await syncRemoteIdentity(data.session.user, data.session.access_token);
