@@ -2,7 +2,7 @@ export interface DeepgramConfig {
   apiKey?: string;
   model: 'nova-3' | 'nova-2' | 'enhanced';
   language: 'ko' | 'en';
-  keywords: string[]; // Keyterm biasing (예: ['구매확정:2', '닉네임:2', '가격:2', '금액:2', '캡처:2'])
+  keyterms: string[]; // Nova-3 keyterm prompting (예: ['구매확정', '닉네임', '가격', '금액', '캡처'])
   punctuate: boolean;
   interimResults: boolean;
   endpointing: number;

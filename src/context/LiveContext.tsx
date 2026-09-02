@@ -729,7 +729,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSttEngineMessage(mode === 'TAB_AUDIO' ? '방송 탭 오디오 연결 확인 중' : '마이크 연결 확인 중');
 
       const rules = storageService.getRules().filter((r) => r.isEnabled);
-      const keywords = rules.map((r) => `${r.word}:2`);
+      const keyterms = rules.map((r) => r.word.trim()).filter(Boolean);
 
       const chunkCallback = (chunk: ArrayBuffer) => {
         if (
@@ -799,7 +799,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           apiKey: activeApiKey,
           model: 'nova-3',
           language: 'ko',
-          keywords,
+          keyterms,
           punctuate: true,
           interimResults: true,
           endpointing: 300,

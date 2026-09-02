@@ -136,7 +136,10 @@ export class DeepgramSttService {
     const handleCloudFailure = (socket: WebSocket, message: string) => {
       if (!this.isActiveSession(generation) || this.ws !== socket) return;
 
-      sessionOnStatus?.('ERROR', `${providerName} 연결 실패 (API 키를 확인해 주세요)`);
+      const troubleshootingHint = provider === 'DEEPGRAM'
+        ? 'API 키 또는 요청 설정을 확인해 주세요'
+        : 'API 키를 확인해 주세요';
+      sessionOnStatus?.('ERROR', `${providerName} 연결 실패 (${troubleshootingHint})`);
       if (allowBrowserSpeechFallback) {
         onError(`${providerName} WebSocket 연결 실패. 브라우저 마이크 음성인식으로 전환합니다.`);
         this.closeWebSocket(socket);
@@ -284,8 +287,8 @@ export class DeepgramSttService {
           `sample_rate=16000`,
           `channels=1`,
           `endpointing=300`,
-          config.keywords && config.keywords.length > 0
-            ? config.keywords.map(k => `keywords=${encodeURIComponent(k)}`).join('&')
+          config.keyterms && config.keyterms.length > 0
+            ? config.keyterms.map((term) => `keyterm=${encodeURIComponent(term)}`).join('&')
             : ''
         ].filter(Boolean).join('&');
 
