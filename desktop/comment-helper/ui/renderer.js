@@ -17,6 +17,15 @@ const testPrintButton = document.querySelector('#test-print');
 
 let printSettingsDirty = false;
 let printSettingsSaving = false;
+const PRINTER_REQUIRED_MESSAGE = '자동 출력을 켜려면 Windows 프린터를 선택해 주세요.';
+
+function setPrintMessage(message) {
+  const text = message || '프린터를 선택하면 판매 전표를 자동으로 출력합니다.';
+  printMessage.textContent = text;
+  printMessage.className = text === PRINTER_REQUIRED_MESSAGE
+    ? 'print-message print-warning'
+    : 'print-message';
+}
 
 function viewState(status) {
   if (status.helper === 'error') return { tone: 'error', label: '연결에 문제가 있습니다', pill: '확인 필요' };
@@ -42,7 +51,7 @@ function render(status) {
     paperSize.value = print.paperSize || 'A4';
     if (print.printerName && printerSelect.options.length) printerSelect.value = print.printerName;
   }
-  printMessage.textContent = print.message || '프린터를 선택하면 판매 전표를 자동으로 출력합니다.';
+  setPrintMessage(print.message);
   const hasLiveInfo = Boolean(status.tiktokUsername) || status.tiktokState === 'collecting';
   liveStats.hidden = !hasLiveInfo;
   tiktokUsername.textContent = status.tiktokUsername ? `@${status.tiktokUsername}` : '-';
@@ -71,7 +80,7 @@ async function loadPrinters(selectedName) {
     }
   } catch (error) {
     printerSelect.replaceChildren(new Option('프린터 목록을 읽지 못했습니다', ''));
-    printMessage.textContent = error instanceof Error ? error.message : '프린터 목록을 읽지 못했습니다.';
+    setPrintMessage(error instanceof Error ? error.message : '프린터 목록을 읽지 못했습니다.');
   } finally {
     printerSelect.disabled = false;
   }
@@ -108,12 +117,12 @@ async function saveCurrentPrintSettings() {
     printSettingsDirty = false;
     printSettingsSaving = false;
     render(status);
-    if (requested.enabled && !status.print?.enabled) printMessage.textContent = '자동 출력을 켜려면 Windows 프린터를 선택해 주세요.';
+    if (requested.enabled && !status.print?.enabled) setPrintMessage(PRINTER_REQUIRED_MESSAGE);
   } catch (error) {
     printSettingsDirty = false;
     printSettingsSaving = false;
     try { render(await window.voicecap.getStatus()); } catch (_) { /* 기존 화면 상태를 유지한다. */ }
-    printMessage.textContent = error instanceof Error ? error.message : '프린터 설정을 저장하지 못했습니다.';
+    setPrintMessage(error instanceof Error ? error.message : '프린터 설정을 저장하지 못했습니다.');
   } finally {
     printSettingsSaving = false;
     printEnabled.disabled = false;
@@ -135,7 +144,7 @@ testPrintButton.addEventListener('click', async () => {
   testPrintButton.textContent = '출력 중...';
   try {
     const result = await window.voicecap.testPrint();
-    printMessage.textContent = result.ok ? '테스트 전표를 프린터로 보냈습니다.' : (result.error || '테스트 출력에 실패했습니다.');
+    setPrintMessage(result.ok ? '테스트 전표를 프린터로 보냈습니다.' : (result.error || '테스트 출력에 실패했습니다.'));
   } finally {
     testPrintButton.disabled = false;
     testPrintButton.textContent = '두 줄 테스트 출력';

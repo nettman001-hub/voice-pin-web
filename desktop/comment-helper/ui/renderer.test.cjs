@@ -70,7 +70,8 @@ test('자동 출력 토글을 즉시 저장하고 상태 갱신에도 선택값�
       await flush();
       savedPrint = {
         ...settings,
-        message: settings.enabled ? '자동 출력 준비 완료' : '자동 출력을 켜면 판매 전표가 출력됩니다.'
+        enabled: settings.enabled && Boolean(settings.printerName),
+        message: settings.enabled && settings.printerName ? '자동 출력 준비 완료' : '자동 출력을 켜면 판매 전표가 출력됩니다.'
       };
       statusListener(status());
       return status();
@@ -109,4 +110,12 @@ test('자동 출력 토글을 즉시 저장하고 상태 갱신에도 선택값�
   await flush();
   assert.equal(saveCalls.at(-1).enabled, false);
   assert.equal(printEnabled.checked, false);
+
+  printerSelect.value = '';
+  printEnabled.checked = true;
+  printEnabled.dispatch('change');
+  await flush();
+  await flush();
+  assert.equal(elements['#print-message'].textContent, '자동 출력을 켜려면 Windows 프린터를 선택해 주세요.');
+  assert.equal(elements['#print-message'].className, 'print-message print-warning');
 });

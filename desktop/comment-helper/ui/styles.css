@@ -217,6 +217,7 @@ h1 {
 select { width: 100%; min-height: 37px; padding: 0 10px; border: 1px solid #d8e3ef; border-radius: 11px; background: #f8fafc; color: #334155; font: inherit; font-size: 10px; }
 .icon-button { border: 1px solid #cfe2f3; border-radius: 11px; background: #f1f8fe; color: #0968af; font-size: 18px; font-weight: 800; }
 .print-message { min-height: 16px; margin: 10px 0 0; color: #64748b; font-size: 9px; line-height: 1.45; }
+.print-message.print-warning { color: #dc2626; font-weight: 800; }
 .print-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 11px; }
 
 .switch { position: relative; width: 43px; height: 25px; flex: 0 0 43px; }
