@@ -96,60 +96,6 @@ export const AdminDashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* 🔑 Deepgram Nova-3 클라우드 STT API Key 중앙 관리 카드 (관리자 전용) */}
-      <div className="bg-gradient-to-br from-white via-brand-50/20 to-purple-50/30 border-2 border-brand-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-2xl bg-brand-600 text-white flex items-center justify-center shadow-md shadow-brand-500/20 flex-shrink-0">
-              <KeyRound className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2 flex-wrap gap-1">
-                <h3 className="text-sm sm:text-base font-black text-slate-900">Deepgram Nova-3 음성인식 API Key 관리</h3>
-                <span className={`text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  deepgramApiKey ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                }`}>
-                  {deepgramApiKey ? '✅ 실제 키 연동됨' : '⚠️ 미등록 (시뮬레이터 모드)'}
-                </span>
-              </div>
-              <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
-                여기서 등록한 API Key는 모든 판매자의 라이브 방송 음성인식(Nova-3 한국어)에 자동으로 공통 적용됩니다.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <form onSubmit={handleSaveApiKey} className="pt-2">
-          <div className="flex flex-col sm:flex-row gap-2.5 items-stretch">
-            <div className="relative flex-1">
-              <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-              <input
-                type={showKey ? 'text' : 'password'}
-                value={inputKey}
-                onChange={(e) => setInputKey(e.target.value)}
-                placeholder="Deepgram Nova-3 API Key (예: 8f3a9b2c...)"
-                className="w-full pl-10 pr-24 py-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500 font-mono"
-              />
-              <button
-                type="button"
-                onClick={() => setShowKey(!showKey)}
-                className="absolute right-3 top-2.5 text-[11px] font-bold text-slate-400 hover:text-slate-700"
-              >
-                {showKey ? '숨기기' : '보기'}
-              </button>
-            </div>
-
-            <button
-              type="submit"
-              className="px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-500/20 flex items-center justify-center space-x-1.5 transition active:scale-95"
-            >
-              <Save className="w-4 h-4" />
-              <span>API Key 저장 & 전체 적용</span>
-            </button>
-          </div>
-        </form>
-      </div>
-
       {/* 관리자 전용 기본 STT 공급자 선택 및 Soniox API Key 관리 */}
       <div className="bg-gradient-to-br from-white via-cyan-50/20 to-sky-50/40 border-2 border-cyan-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-5">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -211,6 +157,60 @@ export const AdminDashboardPage: React.FC = () => {
               {sonioxApiKey ? 'API Key 등록됨' : 'API Key 미등록'}
             </p>
           </button>
+        </div>
+
+        {/* 🔑 Deepgram Nova-3 클라우드 STT API Key 중앙 관리 카드 (관리자 전용) */}
+        <div className="bg-gradient-to-br from-white via-brand-50/20 to-purple-50/30 border-2 border-brand-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-2xl bg-brand-600 text-white flex items-center justify-center shadow-md shadow-brand-500/20 flex-shrink-0">
+                <KeyRound className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2 flex-wrap gap-1">
+                  <h3 className="text-sm sm:text-base font-black text-slate-900">Deepgram Nova-3 음성인식 API Key 관리</h3>
+                  <span className={`text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    deepgramApiKey ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {deepgramApiKey ? '✅ 실제 키 연동됨' : '⚠️ 미등록 (시뮬레이터 모드)'}
+                  </span>
+                </div>
+                <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
+                  여기서 등록한 API Key는 모든 판매자의 라이브 방송 음성인식(Nova-3 한국어)에 자동으로 공통 적용됩니다.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <form onSubmit={handleSaveApiKey} className="pt-2">
+            <div className="flex flex-col sm:flex-row gap-2.5 items-stretch">
+              <div className="relative flex-1">
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                <input
+                  type={showKey ? 'text' : 'password'}
+                  value={inputKey}
+                  onChange={(e) => setInputKey(e.target.value)}
+                  placeholder="Deepgram Nova-3 API Key (예: 8f3a9b2c...)"
+                  className="w-full pl-10 pr-24 py-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500 font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey(!showKey)}
+                  className="absolute right-3 top-2.5 text-[11px] font-bold text-slate-400 hover:text-slate-700"
+                >
+                  {showKey ? '숨기기' : '보기'}
+                </button>
+              </div>
+
+              <button
+                type="submit"
+                className="px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-500/20 flex items-center justify-center space-x-1.5 transition active:scale-95"
+              >
+                <Save className="w-4 h-4" />
+                <span>API Key 저장 & 전체 적용</span>
+              </button>
+            </div>
+          </form>
         </div>
 
         <div className="border-t border-cyan-100 pt-4 space-y-3">
