@@ -172,7 +172,7 @@ export const AdminDashboardPage: React.FC = () => {
                   <span className={`text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full ${
                     deepgramApiKey ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
                   }`}>
-                    {deepgramApiKey ? '✅ 실제 키 연동됨' : '⚠️ 미등록 (시뮬레이터 모드)'}
+                    {deepgramApiKey ? '✅ API Key 등록됨' : '⚠️ API Key 미등록'}
                   </span>
                 </div>
                 <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
@@ -213,20 +213,29 @@ export const AdminDashboardPage: React.FC = () => {
           </form>
         </div>
 
-        <div className="border-t border-cyan-100 pt-4 space-y-3">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <h4 className="text-xs sm:text-sm font-black text-slate-900">Soniox 음성인식 API Key 관리</h4>
-              <p className="text-[11px] text-slate-500 mt-0.5">stt-rt-v5 · 한국어(ko) 엄격 제한 · 자동 엔드포인트/화자 분할 비활성</p>
+        <div className="bg-gradient-to-br from-white via-cyan-50/20 to-sky-50/30 border-2 border-cyan-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-2xl bg-cyan-600 text-white flex items-center justify-center shadow-md shadow-cyan-500/20 flex-shrink-0">
+                <KeyRound className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2 flex-wrap gap-1">
+                  <h3 className="text-sm sm:text-base font-black text-slate-900">Soniox 음성인식 API Key 관리</h3>
+                  <span className={`text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    sonioxApiKey ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {sonioxApiKey ? '✅ API Key 등록됨' : '⚠️ API Key 미등록'}
+                  </span>
+                </div>
+                <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
+                  stt-rt-v5 · 한국어(ko) 엄격 제한 · 자동 엔드포인트/화자 분할 비활성
+                </p>
+              </div>
             </div>
-            <span className={`text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full ${
-              sonioxApiKey ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-            }`}>
-              {sonioxApiKey ? '✅ 실제 키 연동됨' : '⚠️ API Key 미등록'}
-            </span>
           </div>
 
-          <form onSubmit={handleSaveSonioxApiKey}>
+          <form onSubmit={handleSaveSonioxApiKey} className="pt-2">
             <div className="flex flex-col sm:flex-row gap-2.5 items-stretch">
               <div className="relative flex-1">
                 <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
@@ -252,7 +261,7 @@ export const AdminDashboardPage: React.FC = () => {
                 className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md shadow-cyan-500/20 flex items-center justify-center space-x-1.5 transition active:scale-95"
               >
                 <Save className="w-4 h-4" />
-                <span>Soniox Key 저장</span>
+                <span>API Key 저장 & 전체 적용</span>
               </button>
             </div>
           </form>
