@@ -230,6 +230,8 @@ const KEYS = {
   LOGS: 'dadryeo_logs',
   NOTIFICATIONS: 'dadryeo_notifications',
   DEEPGRAM_API_KEY: 'dadryeo_deepgram_api_key',
+  SONIOX_API_KEY: 'voicecap_soniox_api_key',
+  STT_PROVIDER: 'voicecap_stt_provider',
   CAPTURE_AREA: 'voicecap_capture_area_config',
   CAPTURE_AREA_SNAPSHOT: 'voicecap_capture_area_snapshot',
   COMMENT_RECORDS: 'voicecap_comment_records',
@@ -293,6 +295,20 @@ export class StorageService {
     localStorage.setItem(KEYS.DEEPGRAM_API_KEY, key);
   }
 
+  // Soniox API Key 및 관리자가 선택한 STT 공급자
+  public getSonioxApiKey(): string {
+    return localStorage.getItem(KEYS.SONIOX_API_KEY) || '';
+  }
+  public setSonioxApiKey(key: string): void {
+    localStorage.setItem(KEYS.SONIOX_API_KEY, key);
+  }
+  public getSttProvider(): 'DEEPGRAM' | 'SONIOX' {
+    return localStorage.getItem(KEYS.STT_PROVIDER) === 'SONIOX' ? 'SONIOX' : 'DEEPGRAM';
+  }
+  public setSttProvider(provider: 'DEEPGRAM' | 'SONIOX'): void {
+    localStorage.setItem(KEYS.STT_PROVIDER, provider);
+  }
+
   // 전체 데이터 백업 (JSON 파일 다운로드용)
   public exportFullBackup(): string {
     const backupData = {
@@ -305,7 +321,9 @@ export class StorageService {
       payments: this.getPayments(),
       notifications: this.getNotifications(),
       commerce: this.getCommerceState(),
-      deepgramApiKey: this.getDeepgramApiKey()
+      deepgramApiKey: this.getDeepgramApiKey(),
+      sonioxApiKey: this.getSonioxApiKey(),
+      sttProvider: this.getSttProvider()
     };
     return JSON.stringify(backupData, null, 2);
   }
@@ -322,6 +340,10 @@ export class StorageService {
       if (data.notifications) localStorage.setItem(KEYS.NOTIFICATIONS, JSON.stringify(data.notifications));
       if (data.commerce) this.saveCommerceState(data.commerce);
       if (data.deepgramApiKey) this.setDeepgramApiKey(data.deepgramApiKey);
+      if (data.sonioxApiKey) this.setSonioxApiKey(data.sonioxApiKey);
+      if (data.sttProvider === 'DEEPGRAM' || data.sttProvider === 'SONIOX') {
+        this.setSttProvider(data.sttProvider);
+      }
       return true;
     } catch (e) {
       console.error('[Storage] 백업 복원 실패:', e);

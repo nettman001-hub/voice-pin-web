@@ -42,6 +42,9 @@ export const LiveHomePage: React.FC = () => {
     editingFieldInfo,
     deepgramApiKey,
     setDeepgramApiKey,
+    sonioxApiKey,
+    setSonioxApiKey,
+    sttProvider,
     sttEngineStatus,
     sttEngineMessage,
     hasScreenShareAudio,
@@ -73,7 +76,9 @@ export const LiveHomePage: React.FC = () => {
   const [showAreaNotSetModal, setShowAreaNotSetModal] = useState<boolean>(false);
   const [isCapturingNow, setIsCapturingNow] = useState<boolean>(false);
   const [silenceCountdown, setSilenceCountdown] = useState<number | null>(null);
-  const [keyInput, setKeyInput] = useState<string>(deepgramApiKey || '');
+  const selectedSttApiKey = sttProvider === 'SONIOX' ? sonioxApiKey : deepgramApiKey;
+  const selectedSttName = sttProvider === 'SONIOX' ? 'Soniox v5' : 'Deepgram Nova-3';
+  const [keyInput, setKeyInput] = useState<string>(selectedSttApiKey || '');
   const [audioSourceMode, setAudioSourceMode] = useState<'TAB_AUDIO' | 'MIC'>('TAB_AUDIO');
   const flowContainerRef = React.useRef<HTMLDivElement | null>(null);
   const commentFeedRef = React.useRef<HTMLDivElement | null>(null);
@@ -244,7 +249,7 @@ export const LiveHomePage: React.FC = () => {
             <button
               onClick={() => {
                 if (isAdmin) {
-                  setKeyInput(deepgramApiKey || '');
+                  setKeyInput(selectedSttApiKey || '');
                   setShowKeyModal(true);
                 } else {
                   setShowAdminOnlyModal(true);
@@ -255,10 +260,10 @@ export const LiveHomePage: React.FC = () => {
                   ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200 cursor-pointer'
                   : 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed opacity-80'
               }`}
-              title={isAdmin ? 'Deepgram AI Key 설정 (관리자 전용)' : 'AI 키 설정은 관리자만 변경할 수 있습니다'}
+              title={isAdmin ? `${selectedSttName} AI Key 설정 (관리자 전용)` : 'AI 키 설정은 관리자만 변경할 수 있습니다'}
             >
               <Key className={`w-3.5 h-3.5 ${isAdmin ? 'text-amber-500' : 'text-slate-400'}`} />
-              <span>AI 키 {deepgramApiKey ? '연결됨' : '설정'}</span>
+              <span>{sttProvider === 'SONIOX' ? 'Soniox' : 'Deepgram'} 키 {selectedSttApiKey ? '연결됨' : '설정'}</span>
               {!isAdmin && <span className="text-[9px] text-slate-400 bg-slate-200/60 px-1 py-0.2 rounded">관리자</span>}
             </button>
 
@@ -841,7 +846,7 @@ export const LiveHomePage: React.FC = () => {
                   <Key className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-slate-900">Deepgram Nova-3 AI 키 설정</h3>
+                  <h3 className="text-base font-black text-slate-900">{selectedSttName} AI 키 설정</h3>
                   <p className="text-xs text-slate-500">실시간 방송 소리 0.1초 AI 분석</p>
                 </div>
               </div>
@@ -851,16 +856,16 @@ export const LiveHomePage: React.FC = () => {
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-700">Deepgram API Key</label>
+              <label className="text-xs font-bold text-slate-700">{sttProvider === 'SONIOX' ? 'Soniox' : 'Deepgram'} API Key</label>
               <input
                 type="password"
                 value={keyInput}
                 onChange={(e) => setKeyInput(e.target.value)}
-                placeholder="예: d7a8b9c0... (Deepgram 콘솔에서 발급)"
+                placeholder={`${sttProvider === 'SONIOX' ? 'Soniox' : 'Deepgram'} 콘솔에서 발급한 API Key`}
                 className="w-full px-4 py-3 rounded-xl border border-slate-200 text-xs font-mono text-slate-900 focus:outline-none focus:border-brand-500"
               />
               <p className="text-[11px] text-slate-500">
-                Deepgram Nova-3 API Key를 입력하시면, 탭 방송 소리가 0.1초 초저지연으로 정확하게 실시간 텍스트로 변환됩니다.
+                현재 관리자가 선택한 {selectedSttName}의 API Key를 설정합니다. 기본 STT 서비스 선택은 관리자 통합 대시보드에서 변경할 수 있습니다.
               </p>
             </div>
 
@@ -873,7 +878,11 @@ export const LiveHomePage: React.FC = () => {
               </button>
               <button
                 onClick={() => {
-                  setDeepgramApiKey(keyInput.trim());
+                  if (sttProvider === 'SONIOX') {
+                    setSonioxApiKey(keyInput.trim());
+                  } else {
+                    setDeepgramApiKey(keyInput.trim());
+                  }
                   setShowKeyModal(false);
                 }}
                 className="px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20"
@@ -895,7 +904,7 @@ export const LiveHomePage: React.FC = () => {
             <div>
               <h3 className="text-base font-black text-slate-900">관리자 전용 기능</h3>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Deepgram AI 키 설정 및 수정은 <strong className="text-slate-800">최고 관리자(ADMIN)</strong> 권한으로 로그인한 계정만 접근할 수 있습니다.
+                STT AI 키 설정 및 수정은 <strong className="text-slate-800">최고 관리자(ADMIN)</strong> 권한으로 로그인한 계정만 접근할 수 있습니다.
               </p>
             </div>
             <button

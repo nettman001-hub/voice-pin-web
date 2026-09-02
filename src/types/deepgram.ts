@@ -9,6 +9,12 @@ export interface DeepgramConfig {
   allowBrowserSpeechFallback?: boolean;
 }
 
+export type SttProvider = 'DEEPGRAM' | 'SONIOX';
+
+export interface SttConfig extends DeepgramConfig {
+  provider: SttProvider;
+}
+
 export interface DeepgramWord {
   word: string;
   start: number;
@@ -35,4 +41,24 @@ export interface DeepgramResponse {
   is_final?: boolean;
   speech_final?: boolean;
   channel?: DeepgramChannel;
+}
+
+export interface SonioxToken {
+  text: string;
+  start_ms?: number;
+  end_ms?: number;
+  confidence?: number;
+  is_final: boolean;
+  language?: string;
+}
+
+export interface SonioxResponse {
+  tokens: SonioxToken[];
+  final_audio_proc_ms?: number;
+  total_audio_proc_ms?: number;
+  finished?: boolean;
+  error_code?: number;
+  error_type?: string;
+  error_message?: string;
+  request_id?: string;
 }

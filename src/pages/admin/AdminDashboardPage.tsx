@@ -24,11 +24,20 @@ import {
 export const AdminDashboardPage: React.FC = () => {
   const { allMembers, reports } = useAppData();
   const { sales } = useSales();
-  const { deepgramApiKey, setDeepgramApiKey } = useLive();
+  const {
+    deepgramApiKey,
+    setDeepgramApiKey,
+    sonioxApiKey,
+    setSonioxApiKey,
+    sttProvider,
+    setSttProvider
+  } = useLive();
 
   const [inputKey, setInputKey] = useState(deepgramApiKey);
+  const [sonioxInputKey, setSonioxInputKey] = useState(sonioxApiKey);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
+  const [showSonioxKey, setShowSonioxKey] = useState(false);
 
   const totalMembers = allMembers.length;
   const activeMembers = allMembers.filter((m: User) => m.status === '활성').length;
@@ -39,6 +48,20 @@ export const AdminDashboardPage: React.FC = () => {
     e.preventDefault();
     setDeepgramApiKey(inputKey.trim());
     setToastMsg('Deepgram Nova-3 API Key가 시스템 전역에 안전하게 저장되었습니다! 모든 판매자에게 즉시 적용됩니다. 🎉');
+    setTimeout(() => setToastMsg(null), 3500);
+  };
+
+  const handleSaveSonioxApiKey = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSonioxApiKey(sonioxInputKey.trim());
+    setToastMsg('Soniox API Key가 저장되었습니다. Soniox를 선택한 모든 새 청취 세션에 적용됩니다.');
+    setTimeout(() => setToastMsg(null), 3500);
+  };
+
+  const handleSelectSttProvider = (provider: 'DEEPGRAM' | 'SONIOX') => {
+    setSttProvider(provider);
+    const providerName = provider === 'SONIOX' ? 'Soniox v5' : 'Deepgram Nova-3';
+    setToastMsg(`${providerName}가 기본 STT 서비스로 선택되었습니다.`);
     setTimeout(() => setToastMsg(null), 3500);
   };
 
@@ -61,7 +84,7 @@ export const AdminDashboardPage: React.FC = () => {
         <div className="flex items-center space-x-2">
           <span className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-            <span>STT 서버 정상 (Nova-3)</span>
+            <span>기본 STT: {sttProvider === 'SONIOX' ? 'Soniox v5' : 'Deepgram Nova-3'}</span>
           </span>
         </div>
       </div>
@@ -127,6 +150,115 @@ export const AdminDashboardPage: React.FC = () => {
         </form>
       </div>
 
+      {/* 관리자 전용 기본 STT 공급자 선택 및 Soniox API Key 관리 */}
+      <div className="bg-gradient-to-br from-white via-cyan-50/20 to-sky-50/40 border-2 border-cyan-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-2xl bg-cyan-600 text-white flex items-center justify-center shadow-md shadow-cyan-500/20 flex-shrink-0">
+              <Radio className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-base font-black text-slate-900">기본 STT 서비스 선택</h3>
+              <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
+                관리자가 선택한 서비스가 이후 시작되는 모든 라이브 음성인식 세션에 적용됩니다.
+              </p>
+            </div>
+          </div>
+          <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-cyan-100 text-cyan-800">
+            현재: {sttProvider === 'SONIOX' ? 'Soniox v5' : 'Deepgram Nova-3'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" role="radiogroup" aria-label="기본 STT 서비스">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={sttProvider === 'DEEPGRAM'}
+            onClick={() => handleSelectSttProvider('DEEPGRAM')}
+            className={`p-4 rounded-2xl border-2 text-left transition active:scale-[0.99] ${
+              sttProvider === 'DEEPGRAM'
+                ? 'border-brand-500 bg-brand-50 shadow-sm'
+                : 'border-slate-200 bg-white hover:border-brand-200'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-black text-slate-900">Deepgram Nova-3</span>
+              <span className={`w-4 h-4 rounded-full border-4 ${sttProvider === 'DEEPGRAM' ? 'border-brand-600 bg-white' : 'border-slate-300'}`} />
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">기존 한국어 실시간 STT · 키워드 바이어싱</p>
+            <p className={`mt-2 text-[10px] font-bold ${deepgramApiKey ? 'text-emerald-700' : 'text-amber-700'}`}>
+              {deepgramApiKey ? 'API Key 등록됨' : 'API Key 미등록'}
+            </p>
+          </button>
+
+          <button
+            type="button"
+            role="radio"
+            aria-checked={sttProvider === 'SONIOX'}
+            onClick={() => handleSelectSttProvider('SONIOX')}
+            className={`p-4 rounded-2xl border-2 text-left transition active:scale-[0.99] ${
+              sttProvider === 'SONIOX'
+                ? 'border-cyan-500 bg-cyan-50 shadow-sm'
+                : 'border-slate-200 bg-white hover:border-cyan-200'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-black text-slate-900">Soniox STT v5</span>
+              <span className={`w-4 h-4 rounded-full border-4 ${sttProvider === 'SONIOX' ? 'border-cyan-600 bg-white' : 'border-slate-300'}`} />
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">한국어 단일 언어 제한 · 자동 엔드포인트/화자 분할 사용 안 함</p>
+            <p className={`mt-2 text-[10px] font-bold ${sonioxApiKey ? 'text-emerald-700' : 'text-amber-700'}`}>
+              {sonioxApiKey ? 'API Key 등록됨' : 'API Key 미등록'}
+            </p>
+          </button>
+        </div>
+
+        <div className="border-t border-cyan-100 pt-4 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h4 className="text-xs sm:text-sm font-black text-slate-900">Soniox 음성인식 API Key 관리</h4>
+              <p className="text-[11px] text-slate-500 mt-0.5">stt-rt-v5 · 한국어(ko) 엄격 제한 · 자동 엔드포인트/화자 분할 비활성</p>
+            </div>
+            <span className={`text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full ${
+              sonioxApiKey ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+            }`}>
+              {sonioxApiKey ? '✅ 실제 키 연동됨' : '⚠️ API Key 미등록'}
+            </span>
+          </div>
+
+          <form onSubmit={handleSaveSonioxApiKey}>
+            <div className="flex flex-col sm:flex-row gap-2.5 items-stretch">
+              <div className="relative flex-1">
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                <input
+                  type={showSonioxKey ? 'text' : 'password'}
+                  value={sonioxInputKey}
+                  onChange={(e) => setSonioxInputKey(e.target.value)}
+                  placeholder="Soniox API Key"
+                  autoComplete="off"
+                  className="w-full pl-10 pr-24 py-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-cyan-500 font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSonioxKey(!showSonioxKey)}
+                  className="absolute right-3 top-2.5 text-[11px] font-bold text-slate-400 hover:text-slate-700"
+                >
+                  {showSonioxKey ? '숨기기' : '보기'}
+                </button>
+              </div>
+
+              <button
+                type="submit"
+                className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md shadow-cyan-500/20 flex items-center justify-center space-x-1.5 transition active:scale-95"
+              >
+                <Save className="w-4 h-4" />
+                <span>Soniox Key 저장</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       {/* 4대 KPI 요약 카드 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
         <Link
@@ -189,7 +321,7 @@ export const AdminDashboardPage: React.FC = () => {
             99.2 <span className="text-xs font-normal text-slate-400">%</span>
           </div>
           <div className="text-[10px] sm:text-[11px] text-emerald-600 mt-1 sm:mt-2 truncate font-semibold">
-            <span>Nova-3 180ms</span>
+            <span>{sttProvider === 'SONIOX' ? 'Soniox v5 실시간' : 'Nova-3 180ms'}</span>
           </div>
         </Link>
       </div>

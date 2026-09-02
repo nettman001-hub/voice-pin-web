@@ -10,6 +10,35 @@ import { storageService, generateSessionId } from '../services/storageService';
 import { useSales } from './SalesContext';
 import { useAuth } from './AuthContext';
 import { CaptureAreaConfig } from '../types/rules';
+import { SttProvider } from '../types/deepgram';
+
+const SONIOX_SALE_TIMEOUT_MS = 10000;
+const SONIOX_BUFFER_LIMIT = 600;
+const SONIOX_SCAN_TAIL_LIMIT = 64;
+const SONIOX_SALE_START_PATTERNS = [
+  '구매확정',
+  '구매 확정',
+  '구매하신 분',
+  '구매하신분',
+  '결제완료',
+  '결제 완료',
+  '주문확정',
+  '낙찰',
+  '판매완료',
+  '닉네임'
+];
+const SONIOX_COMMAND_PATTERNS = [
+  '방금 건 삭제',
+  '방금거 삭제',
+  '방금 건 수정',
+  '방금거 수정',
+  '수정 시작',
+  '수정 완료',
+  '수정 끝',
+  '화면 캡처',
+  '화면캡처',
+  '캡처'
+];
 
 export interface MatchedRuleItem {
   text: string;
@@ -33,6 +62,10 @@ interface LiveContextType {
   editingFieldInfo: string | null;
   deepgramApiKey: string;
   setDeepgramApiKey: (key: string) => void;
+  sonioxApiKey: string;
+  setSonioxApiKey: (key: string) => void;
+  sttProvider: SttProvider;
+  setSttProvider: (provider: SttProvider) => void;
   sttEngineStatus: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
   sttEngineMessage: string;
   isScreenShareConnected: boolean;
@@ -68,9 +101,14 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isVoiceEditing, setIsVoiceEditing] = useState<boolean>(false);
   const [editingFieldInfo, setEditingFieldInfo] = useState<string | null>(null);
   const editTimeoutRef = useRef<number | null>(null);
+  const sonioxSaleBufferRef = useRef<string>('');
+  const sonioxSaleTimeoutRef = useRef<number | null>(null);
+  const sonioxCommandTailRef = useRef<string>('');
 
-  // Deepgram 설정
+  // 관리자 공통 STT 공급자 및 API Key 설정
   const [deepgramApiKey, setDeepgramApiKeyState] = useState<string>(storageService.getDeepgramApiKey());
+  const [sonioxApiKey, setSonioxApiKeyState] = useState<string>(storageService.getSonioxApiKey());
+  const [sttProvider, setSttProviderState] = useState<SttProvider>(storageService.getSttProvider());
 
   // 최신 세션/상태 ref 유지
   const isListeningRef = useRef<boolean>(false);
@@ -116,6 +154,16 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const setDeepgramApiKey = (key: string) => {
     setDeepgramApiKeyState(key);
     storageService.setDeepgramApiKey(key);
+  };
+
+  const setSonioxApiKey = (key: string) => {
+    setSonioxApiKeyState(key);
+    storageService.setSonioxApiKey(key);
+  };
+
+  const setSttProvider = (provider: SttProvider) => {
+    setSttProviderState(provider);
+    storageService.setSttProvider(provider);
   };
 
   // 비프음/신호음 재생
@@ -261,12 +309,221 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return imageUrl;
   };
 
-  // 실시간 전사 처리 핸들러
-  const handleTranscript = (
-    data: { text: string; isFinal: boolean; confidence: number },
+  interface TranscriptProcessingOptions {
+    skipCommands?: boolean;
+    skipSale?: boolean;
+    skipCapture?: boolean;
+  }
+
+  const clearSonioxSaleTimeout = () => {
+    if (sonioxSaleTimeoutRef.current !== null) {
+      window.clearTimeout(sonioxSaleTimeoutRef.current);
+      sonioxSaleTimeoutRef.current = null;
+    }
+  };
+
+  const resetSonioxBusinessAccumulator = () => {
+    clearSonioxSaleTimeout();
+    sonioxSaleBufferRef.current = '';
+    sonioxCommandTailRef.current = '';
+  };
+
+  function scheduleSonioxSaleTimeout(
+    confidence: number,
     requiredListeningGeneration?: number,
     requiredUserId?: string
-  ) => {
+  ) {
+    if (sonioxSaleTimeoutRef.current !== null) return;
+
+    sonioxSaleTimeoutRef.current = window.setTimeout(() => {
+      sonioxSaleTimeoutRef.current = null;
+      const pendingText = sonioxSaleBufferRef.current.trim();
+      sonioxSaleBufferRef.current = '';
+
+      if (!pendingText) return;
+      handleTranscript(
+        { text: pendingText, isFinal: true, confidence },
+        requiredListeningGeneration,
+        requiredUserId,
+        { skipCommands: true, skipCapture: true }
+      );
+    }, SONIOX_SALE_TIMEOUT_MS);
+  }
+
+  function scanSonioxCommands(
+    confirmedTextDelta: string,
+    confidence: number,
+    requiredListeningGeneration?: number,
+    requiredUserId?: string
+  ) {
+    const previousTail = sonioxCommandTailRef.current;
+    const scanText = `${previousTail}${confirmedTextDelta}`;
+    const matches: Array<{ start: number; end: number; text: string }> = [];
+
+    for (const pattern of SONIOX_COMMAND_PATTERNS) {
+      let searchIndex = 0;
+      while (searchIndex < scanText.length) {
+        const start = scanText.indexOf(pattern, searchIndex);
+        if (start < 0) break;
+        const end = start + pattern.length;
+
+        // 이전 tail 안에서 이미 완성됐던 패턴은 다시 실행하지 않는다.
+        if (end > previousTail.length) {
+          matches.push({ start, end, text: pattern });
+        }
+        searchIndex = start + 1;
+      }
+    }
+
+    matches.sort((a, b) => a.start - b.start || b.text.length - a.text.length);
+    const accepted: typeof matches = [];
+    for (const match of matches) {
+      if (accepted.some((item) => match.start < item.end && match.end > item.start)) continue;
+      accepted.push(match);
+    }
+
+    for (const match of accepted) {
+      const isCaptureCommand = match.text.includes('캡처');
+      handleTranscript(
+        { text: match.text, isFinal: true, confidence },
+        requiredListeningGeneration,
+        requiredUserId,
+        isCaptureCommand
+          ? { skipCommands: true, skipSale: true }
+          : { skipSale: true, skipCapture: true }
+      );
+
+      if (match.text === '수정 시작' || match.text.includes('수정')) {
+        clearSonioxSaleTimeout();
+        sonioxSaleBufferRef.current = '';
+      }
+    }
+
+    sonioxCommandTailRef.current = scanText.slice(-SONIOX_SCAN_TAIL_LIMIT);
+  }
+
+  function consumeSonioxConfirmedText(
+    confirmedTextDelta: string,
+    confidence: number,
+    requiredListeningGeneration?: number,
+    requiredUserId?: string
+  ) {
+    if (!confirmedTextDelta) return;
+
+    scanSonioxCommands(
+      confirmedTextDelta,
+      confidence,
+      requiredListeningGeneration,
+      requiredUserId
+    );
+
+    sonioxSaleBufferRef.current = `${sonioxSaleBufferRef.current}${confirmedTextDelta}`;
+    if (sonioxSaleBufferRef.current.length > SONIOX_BUFFER_LIMIT) {
+      sonioxSaleBufferRef.current = sonioxSaleBufferRef.current.slice(-SONIOX_BUFFER_LIMIT);
+    }
+
+    // 음성 수정 중에는 판매로 저장하지 않고 닉네임/금액 수정 문장을 완성해서 처리한다.
+    if (isVoiceEditingRef.current) {
+      const editCommand = parseVoiceCommand(sonioxSaleBufferRef.current, true);
+      if (editCommand.type === 'FIELD_UPDATE') {
+        const editText = sonioxSaleBufferRef.current.trim();
+        clearSonioxSaleTimeout();
+        sonioxSaleBufferRef.current = '';
+        handleTranscript(
+          { text: editText, isFinal: true, confidence },
+          requiredListeningGeneration,
+          requiredUserId,
+          { skipSale: true, skipCapture: true }
+        );
+      }
+      return;
+    }
+
+    const buffer = sonioxSaleBufferRef.current;
+    const triggerPositions = SONIOX_SALE_START_PATTERNS
+      .map((pattern) => buffer.indexOf(pattern))
+      .filter((index) => index >= 0);
+
+    if (triggerPositions.length === 0) {
+      sonioxSaleBufferRef.current = buffer.slice(-SONIOX_SCAN_TAIL_LIMIT);
+      return;
+    }
+
+    const saleStart = Math.min(...triggerPositions);
+    if (saleStart > 0) {
+      // "러블리님 구매확정"처럼 트리거 앞에 닉네임이 먼저 나온 경우를 보존한다.
+      sonioxSaleBufferRef.current = buffer.slice(Math.max(0, saleStart - 32));
+    }
+
+    const rules = storageService.getRules().filter((rule) => rule.isEnabled);
+    const saleResult = extractSaleFromTranscript(
+      sonioxSaleBufferRef.current,
+      rules.map((rule) => rule.word)
+    );
+
+    if (saleResult && !saleResult.isPending) {
+      const completeSaleText = sonioxSaleBufferRef.current.trim();
+      clearSonioxSaleTimeout();
+      sonioxSaleBufferRef.current = '';
+      handleTranscript(
+        { text: completeSaleText, isFinal: true, confidence },
+        requiredListeningGeneration,
+        requiredUserId,
+        { skipCommands: true, skipCapture: true }
+      );
+      return;
+    }
+
+    scheduleSonioxSaleTimeout(confidence, requiredListeningGeneration, requiredUserId);
+  }
+
+  function handleSonioxTranscript(
+    data: {
+      text: string;
+      isFinal: boolean;
+      confidence: number;
+      confirmedTextDelta?: string;
+    },
+    requiredListeningGeneration?: number,
+    requiredUserId?: string
+  ) {
+    if (data.confirmedTextDelta) {
+      consumeSonioxConfirmedText(
+        data.confirmedTextDelta,
+        data.confidence,
+        requiredListeningGeneration,
+        requiredUserId
+      );
+    }
+
+    if (!data.isFinal) {
+      setCurrentInterimTranscript(data.text);
+      return;
+    }
+
+    setCurrentInterimTranscript('');
+    // 수동 최종화 구간은 자막/로그로만 기록한다. 업무 액션은 위 확정 토큰 누적기가 처리한다.
+    handleTranscript(
+      { text: data.text, isFinal: true, confidence: data.confidence },
+      requiredListeningGeneration,
+      requiredUserId,
+      { skipCommands: true, skipSale: true, skipCapture: true }
+    );
+  }
+
+  // 실시간 전사 처리 핸들러
+  function handleTranscript(
+    data: {
+      text: string;
+      isFinal: boolean;
+      confidence: number;
+      provider?: 'DEEPGRAM' | 'SONIOX' | 'WEB_SPEECH' | 'NONE';
+      confirmedTextDelta?: string;
+    },
+    requiredListeningGeneration?: number,
+    requiredUserId?: string,
+    processingOptions: TranscriptProcessingOptions = {}
+  ) {
     if (!isAuthenticatedRef.current || !currentUserIdRef.current) return;
 
     if (
@@ -282,6 +539,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     if (!data.text) return;
+
+    if (data.provider === 'SONIOX') {
+      handleSonioxTranscript(data, requiredListeningGeneration, requiredUserId);
+      return;
+    }
 
     if (!data.isFinal) {
       setCurrentInterimTranscript(data.text);
@@ -307,9 +569,12 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let ruleActionName = '';
 
     // 1. 방송 중 음성 명령 파싱 ("수정 시작" / "닉네임은 xxx" / "수정 완료")
-    const command = parseVoiceCommand(fullText, isVoiceEditingRef.current);
+    const command = processingOptions.skipCommands
+      ? { type: 'NONE' as const, rawText: fullText }
+      : parseVoiceCommand(fullText, isVoiceEditingRef.current);
 
     if (command.type === 'START_EDIT') {
+      isVoiceEditingRef.current = true;
       setIsVoiceEditing(true);
       setEditingFieldInfo('수정 대기 중: "닉네임은 홍길동, 금액은 3만원"처럼 말씀해주세요.');
       actionTriggered = 'VOICE_EDIT_START';
@@ -317,6 +582,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       playBeep(880, 200);
       resetVoiceEditTimeout();
     } else if (command.type === 'FINISH_EDIT') {
+      isVoiceEditingRef.current = false;
       setIsVoiceEditing(false);
       setEditingFieldInfo(null);
       actionTriggered = 'VOICE_EDIT_DONE';
@@ -344,7 +610,9 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ruleActionName = '🗑️ 최근 항목 삭제';
     } else {
       // 2. 판매 멘트 감지 ("구매확정 됐습니다...")
-      const saleResult = extractSaleFromTranscript(fullText, activeKeywords);
+      const saleResult = processingOptions.skipSale
+        ? null
+        : extractSaleFromTranscript(fullText, activeKeywords);
 
       if (saleResult) {
         const recognizedAt = new Date().toISOString();
@@ -382,7 +650,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // 3. 캡처 트리거 감지 ("캡처", "화면 캡처" 등)
-      if (fullText.includes('캡처') || fullText.includes('화면캡처')) {
+      if (
+        !processingOptions.skipCapture &&
+        (fullText.includes('캡처') || fullText.includes('화면캡처'))
+      ) {
         actionTriggered = 'SCREEN_CAPTURED';
         ruleActionName = ruleActionName ? `${ruleActionName} + 📸 캡처` : '📸 화면 자동 캡처';
         void captureCurrentScreen(
@@ -415,7 +686,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     setTranscriptLogs((prev) => [newLog, ...prev.slice(0, 49)]);
-  };
+  }
 
   // 라이브 청취 시작 (크롬 탭 방송 소리 또는 마이크)
   const startListening = async (mode: 'TAB_AUDIO' | 'MIC' = 'TAB_AUDIO') => {
@@ -433,6 +704,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const listeningGeneration = ++listeningGenerationRef.current;
     startInFlightRef.current = true;
     activeListeningUserIdRef.current = requestedUserId;
+    resetSonioxBusinessAccumulator();
 
     try {
       if (
@@ -514,14 +786,18 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         shareOwnerUserIdRef.current = requestedUserId;
       }
 
-      // 최신 API Key 확인
-      const activeApiKey = deepgramApiKey || storageService.getDeepgramApiKey();
+      // 관리자가 선택한 STT 공급자와 최신 API Key 확인
+      const activeSttProvider = sttProvider || storageService.getSttProvider();
+      const activeApiKey = activeSttProvider === 'SONIOX'
+        ? sonioxApiKey || storageService.getSonioxApiKey()
+        : deepgramApiKey || storageService.getDeepgramApiKey();
 
-      // 2. 실시간 STT 엔진 시작 (Deepgram Nova-2/Nova-3 또는 브라우저 Web Speech API)
+      // 2. 실시간 STT 엔진 시작 (Deepgram Nova-3 / Soniox v5 / 브라우저 Web Speech API)
       deepgramService.startLiveStream(
         {
+          provider: activeSttProvider,
           apiKey: activeApiKey,
-          model: 'nova-2',
+          model: 'nova-3',
           language: 'ko',
           keywords,
           punctuate: true,
@@ -553,6 +829,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
             audioCaptureService.pauseCapture();
             setAudioLevel(0);
             setWaveform(new Uint8Array(128));
+            resetSonioxBusinessAccumulator();
           }
         }
       );
@@ -589,6 +866,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } else {
       audioCaptureService.stopCapture();
     }
+    resetSonioxBusinessAccumulator();
     deepgramService.stopLiveStream();
     setSttEngineStatus('DISCONNECTED');
     setSttEngineMessage(
@@ -599,6 +877,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAudioLevel(0);
     setWaveform(new Uint8Array(128));
     setCurrentInterimTranscript('');
+    isVoiceEditingRef.current = false;
     setIsVoiceEditing(false);
     setEditingFieldInfo(null);
     if (editTimeoutRef.current) clearTimeout(editTimeoutRef.current);
@@ -688,6 +967,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         editingFieldInfo,
         deepgramApiKey,
         setDeepgramApiKey,
+        sonioxApiKey,
+        setSonioxApiKey,
+        sttProvider,
+        setSttProvider,
         sttEngineStatus,
         sttEngineMessage,
         isScreenShareConnected: screenConnection.isConnected,
