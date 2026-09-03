@@ -1,6 +1,6 @@
-# VoiceCAP 개발 인계인수서
+﻿# VoiceCAP 개발 인계인수서
 
-작성일: 2026-09-03 (Asia/Seoul)
+작성일: 2026-09-04 (Asia/Seoul)
 목적: 다른 Windows PC에서 웹앱, 로컬 브리지 서버, Android `VoiceCAP SMS Bridge`, Electron `VoiceCAP 댓글 도우미 (라벨 프린터 연동)` 개발을 그대로 이어가기 위한 문서
 
 ## 1. 현재 기준점
@@ -12,7 +12,7 @@
 | 운영 사이트 | `https://www.voicecap.shop` |
 | Vercel 프로젝트 | `voice-pin-web` (`nettman001-5045s-projects`) |
 | Android 앱 ID | `shop.voicecap.smsbridge` |
-| Android 지원 | 최소 Android 8.0/API 26, target/compile API 35 |
+| Android 지원 | 최소 Android 8.0/API 26, target API 36, compile API 35, versionCode 5 (v1.3.1) |
 | 데스크톱 도우미 | Electron `shop.voicecap.commenthelper` v1.1.4 (틱톡 댓글 수집 + 라벨 프린터 연동) |
 | 검증 라벨 프린터 | `Xprinter XP-DT108B LABEL` (50x30 mm 감열 라벨지 지원) |
 | 실시간 STT 엔진 | Deepgram Nova-3 / Soniox 실시간 한국어 STT / Web Speech API (다중 엔진 지원) |
@@ -403,4 +403,5 @@ vercel curl https://www.voicecap.shop
 - 웹 빌드(`npm run build`), 서버 테스트(`npm test`), 데스크톱 테스트 통과 확인
 - 변경 파일만 커밋하고 `main` 푸시
 - Vercel 프로덕션 자동 배포 완료 확인 (`https://www.voicecap.shop` 및 Vercel 대시보드)
+
 
