@@ -27,10 +27,11 @@ let printedJobIds = [];
 let updateCheckInProgress = false;
 let updateInstallPromptVersion = '';
 
+const VALID_PAPER_SIZES = ['LABEL_50_30', 'RECEIPT_80', 'RECEIPT_58', 'A4'];
 const DEFAULT_PRINT_SETTINGS = {
   enabled: false,
   printerName: '',
-  paperSize: 'A4'
+  paperSize: 'LABEL_50_30'
 };
 
 const state = {
@@ -140,7 +141,9 @@ function startServer() {
   serverProcess.on('message', (message) => {
     const payload = message && message.data ? message.data : message;
     if (!payload || payload.type !== 'print:sale') return;
+    writeLog('print', `도우미 인쇄 요청 수신: ${JSON.stringify(payload)}`);
     void enqueuePrintJob(payload.payload).then((result) => {
+      writeLog('print', `도우미 인쇄 처리 완료: ${JSON.stringify(result)}`);
       try {
         serverProcess?.postMessage({ type: 'print:result', requestId: payload.requestId, result });
       } catch (error) {
@@ -524,7 +527,7 @@ function loadPrintSettings() {
     ...DEFAULT_PRINT_SETTINGS,
     enabled: Boolean(settings.enabled),
     printerName: String(settings.printerName || ''),
-    paperSize: ['A4', 'RECEIPT_80', 'RECEIPT_58'].includes(settings.paperSize) ? settings.paperSize : 'A4',
+    paperSize: VALID_PAPER_SIZES.includes(settings.paperSize) ? settings.paperSize : DEFAULT_PRINT_SETTINGS.paperSize,
     message: settings.enabled && settings.printerName
       ? '자동 출력 준비 완료'
       : '프린터를 선택하면 판매 전표를 자동으로 출력합니다.'
@@ -535,7 +538,7 @@ function loadPrintSettings() {
 
 function savePrintSettings(next) {
   const printerName = String(next && next.printerName || '').trim();
-  const paperSize = ['A4', 'RECEIPT_80', 'RECEIPT_58'].includes(next && next.paperSize) ? next.paperSize : 'A4';
+  const paperSize = VALID_PAPER_SIZES.includes(next && next.paperSize) ? next.paperSize : DEFAULT_PRINT_SETTINGS.paperSize;
   const enabled = Boolean(next && next.enabled && printerName);
   state.print = {
     ...state.print,
@@ -564,6 +567,7 @@ async function getPrinters() {
 }
 
 function printPageSize(paperSize) {
+  if (paperSize === 'LABEL_50_30') return { width: 50000, height: 30000 };
   if (paperSize === 'RECEIPT_80') return { width: 80000, height: 80000 };
   if (paperSize === 'RECEIPT_58') return { width: 58000, height: 80000 };
   return 'A4';
@@ -605,25 +609,46 @@ async function printJob(job) {
     const line1 = `${job.buyerNickname}, ${Math.round(job.amount).toLocaleString('ko-KR')}원`;
     const line2 = formatPrintDate(job.recognizedAt);
     await printWindow.loadFile(path.join(__dirname, 'ui', 'print.html'), {
-      query: { line1, line2 }
+      query: { line1, line2, paperSize: state.print.paperSize }
     });
     const rendered = await printWindow.webContents.executeJavaScript(`
-      Promise.resolve(document.fonts?.ready).then(() => ({
-        line1: document.querySelector('#line1')?.textContent || '',
-        line2: document.querySelector('#line2')?.textContent || ''
-      }))
+      new Promise((resolve) => {
+        const check = () => {
+          const l1 = document.querySelector('#line1')?.textContent || '';
+          const l2 = document.querySelector('#line2')?.textContent || '';
+          resolve({ line1: l1, line2: l2 });
+        };
+        if (document.fonts && document.fonts.ready) {
+          document.fonts.ready.then(() => setTimeout(check, 250));
+        } else {
+          setTimeout(check, 250);
+        }
+      })
     `);
     if (rendered.line1 !== line1 || rendered.line2 !== line2) {
       throw new Error('판매 전표 텍스트를 인쇄 화면에 표시하지 못했습니다.');
     }
+
+    // 렌더링 파이프라인 강제 활성화 (백그라운드 창의 페인트 버퍼 생성)
+    const previewImage = await printWindow.webContents.capturePage();
+    try {
+      fs.writeFileSync(path.join(app.getPath('userData'), 'last-print.png'), previewImage.toPNG());
+    } catch (_) {}
+
+    const printOptions = {
+      silent: true,
+      deviceName: state.print.printerName,
+      printBackground: true,
+      color: false,
+      margins: { marginType: 'none' }
+    };
+    const size = printPageSize(state.print.paperSize);
+    if (size && size !== 'A4') {
+      printOptions.pageSize = size;
+    }
+
     const result = await new Promise((resolve) => {
-      printWindow.webContents.print({
-        silent: true,
-        deviceName: state.print.printerName,
-        printBackground: true,
-        pageSize: printPageSize(state.print.paperSize),
-        margins: { marginType: 'none' }
-      }, (success, failureReason) => resolve({ success, failureReason }));
+      printWindow.webContents.print(printOptions, (success, failureReason) => resolve({ success, failureReason }));
     });
     if (!result.success) throw new Error(result.failureReason || 'Windows 프린터가 인쇄를 거부했습니다.');
     printedJobIds = [...printedJobIds, job.jobId].slice(-500);

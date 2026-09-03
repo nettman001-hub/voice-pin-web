@@ -48,7 +48,7 @@ function render(status) {
   const print = status.print || {};
   if (!printSettingsDirty && !printSettingsSaving) {
     printEnabled.checked = Boolean(print.enabled);
-    paperSize.value = print.paperSize || 'A4';
+    paperSize.value = print.paperSize || 'LABEL_50_30';
     if (print.printerName && printerSelect.options.length) printerSelect.value = print.printerName;
   }
   setPrintMessage(print.message);
@@ -75,8 +75,10 @@ async function loadPrinters(selectedName) {
     });
     if (selectedName) printerSelect.value = selectedName;
     if (!printerSelect.value) {
+      const preferredPrinter = printers.find((printer) => /xprinter|label|xp-/i.test(printer.name));
       const defaultPrinter = printers.find((printer) => printer.options?.isDefault);
-      if (defaultPrinter) printerSelect.value = defaultPrinter.name;
+      if (preferredPrinter) printerSelect.value = preferredPrinter.name;
+      else if (defaultPrinter) printerSelect.value = defaultPrinter.name;
     }
   } catch (error) {
     printerSelect.replaceChildren(new Option('프린터 목록을 읽지 못했습니다', ''));

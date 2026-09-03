@@ -1,7 +1,7 @@
 # VoiceCAP 개발 인계인수서
 
-작성일: 2026-08-30 (Asia/Seoul)
-목적: 다른 Windows PC에서 웹앱, 로컬 브리지 서버, Android `VoiceCAP SMS Bridge` 개발을 그대로 이어가기 위한 문서
+작성일: 2026-09-03 (Asia/Seoul)
+목적: 다른 Windows PC에서 웹앱, 로컬 브리지 서버, Android `VoiceCAP SMS Bridge`, Electron `VoiceCAP 댓글 도우미 (라벨 프린터 연동)` 개발을 그대로 이어가기 위한 문서
 
 ## 1. 현재 기준점
 
@@ -9,12 +9,13 @@
 |---|---|
 | 저장소 | `https://github.com/nettman001-hub/voice-pin-web.git` |
 | 기본 브랜치 | `main` |
-| 인계 기준 커밋 | `55bddc4 feat: 고객 거래 문자 대화 연동` |
 | 운영 사이트 | `https://www.voicecap.shop` |
-| Vercel 프로젝트 | `voice-pin-web` |
-| 마지막 확인 운영 번들 | `index-DaYTcMuf.js` |
+| Vercel 프로젝트 | `voice-pin-web` (`nettman001-5045s-projects`) |
 | Android 앱 ID | `shop.voicecap.smsbridge` |
 | Android 지원 | 최소 Android 8.0/API 26, target/compile API 35 |
+| 데스크톱 도우미 | Electron `shop.voicecap.commenthelper` v1.1.4 (틱톡 댓글 수집 + 라벨 프린터 연동) |
+| 검증 라벨 프린터 | `Xprinter XP-DT108B LABEL` (50x30 mm 감열 라벨지 지원) |
+| 실시간 STT 엔진 | Deepgram Nova-3 / Soniox 실시간 한국어 STT / Web Speech API (다중 엔진 지원) |
 
 문서 작성 직전 상태는 `main...origin/main` 동기화 상태이며, 코드 변경은 없었다. 이 문서를 추가한 커밋은 문서 작성 후 별도로 확인한다.
 
@@ -326,31 +327,80 @@ vercel curl https://www.voicecap.shop
 - `SENT`는 Android가 OS에 발송을 요청한 상태이며 통신사 최종 배달 성공을 뜻하지 않는다.
 - 입금 알림 업로드 API는 있으나 실제 스마트폰 입금 알림 수집 기능은 아직 구현하지 않았다.
 
-## 13. 다음 작업 권장 순서
+## 13. 라벨 프린터 & 전표 출력 시스템 (`desktop/comment-helper`)
 
-1. 실제 운영자 정보와 Google Play 개발자 계정을 확보한다.
-2. 업로드 키를 생성·백업하고 서명된 AAB를 만든다.
-3. 기본 SMS 앱으로서 필요한 대화 목록/수신 저장/답장 경험을 보강한다.
-4. 공개 개인정보 처리방침을 만들고 Play SMS 권한 선언을 작성한다.
-5. Play 내부 테스트에 올려 갤럭시에서 정상 설치되는지 확인한다.
-6. HTTPS SMS 브리지 호스팅 구조와 실제 사용자 인증을 설계한다.
-7. 실기기에서 구매정보 MMS 이미지, 고객 후속 문의, 판매자 계좌 안내, 배송 안내를 왕복 테스트한다.
-8. 추후 입금 알림 수집과 자동 대조 기능을 구현한다.
+2026-09-03 추가 구현 및 최적화 완료:
 
-## 14. 최근 핵심 커밋
+- **검증 기기**: `Xprinter XP-DT108B LABEL` (USB 포트 연결, Seagull Scientific 드라이버)
+- **지원 용지 규격**:
+  - `LABEL_50_30`: **50mm x 30mm 라벨 스티커** (기본 권장, 상하 2.5mm / 좌우 3.5mm 패딩, 14pt 볼드 헤드라인)
+  - `RECEIPT_80`: 80mm 감열 영수증
+  - `RECEIPT_58`: 58mm 감열 영수증
+  - `A4`: 일반 프린터
+- **연동 파이프라인**:
+  1. 웹앱(`LiveHomePage`)에서 판매 발생 또는 테스트 발화 주입
+  2. `SalesContext` → Socket.IO (`print:sale`) → 로컬 서버 (`http://127.0.0.1:2137`)
+  3. `server/index.js` → `process.parentPort` (MessagePort) → Electron 메인 프로세스
+  4. Electron이 `ui/print.html`을 렌더링하고 `webContents.print({ silent: true, color: false, pageSize: ... })` 호출
+  5. 처리 완료 시 웹앱의 판매 내역 카드에 `PRINTED` (녹색 전표 배지) 자동 반영
 
-- `55bddc4` 고객 거래 문자 대화 연동
-- `c3d31d0` SMS 앱 공식 배포 보안 요건 반영
-- `1aefe4c` Android 8 SMS 백그라운드 동기화 지원
-- `913a872` 판매 문자 대조 및 정산 배송 관리
-- `3308988` 고객 관리 메뉴 추가
+> ### ⚠️ 중요 주의사항 (감열 라벨지 필수)
+> - **Xprinter XP-DT108B**는 **감열식(Direct Thermal)** 프린터입니다.
+> - **반드시 감열 라벨지(Direct Thermal Label)**를 장착해야 글자가 열로 검게 인쇄됩니다.
+> - 일반 아트지나 비감열 라벨지를 장착할 경우, 인쇄 신호는 100% 정상 수신되어 용지가 피드되지만 **아무것도 인쇄되지 않은 백지만 배출**됩니다.
+> - **감열지 확인법**: 라벨지 표면을 손톱으로 세게 긁었을 때 검은색 선이 생기면 감열지입니다.
 
-## 15. 작업 종료 전 체크리스트
+## 14. 새 PC에서 작업 시작 시 가이드
+
+1. **저장소 클론 및 최신화**:
+   ```powershell
+   git clone https://github.com/nettman001-hub/voice-pin-web.git
+   cd voice-pin-web
+   npm install
+   ```
+2. **웹 개발 서버 실행**:
+   ```powershell
+   npm run dev
+   ```
+3. **댓글 도우미 및 라벨 프린터 중계기 실행**:
+   ```powershell
+   cd desktop/comment-helper
+   npm install
+   npm start
+   ```
+4. **프린터 설정 파일 (`AppData`)**:
+   `%APPDATA%\voicecap-comment-helper\print-settings.json`
+   ```json
+   {
+     "enabled": true,
+     "printerName": "Xprinter XP-DT108B LABEL",
+     "paperSize": "LABEL_50_30"
+   }
+   ```
+   (도우미 창의 UI에서도 실시간 변경 가능)
+
+## 15. 다음 작업 권장 순서
+
+1. **라벨 프린터 실출력 재검증**: 실제 감열 라벨지(50x30mm) 장착 후 웹 라이브 청취 홈에서 실시간 발화 인쇄 검증.
+2. 실제 운영자 정보와 Google Play 개발자 계정 확보 후 Android SMS Bridge 릴리스.
+3. 기본 SMS 앱으로서 필요한 대화 목록/수신 저장/답장 경험 보강.
+4. 공개 개인정보 처리방침을 만들고 Play SMS 권한 선언 작성.
+5. HTTPS SMS 브리지 호스팅 구조와 실제 사용자 인증 설계.
+
+## 16. 최근 핵심 커밋
+
+- `feat`: Xprinter 50x30mm 라벨 규격 추가 및 감열식 인쇄 파이프라인 최적화 (MessagePort 응답 보정, 렌더링 페인트 버퍼 강제 대기, 순수 흑색 모드)
+- `3a78974` fix: emphasize missing printer warning
+- `fc8e5fd` fix: use Nova-3 keyterm prompting
+- `93f7393` fix: restore comment helper updates
+- `11bc039` feat: add selectable Soniox STT service
+- `55bddc4` feat: 고객 거래 문자 대화 연동
+
+## 17. 작업 종료 전 체크리스트
 
 - `git status --short --branch`로 예상하지 못한 파일 확인
 - 비밀값과 고객 데이터가 staged 상태가 아닌지 확인
-- 웹 빌드, 서버 테스트, Android 빌드/린트 실행
+- 웹 빌드(`npm run build`), 서버 테스트(`npm test`), 데스크톱 테스트 통과 확인
 - 변경 파일만 커밋하고 `main` 푸시
-- 웹 변경이 있으면 Vercel 프로덕션 배포 후 Ready 상태 확인
-- 운영 사이트가 새 JS 번들을 응답하는지 확인
-- Android 키 또는 AAB를 Git에 올리지 않았는지 확인
+- Vercel 프로덕션 자동 배포 완료 확인 (`https://www.voicecap.shop` 및 Vercel 대시보드)
+

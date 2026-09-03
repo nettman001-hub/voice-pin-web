@@ -114,7 +114,8 @@ function sendPrintToHelper(payload, acknowledge) {
 }
 
 if (process.parentPort) {
-  process.parentPort.on('message', (message) => {
+  process.parentPort.on('message', (event) => {
+    const message = event && event.data ? event.data : event;
     if (!message || message.type !== 'print:result') return;
     const pending = pendingPrintRequests.get(message.requestId);
     if (!pending) return;

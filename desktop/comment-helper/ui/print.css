@@ -1,5 +1,112 @@
-@page { margin: 0; }
-* { box-sizing: border-box; }
-body { margin: 0; padding: 12mm; color: #000; font-family: "Malgun Gothic", sans-serif; }
-#line1 { font-size: 18pt; font-weight: 800; line-height: 1.45; }
-#line2 { margin-top: 4mm; font-size: 11pt; line-height: 1.35; }
+@page {
+  margin: 0;
+  size: 50mm 30mm;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  font-family: "Malgun Gothic", "맑은 고딕", sans-serif;
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
+  overflow: hidden;
+}
+
+.container {
+  padding: 2.5mm 3.5mm;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+#line1 {
+  font-size: 14pt;
+  font-weight: 900;
+  line-height: 1.25;
+  color: #000000 !important;
+  word-break: break-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.5px;
+}
+
+#line2 {
+  margin-top: 1.5mm;
+  font-size: 8.5pt;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #000000 !important;
+}
+
+@media print {
+  @page {
+    margin: 0;
+    size: 50mm 30mm;
+  }
+  html, body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+  }
+  #line1 {
+    color: #000000 !important;
+    font-size: 14pt !important;
+    font-weight: 900 !important;
+  }
+  #line2 {
+    color: #000000 !important;
+    font-size: 8.5pt !important;
+    font-weight: 700 !important;
+  }
+}
+
+/* 80mm 영수증 */
+body.RECEIPT_80 .container {
+  padding: 5mm 6mm;
+}
+body.RECEIPT_80 #line1 {
+  font-size: 16pt;
+  white-space: normal;
+}
+body.RECEIPT_80 #line2 {
+  margin-top: 3mm;
+  font-size: 10pt;
+}
+
+/* 58mm 영수증 */
+body.RECEIPT_58 .container {
+  padding: 3mm 4mm;
+}
+body.RECEIPT_58 #line1 {
+  font-size: 13.5pt;
+  white-space: normal;
+}
+body.RECEIPT_58 #line2 {
+  margin-top: 2mm;
+  font-size: 8.5pt;
+}
+
+/* A4 일반 */
+body.A4 .container {
+  padding: 12mm;
+}
+body.A4 #line1 {
+  font-size: 18pt;
+  white-space: normal;
+}
+body.A4 #line2 {
+  margin-top: 4mm;
+  font-size: 11pt;
+}
