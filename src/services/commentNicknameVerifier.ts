@@ -1,7 +1,7 @@
 import type { CommentRecord } from '../types/comment';
 
 const COMMENT_TIME_WINDOW_MS = 3 * 60 * 1000;
-const PURCHASE_INTENT_PATTERN = /(저요|구매|살게요|살께요|주세요|주문|결제|입금|확정)/u;
+const PURCHASE_INTENT_PATTERN = /(저요|ㅈ\s*ㅇ|구매|살게요|살께요|주세요|주문|결제|입금|확정)/u;
 
 export type NicknameVerificationKind =
   | 'EXACT'

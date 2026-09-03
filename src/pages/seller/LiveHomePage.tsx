@@ -401,11 +401,11 @@ export const LiveHomePage: React.FC = () => {
                       ⚡ 3.5만 구매확정
                     </button>
                     <button
-                      onClick={() => injectTestMent('댓글창 화면 캡처 부탁드립니다.')}
+                      onClick={() => injectTestMent('화면 캡처하세요.')}
                       className="px-2 py-0.5 rounded-lg bg-cyan-50 hover:bg-cyan-100 text-cyan-700 font-bold text-[10px] border border-cyan-200 transition"
-                      title="캡처 명령 테스트"
+                      title="캡처 명령 테스트 ('캡처하세요')"
                     >
-                      📸 캡처
+                      📸 캡처하세요
                     </button>
                   </div>
                 </div>
@@ -617,10 +617,10 @@ export const LiveHomePage: React.FC = () => {
                 + "러블리님 35,000원"
               </button>
               <button
-                onClick={() => injectTestMent('구매확정! 닉네임 민트초코님 가격 19,900원입니다. 댓글 캡처 부탁드려요.')}
+                onClick={() => injectTestMent('구매확정! 닉네임 민트초코님 가격 19,900원입니다. 캡처하세요.')}
                 className="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
               >
-                + "민트초코 19,900원 + 캡처"
+                + "민트초코 19,900원 + 캡처하세요"
               </button>
               <button
                 onClick={() => injectTestMent('수정 시작')}

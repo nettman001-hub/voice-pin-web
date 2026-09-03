@@ -30,7 +30,7 @@ export const DEFAULT_RULES: RecognitionWordRule[] = [
   { id: 'r2', word: '닉네임', action: 'DB_SAVE', isEnabled: true, isEssential: true, priority: 2, description: '구매자 닉네임 파싱' },
   { id: 'r3', word: '가격', action: 'DB_SAVE', isEnabled: true, isEssential: true, priority: 3, description: '판매 가격 파싱' },
   { id: 'r4', word: '금액', action: 'DB_SAVE', isEnabled: true, isEssential: true, priority: 4, description: '결제 금액 파싱' },
-  { id: 'r5', word: '캡처', action: 'SCREEN_CAPTURE', isEnabled: true, isEssential: false, priority: 5, description: '댓글/주문 화면 영역 자동 캡처' },
+  { id: 'r5', word: '캡처하세요', action: 'SCREEN_CAPTURE', isEnabled: true, isEssential: false, priority: 5, description: '고객 상품 확인 및 화면 영역 자동 캡처' },
   { id: 'r6', word: '결제완료', action: 'DB_SAVE_AND_CAPTURE', isEnabled: true, isEssential: false, priority: 6, description: 'DB 저장 및 화면 캡처 동시 실행' },
 ];
 

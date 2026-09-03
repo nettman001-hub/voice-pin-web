@@ -15,6 +15,7 @@ import { LoginPage } from './pages/auth/LoginPage';
 import { SignupPage } from './pages/auth/SignupPage';
 import { PasswordResetPage } from './pages/auth/PasswordResetPage';
 import { PricingPage } from './pages/auth/PricingPage';
+import { PrivacyPolicyPage } from './pages/legal/PrivacyPolicyPage';
 
 import { LiveHomePage } from './pages/seller/LiveHomePage';
 import { VoiceTrainingPage } from './pages/seller/VoiceTrainingPage';
@@ -47,8 +48,8 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // 온보딩 및 인증 페이지는 사이드바 및 하단 바 숨김
-  const authRoutes = ['/onboarding', '/login', '/signup', '/password/reset', '/pricing'];
+  // 온보딩 및 인증/공개 정책 페이지는 사이드바 및 하단 바 숨김
+  const authRoutes = ['/onboarding', '/login', '/signup', '/password/reset', '/pricing', '/privacy'];
   const isAuthRoute = authRoutes.some((route) => location.pathname === route);
 
   const showNav = isAuthenticated && !isAuthRoute;
@@ -119,6 +120,7 @@ export const App: React.FC = () => {
                   <Route path="/signup" element={<SignupPage />} />
                   <Route path="/password/reset" element={<PasswordResetPage />} />
                   <Route path="/pricing" element={<PricingPage />} />
+                  <Route path="/privacy" element={<PrivacyPolicyPage />} />
 
                   <Route element={<ProtectedRoute />}>
                     {/* 2. 판매자 핵심 기능 (PG-006 ~ PG-013) */}

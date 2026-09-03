@@ -74,7 +74,12 @@ interface LiveContextType {
   stopListening: () => void;
   disconnectScreenShare: () => void;
   injectTestMent: (text: string) => void;
-  captureCurrentScreen: (area?: CaptureAreaConfig, triggerWord?: string) => Promise<string>;
+  captureCurrentScreen: (
+    area?: CaptureAreaConfig,
+    triggerWord?: string,
+    requiredListeningGeneration?: number,
+    targetSaleId?: string
+  ) => Promise<string>;
 }
 
 const LiveContext = createContext<LiveContextType | undefined>(undefined);
@@ -203,7 +208,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const captureCurrentScreen = async (
     areaConfig?: CaptureAreaConfig,
     triggerWord: string = '화면 캡처',
-    requiredListeningGeneration?: number
+    requiredListeningGeneration?: number,
+    targetSaleId?: string
   ): Promise<string> => {
     const requestedUserId = currentUserIdRef.current;
     const requestedAuthGeneration = authBoundaryGenerationRef.current;
@@ -244,11 +250,13 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 2. 화면 비디오 스트림 가져오기
     const stream = screenCaptureService.getActiveStream();
-    const lastSale = lastSavedSaleRef.current;
+    const targetSale = targetSaleId
+      ? (sales.find((s) => s.id === targetSaleId) || lastSavedSaleRef.current)
+      : lastSavedSaleRef.current;
 
     const imageUrl = await screenCaptureService.captureArea(stream, configuredArea, {
-      nickname: lastSale?.buyerNickname,
-      amount: lastSale?.amount,
+      nickname: targetSale?.buyerNickname,
+      amount: targetSale?.amount,
       timestamp: new Date().toLocaleTimeString('ko-KR')
     });
 
@@ -285,7 +293,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const newCapture: CaptureItem = {
       id: `cap-${Date.now()}`,
-      saleId: lastSale?.id,
+      saleId: targetSale?.id,
       sessionId: currentSessionId,
       imageUrl,
       capturedAt: new Date().toISOString(),
@@ -296,11 +304,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     storageService.addCapture(newCapture);
     setRecentCaptures((prev) => [newCapture, ...prev.slice(0, 9)]);
 
-    // 가장 최근 판매 내역에 캡처 이미지 연결
-    if (lastSale) {
+    // 지정 판매 내역 또는 가장 최근 판매 내역에 캡처 이미지 연결
+    if (targetSale) {
       const updatedSale: SaleRecord = {
-        ...lastSale,
-        captureImageUrls: [...(lastSale.captureImageUrls || []), imageUrl]
+        ...targetSale,
+        captureImageUrls: [...(targetSale.captureImageUrls || []), imageUrl]
       };
       updateSale(updatedSale);
       lastSavedSaleRef.current = updatedSale;
@@ -614,6 +622,18 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ? null
         : extractSaleFromTranscript(fullText, activeKeywords);
 
+      // 캡처 조건: '캡처하세요' 멘트가 반드시 포함되어 있어야 함
+      // (띄어쓰기 유연성 및 단어 규칙 관리 등록 반영)
+      const hasCaptureInstruction =
+        !processingOptions.skipCapture &&
+        (/(캡처\s*하세요|캡쳐\s*하세요)/u.test(fullText) ||
+          rules.some(
+            (r) =>
+              r.isEnabled &&
+              (r.word.includes('캡처하세요') || r.word.includes('캡쳐하세요')) &&
+              fullText.includes(r.word)
+          ));
+
       if (saleResult) {
         const recognizedAt = new Date().toISOString();
         const nicknameVerification = verifyNicknameFromComments({
@@ -644,18 +664,30 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           note: nicknameVerificationNote(nicknameVerification)
         });
         lastSavedSaleRef.current = saved;
-        actionTriggered = 'SALE_SAVED';
-        ruleActionName = '🛍️ 판매 DB 자동 저장';
-        playBeep(1046, 120);
-      }
 
-      // 3. 캡처 트리거 감지 ("캡처", "화면 캡처" 등)
-      if (
-        !processingOptions.skipCapture &&
-        (fullText.includes('캡처') || fullText.includes('화면캡처'))
+        if (hasCaptureInstruction) {
+          actionTriggered = 'SALE_SAVED';
+          ruleActionName = '🛍️ 판매 DB 저장 + 📸 캡처하세요 연동';
+          playBeep(1046, 120);
+          void captureCurrentScreen(
+            undefined,
+            '캡처하세요 (판매 자동 연동)',
+            requiredListeningGeneration,
+            saved.id
+          );
+        } else {
+          actionTriggered = 'SALE_SAVED';
+          ruleActionName = '🛍️ 판매 DB 자동 저장';
+          playBeep(1046, 120);
+        }
+      } else if (
+        hasCaptureInstruction ||
+        (!processingOptions.skipCapture &&
+          (fullText.includes('화면캡처') || fullText.includes('화면 캡처')))
       ) {
+        // 3. 단독 캡처 트리거 감지 (판매 멘트가 없을 때 '캡처하세요' 또는 '화면 캡처')
         actionTriggered = 'SCREEN_CAPTURED';
-        ruleActionName = ruleActionName ? `${ruleActionName} + 📸 캡처` : '📸 화면 자동 캡처';
+        ruleActionName = '📸 화면 자동 캡처';
         void captureCurrentScreen(
           undefined,
           '음성인식 자동캡처',
