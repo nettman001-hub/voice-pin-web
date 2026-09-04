@@ -17,7 +17,7 @@ export type OnTranscriptCallback = (data: {
 export type OnErrorCallback = (error: string) => void;
 export type OnStatusCallback = (status: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR', message?: string) => void;
 
-export type ActiveSttEngine = SttProvider | 'WEB_SPEECH' | 'NONE';
+export type ActiveSttEngine = SttProvider | 'WEB_SPEECH' | 'LOCAL_WHISPER' | 'NONE';
 
 export class DeepgramSttService {
   private ws: WebSocket | null = null;

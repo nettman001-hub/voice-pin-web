@@ -232,6 +232,8 @@ const KEYS = {
   DEEPGRAM_API_KEY: 'dadryeo_deepgram_api_key',
   SONIOX_API_KEY: 'voicecap_soniox_api_key',
   STT_PROVIDER: 'voicecap_stt_provider',
+  STT_MODE: 'voicecap_stt_mode',
+  LOCAL_STT_MODEL: 'voicecap_local_stt_model',
   CAPTURE_AREA: 'voicecap_capture_area_config',
   CAPTURE_AREA_SNAPSHOT: 'voicecap_capture_area_snapshot',
   COMMENT_RECORDS: 'voicecap_comment_records',
@@ -309,6 +311,24 @@ export class StorageService {
     localStorage.setItem(KEYS.STT_PROVIDER, provider);
   }
 
+  // STT 모드: 'CLOUD' (기존 API) | 'LOCAL' (내 PC 무료 faster-whisper)
+  public getSttMode(): 'CLOUD' | 'LOCAL' {
+    return localStorage.getItem(KEYS.STT_MODE) === 'LOCAL' ? 'LOCAL' : 'CLOUD';
+  }
+  public setSttMode(mode: 'CLOUD' | 'LOCAL'): void {
+    localStorage.setItem(KEYS.STT_MODE, mode);
+  }
+
+  // 로컬 STT 모델 선택: 'large-v3-turbo' | 'small' | 'base'
+  public getLocalSttModel(): 'large-v3-turbo' | 'small' | 'base' {
+    const m = localStorage.getItem(KEYS.LOCAL_STT_MODEL);
+    if (m === 'small' || m === 'base') return m;
+    return 'large-v3-turbo';
+  }
+  public setLocalSttModel(model: 'large-v3-turbo' | 'small' | 'base'): void {
+    localStorage.setItem(KEYS.LOCAL_STT_MODEL, model);
+  }
+
   // 전체 데이터 백업 (JSON 파일 다운로드용)
   public exportFullBackup(): string {
     const backupData = {
@@ -323,7 +343,9 @@ export class StorageService {
       commerce: this.getCommerceState(),
       deepgramApiKey: this.getDeepgramApiKey(),
       sonioxApiKey: this.getSonioxApiKey(),
-      sttProvider: this.getSttProvider()
+      sttProvider: this.getSttProvider(),
+      sttMode: this.getSttMode(),
+      localSttModel: this.getLocalSttModel()
     };
     return JSON.stringify(backupData, null, 2);
   }
@@ -343,6 +365,12 @@ export class StorageService {
       if (data.sonioxApiKey) this.setSonioxApiKey(data.sonioxApiKey);
       if (data.sttProvider === 'DEEPGRAM' || data.sttProvider === 'SONIOX') {
         this.setSttProvider(data.sttProvider);
+      }
+      if (data.sttMode === 'CLOUD' || data.sttMode === 'LOCAL') {
+        this.setSttMode(data.sttMode);
+      }
+      if (data.localSttModel === 'large-v3-turbo' || data.localSttModel === 'small' || data.localSttModel === 'base') {
+        this.setLocalSttModel(data.localSttModel);
       }
       return true;
     } catch (e) {

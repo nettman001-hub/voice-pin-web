@@ -7,7 +7,7 @@ const sourceServer = path.join(repoRoot, 'server');
 const targetServer = path.join(helperRoot, 'server');
 const runtimeDir = path.join(helperRoot, 'build-runtime');
 
-const serverFiles = ['index.js', 'bridgeApi.js', 'bridgeStore.js'];
+const serverFiles = ['index.js', 'bridgeApi.js', 'bridgeStore.js', 'sttBridge.js', 'stt_worker.py'];
 
 fs.rmSync(targetServer, { recursive: true, force: true });
 fs.mkdirSync(targetServer, { recursive: true });

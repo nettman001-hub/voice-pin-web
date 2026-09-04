@@ -18,6 +18,7 @@ const cors = require('cors');
 const { Server } = require('socket.io');
 const { BridgeStore } = require('./bridgeStore');
 const { createBridgeRouter } = require('./bridgeApi');
+const { sttBridge, setupSttBridge } = require('./sttBridge');
 const {
   TikTokLiveConnection,
   WebcastEvent,
@@ -195,6 +196,13 @@ app.use('/api', createBridgeRouter({
   apiKey: SMS_BRIDGE_API_KEY,
   onEvent: (eventName, payload) => io.emit(eventName, payload)
 }));
+
+// 오프라인 로컬 STT (faster-whisper 워커 및 Socket.IO 브리지)
+setupSttBridge(io);
+
+app.get('/api/stt/status', (_req, res) => {
+  res.json({ ok: true, ...sttBridge.getStatus() });
+});
 
 // engine.io가 /socket.io/ OPTIONS preflight를 직접 처리하므로(express 미들웨어보다 먼저),
 // 리스너 배열 맨 앞에 붙여 PNA 헤더를 모든 응답(특히 socket.io preflight)에 보장한다.
@@ -451,6 +459,7 @@ process.on('SIGTERM', shutdown);
 function shutdown() {
   log('종료 신호 수신 - 정리 중...');
   stopCollecting(true);
+  sttBridge.destroy();
   io.close();
   httpServer.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 2000).unref();

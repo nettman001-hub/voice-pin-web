@@ -1,4 +1,4 @@
-﻿# VoiceCAP 개발 인계인수서
+# VoiceCAP 개발 인계인수서
 
 작성일: 2026-09-04 (Asia/Seoul)
 목적: 다른 Windows PC에서 웹앱, 로컬 브리지 서버, Android `VoiceCAP SMS Bridge`, Electron `VoiceCAP 댓글 도우미 (라벨 프린터 연동)` 개발 및 배포를 그대로 완벽하게 이어가기 위한 최신 마스터 인계 문서
@@ -19,7 +19,7 @@
 | Android 서명키 | 4096비트 RSA 업로드 키 생성 완료 | `signing/voicecap-upload.jks` |
 | 데스크톱 도우미 | Electron `shop.voicecap.commenthelper` v1.1.4 | 틱톡 댓글 수집 + 라벨 프린터 연동 |
 | 검증 라벨 프린터 | `Xprinter XP-DT108B LABEL` (50x30 mm 감열 라벨지 지원) | 순수 흑색 모드, 자동 인쇄 |
-| 실시간 STT 엔진 | Deepgram Nova-3 / Soniox 실시간 한국어 STT / Web Speech API | 다중 엔진 지원 |
+| 실시간 STT 엔진 | Deepgram Nova-3 / Soniox / faster-whisper (로컬 무료) / Web Speech | 클라우드 & 무료 오프라인 하이브리드 지원 |
 | 라이브 판매 캡처 | '캡처하세요' 발화 시 화면 자동 캡처 & 90% 용량 압축 | 960px 다운스케일링, JPEG 0.72 |
 | 댓글 구매의사 감지 | '저요', '구매', '주세요', **'ㅈㅇ'** 등 | 초성 'ㅈㅇ' 인식 확장 완료 |
 
@@ -121,6 +121,11 @@ $env:VOICECAP_UPLOAD_KEY_PASSWORD = 'VoiceCAP!2026UploadKey#982'
 
 ### 4) Google Search Console 사이트 소유권 확인 연동
 - `index.html`의 `<head>` 섹션에 소유권 확인 메타 태그(`h_I_KItXuFu7NRFoHcnkiXeBTbIBrCxFNks972JSTtU`) 삽입 및 배포 완료.
+
+### 5) 무료 오프라인 로컬 STT (faster-whisper) 연동
+- **도입 목적**: 클라우드 STT API(유료) 없이 사용자 PC에서 완전 무료로 오프라인 음성인식을 구동할 수 있도록 지원.
+- **아키텍처**: 브라우저(16kHz PCM16 바이너리 오디오) ➔ 댓글 도우미 로컬 브리지(Socket.IO `127.0.0.1:2137`) ➔ Python 워커(`faster-whisper` + Silero VAD + CPU `int8` 양자화 가속).
+- **UI 지원**: 라이브 청취 홈에서 `[☁️ 클라우드 STT]` / `[💻 내 PC 무료 STT]` 원클릭 전환, 모델(`base`, `small`, `large-v3-turbo`) 선택 및 준비 상태 뱃지 제공. 무료 모드 시 API 키 검사 자동 생략.
 
 ---
 

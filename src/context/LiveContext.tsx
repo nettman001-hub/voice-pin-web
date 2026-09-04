@@ -11,6 +11,8 @@ import { useSales } from './SalesContext';
 import { useAuth } from './AuthContext';
 import { CaptureAreaConfig } from '../types/rules';
 import { SttProvider } from '../types/deepgram';
+import { localSttService } from '../services/localSttService';
+import { LocalSttModel, LocalSttStatusPayload, SttMode } from '../types/stt';
 
 const SONIOX_SALE_TIMEOUT_MS = 10000;
 const SONIOX_BUFFER_LIMIT = 600;
@@ -66,6 +68,11 @@ interface LiveContextType {
   setSonioxApiKey: (key: string) => void;
   sttProvider: SttProvider;
   setSttProvider: (provider: SttProvider) => void;
+  sttMode: SttMode;
+  setSttMode: (mode: SttMode) => void;
+  localSttModel: LocalSttModel;
+  setLocalSttModel: (model: LocalSttModel) => void;
+  localSttStatus: LocalSttStatusPayload;
   sttEngineStatus: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
   sttEngineMessage: string;
   isScreenShareConnected: boolean;
@@ -114,6 +121,22 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [deepgramApiKey, setDeepgramApiKeyState] = useState<string>(storageService.getDeepgramApiKey());
   const [sonioxApiKey, setSonioxApiKeyState] = useState<string>(storageService.getSonioxApiKey());
   const [sttProvider, setSttProviderState] = useState<SttProvider>(storageService.getSttProvider());
+
+  // STT 모드 (클라우드 vs 로컬) 및 로컬 모델 설정
+  const [sttMode, setSttModeState] = useState<SttMode>(storageService.getSttMode());
+  const [localSttModel, setLocalSttModelState] = useState<LocalSttModel>(storageService.getLocalSttModel());
+  const [localSttStatus, setLocalSttStatus] = useState<LocalSttStatusPayload>(localSttService.getStatus());
+  const sttModeRef = useRef<SttMode>(sttMode);
+
+  useEffect(() => {
+    sttModeRef.current = sttMode;
+  }, [sttMode]);
+
+  useEffect(() => {
+    return localSttService.subscribeStatus((status) => {
+      setLocalSttStatus(status);
+    });
+  }, []);
 
   // 최신 세션/상태 ref 유지
   const isListeningRef = useRef<boolean>(false);
@@ -169,6 +192,18 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const setSttProvider = (provider: SttProvider) => {
     setSttProviderState(provider);
     storageService.setSttProvider(provider);
+  };
+
+  const setSttMode = (mode: SttMode) => {
+    setSttModeState(mode);
+    sttModeRef.current = mode;
+    storageService.setSttMode(mode);
+  };
+
+  const setLocalSttModel = (model: LocalSttModel) => {
+    setLocalSttModelState(model);
+    storageService.setLocalSttModel(model);
+    localSttService.loadModel(model);
   };
 
   // 비프음/신호음 재생
@@ -525,7 +560,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       text: string;
       isFinal: boolean;
       confidence: number;
-      provider?: 'DEEPGRAM' | 'SONIOX' | 'WEB_SPEECH' | 'NONE';
+      provider?: 'DEEPGRAM' | 'SONIOX' | 'WEB_SPEECH' | 'LOCAL_WHISPER' | 'NONE';
       confirmedTextDelta?: string;
     },
     requiredListeningGeneration?: number,
@@ -769,7 +804,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           isListeningRef.current &&
           currentUserIdRef.current === requestedUserId
         ) {
-          deepgramService.sendAudioChunk(chunk);
+          if (sttModeRef.current === 'LOCAL') {
+            localSttService.sendAudioChunk(chunk);
+          } else {
+            deepgramService.sendAudioChunk(chunk);
+          }
         }
       };
 
@@ -818,53 +857,89 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         shareOwnerUserIdRef.current = requestedUserId;
       }
 
-      // 관리자가 선택한 STT 공급자와 최신 API Key 확인
-      const activeSttProvider = sttProvider || storageService.getSttProvider();
-      const activeApiKey = activeSttProvider === 'SONIOX'
-        ? sonioxApiKey || storageService.getSonioxApiKey()
-        : deepgramApiKey || storageService.getDeepgramApiKey();
+      // 2. 실시간 STT 엔진 시작
+      if (sttModeRef.current === 'LOCAL') {
+        // [내 PC 무료 STT] faster-whisper 로컬 브리지 시작
+        localSttService.startListening(
+          newSessionId,
+          listeningGeneration,
+          keyterms.join(', '),
+          (data) => {
+            handleTranscript(data, listeningGeneration, requestedUserId);
+          },
+          (err) => {
+            if (listeningGenerationRef.current === listeningGeneration) {
+              console.error('[Live] 로컬 STT 에러 알림:', err);
+            }
+          },
+          (status, message) => {
+            if (
+              listeningGenerationRef.current !== listeningGeneration ||
+              currentUserIdRef.current !== requestedUserId
+            ) return;
 
-      // 2. 실시간 STT 엔진 시작 (Deepgram Nova-3 / Soniox v5 / 브라우저 Web Speech API)
-      deepgramService.startLiveStream(
-        {
-          provider: activeSttProvider,
-          apiKey: activeApiKey,
-          model: 'nova-3',
-          language: 'ko',
-          keyterms,
-          punctuate: true,
-          interimResults: true,
-          endpointing: 300,
-          allowBrowserSpeechFallback: mode === 'MIC'
-        },
-        (data) => {
-          handleTranscript(data, listeningGeneration, requestedUserId);
-        },
-        (err) => {
-          if (listeningGenerationRef.current === listeningGeneration) {
-            console.error('[Live] STT 스트림 에러 알림:', err);
+            setSttEngineStatus(status);
+            if (message) setSttEngineMessage(message);
+            if (status === 'ERROR' && mode === 'TAB_AUDIO') {
+              listeningGenerationRef.current += 1;
+              activeListeningUserIdRef.current = null;
+              isListeningRef.current = false;
+              setIsListening(false);
+              audioCaptureService.pauseCapture();
+              setAudioLevel(0);
+              setWaveform(new Uint8Array(128));
+              resetSonioxBusinessAccumulator();
+            }
           }
-        },
-        (status, message) => {
-          if (
-            listeningGenerationRef.current !== listeningGeneration ||
-            currentUserIdRef.current !== requestedUserId
-          ) return;
+        );
+      } else {
+        // [클라우드 STT] 관리자가 선택한 STT 공급자와 최신 API Key 확인
+        const activeSttProvider = sttProvider || storageService.getSttProvider();
+        const activeApiKey = activeSttProvider === 'SONIOX'
+          ? sonioxApiKey || storageService.getSonioxApiKey()
+          : deepgramApiKey || storageService.getDeepgramApiKey();
 
-          setSttEngineStatus(status);
-          if (message) setSttEngineMessage(message);
-          if (status === 'ERROR' && mode === 'TAB_AUDIO') {
-            listeningGenerationRef.current += 1;
-            activeListeningUserIdRef.current = null;
-            isListeningRef.current = false;
-            setIsListening(false);
-            audioCaptureService.pauseCapture();
-            setAudioLevel(0);
-            setWaveform(new Uint8Array(128));
-            resetSonioxBusinessAccumulator();
+        deepgramService.startLiveStream(
+          {
+            provider: activeSttProvider,
+            apiKey: activeApiKey,
+            model: 'nova-3',
+            language: 'ko',
+            keyterms,
+            punctuate: true,
+            interimResults: true,
+            endpointing: 300,
+            allowBrowserSpeechFallback: mode === 'MIC'
+          },
+          (data) => {
+            handleTranscript(data, listeningGeneration, requestedUserId);
+          },
+          (err) => {
+            if (listeningGenerationRef.current === listeningGeneration) {
+              console.error('[Live] STT 스트림 에러 알림:', err);
+            }
+          },
+          (status, message) => {
+            if (
+              listeningGenerationRef.current !== listeningGeneration ||
+              currentUserIdRef.current !== requestedUserId
+            ) return;
+
+            setSttEngineStatus(status);
+            if (message) setSttEngineMessage(message);
+            if (status === 'ERROR' && mode === 'TAB_AUDIO') {
+              listeningGenerationRef.current += 1;
+              activeListeningUserIdRef.current = null;
+              isListeningRef.current = false;
+              setIsListening(false);
+              audioCaptureService.pauseCapture();
+              setAudioLevel(0);
+              setWaveform(new Uint8Array(128));
+              resetSonioxBusinessAccumulator();
+            }
           }
-        }
-      );
+        );
+      }
     } catch (err) {
       // 이미 stop/logout으로 무효화된 시작의 늦은 실패는 현재 UI를 덮지 않는다.
       if (listeningGenerationRef.current === listeningGeneration) {
@@ -878,6 +953,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } else {
           audioCaptureService.stopCapture();
         }
+        localSttService.stopListening();
         deepgramService.stopLiveStream();
         setSttEngineStatus('ERROR');
         setSttEngineMessage(err instanceof Error ? err.message : '라이브 청취 시작 실패');
@@ -899,6 +975,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       audioCaptureService.stopCapture();
     }
     resetSonioxBusinessAccumulator();
+    localSttService.stopListening();
     deepgramService.stopLiveStream();
     setSttEngineStatus('DISCONNECTED');
     setSttEngineMessage(
@@ -1003,6 +1080,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setSonioxApiKey,
         sttProvider,
         setSttProvider,
+        sttMode,
+        setSttMode,
+        localSttModel,
+        setLocalSttModel,
+        localSttStatus,
         sttEngineStatus,
         sttEngineMessage,
         isScreenShareConnected: screenConnection.isConnected,

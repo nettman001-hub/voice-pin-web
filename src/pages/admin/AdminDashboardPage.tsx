@@ -159,6 +159,17 @@ export const AdminDashboardPage: React.FC = () => {
           </button>
         </div>
 
+        {/* 💻 오프라인 무료 로컬 STT (내 PC Whisper) 안내 */}
+        <div className="p-3.5 rounded-2xl bg-white/80 border border-cyan-200/60 text-xs text-slate-600 flex items-start space-x-2.5">
+          <span className="text-base">💻</span>
+          <div className="space-y-0.5">
+            <span className="font-black text-slate-800">무료 오프라인 STT 안내</span>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              판매자는 라이브 청취 홈에서 <span className="font-bold text-brand-700">[내 PC 무료 STT]</span>를 선택하여 클라우드 API 사용료 없이 사용자 PC의 faster-whisper 모델로 직접 음성인식을 실행할 수 있습니다. 위 클라우드 기본 설정은 [클라우드 STT] 모드를 사용하는 판매자에게 적용됩니다.
+            </p>
+          </div>
+        </div>
+
         {/* 🔑 Deepgram Nova-3 클라우드 STT API Key 중앙 관리 카드 (관리자 전용) */}
         <div className="bg-gradient-to-br from-white via-brand-50/20 to-purple-50/30 border-2 border-brand-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">

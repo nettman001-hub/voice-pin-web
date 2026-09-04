@@ -21,8 +21,10 @@ import {
   Key,
   X,
   MessageSquareText,
-  VolumeX
+  VolumeX,
+  Cpu
 } from 'lucide-react';
+import { LocalSttModel, SttMode } from '../../types/stt';
 
 const SILENCE_WARNING_DELAY_MS = 5 * 60 * 1000;
 const SILENCE_STOP_COUNTDOWN_SECONDS = 20;
@@ -45,6 +47,11 @@ export const LiveHomePage: React.FC = () => {
     sonioxApiKey,
     setSonioxApiKey,
     sttProvider,
+    sttMode,
+    setSttMode,
+    localSttModel,
+    setLocalSttModel,
+    localSttStatus,
     sttEngineStatus,
     sttEngineMessage,
     hasScreenShareAudio,
@@ -219,6 +226,70 @@ export const LiveHomePage: React.FC = () => {
 
         {/* 오디오 소스 선택 및 제어 버튼 (모바일 뷰 친화적 그리드) */}
         <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 sm:gap-3">
+          {/* 음성인식 방식 선택 (클라우드 vs 내 PC 무료) */}
+          <div className="grid grid-cols-2 sm:flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200 text-xs">
+            <button
+              onClick={() => setSttMode('CLOUD')}
+              disabled={isListening}
+              className={`px-3 py-2 sm:py-1.5 rounded-xl font-bold transition flex items-center justify-center space-x-1.5 ${
+                sttMode === 'CLOUD'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+              title="Deepgram Nova-3 또는 Soniox v5 클라우드 API (API 키 필요)"
+            >
+              <span>☁️ 클라우드 STT</span>
+            </button>
+            <button
+              onClick={() => setSttMode('LOCAL')}
+              disabled={isListening}
+              className={`px-3 py-2 sm:py-1.5 rounded-xl font-bold transition flex items-center justify-center space-x-1.5 ${
+                sttMode === 'LOCAL'
+                  ? 'bg-white text-brand-700 shadow-sm ring-1 ring-brand-500/20'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+              title="내 PC faster-whisper 오프라인 STT (무료, API 키 불필요)"
+            >
+              <span className="flex items-center space-x-1">
+                <span>💻 내 PC 무료 STT</span>
+                <span className="px-1 py-0.2 text-[9px] bg-brand-100 text-brand-700 font-black rounded">무료</span>
+              </span>
+            </button>
+          </div>
+
+          {/* 로컬 STT 전용 모델 선택 및 상태 표시 */}
+          {sttMode === 'LOCAL' && (
+            <div className="flex items-center space-x-1.5 bg-brand-50/70 border border-brand-200/70 px-2.5 py-1.5 rounded-2xl text-xs">
+              <Cpu className="w-3.5 h-3.5 text-brand-600 shrink-0" />
+              <span className="font-bold text-brand-900 shrink-0">모델:</span>
+              <select
+                value={localSttModel}
+                disabled={isListening}
+                onChange={(e) => setLocalSttModel(e.target.value as LocalSttModel)}
+                className="bg-white border border-brand-300 text-brand-900 font-bold rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
+              >
+                <option value="base">base (가장 빠름 · 권장)</option>
+                <option value="small">small (보통 속도)</option>
+                <option value="large-v3-turbo">large-v3-turbo (정확도 우선)</option>
+              </select>
+              <span
+                className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded shrink-0 ${
+                  localSttStatus.state === 'READY' || localSttStatus.state === 'LISTENING'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : localSttStatus.state === 'LOADING'
+                    ? 'bg-amber-100 text-amber-700 animate-pulse'
+                    : 'bg-rose-100 text-rose-700'
+                }`}
+                title={localSttStatus.message}
+              >
+                {localSttStatus.state === 'READY' ? '준비됨 (CPU int8)' :
+                 localSttStatus.state === 'LISTENING' ? '청취 중' :
+                 localSttStatus.state === 'LOADING' ? '로딩 중...' :
+                 localSttStatus.state === 'HELPER_OFFLINE' ? '도우미 미실행' : '대기'}
+              </span>
+            </div>
+          )}
+
           {/* 소리 입력 소스 선택 셀렉터 */}
           <div className="grid grid-cols-2 sm:flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200 text-xs">
             <button
@@ -246,26 +317,36 @@ export const LiveHomePage: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-2 sm:flex items-center gap-2 sm:gap-3">
-            <button
-              onClick={() => {
-                if (isAdmin) {
-                  setKeyInput(selectedSttApiKey || '');
-                  setShowKeyModal(true);
-                } else {
-                  setShowAdminOnlyModal(true);
-                }
-              }}
-              className={`px-3 py-2.5 sm:px-3.5 sm:py-3 rounded-xl text-xs font-bold border flex items-center justify-center space-x-1.5 transition ${
-                isAdmin
-                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200 cursor-pointer'
-                  : 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed opacity-80'
-              }`}
-              title={isAdmin ? `${selectedSttName} AI Key 설정 (관리자 전용)` : 'AI 키 설정은 관리자만 변경할 수 있습니다'}
-            >
-              <Key className={`w-3.5 h-3.5 ${isAdmin ? 'text-amber-500' : 'text-slate-400'}`} />
-              <span>{sttProvider === 'SONIOX' ? 'Soniox' : 'Deepgram'} 키 {selectedSttApiKey ? '연결됨' : '설정'}</span>
-              {!isAdmin && <span className="text-[9px] text-slate-400 bg-slate-200/60 px-1 py-0.2 rounded">관리자</span>}
-            </button>
+            {sttMode === 'CLOUD' ? (
+              <button
+                onClick={() => {
+                  if (isAdmin) {
+                    setKeyInput(selectedSttApiKey || '');
+                    setShowKeyModal(true);
+                  } else {
+                    setShowAdminOnlyModal(true);
+                  }
+                }}
+                className={`px-3 py-2.5 sm:px-3.5 sm:py-3 rounded-xl text-xs font-bold border flex items-center justify-center space-x-1.5 transition ${
+                  isAdmin
+                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200 cursor-pointer'
+                    : 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed opacity-80'
+                }`}
+                title={isAdmin ? `${selectedSttName} AI Key 설정 (관리자 전용)` : 'AI 키 설정은 관리자만 변경할 수 있습니다'}
+              >
+                <Key className={`w-3.5 h-3.5 ${isAdmin ? 'text-amber-500' : 'text-slate-400'}`} />
+                <span>{sttProvider === 'SONIOX' ? 'Soniox' : 'Deepgram'} 키 {selectedSttApiKey ? '연결됨' : '설정'}</span>
+                {!isAdmin && <span className="text-[9px] text-slate-400 bg-slate-200/60 px-1 py-0.2 rounded">관리자</span>}
+              </button>
+            ) : (
+              <div
+                className="px-3 py-2.5 sm:px-3.5 sm:py-3 rounded-xl text-xs font-bold border border-emerald-200 bg-emerald-50/80 text-emerald-800 flex items-center justify-center space-x-1.5 select-none"
+                title="내 PC 무료 STT는 API 사용료가 없는 완전 무료 오프라인 모드입니다."
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span>무료 모드 (키 불필요)</span>
+              </div>
+            )}
 
             <button
               onClick={handleInstantCapture}
