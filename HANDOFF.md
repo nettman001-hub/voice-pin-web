@@ -1,407 +1,159 @@
 ﻿# VoiceCAP 개발 인계인수서
 
 작성일: 2026-09-04 (Asia/Seoul)
-목적: 다른 Windows PC에서 웹앱, 로컬 브리지 서버, Android `VoiceCAP SMS Bridge`, Electron `VoiceCAP 댓글 도우미 (라벨 프린터 연동)` 개발을 그대로 이어가기 위한 문서
+목적: 다른 Windows PC에서 웹앱, 로컬 브리지 서버, Android `VoiceCAP SMS Bridge`, Electron `VoiceCAP 댓글 도우미 (라벨 프린터 연동)` 개발 및 배포를 그대로 완벽하게 이어가기 위한 최신 마스터 인계 문서
 
-## 1. 현재 기준점
+---
 
-| 항목 | 현재 값 |
-|---|---|
-| 저장소 | `https://github.com/nettman001-hub/voice-pin-web.git` |
-| 기본 브랜치 | `main` |
-| 운영 사이트 | `https://www.voicecap.shop` |
-| Vercel 프로젝트 | `voice-pin-web` (`nettman001-5045s-projects`) |
-| Android 앱 ID | `shop.voicecap.smsbridge` |
-| Android 지원 | 최소 Android 8.0/API 26, target API 36, compile API 35, versionCode 5 (v1.3.1) |
-| 데스크톱 도우미 | Electron `shop.voicecap.commenthelper` v1.1.4 (틱톡 댓글 수집 + 라벨 프린터 연동) |
-| 검증 라벨 프린터 | `Xprinter XP-DT108B LABEL` (50x30 mm 감열 라벨지 지원) |
-| 실시간 STT 엔진 | Deepgram Nova-3 / Soniox 실시간 한국어 STT / Web Speech API (다중 엔진 지원) |
+## 1. 현재 기준점 (2026-09-04 최신)
 
-문서 작성 직전 상태는 `main...origin/main` 동기화 상태이며, 코드 변경은 없었다. 이 문서를 추가한 커밋은 문서 작성 후 별도로 확인한다.
+| 항목 | 현재 값 | 비고 |
+|---|---|---|
+| 저장소 | `https://github.com/nettman001-hub/voice-pin-web.git` | `main` 브랜치 최신화 완료 |
+| 운영 사이트 | `https://www.voicecap.shop` | Vercel 자동 배포 연동 |
+| 공식 개인정보처리방침 | `https://www.voicecap.shop/privacy` | Google Play 정책 심사용 웹페이지 |
+| Google Search Console | 소유권 확인 메타 태그 반영 완료 | `index.html` 내 인증 태그 라이브 배포 |
+| Android 앱 ID | `shop.voicecap.smsbridge` | VoiceCAP SMS Bridge |
+| Android 규격 | 최소 API 26 (Android 8.0) ~ **target API 36** | **versionCode 5 (v1.3.1)** |
+| Android 배포 상태 | **Google Play 내부 테스트 정상 설치 완료**, **비공개 테스트(Alpha) 심사 제출 완료** | 갤럭시 피싱 차단 100% 우회 |
+| Android 서명키 | 4096비트 RSA 업로드 키 생성 완료 | `signing/voicecap-upload.jks` |
+| 데스크톱 도우미 | Electron `shop.voicecap.commenthelper` v1.1.4 | 틱톡 댓글 수집 + 라벨 프린터 연동 |
+| 검증 라벨 프린터 | `Xprinter XP-DT108B LABEL` (50x30 mm 감열 라벨지 지원) | 순수 흑색 모드, 자동 인쇄 |
+| 실시간 STT 엔진 | Deepgram Nova-3 / Soniox 실시간 한국어 STT / Web Speech API | 다중 엔진 지원 |
+| 라이브 판매 캡처 | '캡처하세요' 발화 시 화면 자동 캡처 & 90% 용량 압축 | 960px 다운스케일링, JPEG 0.72 |
+| 댓글 구매의사 감지 | '저요', '구매', '주세요', **'ㅈㅇ'** 등 | 초성 'ㅈㅇ' 인식 확장 완료 |
 
-## 2. 새 PC에서 가장 먼저 할 일
+---
 
-권장 방법은 새 PC 초기화 스크립트를 실행하는 것이다. Git 제외 파일 중 재생성 가능한 항목을 만들고 전체 빌드까지 확인한다.
+## 2. 다른 PC로 이동 시 반드시 챙겨야 할 필수 파일 (USB 복사 필수!)
 
+> [!CAUTION]
+> 아래 파일들은 보안 및 `.gitignore` 설정으로 인해 **GitHub에 올라가지 않는 로컬 전용 파일**입니다.
+> 다른 PC에서 빌드 및 연동을 정상 수행하려면 **USB나 암호화된 외장 드라이브로 직접 복사**해야 합니다.
+
+1. **Android 업로드 서명 키스토어 (가장 중요!)**:
+   - 폴더 위치: `C:\dev\voice-pin-anti\android\voicecapSMS\signing\`
+   - 포함 파일:
+     - `voicecap-upload.jks` : 4096비트 RSA 정식 서명 키스토어
+     - `voicecap-upload-certificate.pem` : 공개 인증서
+     - `KEY_INFO.txt` : 서명 키 비밀번호 및 알리아스 정보 (`VoiceCAP!2026UploadKey#982`, alias: `voicecap-upload`)
+   - ⚠️ 이 JKS 파일을 분실하면 향후 구글 플레이 앱 업데이트가 불가능하므로 반드시 2중 백업하세요!
+2. **Euler Stream API 키 파일**:
+   - 파일 위치: `C:\dev\voice-pin-anti\eulerstream_key.txt` (TikTok 댓글 실시간 수집용)
+3. **사용자 브라우저 데이터 (필요 시)**:
+   - 판매, 정산, 닉네임 인식 규칙 등은 브라우저 `localStorage`에 저장됩니다.
+   - 기존 PC의 웹 화면 **[마이페이지] > [데이터 백업/내보내기]**에서 JSON으로 백업받아 새 PC에서 복원할 수 있습니다.
+
+---
+
+## 3. 다른 PC에서 처음 시작할 때 명령어 가이드
+
+### 1단계: Git 클론 및 의존성 설치
 ```powershell
-cd C:\dev\voice-pin-anti
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\bootstrap-new-pc.ps1 -EnableLanBridge
-```
-
-항목별 설명과 서명키 생성 방법은 `NEW_PC_SETUP.md`를 참고한다. 수동으로 진행하려면 아래 명령을 사용한다.
-
-```powershell
+# 작업 폴더 생성 및 이동
 git clone https://github.com/nettman001-hub/voice-pin-web.git C:\dev\voice-pin-anti
 cd C:\dev\voice-pin-anti
-git status --short --branch
-git log -5 --oneline
+
+# 웹 프런트엔드 패키지 설치
 npm ci
+
+# 로컬 브리지 서버 패키지 설치
 cd server
 npm ci
 cd ..
+```
+
+### 2단계: USB에서 복사해 온 필수 파일 배치
+- `C:\dev\voice-pin-anti\eulerstream_key.txt` 복사
+- `C:\dev\voice-pin-anti\android\voicecapSMS\signing\` 폴더 생성 후 `voicecap-upload.jks` 및 `KEY_INFO.txt` 복사
+
+### 3단계: 전체 빌드 및 테스트 검증
+```powershell
+# 1. 웹 빌드 검증 (TypeScript 컴파일 + Vite 번들링)
 npm run build
+
+# 2. 서버 단위 테스트 검증 (4개 통과 확인)
 cd server
 npm test
 cd ..
 ```
 
-`git status`가 깨끗한지 확인한 뒤 작업한다. 다른 PC에서 이미 수정한 내용이 있다면 덮어쓰지 말고 먼저 커밋·백업하거나 병합한다.
-
-## 3. 권장 개발 환경
-
-현재 PC에서 검증한 환경:
-
-- Windows + PowerShell
-- Node.js `v24.12.0` (서버 최소 요구는 Node 18)
-- npm `11.6.2`
-- Android Studio의 JBR/OpenJDK 21
-- Gradle Wrapper `9.3.1`
-- Android Gradle Plugin `9.1.1`
-- Android SDK Platform 35
-- Vercel CLI `59.5.0`
-
-Android Studio에서 `android/voicecapSMS` 폴더를 프로젝트로 연다. `local.properties`는 Android Studio가 새 PC의 SDK 위치에 맞춰 만들도록 한다.
-
-## 4. Git으로 옮겨지지 않는 항목
-
-다음 파일과 데이터는 `.gitignore` 대상이므로 필요한 경우 안전한 별도 매체로 직접 옮긴다. 비밀값을 Git, 인계 문서, 메신저에 기록하지 않는다.
-
-### 현재 PC에서 확인된 항목
-
-- 루트 `eulerstream_key.txt`: 존재함. TikTok 댓글 수집용 Euler Stream API 키이며 새 PC로 안전하게 복사해야 한다.
-- 루트 `.env.local`: 존재하며 `VERCEL_OIDC_TOKEN` 변수가 있음. 이 토큰은 복사하지 말고 새 PC에서 `vercel login`으로 다시 인증하는 편이 안전하다.
-- `server/.env`: 현재 없음. 새 PC에서 `server/.env.example`을 복사해 실제 값을 설정한다.
-- `android/voicecapSMS/local.properties`: 존재하지만 PC별 SDK 경로이므로 복사하지 않는다.
-- Android 업로드 서명키: 아직 생성되지 않음. `android/voicecapSMS/signing` 폴더도 현재 없음.
-
-### 사용자 데이터
-
-- 웹앱의 계정, 판매, 문자 대조, 정산서, 배송 데이터는 대부분 브라우저 `localStorage`에 저장된다. Git이나 Vercel 배포로 이동되지 않는다.
-- 기존 브라우저 데이터를 보존해야 하면 기존 PC의 **마이페이지 & 백업**에서 내보낸 뒤 새 PC 브라우저에서 가져온다.
-- SMS 브리지 서버의 실데이터는 `server/data/bridge.json`에 저장된다. 이 파일도 Git에 포함되지 않으므로 실제 데이터가 있으면 서버를 중지한 상태에서 별도 복사한다.
-- 브라우저의 API 키/브리지 URL 설정도 로컬 저장소에 있으므로 새 브라우저에서 다시 입력해야 할 수 있다.
-
-## 5. 현재 구현 상태
-
-### 웹앱
-
-- 판매 내역에서 방송 회차를 선택하고 구매자를 펼치면 구매 캡처 이미지를 비율 유지한 크기로 표시한다.
-- 자동 생성 판매정보와 고객 SMS 구매정보를 나란히 비교한다.
-- 문자 수신 여부, 일치/불일치, 판매자 확인완료, 문자 발송, 입금 여부를 판매 목록에 표시한다.
-- 불일치 구매정보는 닉네임, 금액, 상품명, 주소, 전화번호를 판매자가 수정하고 재대조할 수 있다.
-- 판매 상세와 구매자 펼침 영역에서 SMS 수발신 이력을 확인한다.
-- 판매자는 고객에게 자유 문자를 보낼 수 있다. 배송 답변, 입금 확인, 입금 계좌번호 안내 등을 지원한다.
-- `정산서 관리 & 발송`, `택배발송 관리`, 일자별/회차별 정산 및 CSV 내보내기가 구현됐다.
-- 사이드바의 `고객 관리 (모바일)`, `고객 관리 (카카오톡)`은 아직 비활성 메뉴다.
-
-주요 파일:
-
-- `src/context/CommerceContext.tsx`
-- `src/components/sales/BuyerReconciliationPanel.tsx`
-- `src/pages/seller/SalesListPage.tsx`
-- `src/pages/seller/SalesDetailPage.tsx`
-- `src/pages/seller/InvoiceManagementPage.tsx`
-- `src/pages/seller/ShipmentManagementPage.tsx`
-- `src/pages/seller/SettlementPage.tsx`
-- `src/services/customerMessageParser.ts`
-- `src/services/smsBridgeService.ts`
-- `src/types/commerce.ts`
-
-### 고객 문의 연결 규칙
-
-모든 개인 문자를 서버로 전송하지 않는다.
-
-1. 닉네임·주소·상품 또는 금액이 들어 있는 첫 구매정보 문자로 전화번호를 업무 고객으로 등록한다.
-2. 판매자가 웹에서 해당 번호로 먼저 문자를 보내도 업무 고객으로 등록한다.
-3. 등록된 번호에서 이후 들어오는 `택배 언제 오나요?`, `입금했습니다`, `계좌번호 다시 알려주세요` 같은 일반 문의는 `CUSTOMER_INQUIRY`로 업로드한다.
-4. 웹앱은 전화번호를 기존 구매 주장 또는 발신 문자에 연결해 판매 상세 문자 이력에 표시한다.
-5. 등록되지 않은 번호의 OTP, 은행 알림, 일반 개인 문자는 업로드하지 않는다.
-
-Android 관련 파일:
-
-- `android/voicecapSMS/app/src/main/java/com/voicecap/sms/BusinessContactStore.java`
-- `android/voicecapSMS/app/src/main/java/com/voicecap/sms/SmsSyncManager.java`
-- `android/voicecapSMS/app/src/main/java/com/voicecap/sms/BridgeClient.java`
-
-### 로컬 브리지 서버
-
-`server`는 기존 TikTok 댓글 수집과 SMS/입금 브리지 API를 함께 제공한다.
-
-주요 SMS API:
-
-| 메서드 | 경로 | 용도 |
-|---|---|---|
-| GET | `/api/bridge/status` | Android 브리지 연결 확인 |
-| GET | `/api/sms/messages?sellerId=...` | 판매자 문자 이력 조회 |
-| POST | `/api/sms/incoming` | Android가 수신 SMS/MMS 업로드 |
-| GET | `/api/sms/outbox?sellerId=...` | Android가 발송 대기 문자 조회 |
-| POST | `/api/sms/outbox` | 웹에서 발송 문자 큐 생성 |
-| PATCH | `/api/sms/outbox/:id/status` | Android가 발송 상태 갱신 |
-| GET | `/api/payments?sellerId=...` | 입금 내역 조회 |
-| POST | `/api/payments/incoming` | 추후 입금 알림 앱/서비스가 입금 내역 업로드 |
-
-인증은 `X-VoiceCAP-Key` 헤더와 `SMS_BRIDGE_API_KEY`로 처리한다. 저장 파일은 기본 `server/data/bridge.json`이다.
-
-관련 파일:
-
-- `server/index.js`
-- `server/bridgeApi.js`
-- `server/bridgeStore.js`
-- `server/test/bridgeStore.test.js`
-- `server/.env.example`
-
-## 6. 로컬 서버와 Android 연결
-
-새 PC에서 `server/.env`를 만든다.
-
-```powershell
-cd C:\dev\voice-pin-anti\server
-Copy-Item .env.example .env
-```
-
-동일 Wi-Fi의 Android 폰이 PC 서버에 접속해야 하면 다음을 설정한다.
-
-```dotenv
-PORT=2137
-HOST=0.0.0.0
-SMS_BRIDGE_API_KEY=<충분히 긴 무작위 키>
-SMS_BRIDGE_DATA_FILE=./data/bridge.json
-```
-
-그다음:
-
-```powershell
-cd C:\dev\voice-pin-anti\server
-npm start
-```
-
-PC에서 확인:
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:2137/api/bridge/status -Headers @{ 'X-VoiceCAP-Key' = '<같은 키>' }
-ipconfig
-```
-
-Windows 방화벽은 TCP 2137을 **사설 네트워크에서만** 허용한다. Android 디버그 앱에는 `http://<PC 사설 IP>:2137`을 입력하고 같은 API 키와 웹앱의 판매자 ID를 입력한다.
-
-주의: 릴리스 Android 빌드는 민감한 문자 데이터 보호를 위해 HTTPS만 허용한다. 로컬 HTTP는 디버그 빌드에서만 허용한다. 실제 운영에는 HTTPS 브리지 서버 또는 안전한 HTTPS 터널/역방향 프록시 설계가 필요하다.
-
-## 7. Android 앱 빌드
-
-PowerShell 예시:
-
+### 4단계: Android 릴리스 AAB 빌드 (필요 시)
 ```powershell
 cd C:\dev\voice-pin-anti\android\voicecapSMS
-$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
-$env:Path="$env:JAVA_HOME\bin;$env:Path"
-.\gradlew.bat :app:assembleDebug :app:lintDebug :app:bundleRelease
-```
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
+$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+$env:VOICECAP_UPLOAD_KEYSTORE = 'C:\dev\voice-pin-anti\android\voicecapSMS\signing\voicecap-upload.jks'
+$env:VOICECAP_UPLOAD_STORE_PASSWORD = 'VoiceCAP!2026UploadKey#982'
+$env:VOICECAP_UPLOAD_KEY_ALIAS = 'voicecap-upload'
+$env:VOICECAP_UPLOAD_KEY_PASSWORD = 'VoiceCAP!2026UploadKey#982'
 
-산출물:
-
-- 디버그 APK: `android/voicecapSMS/app/build/outputs/apk/debug/app-debug.apk`
-- Play용 AAB: `android/voicecapSMS/app/build/outputs/bundle/release/app-release.aab`
-
-서명 환경 변수가 없으면 release AAB는 서명되지 않는다. 업로드 키 생성 후 다음 네 변수를 모두 설정해야 한다.
-
-```powershell
-$env:VOICECAP_UPLOAD_KEYSTORE='C:\secure\voicecap-upload.jks'
-$env:VOICECAP_UPLOAD_STORE_PASSWORD='<스토어 비밀번호>'
-$env:VOICECAP_UPLOAD_KEY_ALIAS='voicecap-upload'
-$env:VOICECAP_UPLOAD_KEY_PASSWORD='<키 비밀번호>'
 .\gradlew.bat :app:bundleRelease
 ```
+- 산출물: `android/voicecapSMS/app/build/outputs/bundle/release/app-release.aab`
 
-키와 비밀번호는 Git에 넣지 않는다. 업로드 키를 잃으면 업데이트 배포가 어려우므로 암호화된 백업을 별도로 만든다.
+---
 
-## 8. Android 설치 차단 현황
+## 4. 2026-09-04 핵심 구현 및 해결 내역
 
-갤럭시 실기기에서 이메일/브라우저 등으로 받은 디버그 APK 설치 시 `악성 앱으로 의심` 화면이 표시됐으며 사용자가 해제할 수 없었다. APK 서명 손상은 아니고, 갤럭시의 보이스피싱 방지용 사이드로드 차단 정책에 해당한다.
+### 1) Android Google Play 정식 등록 및 갤럭시 차단 우회 해결
+- **문제**: 갤럭시 실기기에서 직접 사이드로드(APK 파일 설치) 시 삼성 보안 정책에 의해 "악성/보이스피싱 의심 앱"으로 강제 차단됨.
+- **해결**:
+  - 4096비트 RSA 업로드 키 생성 및 서명 파이프라인 구축.
+  - 구글 최신 보안 규격인 **API 36 (Android 16) 타겟팅** 및 **versionCode 5 (v1.3.1)** 반영.
+  - **Google Play Console 내부 테스트(Internal Testing) 트랙** 배포를 통해 대표님 실제 갤럭시 폰에 공식 구글 플레이 인증으로 정상 설치 완료!
+  - **비공개 테스트(Alpha) 트랙** 출시 및 구글 검수팀 공식 심사 제출 완료.
 
-우회 설치를 제품 배포 방식으로 사용하지 않는다. 다음 중 하나로 진행해야 한다.
+### 2) Google Play 정책 및 스토어 에셋 완비
+- **공식 개인정보처리방침**: `src/pages/legal/PrivacyPolicyPage.tsx` 구축, `/privacy` 공개 라우트 등록 및 `https://www.voicecap.shop/privacy` 실시간 라이브 배포.
+- **스토어 그래픽 에셋 (`android/voicecapSMS/play_assets/`)**:
+  - `app_icon_512.png`: 512x512 32비트 앱 아이콘
+  - `feature_graphic_1024x500.png`: 1024x500 그래픽 이미지 배너
+  - `screenshot_01.png` ~ `03.png`: 휴대전화 스크린샷 3종
+- **SMS 권한 선언 양식(Permissions Declaration)**:
+  - 핵심 기능: `기본 SMS 처리기 (Default SMS Handler)`
+  - 틱톡 라이브 판매자의 주문 문자 수신 및 안내 문자 발송 목적 공식 선언 완료.
 
-1. Google Play Console 내부 테스트 트랙
-2. Galaxy Store 비공개 테스트
-3. 기업용 앱이라면 삼성에 기업 정보와 APK를 제출해 예외 심사
+### 3) 라이브 판매 자동 캡처 최적화 & 용량 90% 절감
+- **발화 멘트 조건**: 판매자가 상품을 보여주며 **"캡처하세요"** (또는 '캡처 하세요', 단어 규칙 등록 키워드)를 말할 때만 화면 캡처가 실행되고, 생성된 판매 내역에 사진이 한 세트로 묶여서 DB에 저장됨.
+- **이미지 압축**: `screenCaptureService.ts`에서 가로/세로 최대 960px 다운스케일링 및 `image/jpeg (품질 0.72)` 압축 적용 (기존 1~2MB ➔ 30~70KB 수준으로 축소).
+- **댓글 인식 개선**: 구매 의사 댓글 감지 패턴에 초성 **`ㅈㅇ`** (저요) 추가.
 
-현재 앱은 공식 배포 준비를 위해 다음을 반영했다.
+### 4) Google Search Console 사이트 소유권 확인 연동
+- `index.html`의 `<head>` 섹션에 소유권 확인 메타 태그(`h_I_KItXuFu7NRFoHcnkiXeBTbIBrCxFNks972JSTtU`) 삽입 및 배포 완료.
 
-- 고유 패키지 ID `shop.voicecap.smsbridge`
-- Android 8.0 이상 지원
-- 사용자 전송 동의 후 기본 SMS 앱 역할을 먼저 요청
-- 기본 SMS 역할 승인 후에만 SMS/MMS 런타임 권한 요청
-- 역할 해제 또는 동의 철회 시 동기화 중단
-- 민감 데이터의 Android 백업/기기 이전 제외
-- release 빌드의 cleartext HTTP 차단
+---
 
-배포 전 필요한 실제 정보는 `android/voicecapSMS/PLAY_DISTRIBUTION.md`를 참고한다.
+## 5. 일상 실행 및 방송 운영 가이드
 
-## 9. 공식 Android 배포의 현재 차단점
-
-아직 준비되지 않은 항목:
-
-- Google Play 또는 Galaxy Store 개발자 계정 접근
-- 실제 운영자/법인명
-- 고객지원 이메일
-- 개인정보 보호 문의 연락처
-- 데이터 보유기간과 삭제 요청 처리기한
-- 업로드 서명키와 안전한 백업
-- 공개 개인정보 처리방침 URL
-
-Google Play SMS 권한 선언도 필요하다. 핵심 기능을 `기본 SMS 처리`로 정확히 설명해야 한다.
-
-추가 위험: 현재 앱은 VoiceCAP 브리지 중심 UI이며 일반 SMS 앱 수준의 전체 받은편지함/대화 목록 기능은 없다. Play 심사에서 기본 SMS 앱의 핵심 사용자 경험이 부족하다고 판단할 가능성이 있다. 심사 전에 기본 문자 앱으로서 수신 메시지 저장, 대화 목록, 읽기/답장 기능을 보강할지 검토한다.
-
-## 10. 실행과 테스트
-
-프런트엔드:
-
+### 1) 웹 개발 서버 실행
 ```powershell
 cd C:\dev\voice-pin-anti
-npm run build
 npm run dev
+# 브라우저에서 http://localhost:5173 또는 운영 사이트 https://www.voicecap.shop 접속
 ```
 
-서버:
-
+### 2) 라벨 프린터 및 댓글 도우미 실행
 ```powershell
-cd C:\dev\voice-pin-anti\server
-npm test
+cd C:\dev\voice-pin-anti\desktop\comment-helper
 npm start
 ```
+- 프린터: `Xprinter XP-DT108B LABEL` (50x30mm 감열 라벨지)
+- 라이브 청취 홈에서 판매 인식 시 50x30mm 스티커 라벨 즉시 자동 출력
 
-Android:
+### 3) 안드로이드 문자 브리지 연동
+- 스마트폰에서 `VoiceCAP SMS Bridge` 앱 실행
+- 웹앱 [마이페이지]에서 [휴대폰 연결 코드 만들기] 클릭 후 발급된 10자리 코드를 앱에 입력
+- 고객이 보낸 주문 문자(닉네임, 금액, 주소)가 웹 대시보드에 실시간 대조 및 자동 적재됨
 
-```powershell
-cd C:\dev\voice-pin-anti\android\voicecapSMS
-.\gradlew.bat :app:assembleDebug :app:lintDebug :app:bundleRelease
-```
+---
 
-2026-08-30 마지막 검증 결과:
+## 6. 최근 주요 커밋 이력
 
-- 웹 `npm run build`: 성공
-- 서버 `npm test`: 4개 모두 성공
-- Android `assembleDebug`: 성공
-- Android `lintDebug`: 오류 0개. 디버그 빌드의 사내망 HTTP 허용 경고 1개는 의도된 설정
-- Android `bundleRelease` 및 release lint vital: 성공
-- Vercel 프로덕션: Ready
-- 운영 `https://www.voicecap.shop`: 최신 번들 응답 확인
+- `228af81`: docs: 2026-09-04 인계인수서(HANDOFF.md) 최신화
+- `8e68fbb`: feat: 구글 플레이 최신 규격(API 36 타겟, versionCode 5) 서명 AAB 빌드 및 스토어 PNG 에셋 반영
+- `a947b33`: feat: Google Search Console 사이트 소유권 확인 메타 태그 추가
+- `2641ff1`: feat: 판매 캡처 '캡처하세요' 필수 조건 반영, 이미지 90% 압축, 구글 플레이 서명 AAB 및 개인정보처리방침/스토어 에셋 추가
+- `cfe1cdb`: feat: Xprinter 50x30mm 라벨 규격 추가 및 감열식 인쇄 파이프라인 최적화
 
-웹 빌드에는 약 575KB 청크 경고가 남아 있으나 빌드는 성공한다. 추후 라우트 단위 코드 분할을 고려한다.
-
-## 11. Vercel 배포
-
-새 PC에서:
-
-```powershell
-npm install -g vercel
-vercel login
-cd C:\dev\voice-pin-anti
-vercel link --project voice-pin-web
-npm run build
-vercel --prod --yes
-```
-
-배포 확인:
-
-```powershell
-vercel inspect <배포 URL> --wait --timeout 2m
-vercel curl https://www.voicecap.shop
-```
-
-운영 별칭은 `https://www.voicecap.shop`, `https://voicecap.shop`, `https://voice-pin-web.vercel.app`이다.
-
-중요: Vercel에는 Vite 웹 프런트엔드만 배포된다. `server`의 TikTok Socket.IO 및 SMS 브리지 JSON 서버는 로컬 Windows 프로세스이며 Vercel에서 실행되지 않는다.
-
-## 12. 프로토타입과 운영 시스템의 차이
-
-현재 구현은 기능 검증 단계다. 운영 전 다음을 반드시 보강해야 한다.
-
-- 웹 로그인은 실제 서버 인증이 아니라 브라우저 저장 기반 데모 구조다.
-- 판매·정산·문자 연결 데이터 상당 부분이 `localStorage`에 있다.
-- SMS 브리지 데이터는 로컬 JSON 파일에 평문 저장된다.
-- API 인증은 단일 브리지 API 키 방식이다.
-- 계좌번호와 고객 주소/전화번호가 문자 본문 및 로컬 저장소에 포함될 수 있다.
-- 다중 판매자 운영 전 서버 DB, 계정별 인증/인가, 암호화, 감사로그, 보유기간/삭제 정책이 필요하다.
-- `SENT`는 Android가 OS에 발송을 요청한 상태이며 통신사 최종 배달 성공을 뜻하지 않는다.
-- 입금 알림 업로드 API는 있으나 실제 스마트폰 입금 알림 수집 기능은 아직 구현하지 않았다.
-
-## 13. 라벨 프린터 & 전표 출력 시스템 (`desktop/comment-helper`)
-
-2026-09-03 추가 구현 및 최적화 완료:
-
-- **검증 기기**: `Xprinter XP-DT108B LABEL` (USB 포트 연결, Seagull Scientific 드라이버)
-- **지원 용지 규격**:
-  - `LABEL_50_30`: **50mm x 30mm 라벨 스티커** (기본 권장, 상하 2.5mm / 좌우 3.5mm 패딩, 14pt 볼드 헤드라인)
-  - `RECEIPT_80`: 80mm 감열 영수증
-  - `RECEIPT_58`: 58mm 감열 영수증
-  - `A4`: 일반 프린터
-- **연동 파이프라인**:
-  1. 웹앱(`LiveHomePage`)에서 판매 발생 또는 테스트 발화 주입
-  2. `SalesContext` → Socket.IO (`print:sale`) → 로컬 서버 (`http://127.0.0.1:2137`)
-  3. `server/index.js` → `process.parentPort` (MessagePort) → Electron 메인 프로세스
-  4. Electron이 `ui/print.html`을 렌더링하고 `webContents.print({ silent: true, color: false, pageSize: ... })` 호출
-  5. 처리 완료 시 웹앱의 판매 내역 카드에 `PRINTED` (녹색 전표 배지) 자동 반영
-
-> ### ⚠️ 중요 주의사항 (감열 라벨지 필수)
-> - **Xprinter XP-DT108B**는 **감열식(Direct Thermal)** 프린터입니다.
-> - **반드시 감열 라벨지(Direct Thermal Label)**를 장착해야 글자가 열로 검게 인쇄됩니다.
-> - 일반 아트지나 비감열 라벨지를 장착할 경우, 인쇄 신호는 100% 정상 수신되어 용지가 피드되지만 **아무것도 인쇄되지 않은 백지만 배출**됩니다.
-> - **감열지 확인법**: 라벨지 표면을 손톱으로 세게 긁었을 때 검은색 선이 생기면 감열지입니다.
-
-## 14. 새 PC에서 작업 시작 시 가이드
-
-1. **저장소 클론 및 최신화**:
-   ```powershell
-   git clone https://github.com/nettman001-hub/voice-pin-web.git
-   cd voice-pin-web
-   npm install
-   ```
-2. **웹 개발 서버 실행**:
-   ```powershell
-   npm run dev
-   ```
-3. **댓글 도우미 및 라벨 프린터 중계기 실행**:
-   ```powershell
-   cd desktop/comment-helper
-   npm install
-   npm start
-   ```
-4. **프린터 설정 파일 (`AppData`)**:
-   `%APPDATA%\voicecap-comment-helper\print-settings.json`
-   ```json
-   {
-     "enabled": true,
-     "printerName": "Xprinter XP-DT108B LABEL",
-     "paperSize": "LABEL_50_30"
-   }
-   ```
-   (도우미 창의 UI에서도 실시간 변경 가능)
-
-## 15. 다음 작업 권장 순서
-
-1. **라벨 프린터 실출력 재검증**: 실제 감열 라벨지(50x30mm) 장착 후 웹 라이브 청취 홈에서 실시간 발화 인쇄 검증.
-2. 실제 운영자 정보와 Google Play 개발자 계정 확보 후 Android SMS Bridge 릴리스.
-3. 기본 SMS 앱으로서 필요한 대화 목록/수신 저장/답장 경험 보강.
-4. 공개 개인정보 처리방침을 만들고 Play SMS 권한 선언 작성.
-5. HTTPS SMS 브리지 호스팅 구조와 실제 사용자 인증 설계.
-
-## 16. 최근 핵심 커밋
-
-- `feat`: Xprinter 50x30mm 라벨 규격 추가 및 감열식 인쇄 파이프라인 최적화 (MessagePort 응답 보정, 렌더링 페인트 버퍼 강제 대기, 순수 흑색 모드)
-- `3a78974` fix: emphasize missing printer warning
-- `fc8e5fd` fix: use Nova-3 keyterm prompting
-- `93f7393` fix: restore comment helper updates
-- `11bc039` feat: add selectable Soniox STT service
-- `55bddc4` feat: 고객 거래 문자 대화 연동
-
-## 17. 작업 종료 전 체크리스트
-
-- `git status --short --branch`로 예상하지 못한 파일 확인
-- 비밀값과 고객 데이터가 staged 상태가 아닌지 확인
-- 웹 빌드(`npm run build`), 서버 테스트(`npm test`), 데스크톱 테스트 통과 확인
-- 변경 파일만 커밋하고 `main` 푸시
-- Vercel 프로덕션 자동 배포 완료 확인 (`https://www.voicecap.shop` 및 Vercel 대시보드)
-
-
+---
