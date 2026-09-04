@@ -35,11 +35,38 @@ function resolvePythonPath() {
   return 'python';
 }
 
+function resolveWorkerScript() {
+  const defaultPath = path.join(__dirname, 'stt_worker.py');
+  if (defaultPath.includes('app.asar')) {
+    // 1. electron-builder asarUnpack 경로 우선 확인
+    const unpacked = defaultPath.replace('app.asar', 'app.asar.unpacked');
+    if (fs.existsSync(unpacked)) {
+      return unpacked;
+    }
+    // 2. app.asar 내부에서 실제 디스크 폴더로 복사 (Electron fs는 asar 투명 읽기 지원)
+    try {
+      const os = require('os');
+      const targetDir = path.join(
+        process.env.APPDATA || process.env.LOCALAPPDATA || os.tmpdir(),
+        'voicecap-comment-helper',
+        'stt'
+      );
+      fs.mkdirSync(targetDir, { recursive: true });
+      const targetFile = path.join(targetDir, 'stt_worker.py');
+      fs.writeFileSync(targetFile, fs.readFileSync(defaultPath));
+      return targetFile;
+    } catch (e) {
+      console.warn('[SttBridge] stt_worker.py 추출 경고:', e.message);
+    }
+  }
+  return defaultPath;
+}
+
 class SttBridge {
   constructor() {
     this.workerProcess = null;
     this.pythonPath = resolvePythonPath();
-    this.workerScript = path.join(__dirname, 'stt_worker.py');
+    this.workerScript = resolveWorkerScript();
     this.io = null;
     this.isStarting = false;
     this.reconnectTimer = null;
@@ -85,21 +112,23 @@ class SttBridge {
 
   startWorker() {
     if (this.workerProcess) return;
+    this.workerScript = resolveWorkerScript();
     if (!fs.existsSync(this.workerScript)) {
       this.state.state = 'ERROR';
       this.state.message = 'stt_worker.py 스크립트 파일을 찾을 수 없습니다.';
       return;
     }
 
+    const workDir = path.dirname(this.workerScript);
     this.isStarting = true;
     this.state.state = 'LOADING';
     this.state.message = 'faster-whisper 워커 프로세스 시작 중...';
     this.broadcastStatus();
 
     try {
-      console.log(`[SttBridge] Python 워커 실행: ${this.pythonPath} ${this.workerScript}`);
+      console.log(`[SttBridge] Python 워커 실행: ${this.pythonPath} ${this.workerScript} (cwd: ${workDir})`);
       this.workerProcess = spawn(this.pythonPath, [this.workerScript], {
-        cwd: __dirname,
+        cwd: workDir,
         env: {
           ...process.env,
           PYTHONUNBUFFERED: '1',

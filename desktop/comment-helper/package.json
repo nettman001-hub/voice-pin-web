@@ -30,6 +30,9 @@
     "productName": "VoiceCAP 댓글 도우미",
     "copyright": "Copyright © VoiceCAP",
     "asar": true,
+    "asarUnpack": [
+      "server/stt_worker.py"
+    ],
     "files": [
       "main.cjs",
       "preload.cjs",
