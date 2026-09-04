@@ -562,6 +562,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       confidence: number;
       provider?: 'DEEPGRAM' | 'SONIOX' | 'WEB_SPEECH' | 'LOCAL_WHISPER' | 'NONE';
       confirmedTextDelta?: string;
+      isAbnormal?: boolean;
+      abnormalReason?: string;
     },
     requiredListeningGeneration?: number,
     requiredUserId?: string,
@@ -582,6 +584,21 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     if (!data.text) return;
+
+    // [로컬 STT 비정상 반복 생성 방어] 동일 글자/어절 반복 등 환각 시 업무 파이프라인(판매/캡처) 진입 원천 차단
+    if (data.isAbnormal) {
+      const abnormalTime = new Date().toLocaleTimeString('ko-KR');
+      console.warn(`[LiveContext] 로컬 STT 비정상 반복 전사 차단 (${data.abnormalReason}):`, data.text);
+      setLiveTranscriptFlow((prev) => [
+        ...prev.slice(-30),
+        {
+          id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          text: `⚠️ [반복 감지 차단] ${data.text.slice(0, 30)}...`,
+          timestamp: abnormalTime
+        }
+      ]);
+      return;
+    }
 
     if (data.provider === 'SONIOX') {
       handleSonioxTranscript(data, requiredListeningGeneration, requiredUserId);
@@ -860,6 +877,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // 2. 실시간 STT 엔진 시작
       if (sttModeRef.current === 'LOCAL') {
         // [내 PC 무료 STT] faster-whisper 로컬 브리지 시작
+        const activeLocalModel = localSttModel || storageService.getLocalSttModel();
         localSttService.startListening(
           newSessionId,
           listeningGeneration,
@@ -890,7 +908,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
               setWaveform(new Uint8Array(128));
               resetSonioxBusinessAccumulator();
             }
-          }
+          },
+          activeLocalModel
         );
       } else {
         // [클라우드 STT] 관리자가 선택한 STT 공급자와 최신 API Key 확인

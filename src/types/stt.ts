@@ -14,6 +14,7 @@ export interface LocalSttStatusPayload {
   available: boolean;
   state: LocalSttState;
   model: LocalSttModel | string;
+  requestedModel?: LocalSttModel | string;
   device: 'cpu' | 'cuda' | string;
   computeType: string;
   message: string;
@@ -21,6 +22,8 @@ export interface LocalSttStatusPayload {
   activeSessionId?: string;
   activeGeneration?: number;
   pythonPath?: string;
+  hasOwner?: boolean;
+  droppedChunks?: number;
 }
 
 export interface LocalSttTranscriptEvent {
@@ -31,4 +34,8 @@ export interface LocalSttTranscriptEvent {
   is_final: boolean;
   confidence: number;
   provider: 'LOCAL_WHISPER';
+  duration?: number;
+  infer_time?: number;
+  is_abnormal?: boolean;
+  abnormal_reason?: string;
 }

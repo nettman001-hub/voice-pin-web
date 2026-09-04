@@ -12,6 +12,8 @@ export type OnTranscriptCallback = (data: {
   provider?: ActiveSttEngine;
   confirmedTextDelta?: string;
   rawResponse?: DeepgramResponse | SonioxResponse;
+  isAbnormal?: boolean;
+  abnormalReason?: string;
 }) => void;
 
 export type OnErrorCallback = (error: string) => void;

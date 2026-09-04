@@ -319,11 +319,11 @@ export class StorageService {
     localStorage.setItem(KEYS.STT_MODE, mode);
   }
 
-  // 로컬 STT 모델 선택: 'large-v3-turbo' | 'small' | 'base'
+  // 로컬 STT 모델 선택: 'base' | 'small' | 'large-v3-turbo'
   public getLocalSttModel(): 'large-v3-turbo' | 'small' | 'base' {
     const m = localStorage.getItem(KEYS.LOCAL_STT_MODEL);
-    if (m === 'small' || m === 'base') return m;
-    return 'large-v3-turbo';
+    if (m === 'small' || m === 'base' || m === 'large-v3-turbo') return m;
+    return 'base'; // 저사양/보통 PC 안정성을 위한 기본값: base
   }
   public setLocalSttModel(model: 'large-v3-turbo' | 'small' | 'base'): void {
     localStorage.setItem(KEYS.LOCAL_STT_MODEL, model);

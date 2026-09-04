@@ -268,9 +268,9 @@ export const LiveHomePage: React.FC = () => {
                 onChange={(e) => setLocalSttModel(e.target.value as LocalSttModel)}
                 className="bg-white border border-brand-300 text-brand-900 font-bold rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
               >
-                <option value="base">base (가장 빠름 · 권장)</option>
+                <option value="base">base (가장 가벼움 · 기본)</option>
                 <option value="small">small (보통 속도)</option>
-                <option value="large-v3-turbo">large-v3-turbo (정확도 우선)</option>
+                <option value="large-v3-turbo">large-v3-turbo (고성능 PC 권장)</option>
               </select>
               <span
                 className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded shrink-0 ${
@@ -280,12 +280,21 @@ export const LiveHomePage: React.FC = () => {
                     ? 'bg-amber-100 text-amber-700 animate-pulse'
                     : 'bg-rose-100 text-rose-700'
                 }`}
-                title={localSttStatus.message}
+                title={localSttStatus.error || localSttStatus.message}
               >
-                {localSttStatus.state === 'READY' ? '준비됨 (CPU int8)' :
-                 localSttStatus.state === 'LISTENING' ? '청취 중' :
-                 localSttStatus.state === 'LOADING' ? '로딩 중...' :
-                 localSttStatus.state === 'HELPER_OFFLINE' ? '도우미 미실행' : '대기'}
+                {localSttStatus.state === 'READY'
+                  ? (localSttStatus.model !== localSttModel
+                      ? `준비됨 (현재: ${localSttStatus.model})`
+                      : `준비됨 (${localSttStatus.model})`)
+                  : localSttStatus.state === 'LISTENING'
+                  ? `청취 중 (${localSttStatus.model})`
+                  : localSttStatus.state === 'LOADING'
+                  ? '로딩 중...'
+                  : localSttStatus.state === 'ERROR'
+                  ? `오류 (${localSttStatus.error?.slice(0, 15) || '실패'})`
+                  : localSttStatus.state === 'HELPER_OFFLINE'
+                  ? '도우미 미실행'
+                  : '대기'}
               </span>
             </div>
           )}

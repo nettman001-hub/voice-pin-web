@@ -127,6 +127,22 @@
   2. `server/sttBridge.js`의 `resolveWorkerScript()` 함수 구현 ➔ `app.asar.unpacked` 경로 우선 탐색, 파일 없을 시 시스템 Temp 폴더로 자동 복사 후 물리 경로 반환.
   3. 자식 프로세스 `cwd`를 `app.asar`가 아닌 실제 디스크 폴더(`app.asar.unpacked` 또는 시스템 `tmpdir`)로 지정.
 
+### 3) 2026-09-04 긴급 결함 진단(OFFLINE_STT_DIAGNOSIS_REPORT) 및 전면 개선 완료
+- **진단 보고서**: 프로젝트 루트의 [`OFFLINE_STT_DIAGNOSIS_REPORT.md`](file:///c:/dev/voicecap-web/OFFLINE_STT_DIAGNOSIS_REPORT.md)
+- **조치 내역**:
+  1. **요청/실제 모델 동기화**: `storageService`의 기본 모델을 `base`로 일치시키고, `requestedModel`과 실제 워커 `loadedModel`을 분리하여 불일치 상태 표출 및 청취 시작 시 자동 로드 연동.
+  2. **메모리 중복 점유 방지**: 모델 교체 시 명시적 `del current_model; gc.collect()`를 수행하여 저메모리 PC(Celeron J4105 등)에서 `mkl_malloc` 메모리 부족 에러 원천 차단.
+  3. **비정상 반복 생성(한 글자/어절 연속 반복) 차단**:
+     - 단일 글자 4회 이상 연속 반복, 어절 3회 연속 반복, Whisper 세그먼트 고압축률(`compression_ratio > 2.4`) 감지 필터 탑재.
+     - 비정상 전사 감지 시 `is_abnormal: true` 플래그 부여 및 **판매 등록 / 화면 캡처 / 라벨 인쇄 파이프라인 진입 원천 차단**.
+  4. **발화 기반 VAD 및 자음 유실 방지**:
+     - 기존 고정 3.5초 절단 폐지.
+     - 250ms pre-roll 버퍼 유지로 발화 시작 첫 자음/모음 보존.
+     - 발화 감지 후 450ms 무음 확인 시 발화 단위로 안전 플러시.
+  5. **세션 소유권 및 백프레셔 방어**:
+     - 단일 청취 소켓(`ownerSocketId`) 등록으로 타 탭 오디오 혼입 차단.
+     - 워커 stdin 버퍼 과부하 시 안전 프레임 드롭(Backpressure 방어) 및 소켓 연결 종료 시 고아 세션 자동 정리.
+
 ---
 
 ## 5. 배포 현황 및 다운로드 링크
