@@ -17,7 +17,7 @@
 | Android 규격 | 최소 API 26 (Android 8.0) ~ **target API 36** | **versionCode 5 (v1.3.1)** |
 | Android 배포 상태 | **Google Play 내부 테스트 정상 설치 완료**, **비공개 테스트(Alpha) 심사 제출 완료** | 갤럭시 피싱 차단 100% 우회 |
 | Android 서명키 | 4096비트 RSA 업로드 키 생성 완료 | `signing/voicecap-upload.jks` |
-| 데스크톱 도우미 | Electron `shop.voicecap.commenthelper` v1.1.4 | 틱톡 댓글 수집 + 라벨 프린터 연동 |
+| 데스크톱 도우미 | Electron `shop.voicecap.commenthelper` v1.2.0 | 로컬 faster-whisper STT + 틱톡 댓글 수집 + 라벨 프린터 연동 |
 | 검증 라벨 프린터 | `Xprinter XP-DT108B LABEL` (50x30 mm 감열 라벨지 지원) | 순수 흑색 모드, 자동 인쇄 |
 | 실시간 STT 엔진 | Deepgram Nova-3 / Soniox / faster-whisper (로컬 무료) / Web Speech | 클라우드 & 무료 오프라인 하이브리드 지원 |
 | 라이브 판매 캡처 | '캡처하세요' 발화 시 화면 자동 캡처 & 90% 용량 압축 | 960px 다운스케일링, JPEG 0.72 |

@@ -5,6 +5,7 @@ const statusMessage = document.querySelector('#status-message');
 const liveStats = document.querySelector('#live-stats');
 const tiktokUsername = document.querySelector('#tiktok-username');
 const commentCount = document.querySelector('#comment-count');
+const sttStatus = document.querySelector('#stt-status');
 const autoStart = document.querySelector('#auto-start');
 const restartButton = document.querySelector('#restart');
 const version = document.querySelector('#version');
@@ -52,10 +53,24 @@ function render(status) {
     if (print.printerName && printerSelect.options.length) printerSelect.value = print.printerName;
   }
   setPrintMessage(print.message);
-  const hasLiveInfo = Boolean(status.tiktokUsername) || status.tiktokState === 'collecting';
+  const hasLiveInfo = Boolean(status.tiktokUsername) || status.tiktokState === 'collecting' || Boolean(status.stt);
   liveStats.hidden = !hasLiveInfo;
   tiktokUsername.textContent = status.tiktokUsername ? `@${status.tiktokUsername}` : '-';
   commentCount.textContent = `${Number(status.totalComments || 0).toLocaleString('ko-KR')}개`;
+  if (sttStatus) {
+    const stt = status.stt;
+    if (!stt) {
+      sttStatus.textContent = '대기 중';
+    } else if (stt.state === 'READY' || stt.state === 'LISTENING') {
+      sttStatus.textContent = `준비됨 (${stt.model || 'base'})`;
+    } else if (stt.state === 'LOADING') {
+      sttStatus.textContent = `로딩 중 (${stt.model || 'base'})`;
+    } else if (stt.state === 'ERROR') {
+      sttStatus.textContent = '오류';
+    } else {
+      sttStatus.textContent = stt.state || '대기';
+    }
+  }
 }
 
 async function loadPrinters(selectedName) {

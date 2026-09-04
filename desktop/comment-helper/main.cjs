@@ -45,6 +45,7 @@ const state = {
   version: app.getVersion(),
   autoStart: false,
   webAppUrl: WEB_APP_URL,
+  stt: null,
   print: {
     ...DEFAULT_PRINT_SETTINGS,
     message: '프린터를 선택하면 판매 전표를 자동으로 출력합니다.'
@@ -220,6 +221,7 @@ function requestHealth() {
           state.tiktokUsername = tiktok.username || '';
           state.viewerCount = Number(tiktok.viewerCount || 0);
           state.totalComments = Number(tiktok.totalComments || 0);
+          state.stt = payload.stt || null;
           state.lastCheckedAt = new Date().toISOString();
           publishStatus();
         } catch (error) {

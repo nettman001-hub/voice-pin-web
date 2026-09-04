@@ -174,6 +174,7 @@ app.get('/status', (_req, res) => {
       viewerCount,
       ...stats
     },
+    stt: sttBridge.getStatus(),
     socketClients: io.engine.clientsCount
   });
 });
