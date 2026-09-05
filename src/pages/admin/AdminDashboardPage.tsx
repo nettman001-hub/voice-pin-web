@@ -46,22 +46,36 @@ export const AdminDashboardPage: React.FC = () => {
   const sellerMembers = allMembers.filter((m: User) => m.role === '판매자');
   const allowedSellersCount = sellerMembers.filter((m: User) => m.allowAdminSttKey).length;
 
-  const handleSaveApiKey = (e: React.FormEvent) => {
+  const handleSaveApiKey = async (e: React.FormEvent) => {
     e.preventDefault();
-    setDeepgramApiKey(inputKey.trim());
-    setToastMsg('Deepgram Nova-3 API Key가 시스템 전역에 안전하게 저장되었습니다! 모든 판매자에게 즉시 적용됩니다. 🎉');
+    try {
+      await setDeepgramApiKey(inputKey.trim());
+      setToastMsg('Deepgram Nova-3 API Key가 클라우드에 저장되어 허락된 모든 판매자에게 적용됩니다. 🎉');
+    } catch (error) {
+      setToastMsg(error instanceof Error ? error.message : 'Deepgram API Key 저장에 실패했습니다.');
+    }
     setTimeout(() => setToastMsg(null), 3500);
   };
 
-  const handleSaveSonioxApiKey = (e: React.FormEvent) => {
+  const handleSaveSonioxApiKey = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSonioxApiKey(sonioxInputKey.trim());
-    setToastMsg('Soniox API Key가 저장되었습니다. Soniox를 선택한 모든 새 청취 세션에 적용됩니다.');
+    try {
+      await setSonioxApiKey(sonioxInputKey.trim());
+      setToastMsg('Soniox API Key가 클라우드에 저장되어 허락된 모든 판매자에게 적용됩니다.');
+    } catch (error) {
+      setToastMsg(error instanceof Error ? error.message : 'Soniox API Key 저장에 실패했습니다.');
+    }
     setTimeout(() => setToastMsg(null), 3500);
   };
 
-  const handleSelectSttProvider = (provider: 'DEEPGRAM' | 'SONIOX') => {
-    setSttProvider(provider);
+  const handleSelectSttProvider = async (provider: 'DEEPGRAM' | 'SONIOX') => {
+    try {
+      await setSttProvider(provider);
+    } catch (error) {
+      setToastMsg(error instanceof Error ? error.message : '기본 STT 서비스 저장에 실패했습니다.');
+      setTimeout(() => setToastMsg(null), 3500);
+      return;
+    }
     const providerName = provider === 'SONIOX' ? 'Soniox v5' : 'Deepgram Nova-3';
     setToastMsg(`${providerName}가 기본 STT 서비스로 선택되었습니다.`);
     setTimeout(() => setToastMsg(null), 3500);

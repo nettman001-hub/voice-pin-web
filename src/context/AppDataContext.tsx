@@ -89,9 +89,9 @@ interface AppDataContextType {
   isSyncingMembers: boolean;
   memberSyncError: string | null;
   refreshMembers: () => Promise<boolean>;
-  suspendMember: (userId: string, reason: string) => void;
-  unsuspendMember: (userId: string) => void;
-  setMemberSttAccess: (userId: string, allow: boolean) => void;
+  suspendMember: (userId: string, reason: string) => Promise<boolean>;
+  unsuspendMember: (userId: string) => Promise<boolean>;
+  setMemberSttAccess: (userId: string, allow: boolean) => Promise<boolean>;
   reports: ReportItem[];
   updateReportStatus: (reportId: string, status: ReportItem['status'], actionTaken?: string) => void;
   errorLogs: SystemErrorLog[];
@@ -137,54 +137,13 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setIsSyncingMembers(true);
     setMemberSyncError(null);
     try {
-      const localUsers = storageService.getUsers();
       if (!isSupabaseConfigured) {
-        setAllMembers(localUsers);
-        return true;
+        setAllMembers([]);
+        throw new Error('클라우드 회원 서버가 설정되지 않았습니다.');
       }
 
       const cloudSellers = await remoteWorkspaceService.fetchVoicecapSellers();
-
-      // 로컬 사용자와 클라우드 사용자를 이메일/ID 기준으로 병합
-      const mergedMap = new Map<string, User>();
-
-      for (const u of localUsers) {
-        mergedMap.set(u.id, u);
-        if (u.email) {
-          mergedMap.set(u.email.toLowerCase(), u);
-        }
-      }
-
-      for (const cs of cloudSellers) {
-        const existing = mergedMap.get(cs.id) || (cs.email ? mergedMap.get(cs.email.toLowerCase()) : undefined);
-        if (existing) {
-          const updatedUser: User = {
-            ...existing,
-            nickname: cs.nickname || existing.nickname,
-            role: cs.role || existing.role,
-            isCloudUser: true,
-            workspaceName: cs.workspaceName || existing.workspaceName,
-            createdAt: existing.createdAt || cs.createdAt,
-            allowAdminSttKey: existing.allowAdminSttKey ?? false,
-            status: existing.status || '활성',
-          };
-          mergedMap.set(existing.id, updatedUser);
-          if (existing.email) mergedMap.set(existing.email.toLowerCase(), updatedUser);
-        } else {
-          const newUser: User = {
-            ...cs,
-            status: cs.status || '활성',
-            isCloudUser: true,
-            allowAdminSttKey: false,
-          };
-          mergedMap.set(newUser.id, newUser);
-          if (newUser.email) mergedMap.set(newUser.email.toLowerCase(), newUser);
-        }
-      }
-
-      const uniqueUsers = Array.from(new Set(Array.from(mergedMap.values())));
-      storageService.saveUsers(uniqueUsers);
-      setAllMembers(uniqueUsers);
+      setAllMembers(cloudSellers);
       return true;
     } catch (err) {
       console.error('[AppDataContext] 회원 동기화 오류:', err);
@@ -205,7 +164,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setTrainingSentences(storageService.getTrainingSentences());
     setPaymentHistory(storageService.getPayments());
     setNotifications(storageService.getNotifications());
-    setAllMembers(storageService.getUsers());
+    setAllMembers([]);
     setReports(storageService.getReports());
     setErrorLogs(storageService.getLogs());
 
@@ -213,8 +172,12 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setCurrentPlan(user.subscriptionPlan);
     }
 
-    // Supabase가 설정되어 있으면 클라우드 회원 실시간 동기화
-    void refreshMembers();
+    // 로그인된 동안에만 클라우드 회원을 메모리에 유지하고, 로그아웃 즉시 비운다.
+    if (user) void refreshMembers();
+    else {
+      setAllMembers([]);
+      setMemberSyncError(null);
+    }
   }, [user]);
 
   // --- 규칙 메서드 ---
@@ -381,25 +344,42 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   // --- 관리자 기능 ---
-  const suspendMember = (userId: string, reason: string) => {
-    const updated = allMembers.map((m) => (m.id === userId ? { ...m, status: '정지' as const, suspendedReason: reason } : m));
-    storageService.saveUsers(updated);
-    setAllMembers(updated);
+  const suspendMember = async (userId: string, reason: string) => {
+    try {
+      await remoteWorkspaceService.setVoicecapMemberStatus(userId, '정지', reason);
+      setAllMembers((members) => members.map((member) => member.id === userId
+        ? { ...member, status: '정지' as const, suspendedReason: reason }
+        : member));
+      return true;
+    } catch (error) {
+      setMemberSyncError(error instanceof Error ? error.message : '회원 상태를 저장하지 못했습니다.');
+      return false;
+    }
   };
 
-  const unsuspendMember = (userId: string) => {
-    const updated = allMembers.map((m) => (m.id === userId ? { ...m, status: '활성' as const, suspendedReason: undefined } : m));
-    storageService.saveUsers(updated);
-    setAllMembers(updated);
+  const unsuspendMember = async (userId: string) => {
+    try {
+      await remoteWorkspaceService.setVoicecapMemberStatus(userId, '활성');
+      setAllMembers((members) => members.map((member) => member.id === userId
+        ? { ...member, status: '활성' as const, suspendedReason: undefined }
+        : member));
+      return true;
+    } catch (error) {
+      setMemberSyncError(error instanceof Error ? error.message : '회원 상태를 저장하지 못했습니다.');
+      return false;
+    }
   };
 
-  const setMemberSttAccess = (userId: string, allow: boolean) => {
-    const updated = allMembers.map((m) => (m.id === userId ? { ...m, allowAdminSttKey: allow } : m));
-    storageService.saveUsers(updated);
-    setAllMembers(updated);
-    const currentUser = storageService.getCurrentUser();
-    if (currentUser && currentUser.id === userId) {
-      storageService.setCurrentUser({ ...currentUser, allowAdminSttKey: allow });
+  const setMemberSttAccess = async (userId: string, allow: boolean) => {
+    try {
+      if (isSupabaseConfigured) await remoteWorkspaceService.setVoicecapSellerSttAccess(userId, allow);
+      const updated = allMembers.map((m) => (m.id === userId ? { ...m, allowAdminSttKey: allow } : m));
+      setAllMembers(updated);
+      return true;
+    } catch (error) {
+      console.error('[AppDataContext] STT 지원 권한 저장 오류:', error);
+      setMemberSyncError(error instanceof Error ? error.message : 'STT 지원 권한을 저장하지 못했습니다.');
+      return false;
     }
   };
 

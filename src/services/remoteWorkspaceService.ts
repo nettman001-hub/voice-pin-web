@@ -203,13 +203,61 @@ export const remoteWorkspaceService = {
       nickname: s.nickname || s.email?.split('@')[0] || '판매자',
       role: s.role || '판매자',
       status: s.status || '활성',
+      suspendedReason: s.suspendedReason || undefined,
       createdAt: s.createdAt || new Date().toISOString().slice(0, 10),
-      subscriptionPlan: '프로',
-      isTrial: true,
+      subscriptionPlan: s.subscriptionPlan || '프로',
+      subscriptionExpiresAt: s.subscriptionExpiresAt || undefined,
+      isTrial: s.isTrial !== false,
       phone: s.phone || undefined,
       isCloudUser: true,
       workspaceName: s.workspaceName || undefined,
+      allowAdminSttKey: Boolean(s.allowAdminSttKey),
     }));
+  },
+
+  async setVoicecapSellerSttAccess(userId: string, allow: boolean): Promise<void> {
+    const { data, error } = await ensureEnabled().functions.invoke('voicecap-onboard', {
+      body: { action: 'set-stt-access', userId, allow },
+    });
+    if (error) throw new Error(`STT 지원 권한 저장 실패: ${error.message}`);
+    if (!data?.ok) throw new Error(data?.error || 'STT 지원 권한을 저장하지 못했습니다.');
+  },
+
+  async setVoicecapMemberStatus(userId: string, status: '활성' | '정지', reason?: string): Promise<void> {
+    const { data, error } = await ensureEnabled().functions.invoke('voicecap-onboard', {
+      body: { action: 'set-member-status', userId, status, reason },
+    });
+    if (error) throw new Error(`회원 상태 저장 실패: ${error.message}`);
+    if (!data?.ok) throw new Error(data?.error || '회원 상태를 저장하지 못했습니다.');
+  },
+
+  async fetchGlobalSttSettings(): Promise<{
+    configured: boolean;
+    provider: 'DEEPGRAM' | 'SONIOX';
+    allowed: boolean;
+    hasDeepgramApiKey: boolean;
+    hasSonioxApiKey: boolean;
+    deepgramApiKey: string;
+    sonioxApiKey: string;
+  }> {
+    const { data, error } = await ensureEnabled().functions.invoke('voicecap-onboard', {
+      body: { action: 'get-stt-settings' },
+    });
+    if (error) throw new Error(`공용 STT 설정 조회 실패: ${error.message}`);
+    if (!data?.ok || !data.settings) throw new Error(data?.error || '공용 STT 설정을 조회하지 못했습니다.');
+    return data.settings;
+  },
+
+  async saveGlobalSttSettings(settings: {
+    provider: 'DEEPGRAM' | 'SONIOX';
+    deepgramApiKey: string;
+    sonioxApiKey: string;
+  }): Promise<void> {
+    const { data, error } = await ensureEnabled().functions.invoke('voicecap-onboard', {
+      body: { action: 'set-stt-settings', ...settings },
+    });
+    if (error) throw new Error(`공용 STT 설정 저장 실패: ${error.message}`);
+    if (!data?.ok) throw new Error(data?.error || '공용 STT 설정을 저장하지 못했습니다.');
   },
 
   async loadSales(workspaceId: string) {

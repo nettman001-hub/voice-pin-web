@@ -22,6 +22,8 @@ const corsHeaders = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: corsHeaders })
 
+const GLOBAL_STT_NAMESPACE = 'voicecap-global-stt'
+
 async function authenticatedUser(request: Request) {
   const authorization = request.headers.get('authorization') ?? ''
   if (!authorization.startsWith('Bearer ') || !anonKey) return null
@@ -99,16 +101,45 @@ async function listVoicecapSellers() {
         email: profile?.email || authUser.email || '',
         nickname: profile?.display_name || authUser.user_metadata?.display_name || authUser.email?.split('@')[0] || '판매자',
         role: membership?.role === 'MANAGER' ? '관리자' : '판매자',
-        status: '활성',
+        status: authUser.app_metadata?.voicecap_status === '정지' ? '정지' : '활성',
+        suspendedReason: typeof authUser.app_metadata?.voicecap_suspended_reason === 'string'
+          ? authUser.app_metadata.voicecap_suspended_reason
+          : null,
         createdAt: String(authUser.created_at || new Date().toISOString()).slice(0, 10),
         workspaceId: workspace?.id || null,
         workspaceName: workspace?.name || authUser.user_metadata?.workspace_name || null,
         phone: profile?.phone || null,
+        allowAdminSttKey: Boolean(authUser.app_metadata?.voicecap_stt_allowed),
+        subscriptionPlan: ['베이직', '프로', '프리미엄'].includes(authUser.app_metadata?.voicecap_subscription_plan)
+          ? authUser.app_metadata.voicecap_subscription_plan
+          : '프로',
+        subscriptionExpiresAt: typeof authUser.app_metadata?.voicecap_subscription_expires_at === 'string'
+          ? authUser.app_metadata.voicecap_subscription_expires_at
+          : null,
+        isTrial: authUser.app_metadata?.voicecap_is_trial !== false,
         emailConfirmed: Boolean(authUser.email_confirmed_at),
         source: 'cloud',
       }
     })
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+}
+
+async function getGlobalSttSettings() {
+  const { data, error } = await admin
+    .from('workspace_settings')
+    .select('value')
+    .eq('namespace', GLOBAL_STT_NAMESPACE)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  const value = (data?.value && typeof data.value === 'object') ? data.value as Record<string, unknown> : {}
+  return {
+    configured: Boolean(data),
+    provider: value.provider === 'SONIOX' ? 'SONIOX' : 'DEEPGRAM',
+    deepgramApiKey: typeof value.deepgramApiKey === 'string' ? value.deepgramApiKey : '',
+    sonioxApiKey: typeof value.sonioxApiKey === 'string' ? value.sonioxApiKey : '',
+  }
 }
 
 Deno.serve(async (request) => {
@@ -134,6 +165,79 @@ Deno.serve(async (request) => {
       return json({ ok: true, sellers })
     }
 
+    if (body.action === 'set-stt-access') {
+      const targetUserId = typeof body.userId === 'string' ? body.userId : ''
+      if (!targetUserId || typeof body.allow !== 'boolean') {
+        return json({ ok: false, error: '회원 ID와 허용 여부가 필요합니다.' }, 400)
+      }
+      const { data: targetResult, error: targetError } = await admin.auth.admin.getUserById(targetUserId)
+      if (targetError || !targetResult.user || targetResult.user.user_metadata?.auth_app !== 'voicecap') {
+        return json({ ok: false, error: 'VoiceCAP 회원을 찾지 못했습니다.' }, 404)
+      }
+      const target = targetResult.user
+      const { error: updateError } = await admin.auth.admin.updateUserById(targetUserId, {
+        app_metadata: { ...target.app_metadata, voicecap_stt_allowed: body.allow },
+      })
+      if (updateError) throw updateError
+      return json({ ok: true, userId: targetUserId, allowAdminSttKey: body.allow })
+    }
+
+    if (body.action === 'set-member-status') {
+      const targetUserId = typeof body.userId === 'string' ? body.userId : ''
+      const status = body.status === '정지' ? '정지' : body.status === '활성' ? '활성' : null
+      if (!targetUserId || !status) return json({ ok: false, error: '회원 ID와 상태가 필요합니다.' }, 400)
+      const { data: targetResult, error: targetError } = await admin.auth.admin.getUserById(targetUserId)
+      if (targetError || !targetResult.user || targetResult.user.user_metadata?.auth_app !== 'voicecap') {
+        return json({ ok: false, error: 'VoiceCAP 회원을 찾지 못했습니다.' }, 404)
+      }
+      const target = targetResult.user
+      const reason = status === '정지' && typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : null
+      const { error: updateError } = await admin.auth.admin.updateUserById(targetUserId, {
+        app_metadata: {
+          ...target.app_metadata,
+          voicecap_status: status,
+          voicecap_suspended_reason: reason,
+        },
+      })
+      if (updateError) throw updateError
+      return json({ ok: true, userId: targetUserId, status, suspendedReason: reason })
+    }
+
+    if (body.action === 'get-stt-settings') {
+      const settings = await getGlobalSttSettings()
+      const allowed = user.app_metadata?.role === 'ADMIN' || Boolean(user.app_metadata?.voicecap_stt_allowed)
+      return json({
+        ok: true,
+        settings: {
+          configured: settings.configured,
+          provider: settings.provider,
+          allowed,
+          hasDeepgramApiKey: Boolean(settings.deepgramApiKey),
+          hasSonioxApiKey: Boolean(settings.sonioxApiKey),
+          deepgramApiKey: allowed ? settings.deepgramApiKey : '',
+          sonioxApiKey: allowed ? settings.sonioxApiKey : '',
+        },
+      })
+    }
+
+    if (body.action === 'set-stt-settings') {
+      const provider = body.provider === 'SONIOX' ? 'SONIOX' : 'DEEPGRAM'
+      const deepgramApiKey = typeof body.deepgramApiKey === 'string' ? body.deepgramApiKey.trim() : ''
+      const sonioxApiKey = typeof body.sonioxApiKey === 'string' ? body.sonioxApiKey.trim() : ''
+      const { data: membership, error: membershipError } = await admin
+        .from('workspace_members').select('workspace_id').eq('user_id', user.id).order('created_at').limit(1).maybeSingle()
+      if (membershipError) throw membershipError
+      if (!membership) return json({ ok: false, error: 'VoiceCAP 작업공간을 찾지 못했습니다.' }, 404)
+      const { error: saveError } = await admin.from('workspace_settings').upsert({
+        workspace_id: membership.workspace_id,
+        namespace: GLOBAL_STT_NAMESPACE,
+        value: { provider, deepgramApiKey, sonioxApiKey },
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'workspace_id,namespace' })
+      if (saveError) throw saveError
+      return json({ ok: true })
+    }
+
     // 이 함수를 통해 로그인한 계정은 이후 관리자 목록에서 확실히 식별되도록 표식을 보정한다.
     if (user.user_metadata?.auth_app !== 'voicecap') {
       const { error: metadataError } = await admin.auth.admin.updateUserById(user.id, {
@@ -151,7 +255,12 @@ Deno.serve(async (request) => {
       id: user.id, email: user.email || null, display_name: displayName,
     }, { onConflict: 'id', ignoreDuplicates: true })
     if (profileError) throw profileError
-    if (membership) return json({ ok: true, workspaceId: membership.workspace_id, created: false })
+    if (membership) return json({
+      ok: true,
+      workspaceId: membership.workspace_id,
+      created: false,
+      allowAdminSttKey: Boolean(user.app_metadata?.voicecap_stt_allowed),
+    })
     const { data: workspace, error: workspaceError } = await admin
       .from('workspaces').insert({ name: workspaceName, owner_id: user.id }).select('id').single()
     if (workspaceError) throw workspaceError
@@ -159,7 +268,12 @@ Deno.serve(async (request) => {
       workspace_id: workspace.id, user_id: user.id, role: 'OWNER',
     })
     if (insertError) throw insertError
-    return json({ ok: true, workspaceId: workspace.id, created: true })
+    return json({
+      ok: true,
+      workspaceId: workspace.id,
+      created: true,
+      allowAdminSttKey: Boolean(user.app_metadata?.voicecap_stt_allowed),
+    })
   } catch (error) {
     console.error(error)
     return json({ ok: false, error: error instanceof Error ? error.message : '작업공간 준비에 실패했습니다.' }, 500)

@@ -14,6 +14,8 @@ import { SttProvider } from '../types/deepgram';
 import { localSttService } from '../services/localSttService';
 import { LocalSttModel, LocalSttStatusPayload, SttMode } from '../types/stt';
 import { User } from '../types/auth';
+import { isSupabaseConfigured } from '../services/supabaseClient';
+import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
 
 const SONIOX_SALE_TIMEOUT_MS = 10000;
 const SONIOX_BUFFER_LIMIT = 600;
@@ -64,11 +66,11 @@ interface LiveContextType {
   isVoiceEditing: boolean;
   editingFieldInfo: string | null;
   deepgramApiKey: string;
-  setDeepgramApiKey: (key: string) => void;
+  setDeepgramApiKey: (key: string) => Promise<void>;
   sonioxApiKey: string;
-  setSonioxApiKey: (key: string) => void;
+  setSonioxApiKey: (key: string) => Promise<void>;
   sttProvider: SttProvider;
-  setSttProvider: (provider: SttProvider) => void;
+  setSttProvider: (provider: SttProvider) => Promise<void>;
   sttMode: SttMode;
   setSttMode: (mode: SttMode) => void;
   localSttModel: LocalSttModel;
@@ -139,6 +141,29 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   }, []);
 
+  // 공용 STT 설정과 이 계정의 이용 권한은 서버가 단일 원본이다.
+  useEffect(() => {
+    if (!isSupabaseConfigured || !user) return;
+    let active = true;
+    void remoteWorkspaceService.fetchGlobalSttSettings().then((settings) => {
+      if (!active || !settings.configured) return;
+      setSttProviderState(settings.provider);
+      storageService.setSttProvider(settings.provider);
+      if (settings.allowed) {
+        setDeepgramApiKeyState(settings.deepgramApiKey);
+        setSonioxApiKeyState(settings.sonioxApiKey);
+        storageService.setDeepgramApiKey(settings.deepgramApiKey);
+        storageService.setSonioxApiKey(settings.sonioxApiKey);
+      } else {
+        setDeepgramApiKeyState('');
+        setSonioxApiKeyState('');
+        storageService.setDeepgramApiKey('');
+        storageService.setSonioxApiKey('');
+      }
+    }).catch((error) => console.error('[Live] 공용 STT 설정 동기화 실패:', error));
+    return () => { active = false; };
+  }, [user?.id]);
+
   // 최신 세션/상태 ref 유지
   const isListeningRef = useRef<boolean>(false);
   const isVoiceEditingRef = useRef<boolean>(false);
@@ -182,17 +207,26 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }), []);
 
-  const setDeepgramApiKey = (key: string) => {
+  const setDeepgramApiKey = async (key: string) => {
+    if (isSupabaseConfigured && user) {
+      await remoteWorkspaceService.saveGlobalSttSettings({ provider: sttProvider, deepgramApiKey: key, sonioxApiKey });
+    }
     setDeepgramApiKeyState(key);
     storageService.setDeepgramApiKey(key);
   };
 
-  const setSonioxApiKey = (key: string) => {
+  const setSonioxApiKey = async (key: string) => {
+    if (isSupabaseConfigured && user) {
+      await remoteWorkspaceService.saveGlobalSttSettings({ provider: sttProvider, deepgramApiKey, sonioxApiKey: key });
+    }
     setSonioxApiKeyState(key);
     storageService.setSonioxApiKey(key);
   };
 
-  const setSttProvider = (provider: SttProvider) => {
+  const setSttProvider = async (provider: SttProvider) => {
+    if (isSupabaseConfigured && user) {
+      await remoteWorkspaceService.saveGlobalSttSettings({ provider, deepgramApiKey, sonioxApiKey });
+    }
     setSttProviderState(provider);
     storageService.setSttProvider(provider);
   };

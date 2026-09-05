@@ -1,4 +1,3 @@
-import { User } from '../types/auth';
 import { SaleRecord, CaptureItem, LiveSession } from '../types/live';
 import { RecognitionWordRule, CaptureAreaConfig } from '../types/rules';
 import { TrainingSentence } from '../types/training';
@@ -98,55 +97,6 @@ export const INITIAL_SALES: SaleRecord[] = [
   }
 ];
 
-// 초기 회원 목업 데이터
-export const INITIAL_USERS: User[] = [
-  {
-    id: 'u-seller-1',
-    email: 'seller@dadryeo.com',
-    nickname: '김미정 (의류판매)',
-    phone: '010-1234-5678',
-    role: '판매자',
-    status: '활성',
-    createdAt: '2026-08-01',
-    subscriptionPlan: '프로',
-    subscriptionExpiresAt: '2026-09-01',
-    isTrial: false,
-    allowAdminSttKey: true // 관리자 STT 키 이용 허락됨
-  },
-  {
-    id: 'u-admin-1',
-    email: 'admin@dadryeo.com',
-    nickname: '운영총괄 관리자',
-    phone: '010-9999-8888',
-    role: '관리자',
-    status: '활성',
-    createdAt: '2026-07-01',
-    allowAdminSttKey: true
-  },
-  {
-    id: 'u-seller-2',
-    email: 'baduser@dadryeo.com',
-    nickname: '스팸판매자',
-    phone: '010-4444-5555',
-    role: '판매자',
-    status: '정지',
-    suspendedReason: '음성 학습을 통한 부적절한 단어 오남용 신고 접수',
-    createdAt: '2026-08-10',
-    allowAdminSttKey: false
-  },
-  {
-    id: 'u-seller-3',
-    email: 'rookie@dadryeo.com',
-    nickname: '초보라이브 (미승인)',
-    phone: '010-7777-8888',
-    role: '판매자',
-    status: '활성',
-    createdAt: '2026-08-20',
-    subscriptionPlan: '베이직',
-    allowAdminSttKey: false // 관리자 STT 키 미허락 (승인 필요)
-  }
-];
-
 // 초기 결제 내역 목업 데이터
 export const INITIAL_PAYMENTS: PaymentHistoryItem[] = [
   { id: 'p1', date: '2026-08-01', planName: '프로 플랜', amount: 19900, status: '결제 완료', paymentMethod: '신한카드 (4820)' },
@@ -232,9 +182,6 @@ export const INITIAL_COMMERCE_STATE: CommerceState = {
 
 // 로컬 스토리지 키
 const KEYS = {
-  USERS: 'dadryeo_users',
-  CURRENT_USER: 'dadryeo_current_user',
-  TOKEN: 'dadryeo_token',
   RULES: 'dadryeo_rules',
   TRAINING: 'dadryeo_training',
   SALES: 'dadryeo_sales',
@@ -277,9 +224,7 @@ export class StorageService {
 
   // 초기화 및 시딩
   public init() {
-    if (!localStorage.getItem(KEYS.USERS)) {
-      this.setItem(KEYS.USERS, INITIAL_USERS);
-    }
+    this.clearLegacyMemberData();
     if (!localStorage.getItem(KEYS.RULES)) {
       this.setItem(KEYS.RULES, DEFAULT_RULES);
     }
@@ -300,6 +245,17 @@ export class StorageService {
     }
     if (!localStorage.getItem(KEYS.COMMERCE_STATE)) {
       this.setItem(KEYS.COMMERCE_STATE, INITIAL_COMMERCE_STATE);
+    }
+  }
+
+  // 회원/인증 데이터는 Supabase만 원본으로 사용한다. 과거 버전이 남긴 로컬 데이터도 즉시 제거한다.
+  public clearLegacyMemberData() {
+    localStorage.removeItem('dadryeo_users');
+    localStorage.removeItem('dadryeo_current_user');
+    localStorage.removeItem('dadryeo_token');
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith('sb-') && key.endsWith('-auth-token')) localStorage.removeItem(key);
     }
   }
 
@@ -391,54 +347,6 @@ export class StorageService {
       console.error('[Storage] 백업 복원 실패:', e);
       return false;
     }
-  }
-
-  // 회원 및 인증
-  public getUsers(): User[] {
-    const users = this.getItem(KEYS.USERS, INITIAL_USERS);
-    let changed = false;
-    // 신규 목업 사용자가 로컬스토리지에 누락된 경우 병합
-    INITIAL_USERS.forEach((initUser) => {
-      if (!users.some((u) => u.id === initUser.id)) {
-        users.push(initUser);
-        changed = true;
-      }
-    });
-    const normalized = users.map((u) => {
-      if (u.allowAdminSttKey === undefined) {
-        changed = true;
-        return {
-          ...u,
-          allowAdminSttKey: u.role === '관리자' || u.id === 'u-seller-1'
-        };
-      }
-      return u;
-    });
-    if (changed) {
-      this.setItem(KEYS.USERS, normalized);
-    }
-    return normalized;
-  }
-  public saveUsers(users: User[]) { this.setItem(KEYS.USERS, users); }
-
-  public getCurrentUser(): User | null {
-    const user = this.getItem<User | null>(KEYS.CURRENT_USER, null);
-    if (!user) return INITIAL_USERS[0];
-    if (user.allowAdminSttKey === undefined) {
-      const users = this.getUsers();
-      const matched = users.find((u) => u.id === user.id);
-      const updated = { ...user, allowAdminSttKey: matched ? matched.allowAdminSttKey : (user.role === '관리자' || user.id === 'u-seller-1') };
-      this.setItem(KEYS.CURRENT_USER, updated);
-      return updated;
-    }
-    return user;
-  }
-  public setCurrentUser(user: User | null) { this.setItem(KEYS.CURRENT_USER, user); }
-
-  public getToken(): string | null { return localStorage.getItem(KEYS.TOKEN); }
-  public setToken(token: string | null) {
-    if (token) localStorage.setItem(KEYS.TOKEN, token);
-    else localStorage.removeItem(KEYS.TOKEN);
   }
 
   // 규칙

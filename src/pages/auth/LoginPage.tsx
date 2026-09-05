@@ -9,7 +9,6 @@ export const LoginPage: React.FC = () => {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [autoLogin, setAutoLogin] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -19,7 +18,7 @@ export const LoginPage: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      const res = await login(email, password, autoLogin);
+      const res = await login(email, password, false);
       if (!res.success) {
         setErrorMessage(res.message || '로그인에 실패했습니다.');
         return;
@@ -122,17 +121,7 @@ export const LoginPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-1">
-            <label className="flex items-center space-x-2 text-xs text-slate-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={autoLogin}
-                onChange={(e) => setAutoLogin(e.target.checked)}
-                className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 w-4 h-4"
-              />
-              <span>자동 로그인 설정</span>
-            </label>
-          </div>
+          <p className="text-[11px] text-slate-500">보안을 위해 로그인 정보는 이 브라우저에 저장되지 않습니다.</p>
 
           <button
             type="submit"

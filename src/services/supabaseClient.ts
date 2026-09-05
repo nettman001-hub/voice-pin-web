@@ -8,7 +8,8 @@ export const isSupabaseConfigured = Boolean(url && publishableKey);
 export const supabase: SupabaseClient | null = isSupabaseConfigured
   ? createClient(url!, publishableKey!, {
       auth: {
-        persistSession: true,
+        // 회원/세션 정보를 localStorage에 남기지 않는다. 세션은 현재 탭 메모리에만 유지된다.
+        persistSession: false,
         autoRefreshToken: true,
         detectSessionInUrl: true,
       },

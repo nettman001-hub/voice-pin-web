@@ -33,9 +33,10 @@ export const MemberManagementPage: React.FC = () => {
   const [suspendReason, setSuspendReason] = useState('허위 판매 멘트 및 비정상 트래픽 유발');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
-  const handleToggleSttAccess = (member: User) => {
+  const handleToggleSttAccess = async (member: User) => {
     const nextState = !member.allowAdminSttKey;
-    setMemberSttAccess(member.id, nextState);
+    const success = await setMemberSttAccess(member.id, nextState);
+    if (!success) return;
     setToastMsg(
       nextState
         ? `'${member.nickname}' 판매자에게 관리자 STT API 키 이용을 허락했습니다! 🎉`
@@ -53,16 +54,18 @@ export const MemberManagementPage: React.FC = () => {
     return true;
   });
 
-  const handleConfirmSuspend = () => {
+  const handleConfirmSuspend = async () => {
     if (!selectedMemberForSuspend) return;
-    suspendMember(selectedMemberForSuspend.id, suspendReason);
+    const success = await suspendMember(selectedMemberForSuspend.id, suspendReason);
+    if (!success) return;
     setSelectedMemberForSuspend(null);
     setToastMsg(`'${selectedMemberForSuspend.nickname}' 회원이 정지 처리되었습니다.`);
     setTimeout(() => setToastMsg(null), 3000);
   };
 
-  const handleRelease = (member: User) => {
-    unsuspendMember(member.id);
+  const handleRelease = async (member: User) => {
+    const success = await unsuspendMember(member.id);
+    if (!success) return;
     setToastMsg(`'${member.nickname}' 회원의 정지가 해제되었습니다.`);
     setTimeout(() => setToastMsg(null), 3000);
   };
