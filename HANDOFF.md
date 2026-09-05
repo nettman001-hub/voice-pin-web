@@ -280,7 +280,23 @@ npm test --prefix desktop/comment-helper
 
 ---
 
-## 8. 최근 핵심 커밋 히스토리
+## 8. 2026-09-05 최신 구현 및 해결 내역
+
+### 1) 라이브 청취 재시작 시 오디오 스트림 및 파형/자막 먹통 버그 원천 해결
+- **문제**: "연결된 방송 탭"으로 청취 중 [청취 중지하기] 후 다시 [청취 시작] 시 실시간 오디오가 유입되지 않고 파형 및 실시간 전체 자막이 멈춤.
+- **원인**: Chrome 브라우저의 Web Audio API에서 `MediaStreamAudioSourceNode`와 `ScriptProcessorNode`가 연결된 `AudioContext`가 `suspend()` 후 `resume()`될 때 내부 오디오 렌더러가 깨어나지 못해 무음(0) 상태로 고착되는 브라우저 버그.
+- **해결**:
+  - `audioCaptureService.ts`: 중지 시 오디오 그래프 노드를 깨끗이 닫고, 재청취 시작 시 살아있는 원본 방송 탭 오디오 트랙으로부터 신선한 `new AudioContext()` 파이프라인을 1~2ms 만에 즉시 재생성.
+  - 원본 방송 탭 오디오 트랙을 `.stop()`하지 않고 보존하여 팝업창 없이 즉각 재연결되도록 완벽 조치.
+
+### 2) VoiceCAP 댓글 도우미 로컬 무료 STT NVIDIA GPU(CUDA) 가속 및 디바이스 선택 지원
+- **구현**:
+  - NVIDIA GeForce GTX 1660 SUPER 등 외장 GPU 환경에서 Faster-Whisper를 `cuda` 및 `float16`으로 고속 구동하여 CPU 점유율 대폭 감소 및 음성 인식 지연 최소화.
+  - `desktop/comment-helper`: PyTorch/CUDA 연동 디바이스 자동 감지(`detect_devices`), GPU 감지 배지 및 사용자가 GPU/CPU를 직접 선택할 수 있는 환경설정 UI 반영.
+
+---
+
+## 9. 최근 핵심 커밋 히스토리
 
 - `85796a5`: fix(desktop): Electron asarUnpack 적용 및 Python worker 경로 해석 개선
 - `c341182`: build: 댓글 도우미 GitHub Release 자동 업로드 스크립트 추가

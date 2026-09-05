@@ -6,6 +6,10 @@ const liveStats = document.querySelector('#live-stats');
 const tiktokUsername = document.querySelector('#tiktok-username');
 const commentCount = document.querySelector('#comment-count');
 const sttStatus = document.querySelector('#stt-status');
+const sttDeviceSelect = document.querySelector('#stt-device-select');
+const refreshDevicesButton = document.querySelector('#refresh-devices');
+const gpuBadge = document.querySelector('#gpu-badge');
+const sttDeviceMessage = document.querySelector('#stt-device-message');
 const autoStart = document.querySelector('#auto-start');
 const restartButton = document.querySelector('#restart');
 const version = document.querySelector('#version');
@@ -62,13 +66,53 @@ function render(status) {
     if (!stt) {
       sttStatus.textContent = '대기 중';
     } else if (stt.state === 'READY' || stt.state === 'LISTENING') {
-      sttStatus.textContent = `준비됨 (${stt.model || 'base'})`;
+      const devLabel = stt.device === 'cuda' ? 'GPU 가속' : 'CPU';
+      sttStatus.textContent = `준비됨 (${stt.model || 'base'} / ${devLabel})`;
     } else if (stt.state === 'LOADING') {
       sttStatus.textContent = `로딩 중 (${stt.model || 'base'})`;
     } else if (stt.state === 'ERROR') {
       sttStatus.textContent = '오류';
     } else {
       sttStatus.textContent = stt.state || '대기';
+    }
+  }
+
+  if (status.stt) {
+    const stt = status.stt;
+    if (gpuBadge) {
+      if (stt.hasGpu) {
+        gpuBadge.className = 'badge-gpu';
+        gpuBadge.textContent = `⚡ ${stt.gpuName || 'NVIDIA GPU'} 감지됨`;
+      } else {
+        gpuBadge.className = 'badge-gpu disabled';
+        gpuBadge.textContent = 'GPU 미감지 (CPU 모드)';
+      }
+    }
+    if (sttDeviceSelect && !sttDeviceSelect.matches(':focus')) {
+      if (Array.isArray(stt.availableDevices) && stt.availableDevices.length > 0) {
+        sttDeviceSelect.replaceChildren();
+        stt.availableDevices.forEach((dev) => {
+          const opt = document.createElement('option');
+          opt.value = dev.id;
+          opt.textContent = dev.id === 'cuda'
+            ? `🚀 GPU 가속 (${dev.name})`
+            : `💻 CPU (${dev.name})`;
+          opt.disabled = !dev.available;
+          sttDeviceSelect.append(opt);
+        });
+        sttDeviceSelect.value = stt.device || 'cuda';
+      } else if (stt.device) {
+        sttDeviceSelect.value = stt.device;
+      }
+    }
+    if (sttDeviceMessage) {
+      if (stt.device === 'cuda') {
+        sttDeviceMessage.textContent = `NVIDIA GPU (${stt.gpuName || 'CUDA'}) 가속 활성화됨: 지연 없는 초고속 실시간 음성인식`;
+        sttDeviceMessage.className = 'stt-message';
+      } else {
+        sttDeviceMessage.textContent = 'CPU 기본 연산으로 동작 중입니다. 빠른 발화 시 지연이 발생할 수 있습니다.';
+        sttDeviceMessage.className = 'stt-message';
+      }
     }
   }
 }
@@ -174,6 +218,34 @@ restartButton.addEventListener('click', async () => {
   try { render(await window.voicecap.restart()); }
   finally {
     setTimeout(() => { restartButton.disabled = false; restartButton.textContent = '서버 다시 시작'; }, 1800);
+  }
+});
+
+sttDeviceSelect?.addEventListener('change', async () => {
+  const chosen = sttDeviceSelect.value;
+  sttDeviceSelect.disabled = true;
+  if (sttDeviceMessage) {
+    sttDeviceMessage.textContent = `${chosen === 'cuda' ? 'GPU 가속' : 'CPU'} 모드로 전환하는 중입니다...`;
+  }
+  try {
+    await window.voicecap.setSttDevice(chosen);
+    render(await window.voicecap.getStatus());
+  } catch (err) {
+    if (sttDeviceMessage) {
+      sttDeviceMessage.textContent = `장치 전환 실패: ${err.message}`;
+    }
+  } finally {
+    sttDeviceSelect.disabled = false;
+  }
+});
+
+refreshDevicesButton?.addEventListener('click', async () => {
+  refreshDevicesButton.disabled = true;
+  try {
+    await window.voicecap.detectSttDevices();
+    render(await window.voicecap.getStatus());
+  } finally {
+    setTimeout(() => { refreshDevicesButton.disabled = false; }, 1000);
   }
 });
 

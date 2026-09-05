@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('voicecap', {
   getPrinters: () => ipcRenderer.invoke('helper:get-printers'),
   savePrintSettings: (settings) => ipcRenderer.invoke('helper:save-print-settings', settings),
   testPrint: () => ipcRenderer.invoke('helper:test-print'),
+  setSttDevice: (device) => ipcRenderer.invoke('helper:set-stt-device', device),
+  detectSttDevices: () => ipcRenderer.invoke('helper:detect-stt-devices'),
   hideWindow: () => ipcRenderer.invoke('helper:hide-window'),
   quit: () => ipcRenderer.invoke('helper:quit'),
   onStatus: (listener) => {

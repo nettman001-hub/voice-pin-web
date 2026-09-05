@@ -799,7 +799,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ) {
         // 같은 브라우저에서 다른 계정으로 전환된 경우 이전 계정의 공유를 넘기지 않는다.
         screenCaptureService.stopStream();
-        audioCaptureService.stopCapture();
+        audioCaptureService.stopCapture(false);
       }
 
       const previousMode = activeAudioSourceModeRef.current;
@@ -1013,7 +1013,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const disconnectScreenShare = useCallback(() => {
     stopListening();
-    audioCaptureService.stopCapture();
+    audioCaptureService.stopCapture(false);
     screenCaptureService.stopStream();
     setSttEngineStatus('DISCONNECTED');
     setSttEngineMessage('방송 탭 공유 연결 해제됨');

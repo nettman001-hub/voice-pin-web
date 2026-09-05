@@ -706,6 +706,60 @@ ipcMain.handle('helper:test-print', () => enqueuePrintJob({
   amount: 15000,
   recognizedAt: new Date().toISOString()
 }));
+function postServerJson(apiPath, body) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body || {});
+    const req = http.request({
+      hostname: SERVER_HOST,
+      port: SERVER_PORT,
+      path: apiPath,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data)
+      },
+      timeout: 3000
+    }, (res) => {
+      let respBody = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { respBody += chunk; });
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(respBody));
+        } catch (e) {
+          resolve({ ok: false, error: e.message });
+        }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(new Error('timeout')); reject(new Error('timeout')); });
+    req.write(data);
+    req.end();
+  });
+}
+
+ipcMain.handle('helper:set-stt-device', async (_event, device) => {
+  try {
+    const res = await postServerJson('/api/stt/device', { device });
+    if (res && res.ok) {
+      state.stt = res;
+      publishStatus();
+    }
+    return res;
+  } catch (err) {
+    writeLog('helper', `STT 장치 변경 실패: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('helper:detect-stt-devices', async () => {
+  try {
+    return await postServerJson('/api/stt/detect', {});
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('helper:hide-window', () => mainWindow?.hide());
 ipcMain.handle('helper:quit', quitApp);
 
