@@ -190,53 +190,26 @@ export const remoteWorkspaceService = {
     if (!isSupabaseConfigured) return [];
     const client = requireSupabase();
 
-    // 1차 시도: Edge Function 'voicecap-onboard' { action: 'list-voicecap-sellers' }
-    try {
-      const { data, error } = await client.functions.invoke('voicecap-onboard', {
-        body: { action: 'list-voicecap-sellers' },
-      });
-      if (!error && data?.ok && Array.isArray(data.sellers)) {
-        return data.sellers.map((s: any) => ({
-          id: s.id,
-          email: s.email,
-          nickname: s.nickname || s.email?.split('@')[0] || '판매자',
-          role: s.role || '판매자',
-          status: s.status || '활성',
-          createdAt: s.createdAt || new Date().toISOString().slice(0, 10),
-          subscriptionPlan: '프로',
-          isTrial: true,
-          phone: s.phone || undefined,
-          isCloudUser: true,
-          workspaceName: s.workspaceName || undefined,
-        }));
-      }
-    } catch (efError) {
-      console.warn('[RemoteWorkspace] Edge Function 호출 실패, RPC 폴백 시도:', efError);
-    }
+    const { data, error } = await client.functions.invoke('voicecap-onboard', {
+      body: { action: 'list-voicecap-sellers' },
+    });
+    if (error) throw new Error(`클라우드 회원 조회 실패: ${error.message}`);
+    if (!data?.ok) throw new Error(data?.error || '클라우드 회원 조회 응답이 올바르지 않습니다.');
+    if (!Array.isArray(data.sellers)) throw new Error('클라우드 회원 목록 형식이 올바르지 않습니다.');
 
-    // 2차 시도: Postgres RPC 'get_voicecap_sellers'
-    try {
-      const { data, error } = await client.rpc('get_voicecap_sellers');
-      if (!error && Array.isArray(data)) {
-        return data.map((s: any) => ({
-          id: s.id,
-          email: s.email,
-          nickname: s.display_name || s.email?.split('@')[0] || '판매자',
-          role: s.role || '판매자',
-          status: s.status || '활성',
-          createdAt: s.created_at ? String(s.created_at).slice(0, 10) : new Date().toISOString().slice(0, 10),
-          subscriptionPlan: '프로',
-          isTrial: true,
-          phone: s.phone || undefined,
-          isCloudUser: true,
-          workspaceName: s.workspace_name || undefined,
-        }));
-      }
-    } catch (rpcError) {
-      console.warn('[RemoteWorkspace] RPC get_voicecap_sellers 실패:', rpcError);
-    }
-
-    return [];
+    return data.sellers.map((s: any) => ({
+      id: s.id,
+      email: s.email,
+      nickname: s.nickname || s.email?.split('@')[0] || '판매자',
+      role: s.role || '판매자',
+      status: s.status || '활성',
+      createdAt: s.createdAt || new Date().toISOString().slice(0, 10),
+      subscriptionPlan: '프로',
+      isTrial: true,
+      phone: s.phone || undefined,
+      isCloudUser: true,
+      workspaceName: s.workspaceName || undefined,
+    }));
   },
 
   async loadSales(workspaceId: string) {

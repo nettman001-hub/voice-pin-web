@@ -23,7 +23,8 @@ export const MemberManagementPage: React.FC = () => {
     unsuspendMember,
     setMemberSttAccess,
     refreshMembers,
-    isSyncingMembers
+    isSyncingMembers,
+    memberSyncError
   } = useAppData();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -94,8 +95,8 @@ export const MemberManagementPage: React.FC = () => {
 
         <button
           onClick={async () => {
-            await refreshMembers();
-            setToastMsg('VoiceCAP 클라우드 판매자 목록을 최신으로 동기화했습니다! ☁️');
+            const success = await refreshMembers();
+            setToastMsg(success ? 'VoiceCAP 클라우드 판매자 목록을 최신으로 동기화했습니다! ☁️' : null);
             setTimeout(() => setToastMsg(null), 3000);
           }}
           disabled={isSyncingMembers}
@@ -114,6 +115,13 @@ export const MemberManagementPage: React.FC = () => {
         <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center space-x-2 animate-in fade-in">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
           <span>{toastMsg}</span>
+        </div>
+      )}
+
+      {memberSyncError && (
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center space-x-2">
+          <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+          <span>클라우드 회원을 불러오지 못했습니다: {memberSyncError}</span>
         </div>
       )}
 

@@ -87,7 +87,8 @@ interface AppDataContextType {
   adminKpis: AdminKpis;
   allMembers: User[];
   isSyncingMembers: boolean;
-  refreshMembers: () => Promise<void>;
+  memberSyncError: string | null;
+  refreshMembers: () => Promise<boolean>;
   suspendMember: (userId: string, reason: string) => void;
   unsuspendMember: (userId: string) => void;
   setMemberSttAccess: (userId: string, allow: boolean) => void;
@@ -128,23 +129,21 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // 관리자 상태
   const [allMembers, setAllMembers] = useState<User[]>([]);
   const [isSyncingMembers, setIsSyncingMembers] = useState<boolean>(false);
+  const [memberSyncError, setMemberSyncError] = useState<string | null>(null);
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [errorLogs, setErrorLogs] = useState<SystemErrorLog[]>([]);
 
   const refreshMembers = async () => {
     setIsSyncingMembers(true);
+    setMemberSyncError(null);
     try {
       const localUsers = storageService.getUsers();
       if (!isSupabaseConfigured) {
         setAllMembers(localUsers);
-        return;
+        return true;
       }
 
       const cloudSellers = await remoteWorkspaceService.fetchVoicecapSellers();
-      if (!cloudSellers || cloudSellers.length === 0) {
-        setAllMembers(localUsers);
-        return;
-      }
 
       // 로컬 사용자와 클라우드 사용자를 이메일/ID 기준으로 병합
       const mergedMap = new Map<string, User>();
@@ -186,8 +185,11 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const uniqueUsers = Array.from(new Set(Array.from(mergedMap.values())));
       storageService.saveUsers(uniqueUsers);
       setAllMembers(uniqueUsers);
+      return true;
     } catch (err) {
       console.error('[AppDataContext] 회원 동기화 오류:', err);
+      setMemberSyncError(err instanceof Error ? err.message : '클라우드 회원 동기화에 실패했습니다.');
+      return false;
     } finally {
       setIsSyncingMembers(false);
     }
@@ -454,6 +456,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         adminKpis,
         allMembers,
         isSyncingMembers,
+        memberSyncError,
         refreshMembers,
         suspendMember,
         unsuspendMember,
