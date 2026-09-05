@@ -4,6 +4,7 @@ import { useAppData } from '../../context/AppDataContext';
 import { useSales } from '../../context/SalesContext';
 import { useLive } from '../../context/LiveContext';
 import { User } from '../../types/auth';
+import { remoteWorkspaceService } from '../../services/remoteWorkspaceService';
 import { ReportItem } from '../../types/admin';
 import {
   Users,
@@ -38,6 +39,23 @@ export const AdminDashboardPage: React.FC = () => {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
   const [showSonioxKey, setShowSonioxKey] = useState(false);
+  const [adminTotalRevenue, setAdminTotalRevenue] = useState<number | null>(null);
+  const [adminTotalSalesCount, setAdminTotalSalesCount] = useState<number>(0);
+
+  useEffect(() => {
+    let active = true;
+    void remoteWorkspaceService.fetchAllSalesForAdmin().then((allSales) => {
+      if (!active) return;
+      const validSales = allSales.filter((s) => s.status !== '보류');
+      const sum = validSales.reduce((acc, s) => acc + s.amount, 0);
+      setAdminTotalRevenue(sum);
+      setAdminTotalSalesCount(validSales.length);
+    }).catch((err) => {
+      console.warn('[AdminDashboard] 전체 판매 내역 조회 실패:', err);
+    });
+    return () => { active = false; };
+  }, []);
+
 
   useEffect(() => setInputKey(deepgramApiKey), [deepgramApiKey]);
   useEffect(() => setSonioxInputKey(sonioxApiKey), [sonioxApiKey]);
@@ -360,18 +378,18 @@ export const AdminDashboardPage: React.FC = () => {
         </Link>
 
         <Link
-          to="/sales"
+          to="/admin/sales"
           className="p-3.5 sm:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm hover:border-slate-300 transition block group"
         >
           <div className="flex items-center justify-between text-slate-500">
-            <span className="text-[10px] sm:text-xs font-medium">총 누적 거래액</span>
+            <span className="text-[10px] sm:text-xs font-medium">전체 판매자 누적 거래액</span>
             <CreditCard className="w-4 h-4 text-brand-600 group-hover:scale-110 transition-transform" />
           </div>
           <div className="text-lg sm:text-2xl font-black text-slate-900 mt-1 sm:mt-2 truncate">
-            {totalRevenue.toLocaleString()} <span className="text-xs font-normal text-slate-400">원</span>
+            {(adminTotalRevenue !== null ? adminTotalRevenue : totalRevenue).toLocaleString()} <span className="text-xs font-normal text-slate-400">원</span>
           </div>
           <div className="text-[10px] sm:text-[11px] text-brand-600 mt-1 sm:mt-2 truncate font-semibold">
-            <span>실시간 정산 연동</span>
+            <span>전체 판매 & 회차 관제 ↗</span>
           </div>
         </Link>
 
