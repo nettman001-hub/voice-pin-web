@@ -255,7 +255,7 @@ export const SignupPage: React.FC = () => {
               type="submit"
               className="w-full py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-500/20 transition mt-4"
             >
-              {isSubmitting ? '가입 처리 중...' : '이메일 인증번호 받기'}
+              {isSubmitting ? '가입 처리 중...' : '회원가입하기'}
             </button>
           </form>
         ) : (
