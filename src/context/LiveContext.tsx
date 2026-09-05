@@ -121,9 +121,9 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sonioxCommandTailRef = useRef<string>('');
 
   // 관리자 공통 STT 공급자 및 API Key 설정
-  const [deepgramApiKey, setDeepgramApiKeyState] = useState<string>(storageService.getDeepgramApiKey());
-  const [sonioxApiKey, setSonioxApiKeyState] = useState<string>(storageService.getSonioxApiKey());
-  const [sttProvider, setSttProviderState] = useState<SttProvider>(storageService.getSttProvider());
+  const [deepgramApiKey, setDeepgramApiKeyState] = useState<string>('');
+  const [sonioxApiKey, setSonioxApiKeyState] = useState<string>('');
+  const [sttProvider, setSttProviderState] = useState<SttProvider>('DEEPGRAM');
 
   // STT 모드 (클라우드 vs 로컬) 및 로컬 모델 설정
   const [sttMode, setSttModeState] = useState<SttMode>(storageService.getSttMode());
@@ -146,19 +146,19 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!isSupabaseConfigured || !user) return;
     let active = true;
     void remoteWorkspaceService.fetchGlobalSttSettings().then((settings) => {
-      if (!active || !settings.configured) return;
+      if (!active) return;
+      if (!settings.configured) {
+        setDeepgramApiKeyState('');
+        setSonioxApiKeyState('');
+        return;
+      }
       setSttProviderState(settings.provider);
-      storageService.setSttProvider(settings.provider);
       if (settings.allowed) {
         setDeepgramApiKeyState(settings.deepgramApiKey);
         setSonioxApiKeyState(settings.sonioxApiKey);
-        storageService.setDeepgramApiKey(settings.deepgramApiKey);
-        storageService.setSonioxApiKey(settings.sonioxApiKey);
       } else {
         setDeepgramApiKeyState('');
         setSonioxApiKeyState('');
-        storageService.setDeepgramApiKey('');
-        storageService.setSonioxApiKey('');
       }
     }).catch((error) => console.error('[Live] 공용 STT 설정 동기화 실패:', error));
     return () => { active = false; };
@@ -212,7 +212,6 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await remoteWorkspaceService.saveGlobalSttSettings({ provider: sttProvider, deepgramApiKey: key, sonioxApiKey });
     }
     setDeepgramApiKeyState(key);
-    storageService.setDeepgramApiKey(key);
   };
 
   const setSonioxApiKey = async (key: string) => {
@@ -220,7 +219,6 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await remoteWorkspaceService.saveGlobalSttSettings({ provider: sttProvider, deepgramApiKey, sonioxApiKey: key });
     }
     setSonioxApiKeyState(key);
-    storageService.setSonioxApiKey(key);
   };
 
   const setSttProvider = async (provider: SttProvider) => {
@@ -228,7 +226,6 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await remoteWorkspaceService.saveGlobalSttSettings({ provider, deepgramApiKey, sonioxApiKey });
     }
     setSttProviderState(provider);
-    storageService.setSttProvider(provider);
   };
 
   const setSttMode = (mode: SttMode) => {
@@ -950,10 +947,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         );
       } else {
         // [클라우드 STT] 관리자가 선택한 STT 공급자와 최신 API Key 확인
-        const activeSttProvider = sttProvider || storageService.getSttProvider();
+        const activeSttProvider = sttProvider;
         const activeApiKey = activeSttProvider === 'SONIOX'
-          ? sonioxApiKey || storageService.getSonioxApiKey()
-          : deepgramApiKey || storageService.getDeepgramApiKey();
+          ? sonioxApiKey
+          : deepgramApiKey;
 
         const currentUser = currentUserRef.current;
         const canUseAdminKey = currentUser?.role === '관리자' || Boolean(currentUser?.allowAdminSttKey);

@@ -1,6 +1,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { User, AuthState, UserRole } from '../types/auth';
-import { isSupabaseConfigured, requireSupabase, supabase } from '../services/supabaseClient';
+import {
+  isSupabaseConfigured,
+  rememberSessionRefreshToken,
+  requireSupabase,
+  restoreSupabaseSession,
+  supabase,
+} from '../services/supabaseClient';
 
 interface AuthResult {
   success: boolean;
@@ -93,10 +99,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     let active = true;
     const initialize = async () => {
-      const { data } = await client.auth.getSession();
-      if (data.session?.user && active) {
+      const session = await restoreSupabaseSession();
+      if (session?.user && active) {
         try {
-          await syncRemoteIdentity(data.session.user, data.session.access_token);
+          await syncRemoteIdentity(session.user, session.access_token);
         } catch (error) {
           console.error('[Auth] Supabase profile load failed', error);
         }
@@ -107,9 +113,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
       if (!active) return;
       if (!session?.user) {
+        rememberSessionRefreshToken(null);
         setUser(null); setWorkspaceId(null); setToken(null);
         return;
       }
+      rememberSessionRefreshToken(session.refresh_token);
       const authUser = session.user;
       const accessToken = session.access_token;
       window.setTimeout(() => {
@@ -127,6 +135,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (isSupabaseConfigured) {
       const { data, error } = await requireSupabase().auth.signInWithPassword({ email, password: pass });
       if (error || !data.user) return { success: false, message: error?.message || '로그인에 실패했습니다.' };
+      rememberSessionRefreshToken(data.session?.refresh_token);
       await syncRemoteIdentity(data.user, data.session?.access_token);
       return { success: true };
     }
@@ -145,7 +154,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         },
       });
       if (error) return { success: false, message: error.message };
-      if (data.session?.user) await syncRemoteIdentity(data.session.user, data.session.access_token);
+      if (data.session?.user) {
+        rememberSessionRefreshToken(data.session.refresh_token);
+        await syncRemoteIdentity(data.session.user, data.session.access_token);
+      }
       return { success: true, requiresEmailConfirmation: !data.session };
     }
 
@@ -156,6 +168,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!isSupabaseConfigured) return { success: false, message: '인증번호 확인은 수파베이스 설정 후 사용할 수 있습니다.' };
     const { data, error } = await requireSupabase().auth.verifyOtp({ email, token: code, type: 'email' });
     if (error || !data.session?.user) return { success: false, message: error?.message || '인증번호를 확인하지 못했습니다. 새 인증번호를 요청해 주세요.' };
+    rememberSessionRefreshToken(data.session.refresh_token);
     await syncRemoteIdentity(data.session.user, data.session.access_token);
     return { success: true };
   };
@@ -171,6 +184,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    rememberSessionRefreshToken(null);
     if (isSupabaseConfigured) await requireSupabase().auth.signOut();
     setUser(null); setWorkspaceId(null); setToken(null);
   };

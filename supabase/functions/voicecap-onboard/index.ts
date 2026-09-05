@@ -158,14 +158,17 @@ Deno.serve(async (request) => {
     }
 
     if (body.action === 'list-voicecap-sellers') {
-      if (user.user_metadata?.auth_app !== 'voicecap' && user.app_metadata?.role !== 'ADMIN') {
-        return json({ ok: false, error: 'VoiceCAP 회원만 조회할 수 있습니다.' }, 403)
+      if (user.app_metadata?.role !== 'ADMIN') {
+        return json({ ok: false, error: '관리자만 회원 목록을 조회할 수 있습니다.' }, 403)
       }
       const sellers = await listVoicecapSellers()
       return json({ ok: true, sellers })
     }
 
     if (body.action === 'set-stt-access') {
+      if (user.app_metadata?.role !== 'ADMIN') {
+        return json({ ok: false, error: '관리자만 STT 지원 권한을 변경할 수 있습니다.' }, 403)
+      }
       const targetUserId = typeof body.userId === 'string' ? body.userId : ''
       if (!targetUserId || typeof body.allow !== 'boolean') {
         return json({ ok: false, error: '회원 ID와 허용 여부가 필요합니다.' }, 400)
@@ -183,6 +186,9 @@ Deno.serve(async (request) => {
     }
 
     if (body.action === 'set-member-status') {
+      if (user.app_metadata?.role !== 'ADMIN') {
+        return json({ ok: false, error: '관리자만 회원 상태를 변경할 수 있습니다.' }, 403)
+      }
       const targetUserId = typeof body.userId === 'string' ? body.userId : ''
       const status = body.status === '정지' ? '정지' : body.status === '활성' ? '활성' : null
       if (!targetUserId || !status) return json({ ok: false, error: '회원 ID와 상태가 필요합니다.' }, 400)
@@ -221,6 +227,9 @@ Deno.serve(async (request) => {
     }
 
     if (body.action === 'set-stt-settings') {
+      if (user.app_metadata?.role !== 'ADMIN') {
+        return json({ ok: false, error: '관리자만 공용 STT 설정을 변경할 수 있습니다.' }, 403)
+      }
       const provider = body.provider === 'SONIOX' ? 'SONIOX' : 'DEEPGRAM'
       const deepgramApiKey = typeof body.deepgramApiKey === 'string' ? body.deepgramApiKey.trim() : ''
       const sonioxApiKey = typeof body.sonioxApiKey === 'string' ? body.sonioxApiKey.trim() : ''

@@ -100,6 +100,12 @@ const ProtectedRoute: React.FC = () => {
   return isAuthenticated ? <Outlet /> : <Navigate to="/login" replace />;
 };
 
+const AdminRoute: React.FC = () => {
+  const { user, isInitialized } = useAuth();
+  if (!isInitialized) return <AuthLoadingState />;
+  return user?.role === '관리자' ? <Outlet /> : <Navigate to="/live" replace />;
+};
+
 export const App: React.FC = () => {
   return (
     <BrowserRouter>
@@ -161,10 +167,12 @@ export const App: React.FC = () => {
                     />
 
                     {/* 5. 관리자 웹 대시보드 (PG-021 ~ PG-024) */}
-                    <Route path="/admin" element={<AdminDashboardPage />} />
-                    <Route path="/admin/members" element={<MemberManagementPage />} />
-                    <Route path="/admin/reports" element={<ReportManagementPage />} />
-                    <Route path="/admin/stats" element={<AdminStatsPage />} />
+                    <Route element={<AdminRoute />}>
+                      <Route path="/admin" element={<AdminDashboardPage />} />
+                      <Route path="/admin/members" element={<MemberManagementPage />} />
+                      <Route path="/admin/reports" element={<ReportManagementPage />} />
+                      <Route path="/admin/stats" element={<AdminStatsPage />} />
+                    </Route>
                   </Route>
 
                   {/* 일치하지 않는 경로는 홈으로 리다이렉트 */}

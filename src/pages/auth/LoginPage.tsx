@@ -121,7 +121,7 @@ export const LoginPage: React.FC = () => {
             </div>
           </div>
 
-          <p className="text-[11px] text-slate-500">보안을 위해 로그인 정보는 이 브라우저에 저장되지 않습니다.</p>
+          <p className="text-[11px] text-slate-500">회원 정보는 저장하지 않고, 새로고침 유지용 임시 인증 토큰만 현재 탭에 보관합니다.</p>
 
           <button
             type="submit"

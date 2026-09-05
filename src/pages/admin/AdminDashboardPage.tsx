@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppData } from '../../context/AppDataContext';
 import { useSales } from '../../context/SalesContext';
@@ -38,6 +38,9 @@ export const AdminDashboardPage: React.FC = () => {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
   const [showSonioxKey, setShowSonioxKey] = useState(false);
+
+  useEffect(() => setInputKey(deepgramApiKey), [deepgramApiKey]);
+  useEffect(() => setSonioxInputKey(sonioxApiKey), [sonioxApiKey]);
 
   const totalMembers = allMembers.length;
   const activeMembers = allMembers.filter((m: User) => m.status === '활성').length;

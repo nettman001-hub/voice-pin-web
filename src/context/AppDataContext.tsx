@@ -173,7 +173,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     // 로그인된 동안에만 클라우드 회원을 메모리에 유지하고, 로그아웃 즉시 비운다.
-    if (user) void refreshMembers();
+    if (user?.role === '관리자') void refreshMembers();
     else {
       setAllMembers([]);
       setMemberSyncError(null);

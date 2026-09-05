@@ -190,9 +190,6 @@ const KEYS = {
   REPORTS: 'dadryeo_reports',
   LOGS: 'dadryeo_logs',
   NOTIFICATIONS: 'dadryeo_notifications',
-  DEEPGRAM_API_KEY: 'dadryeo_deepgram_api_key',
-  SONIOX_API_KEY: 'voicecap_soniox_api_key',
-  STT_PROVIDER: 'voicecap_stt_provider',
   STT_MODE: 'voicecap_stt_mode',
   LOCAL_STT_MODEL: 'voicecap_local_stt_model',
   CAPTURE_AREA: 'voicecap_capture_area_config',
@@ -253,32 +250,13 @@ export class StorageService {
     localStorage.removeItem('dadryeo_users');
     localStorage.removeItem('dadryeo_current_user');
     localStorage.removeItem('dadryeo_token');
+    localStorage.removeItem('dadryeo_deepgram_api_key');
+    localStorage.removeItem('voicecap_soniox_api_key');
+    localStorage.removeItem('voicecap_stt_provider');
     for (let index = localStorage.length - 1; index >= 0; index -= 1) {
       const key = localStorage.key(index);
       if (key?.startsWith('sb-') && key.endsWith('-auth-token')) localStorage.removeItem(key);
     }
-  }
-
-  // Deepgram API Key
-  public getDeepgramApiKey(): string {
-    return localStorage.getItem(KEYS.DEEPGRAM_API_KEY) || '';
-  }
-  public setDeepgramApiKey(key: string): void {
-    localStorage.setItem(KEYS.DEEPGRAM_API_KEY, key);
-  }
-
-  // Soniox API Key 및 관리자가 선택한 STT 공급자
-  public getSonioxApiKey(): string {
-    return localStorage.getItem(KEYS.SONIOX_API_KEY) || '';
-  }
-  public setSonioxApiKey(key: string): void {
-    localStorage.setItem(KEYS.SONIOX_API_KEY, key);
-  }
-  public getSttProvider(): 'DEEPGRAM' | 'SONIOX' {
-    return localStorage.getItem(KEYS.STT_PROVIDER) === 'SONIOX' ? 'SONIOX' : 'DEEPGRAM';
-  }
-  public setSttProvider(provider: 'DEEPGRAM' | 'SONIOX'): void {
-    localStorage.setItem(KEYS.STT_PROVIDER, provider);
   }
 
   // STT 모드: 'CLOUD' (기존 API) | 'LOCAL' (내 PC 무료 faster-whisper)
@@ -311,9 +289,6 @@ export class StorageService {
       payments: this.getPayments(),
       notifications: this.getNotifications(),
       commerce: this.getCommerceState(),
-      deepgramApiKey: this.getDeepgramApiKey(),
-      sonioxApiKey: this.getSonioxApiKey(),
-      sttProvider: this.getSttProvider(),
       sttMode: this.getSttMode(),
       localSttModel: this.getLocalSttModel()
     };
@@ -331,11 +306,6 @@ export class StorageService {
       if (data.payments) localStorage.setItem(KEYS.PAYMENTS, JSON.stringify(data.payments));
       if (data.notifications) localStorage.setItem(KEYS.NOTIFICATIONS, JSON.stringify(data.notifications));
       if (data.commerce) this.saveCommerceState(data.commerce);
-      if (data.deepgramApiKey) this.setDeepgramApiKey(data.deepgramApiKey);
-      if (data.sonioxApiKey) this.setSonioxApiKey(data.sonioxApiKey);
-      if (data.sttProvider === 'DEEPGRAM' || data.sttProvider === 'SONIOX') {
-        this.setSttProvider(data.sttProvider);
-      }
       if (data.sttMode === 'CLOUD' || data.sttMode === 'LOCAL') {
         this.setSttMode(data.sttMode);
       }

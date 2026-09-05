@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLive } from '../../context/LiveContext';
 import { Modal } from './Modal';
@@ -37,6 +37,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu, isMobileMenu
     disconnectScreenShare
   } = useLive();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showGuideModal, setShowGuideModal] = useState(false);
@@ -138,13 +139,13 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu, isMobileMenu
           </button>
 
           {/* 데모용 빠른 역할 스위처 (데스크톱) */}
-          {isAuthenticated && (
+          {isAuthenticated && user?.role === '관리자' && (
             <div className="hidden lg:flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
               <span className="text-slate-500 px-2 font-medium">모드:</span>
               <button
                 onClick={() => { switchUserRole('판매자'); navigate('/live'); }}
                 className={`px-2.5 py-1 rounded-lg font-bold transition ${
-                  user?.role === '판매자' ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  !location.pathname.startsWith('/admin') ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 판매자
@@ -152,7 +153,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu, isMobileMenu
               <button
                 onClick={() => { switchUserRole('관리자'); navigate('/admin'); }}
                 className={`px-2.5 py-1 rounded-lg font-bold transition ${
-                  user?.role === '관리자' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  location.pathname.startsWith('/admin') ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 관리자
