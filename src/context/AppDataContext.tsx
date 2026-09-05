@@ -5,6 +5,8 @@ import { PlanTier, PlanInfo, PaymentHistoryItem, PaymentCard } from '../types/su
 import { AdminKpis, ReportItem, SystemErrorLog, NotificationSetting } from '../types/admin';
 import { User } from '../types/auth';
 import { storageService, DEFAULT_RULES, DEFAULT_TRAINING_SENTENCES } from '../services/storageService';
+import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
+import { isSupabaseConfigured } from '../services/supabaseClient';
 import { useAuth } from './AuthContext';
 import confetti from 'canvas-confetti';
 
@@ -84,6 +86,8 @@ interface AppDataContextType {
   // 관리자
   adminKpis: AdminKpis;
   allMembers: User[];
+  isSyncingMembers: boolean;
+  refreshMembers: () => Promise<void>;
   suspendMember: (userId: string, reason: string) => void;
   unsuspendMember: (userId: string) => void;
   setMemberSttAccess: (userId: string, allow: boolean) => void;
@@ -123,8 +127,71 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // 관리자 상태
   const [allMembers, setAllMembers] = useState<User[]>([]);
+  const [isSyncingMembers, setIsSyncingMembers] = useState<boolean>(false);
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [errorLogs, setErrorLogs] = useState<SystemErrorLog[]>([]);
+
+  const refreshMembers = async () => {
+    setIsSyncingMembers(true);
+    try {
+      const localUsers = storageService.getUsers();
+      if (!isSupabaseConfigured) {
+        setAllMembers(localUsers);
+        return;
+      }
+
+      const cloudSellers = await remoteWorkspaceService.fetchVoicecapSellers();
+      if (!cloudSellers || cloudSellers.length === 0) {
+        setAllMembers(localUsers);
+        return;
+      }
+
+      // 로컬 사용자와 클라우드 사용자를 이메일/ID 기준으로 병합
+      const mergedMap = new Map<string, User>();
+
+      for (const u of localUsers) {
+        mergedMap.set(u.id, u);
+        if (u.email) {
+          mergedMap.set(u.email.toLowerCase(), u);
+        }
+      }
+
+      for (const cs of cloudSellers) {
+        const existing = mergedMap.get(cs.id) || (cs.email ? mergedMap.get(cs.email.toLowerCase()) : undefined);
+        if (existing) {
+          const updatedUser: User = {
+            ...existing,
+            nickname: cs.nickname || existing.nickname,
+            role: cs.role || existing.role,
+            isCloudUser: true,
+            workspaceName: cs.workspaceName || existing.workspaceName,
+            createdAt: existing.createdAt || cs.createdAt,
+            allowAdminSttKey: existing.allowAdminSttKey ?? false,
+            status: existing.status || '활성',
+          };
+          mergedMap.set(existing.id, updatedUser);
+          if (existing.email) mergedMap.set(existing.email.toLowerCase(), updatedUser);
+        } else {
+          const newUser: User = {
+            ...cs,
+            status: cs.status || '활성',
+            isCloudUser: true,
+            allowAdminSttKey: false,
+          };
+          mergedMap.set(newUser.id, newUser);
+          if (newUser.email) mergedMap.set(newUser.email.toLowerCase(), newUser);
+        }
+      }
+
+      const uniqueUsers = Array.from(new Set(Array.from(mergedMap.values())));
+      storageService.saveUsers(uniqueUsers);
+      setAllMembers(uniqueUsers);
+    } catch (err) {
+      console.error('[AppDataContext] 회원 동기화 오류:', err);
+    } finally {
+      setIsSyncingMembers(false);
+    }
+  };
 
   useEffect(() => {
     storageService.init();
@@ -143,6 +210,9 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (user?.subscriptionPlan) {
       setCurrentPlan(user.subscriptionPlan);
     }
+
+    // Supabase가 설정되어 있으면 클라우드 회원 실시간 동기화
+    void refreshMembers();
   }, [user]);
 
   // --- 규칙 메서드 ---
@@ -383,6 +453,8 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         sendTestNotification,
         adminKpis,
         allMembers,
+        isSyncingMembers,
+        refreshMembers,
         suspendMember,
         unsuspendMember,
         setMemberSttAccess,

@@ -1,5 +1,6 @@
 import { CommerceState, CustomerPurchaseClaim, PaymentReceipt, SettlementInvoice, Shipment, SmsMessage } from '../types/commerce';
 import { SaleRecord } from '../types/live';
+import { User } from '../types/auth';
 import { isSupabaseConfigured, requireSupabase } from './supabaseClient';
 
 type Row = Record<string, any>;
@@ -179,6 +180,64 @@ const ensureEnabled = () => {
 
 export const remoteWorkspaceService = {
   enabled: isSupabaseConfigured,
+
+  /**
+   * VoiceCAP 클라우드 서버에 등록된 실제 판매자 목록을 조회합니다.
+   * 타 서비스(sermon-guide-db)와의 데이터 섞임을 원천 차단하기 위해
+   * VoiceCAP 전용 workspace_members 및 auth_app: 'voicecap' 메타데이터만 엄격히 선별합니다.
+   */
+  async fetchVoicecapSellers(): Promise<User[]> {
+    if (!isSupabaseConfigured) return [];
+    const client = requireSupabase();
+
+    // 1차 시도: Edge Function 'voicecap-onboard' { action: 'list-voicecap-sellers' }
+    try {
+      const { data, error } = await client.functions.invoke('voicecap-onboard', {
+        body: { action: 'list-voicecap-sellers' },
+      });
+      if (!error && data?.ok && Array.isArray(data.sellers)) {
+        return data.sellers.map((s: any) => ({
+          id: s.id,
+          email: s.email,
+          nickname: s.nickname || s.email?.split('@')[0] || '판매자',
+          role: s.role || '판매자',
+          status: s.status || '활성',
+          createdAt: s.createdAt || new Date().toISOString().slice(0, 10),
+          subscriptionPlan: '프로',
+          isTrial: true,
+          phone: s.phone || undefined,
+          isCloudUser: true,
+          workspaceName: s.workspaceName || undefined,
+        }));
+      }
+    } catch (efError) {
+      console.warn('[RemoteWorkspace] Edge Function 호출 실패, RPC 폴백 시도:', efError);
+    }
+
+    // 2차 시도: Postgres RPC 'get_voicecap_sellers'
+    try {
+      const { data, error } = await client.rpc('get_voicecap_sellers');
+      if (!error && Array.isArray(data)) {
+        return data.map((s: any) => ({
+          id: s.id,
+          email: s.email,
+          nickname: s.display_name || s.email?.split('@')[0] || '판매자',
+          role: s.role || '판매자',
+          status: s.status || '활성',
+          createdAt: s.created_at ? String(s.created_at).slice(0, 10) : new Date().toISOString().slice(0, 10),
+          subscriptionPlan: '프로',
+          isTrial: true,
+          phone: s.phone || undefined,
+          isCloudUser: true,
+          workspaceName: s.workspace_name || undefined,
+        }));
+      }
+    } catch (rpcError) {
+      console.warn('[RemoteWorkspace] RPC get_voicecap_sellers 실패:', rpcError);
+    }
+
+    return [];
+  },
 
   async loadSales(workspaceId: string) {
     const { data, error } = await ensureEnabled().from('sales').select('*').eq('workspace_id', workspaceId).order('recognized_at', { ascending: false });

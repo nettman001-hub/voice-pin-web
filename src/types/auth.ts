@@ -14,6 +14,10 @@ export interface User {
   isTrial?: boolean;
   /** 관리자가 등록한 공용 STT API 키 무료 이용 허락 여부 */
   allowAdminSttKey?: boolean;
+  /** Supabase 클라우드 서버에 실제로 등록된 판매자 여부 */
+  isCloudUser?: boolean;
+  /** 연결된 작업공간 이름 */
+  workspaceName?: string;
 }
 
 export interface AuthState {
