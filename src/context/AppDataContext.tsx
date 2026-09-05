@@ -86,6 +86,7 @@ interface AppDataContextType {
   allMembers: User[];
   suspendMember: (userId: string, reason: string) => void;
   unsuspendMember: (userId: string) => void;
+  setMemberSttAccess: (userId: string, allow: boolean) => void;
   reports: ReportItem[];
   updateReportStatus: (reportId: string, status: ReportItem['status'], actionTaken?: string) => void;
   errorLogs: SystemErrorLog[];
@@ -320,6 +321,16 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setAllMembers(updated);
   };
 
+  const setMemberSttAccess = (userId: string, allow: boolean) => {
+    const updated = allMembers.map((m) => (m.id === userId ? { ...m, allowAdminSttKey: allow } : m));
+    storageService.saveUsers(updated);
+    setAllMembers(updated);
+    const currentUser = storageService.getCurrentUser();
+    if (currentUser && currentUser.id === userId) {
+      storageService.setCurrentUser({ ...currentUser, allowAdminSttKey: allow });
+    }
+  };
+
   const updateReportStatus = (reportId: string, status: ReportItem['status'], actionTaken?: string) => {
     const updated = reports.map((r) =>
       r.id === reportId
@@ -374,6 +385,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         allMembers,
         suspendMember,
         unsuspendMember,
+        setMemberSttAccess,
         reports,
         updateReportStatus,
         errorLogs

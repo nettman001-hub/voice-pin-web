@@ -8,17 +8,30 @@ import {
   ShieldAlert,
   CheckCircle2,
   AlertCircle,
-  X
+  X,
+  Key,
+  Sparkles
 } from 'lucide-react';
 
 export const MemberManagementPage: React.FC = () => {
-  const { allMembers, suspendMember, unsuspendMember } = useAppData();
+  const { allMembers, suspendMember, unsuspendMember, setMemberSttAccess } = useAppData();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | '활성' | '정지'>('ALL');
   const [selectedMemberForSuspend, setSelectedMemberForSuspend] = useState<User | null>(null);
   const [suspendReason, setSuspendReason] = useState('허위 판매 멘트 및 비정상 트래픽 유발');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  const handleToggleSttAccess = (member: User) => {
+    const nextState = !member.allowAdminSttKey;
+    setMemberSttAccess(member.id, nextState);
+    setToastMsg(
+      nextState
+        ? `'${member.nickname}' 판매자에게 관리자 STT API 키 이용을 허락했습니다! 🎉`
+        : `'${member.nickname}' 판매자의 관리자 STT API 키 이용 권한을 해제했습니다.`
+    );
+    setTimeout(() => setToastMsg(null), 3000);
+  };
 
   const filteredMembers = allMembers.filter((m: User) => {
     const matchSearch =
@@ -108,6 +121,7 @@ export const MemberManagementPage: React.FC = () => {
                 <th className="py-3 px-4">구분 / 플랜</th>
                 <th className="py-3 px-4">가입일</th>
                 <th className="py-3 px-4">상태</th>
+                <th className="py-3 px-4 text-center">STT API 키 지원</th>
                 <th className="py-3 px-4 text-right">계정 관리</th>
               </tr>
             </thead>
@@ -137,6 +151,33 @@ export const MemberManagementPage: React.FC = () => {
                       <span className="block text-[10px] text-rose-500 mt-0.5 truncate max-w-xs">
                         사유: {m.suspendedReason}
                       </span>
+                    )}
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    {m.role === '관리자' ? (
+                      <span className="text-[10px] text-purple-600 font-bold bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">
+                        관리자 기본허용
+                      </span>
+                    ) : m.allowAdminSttKey ? (
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSttAccess(m)}
+                        className="px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-300 text-[11px] font-bold inline-flex items-center gap-1 transition active:scale-95 shadow-sm"
+                        title="클릭 시 STT API 키 지원을 해제합니다"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>허락됨 (키 지원)</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSttAccess(m)}
+                        className="px-2.5 py-1 rounded-xl bg-slate-50 text-slate-500 hover:bg-brand-50 hover:text-brand-700 hover:border-brand-300 border border-slate-200 text-[11px] font-medium inline-flex items-center gap-1 transition active:scale-95"
+                        title="클릭 시 관리자 STT API 키 무료 이용을 허락합니다"
+                      >
+                        <Key className="w-3.5 h-3.5 text-slate-400" />
+                        <span>미허락 (클릭시 허락)</span>
+                      </button>
                     )}
                   </td>
                   <td className="py-3 px-4 text-right">

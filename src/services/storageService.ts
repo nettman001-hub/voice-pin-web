@@ -110,7 +110,8 @@ export const INITIAL_USERS: User[] = [
     createdAt: '2026-08-01',
     subscriptionPlan: '프로',
     subscriptionExpiresAt: '2026-09-01',
-    isTrial: false
+    isTrial: false,
+    allowAdminSttKey: true // 관리자 STT 키 이용 허락됨
   },
   {
     id: 'u-admin-1',
@@ -119,7 +120,8 @@ export const INITIAL_USERS: User[] = [
     phone: '010-9999-8888',
     role: '관리자',
     status: '활성',
-    createdAt: '2026-07-01'
+    createdAt: '2026-07-01',
+    allowAdminSttKey: true
   },
   {
     id: 'u-seller-2',
@@ -129,7 +131,19 @@ export const INITIAL_USERS: User[] = [
     role: '판매자',
     status: '정지',
     suspendedReason: '음성 학습을 통한 부적절한 단어 오남용 신고 접수',
-    createdAt: '2026-08-10'
+    createdAt: '2026-08-10',
+    allowAdminSttKey: false
+  },
+  {
+    id: 'u-seller-3',
+    email: 'rookie@dadryeo.com',
+    nickname: '초보라이브 (미승인)',
+    phone: '010-7777-8888',
+    role: '판매자',
+    status: '활성',
+    createdAt: '2026-08-20',
+    subscriptionPlan: '베이직',
+    allowAdminSttKey: false // 관리자 STT 키 미허락 (승인 필요)
   }
 ];
 
@@ -380,10 +394,45 @@ export class StorageService {
   }
 
   // 회원 및 인증
-  public getUsers(): User[] { return this.getItem(KEYS.USERS, INITIAL_USERS); }
+  public getUsers(): User[] {
+    const users = this.getItem(KEYS.USERS, INITIAL_USERS);
+    let changed = false;
+    // 신규 목업 사용자가 로컬스토리지에 누락된 경우 병합
+    INITIAL_USERS.forEach((initUser) => {
+      if (!users.some((u) => u.id === initUser.id)) {
+        users.push(initUser);
+        changed = true;
+      }
+    });
+    const normalized = users.map((u) => {
+      if (u.allowAdminSttKey === undefined) {
+        changed = true;
+        return {
+          ...u,
+          allowAdminSttKey: u.role === '관리자' || u.id === 'u-seller-1'
+        };
+      }
+      return u;
+    });
+    if (changed) {
+      this.setItem(KEYS.USERS, normalized);
+    }
+    return normalized;
+  }
   public saveUsers(users: User[]) { this.setItem(KEYS.USERS, users); }
 
-  public getCurrentUser(): User | null { return this.getItem(KEYS.CURRENT_USER, INITIAL_USERS[0]); }
+  public getCurrentUser(): User | null {
+    const user = this.getItem<User | null>(KEYS.CURRENT_USER, null);
+    if (!user) return INITIAL_USERS[0];
+    if (user.allowAdminSttKey === undefined) {
+      const users = this.getUsers();
+      const matched = users.find((u) => u.id === user.id);
+      const updated = { ...user, allowAdminSttKey: matched ? matched.allowAdminSttKey : (user.role === '관리자' || user.id === 'u-seller-1') };
+      this.setItem(KEYS.CURRENT_USER, updated);
+      return updated;
+    }
+    return user;
+  }
   public setCurrentUser(user: User | null) { this.setItem(KEYS.CURRENT_USER, user); }
 
   public getToken(): string | null { return localStorage.getItem(KEYS.TOKEN); }

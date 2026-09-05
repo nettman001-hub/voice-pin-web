@@ -25,6 +25,7 @@ import {
   Cpu
 } from 'lucide-react';
 import { LocalSttModel, SttMode } from '../../types/stt';
+import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
 
 const SILENCE_WARNING_DELAY_MS = 5 * 60 * 1000;
 const SILENCE_STOP_COUNTDOWN_SECONDS = 20;
@@ -80,11 +81,16 @@ export const LiveHomePage: React.FC = () => {
   const [selectedCaptureModal, setSelectedCaptureModal] = useState<string | null>(null);
   const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
   const [showAdminOnlyModal, setShowAdminOnlyModal] = useState<boolean>(false);
+  const [showSellerKeyInfoModal, setShowSellerKeyInfoModal] = useState<boolean>(false);
+  const [showNoPermissionModal, setShowNoPermissionModal] = useState<boolean>(false);
   const [showAreaNotSetModal, setShowAreaNotSetModal] = useState<boolean>(false);
   const [isCapturingNow, setIsCapturingNow] = useState<boolean>(false);
   const [silenceCountdown, setSilenceCountdown] = useState<number | null>(null);
   const selectedSttApiKey = sttProvider === 'SONIOX' ? sonioxApiKey : deepgramApiKey;
   const selectedSttName = sttProvider === 'SONIOX' ? 'Soniox v5' : 'Deepgram Nova-3';
+  const isAllowedByAdmin = Boolean(user?.allowAdminSttKey);
+  const canUseAdminKey = isAdmin || isAllowedByAdmin;
+  const hasAdminSttKey = Boolean(selectedSttApiKey);
   const [keyInput, setKeyInput] = useState<string>(selectedSttApiKey || '');
   const [audioSourceMode, setAudioSourceMode] = useState<'TAB_AUDIO' | 'MIC'>('TAB_AUDIO');
   const flowContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -164,6 +170,16 @@ export const LiveHomePage: React.FC = () => {
       stopListening();
       stopCommentCapture();
     } else {
+      if (sttMode === 'CLOUD') {
+        if (!canUseAdminKey) {
+          setShowNoPermissionModal(true);
+          return;
+        }
+        if (!hasAdminSttKey) {
+          setShowSellerKeyInfoModal(true);
+          return;
+        }
+      }
       startListening(audioSourceMode);
     }
   };
@@ -334,20 +350,57 @@ export const LiveHomePage: React.FC = () => {
                   if (isAdmin) {
                     setKeyInput(selectedSttApiKey || '');
                     setShowKeyModal(true);
+                  } else if (isAllowedByAdmin) {
+                    setShowSellerKeyInfoModal(true);
                   } else {
-                    setShowAdminOnlyModal(true);
+                    setShowNoPermissionModal(true);
                   }
                 }}
                 className={`px-3 py-2.5 sm:px-3.5 sm:py-3 rounded-xl text-xs font-bold border flex items-center justify-center space-x-1.5 transition ${
                   isAdmin
                     ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200 cursor-pointer'
-                    : 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed opacity-80'
+                    : isAllowedByAdmin
+                    ? hasAdminSttKey
+                      ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300 cursor-pointer shadow-xs'
+                      : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300 cursor-pointer shadow-xs'
+                    : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200 cursor-pointer'
                 }`}
-                title={isAdmin ? `${selectedSttName} AI Key 설정 (관리자 전용)` : 'AI 키 설정은 관리자만 변경할 수 있습니다'}
+                title={
+                  isAdmin
+                    ? `${selectedSttName} API Key 설정 (관리자 전용)`
+                    : isAllowedByAdmin
+                    ? hasAdminSttKey
+                      ? '관리자가 제공한 API Key가 자동 연결되었습니다. 키 입력 없이 무료로 이용 가능합니다.'
+                      : '관리자가 기본 STT 키를 아직 등록하지 않았습니다.'
+                    : '관리자의 STT 키 이용 승인이 필요합니다. [내 PC 무료 STT]를 이용해 주세요.'
+                }
               >
-                <Key className={`w-3.5 h-3.5 ${isAdmin ? 'text-amber-500' : 'text-slate-400'}`} />
-                <span>{sttProvider === 'SONIOX' ? 'Soniox' : 'Deepgram'} 키 {selectedSttApiKey ? '연결됨' : '설정'}</span>
-                {!isAdmin && <span className="text-[9px] text-slate-400 bg-slate-200/60 px-1 py-0.2 rounded">관리자</span>}
+                {isAdmin ? (
+                  <>
+                    <Key className="w-3.5 h-3.5 text-amber-500" />
+                    <span>{sttProvider === 'SONIOX' ? 'Soniox' : 'Deepgram'} 키 {selectedSttApiKey ? '연결됨' : '설정'}</span>
+                    <span className="text-[9px] text-slate-400 bg-slate-200/60 px-1 py-0.2 rounded">관리자</span>
+                  </>
+                ) : isAllowedByAdmin ? (
+                  hasAdminSttKey ? (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>✨ 관리자 지원 키 연결됨</span>
+                      <span className="text-[9px] text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full font-black">무료제공</span>
+                    </>
+                  ) : (
+                    <>
+                      <Key className="w-3.5 h-3.5 text-amber-600" />
+                      <span>⚠️ 관리자 키 등록대기</span>
+                    </>
+                  )
+                ) : (
+                  <>
+                    <Key className="w-3.5 h-3.5 text-rose-500" />
+                    <span>🔒 관리자 승인 필요</span>
+                    <span className="text-[9px] text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded-full font-black">미허락</span>
+                  </>
+                )}
               </button>
             ) : (
               <div
@@ -671,7 +724,7 @@ export const LiveHomePage: React.FC = () => {
                 liveComments.map((c) => (
                   <div
                     key={c.id}
-                    className={`flex items-baseline space-x-2 p-2 rounded-xl border text-xs ${
+                    className={`flex items-center space-x-2 p-2 rounded-xl border text-xs ${
                       c.matchedAlertWord
                         ? 'bg-rose-50/70 border-rose-200'
                         : 'bg-slate-50/70 border-slate-200'
@@ -689,6 +742,7 @@ export const LiveHomePage: React.FC = () => {
                         {c.matchedAlertWord}
                       </span>
                     )}
+                    <CustomerStatsBadge nickname={c.nickname} variant="compact" />
                   </div>
                 ))
               )}
@@ -790,6 +844,7 @@ export const LiveHomePage: React.FC = () => {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center space-x-2 flex-wrap gap-1">
                           <span className="font-bold text-sm text-slate-900 truncate">{sale.buyerNickname}</span>
+                          <CustomerStatsBadge nickname={sale.buyerNickname} variant="pill" />
                           <span className={`text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold ${
                             sale.status === '보류'
                               ? 'bg-amber-400 text-slate-950'
@@ -1005,6 +1060,98 @@ export const LiveHomePage: React.FC = () => {
             >
               확인
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 관리자가 허락한 판매자용 STT API 키 안내 모달 */}
+      {showSellerKeyInfoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="max-w-sm w-full bg-white p-6 rounded-3xl border border-slate-200 shadow-2xl space-y-4 animate-in zoom-in-95 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center mx-auto">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-black text-slate-900">
+                {hasAdminSttKey ? '✨ 관리자 STT 키 무료 지원 중' : '⚠️ 관리자 키 등록 대기'}
+              </h3>
+              <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                {hasAdminSttKey ? (
+                  <>
+                    관리자가 등록한 기본 STT 서비스(<strong className="text-slate-800 font-bold">{selectedSttName}</strong>)를 <strong className="text-emerald-700 font-bold">키 입력 없이 무료</strong>로 이용하실 수 있습니다.<br />
+                    방송 시작 시 자동으로 연결됩니다! 🎉
+                  </>
+                ) : (
+                  <>
+                    관리자가 기본 STT 서비스(<strong className="text-slate-800 font-bold">{selectedSttName}</strong>)를 선택했으나 아직 API Key를 등록하지 않았습니다.<br />
+                    관리자에게 키 등록을 요청하시거나 <strong className="text-brand-700 font-bold">[내 PC 무료 STT]</strong> 모드를 이용해 주세요.
+                  </>
+                )}
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 pt-1">
+              {hasAdminSttKey ? (
+                <button
+                  onClick={() => setShowSellerKeyInfoModal(false)}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                >
+                  확인 완료
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      setSttMode('LOCAL');
+                      setShowSellerKeyInfoModal(false);
+                    }}
+                    className="w-full py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                  >
+                    내 PC 무료 STT로 전환하기
+                  </button>
+                  <button
+                    onClick={() => setShowSellerKeyInfoModal(false)}
+                    className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+                  >
+                    닫기
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 미허락 판매자용 승인 필요 안내 모달 */}
+      {showNoPermissionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="max-w-sm w-full bg-white p-6 rounded-3xl border border-slate-200 shadow-2xl space-y-4 animate-in zoom-in-95 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center mx-auto">
+              <Key className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-black text-slate-900">🔒 관리자 승인이 필요합니다</h3>
+              <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                현재 계정은 관리자의 클라우드 STT API 키 무료 이용 승인이 완료되지 않았습니다.<br />
+                관리자에게 승인을 요청하시거나, API 사용료가 전혀 없는 <strong className="text-brand-700 font-bold">[내 PC 무료 STT (Whisper)]</strong> 모드를 이용해 주세요!
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 pt-1">
+              <button
+                onClick={() => {
+                  setSttMode('LOCAL');
+                  setShowNoPermissionModal(false);
+                }}
+                className="w-full py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold transition shadow-sm"
+              >
+                내 PC 무료 STT로 전환하기
+              </button>
+              <button
+                onClick={() => setShowNoPermissionModal(false)}
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+              >
+                닫기
+              </button>
+            </div>
           </div>
         </div>
       )}

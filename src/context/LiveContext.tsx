@@ -13,6 +13,7 @@ import { CaptureAreaConfig } from '../types/rules';
 import { SttProvider } from '../types/deepgram';
 import { localSttService } from '../services/localSttService';
 import { LocalSttModel, LocalSttStatusPayload, SttMode } from '../types/stt';
+import { User } from '../types/auth';
 
 const SONIOX_SALE_TIMEOUT_MS = 10000;
 const SONIOX_BUFFER_LIMIT = 600;
@@ -147,6 +148,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const previousShareAudioRef = useRef<boolean>(screenConnection.hasAudio);
   const shareOwnerUserIdRef = useRef<string | null>(null);
   const currentUserIdRef = useRef<string | null>(user?.id ?? null);
+  const currentUserRef = useRef<User | null>(user ?? null);
   const isAuthenticatedRef = useRef<boolean>(isAuthenticated);
   const authBoundaryGenerationRef = useRef(0);
   const previousAuthIdentityRef = useRef(`${isAuthenticated}:${user?.id ?? ''}`);
@@ -166,8 +168,9 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       authBoundaryGenerationRef.current += 1;
     }
     currentUserIdRef.current = user?.id ?? null;
+    currentUserRef.current = user ?? null;
     isAuthenticatedRef.current = isAuthenticated;
-  }, [isAuthenticated, user?.id]);
+  }, [isAuthenticated, user]);
 
   useEffect(() => screenCaptureService.subscribeConnection((state) => {
     setScreenConnection(state);
@@ -917,6 +920,27 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const activeApiKey = activeSttProvider === 'SONIOX'
           ? sonioxApiKey || storageService.getSonioxApiKey()
           : deepgramApiKey || storageService.getDeepgramApiKey();
+
+        const currentUser = currentUserRef.current;
+        const canUseAdminKey = currentUser?.role === '관리자' || Boolean(currentUser?.allowAdminSttKey);
+
+        if (!canUseAdminKey) {
+          setSttEngineStatus('ERROR');
+          setSttEngineMessage('관리자의 STT API 키 이용 승인이 필요합니다. [내 PC 무료 STT]를 이용해 주세요.');
+          audioCaptureService.stopCapture();
+          isListeningRef.current = false;
+          setIsListening(false);
+          return;
+        }
+
+        if (!activeApiKey) {
+          setSttEngineStatus('ERROR');
+          setSttEngineMessage('관리자가 등록한 기본 STT API Key가 없습니다. 관리자에게 키 등록을 요청하거나 [내 PC 무료 STT]를 이용해 주세요.');
+          audioCaptureService.stopCapture();
+          isListeningRef.current = false;
+          setIsListening(false);
+          return;
+        }
 
         deepgramService.startLiveStream(
           {

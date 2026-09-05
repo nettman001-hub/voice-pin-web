@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
 import { SaleStatus } from '../../types/live';
 import { BuyerReconciliationPanel } from '../../components/sales/BuyerReconciliationPanel';
+import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
 import {
   ShoppingBag,
   ArrowLeft,
@@ -130,11 +131,17 @@ export const SalesDetailPage: React.FC = () => {
           </div>
         </div>
 
+        {/* 구매자 누적 거래 및 신용 이력 */}
+        <CustomerStatsBadge nickname={buyerNickname || sale.buyerNickname} variant="detailed" />
+
         {/* 수정 폼 */}
         <form onSubmit={handleSave} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">구매자 닉네임</label>
+              <div className="flex items-center justify-between mb-1.5 gap-2">
+                <label className="block text-xs font-semibold text-slate-700">구매자 닉네임</label>
+                <CustomerStatsBadge nickname={buyerNickname} variant="pill" />
+              </div>
               <input
                 type="text"
                 required

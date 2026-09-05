@@ -43,6 +43,8 @@ export const AdminDashboardPage: React.FC = () => {
   const activeMembers = allMembers.filter((m: User) => m.status === '활성').length;
   const pendingReports = reports.filter((r: ReportItem) => r.status === '접수').length;
   const totalRevenue = sales.filter((s) => s.status !== '보류').reduce((sum, s) => sum + s.amount, 0);
+  const sellerMembers = allMembers.filter((m: User) => m.role === '판매자');
+  const allowedSellersCount = sellerMembers.filter((m: User) => m.allowAdminSttKey).length;
 
   const handleSaveApiKey = (e: React.FormEvent) => {
     e.preventDefault();
@@ -168,6 +170,33 @@ export const AdminDashboardPage: React.FC = () => {
               판매자는 라이브 청취 홈에서 <span className="font-bold text-brand-700">[내 PC 무료 STT]</span>를 선택하여 클라우드 API 사용료 없이 사용자 PC의 faster-whisper 모델로 직접 음성인식을 실행할 수 있습니다. 위 클라우드 기본 설정은 [클라우드 STT] 모드를 사용하는 판매자에게 적용됩니다.
             </p>
           </div>
+        </div>
+
+        {/* 🔑 허락된 판매자 STT API 키 자동 지원 현황 */}
+        <div className="p-4 rounded-2xl bg-white border border-cyan-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center space-x-3">
+            <div className="w-9 h-9 rounded-xl bg-cyan-100 text-cyan-800 flex items-center justify-center font-bold flex-shrink-0">
+              <KeyRound className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2 flex-wrap gap-1">
+                <span className="font-bold text-slate-800">허락된 판매자 STT API 키 자동 지원</span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-black border border-emerald-200">
+                  {allowedSellersCount}명 허락됨 / 총 {sellerMembers.length}명
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                여기서 등록한 API 키는 관리자가 허락한 판매자가 로그인 시 키 입력 없이 자동으로 연동됩니다.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/admin/members"
+            className="px-3 py-1.5 rounded-xl bg-cyan-50 hover:bg-cyan-100 text-cyan-800 border border-cyan-200 text-xs font-bold flex items-center space-x-1 whitespace-nowrap self-stretch sm:self-auto justify-center transition"
+          >
+            <span>판매자별 권한 관리</span>
+            <ArrowRight className="w-3.5 h-3.5 ml-0.5" />
+          </Link>
         </div>
 
         {/* 🔑 Deepgram Nova-3 클라우드 STT API Key 중앙 관리 카드 (관리자 전용) */}

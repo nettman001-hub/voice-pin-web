@@ -12,6 +12,8 @@ export interface User {
   subscriptionPlan?: '베이직' | '프로' | '프리미엄';
   subscriptionExpiresAt?: string;
   isTrial?: boolean;
+  /** 관리자가 등록한 공용 STT API 키 무료 이용 허락 여부 */
+  allowAdminSttKey?: boolean;
 }
 
 export interface AuthState {
