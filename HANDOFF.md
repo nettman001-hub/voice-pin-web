@@ -294,6 +294,19 @@ npm test --prefix desktop/comment-helper
   - NVIDIA GeForce GTX 1660 SUPER 등 외장 GPU 환경에서 Faster-Whisper를 `cuda` 및 `float16`으로 고속 구동하여 CPU 점유율 대폭 감소 및 음성 인식 지연 최소화.
   - `desktop/comment-helper`: PyTorch/CUDA 연동 디바이스 자동 감지(`detect_devices`), GPU 감지 배지 및 사용자가 GPU/CPU를 직접 선택할 수 있는 환경설정 UI 반영.
 
+### 3) 로컬 STT 모델 변경 고정 및 CTranslate2 CUDA 12 DLL 누락 결함 완전 해결
+- **문제**:
+  1. 라이브 청취 홈에서 로컬 STT 모델을 `base` 등으로 변경해도 `(small)`로 고정되고, 댓글 도우미 창에도 `준비됨 (small / GPU 가속)`으로 고정됨.
+  2. 음성은 들어오지만 실시간 음성텍스트 캡처가 전혀 되지 않고 침묵 처리됨.
+- **원인**:
+  - `faster-whisper` 추론 시작 시 `cublas64_12.dll is not found` 에러로 워커 프로세스 내부가 중단/청크 드롭됨 (NVIDIA CUDA 12 패키지 및 DLL 검색 경로 미등록).
+  - 웹의 `stt:load_model` 요청 시 현재 GPU 장치 설정이 유지되지 않고 `cpu`로 하드코딩되거나, 서버에서 영구 설정 저장(`stt-settings.json`)이 누락되어 기존 `small`로 회귀.
+- **해결**:
+  - `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, `nvidia-cuda-nvrtc-cu12` 라이브러리 연동 및 `stt_worker.py` 상단에 Windows DLL 경로 자동 등록 (`os.add_dll_directory`) 구현.
+  - 모델 로딩 시 실제 CUDA 드라이런 검증 추가 및 실패 시 CPU int8로 안전 자동 폴백.
+  - `sttBridge.js`: 모델 전환 시 `state.requestedModel` 동기화 및 `stt-settings.json`에 모델과 디바이스 영구 저장.
+  - `LiveHomePage.tsx`: 모델 전환 중 상태(예: `전환 중 (small ➡️ base)`) 직관적 표시.
+
 ---
 
 ## 9. 최근 핵심 커밋 히스토리

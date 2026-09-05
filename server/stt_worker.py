@@ -24,6 +24,26 @@ import wave
 import traceback
 import numpy as np
 
+# ---------------------------------------------------------------------------
+# Windows CUDA 12 DLL 자동 경로 탐색 및 등록 (cuBLAS, cuDNN 등)
+# ---------------------------------------------------------------------------
+if sys.platform == 'win32':
+    try:
+        import site
+        import glob
+        # Python site-packages 내의 nvidia/cublas/bin, nvidia/cudnn/bin 등 자동 등록
+        for sp in site.getsitepackages():
+            for p in glob.glob(os.path.join(sp, 'nvidia', '*', 'bin')):
+                if os.path.isdir(p):
+                    try:
+                        os.add_dll_directory(p)
+                    except Exception:
+                        pass
+                    if p not in os.environ.get('PATH', ''):
+                        os.environ['PATH'] = p + os.pathsep + os.environ.get('PATH', '')
+    except Exception as _dll_e:
+        sys.stderr.write(f"[stt_worker] NVIDIA DLL 경로 등록 경고: {_dll_e}\n")
+
 # Windows UTF-8 입출력 강제 설정
 if hasattr(sys.stdin, 'reconfigure'):
     sys.stdin.reconfigure(encoding='utf-8')
@@ -164,7 +184,59 @@ def dump_audio_if_enabled(pcm_bytes, session_id):
         sys.stderr.write(f"[stt_worker] WAV 덤프 실패: {e}\n")
 
 
-def do_load_model(model_name="base", device="cpu", compute_type="int8"):
+def detect_devices():
+    """
+    NVIDIA CUDA GPU 및 CPU 지원 여부 및 장치 정보 검출
+    """
+    cuda_available = False
+    device_name = "CPU"
+
+    try:
+        import ctranslate2
+        cuda_count = ctranslate2.get_cuda_device_count() if hasattr(ctranslate2, "get_cuda_device_count") else 0
+        if cuda_count > 0:
+            cuda_available = True
+            try:
+                import subprocess
+                res = subprocess.run(
+                    ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                    capture_output=True, text=True, timeout=2
+                )
+                names = [n.strip() for n in res.stdout.strip().split("\n") if n.strip()]
+                if names:
+                    device_name = names[0]
+                else:
+                    device_name = "NVIDIA CUDA GPU"
+            except Exception:
+                device_name = "NVIDIA CUDA GPU"
+    except Exception as e:
+        sys.stderr.write(f"[stt_worker] GPU 감지 오류: {e}\n")
+        cuda_available = False
+
+    devices = [
+        {
+            "id": "cuda",
+            "name": f"{device_name} (초고속 가속 권장)" if cuda_available else "NVIDIA GPU (미감지/미지원)",
+            "available": cuda_available,
+            "compute_type": "float16"
+        },
+        {
+            "id": "cpu",
+            "name": "CPU (저전력/기본 연산)",
+            "available": True,
+            "compute_type": "int8"
+        }
+    ]
+    return {
+        "cuda_available": cuda_available,
+        "device_name": device_name,
+        "devices": devices,
+        "recommended_device": "cuda" if cuda_available else "cpu",
+        "recommended_compute_type": "float16" if cuda_available else "int8"
+    }
+
+
+def do_load_model(model_name="base", device="cuda", compute_type="float16"):
     global current_model, current_model_name, current_device, current_compute_type, worker_state, last_error_info
 
     if faster_whisper is None:
@@ -180,11 +252,28 @@ def do_load_model(model_name="base", device="cpu", compute_type="int8"):
         })
         return False
 
+    # 장치 유효성 및 최적 연산 타입 보정
+    target_device = device.lower() if device else "cpu"
+    if target_device == "cuda":
+        # CUDA 사용 불가 시 CPU로 강제 전환
+        dev_info = detect_devices()
+        if not dev_info["cuda_available"]:
+            sys.stderr.write("[stt_worker] CUDA 사용 불가능 -> CPU로 자동 전환\n")
+            target_device = "cpu"
+
+    target_compute = compute_type
+    if target_device == "cuda":
+        if target_compute not in ["float16", "int8_float16", "int8", "float32"]:
+            target_compute = "float16"
+    else:
+        target_device = "cpu"
+        target_compute = "int8"
+
     # 이미 동일한 모델, 장치, 연산 타입으로 성공 로드되어 있다면 재로딩 생략
     if (current_model is not None and
             current_model_name == model_name and
-            current_device == device and
-            current_compute_type == compute_type):
+            current_device == target_device and
+            current_compute_type == target_compute):
         worker_state = "READY"
         last_error_info = None
         send_event({
@@ -193,7 +282,7 @@ def do_load_model(model_name="base", device="cpu", compute_type="int8"):
             "model": current_model_name,
             "device": current_device,
             "compute_type": current_compute_type,
-            "message": f"로컬 STT 준비 완료 ({current_model_name} / {current_device} {current_compute_type})"
+            "message": f"로컬 STT 준비 완료 ({current_model_name} / {current_device.upper()} {current_compute_type})"
         })
         return True
 
@@ -202,44 +291,82 @@ def do_load_model(model_name="base", device="cpu", compute_type="int8"):
         "event": "status",
         "state": "LOADING",
         "model": model_name,
-        "device": device,
-        "message": f"모델 ({model_name}) 로딩 중..."
+        "device": target_device,
+        "compute_type": target_compute,
+        "message": f"모델 ({model_name} / {target_device.upper()}) 로딩 중..."
     })
 
     try:
-        # Celeron J4105 등 저메모리 PC를 위해 기존 모델 객체 명시적 파기 및 GC 수행
+        # 기존 모델 객체 명시적 파기 및 GC 수행
         if current_model is not None:
             del current_model
             current_model = None
             gc.collect()
-
-        target_device = device
-        target_compute = compute_type
-        if target_device == "cpu":
-            target_compute = "int8"
 
         current_model = faster_whisper.WhisperModel(
             model_name,
             device=target_device,
             compute_type=target_compute
         )
+
+        # 중요: WhisperModel 생성뿐 아니라 실제 transcribe 호출 시 cublas DLL을 로드하므로
+        # 더미 0.1초 오디오로 드라이런을 1회 수행하여 CTranslate2와 CUDA DLL이 완벽히 작동하는지 검증
+        if target_device == "cuda":
+            try:
+                dummy_pcm = np.zeros(1600, dtype=np.float32)
+                list(current_model.transcribe(dummy_pcm, language="ko")[0])
+            except Exception as cuda_test_err:
+                sys.stderr.write(f"[stt_worker] CUDA 드라이런 실패, CPU로 즉시 폴백: {cuda_test_err}\n")
+                raise cuda_test_err
+
         current_model_name = model_name
         current_device = target_device
         current_compute_type = target_compute
         worker_state = "READY"
         last_error_info = None
 
+        device_display = "GPU(CUDA)" if target_device == "cuda" else "CPU"
         send_event({
             "event": "status",
             "state": "READY",
             "model": current_model_name,
             "device": current_device,
             "compute_type": current_compute_type,
-            "message": f"로컬 STT 준비 완료 ({current_model_name} / {current_device} {current_compute_type})"
+            "message": f"로컬 STT 준비 완료 ({current_model_name} / {device_display} {current_compute_type})"
         })
         return True
     except Exception as e:
-        # 실패 시 잔여 참조 완전 정리
+        # CUDA 로드 실패 시 CPU로 안전 폴백 시도
+        if target_device == "cuda":
+            sys.stderr.write(f"[stt_worker] CUDA 로딩 실패 ({e}) -> CPU int8 안전 폴백 시도\n")
+            try:
+                if current_model is not None:
+                    del current_model
+                    current_model = None
+                    gc.collect()
+                current_model = faster_whisper.WhisperModel(
+                    model_name,
+                    device="cpu",
+                    compute_type="int8"
+                )
+                current_model_name = model_name
+                current_device = "cpu"
+                current_compute_type = "int8"
+                worker_state = "READY"
+                last_error_info = None
+                send_event({
+                    "event": "status",
+                    "state": "READY",
+                    "model": current_model_name,
+                    "device": current_device,
+                    "compute_type": current_compute_type,
+                    "message": f"로컬 STT 준비 완료 (GPU 오류로 CPU 자동 전환: {current_model_name})"
+                })
+                return True
+            except Exception as cpu_err:
+                e = cpu_err
+
+        # 완전 실패 시 잔여 참조 정리
         current_model = None
         current_model_name = ""
         gc.collect()
@@ -393,13 +520,18 @@ def main():
     global worker_state, current_session_id, current_generation, current_initial_prompt
     global audio_buffer, pre_roll_buffer, speech_detected, silence_samples_count
 
+    dev_info = detect_devices()
+
     send_event({
         "event": "started",
-        "has_faster_whisper": faster_whisper is not None
+        "has_faster_whisper": faster_whisper is not None,
+        "device_info": dev_info
     })
 
-    # Celeron J4105 친화적 기본 모델(base) 사전 로딩 시도
-    do_load_model("base", device="cpu", compute_type="int8")
+    # GPU 사용 가능 시 cuda(float16) 우선 로딩, 저사양 PC는 cpu(int8) 로딩
+    initial_device = dev_info["recommended_device"]
+    initial_compute = dev_info["recommended_compute_type"]
+    do_load_model("base", device=initial_device, compute_type=initial_compute)
 
     while True:
         try:
@@ -416,13 +548,22 @@ def main():
             if cmd == "ping":
                 send_event({"event": "pong", "time": time.time()})
 
+            elif cmd == "detect_devices":
+                current_dev_info = detect_devices()
+                send_event({
+                    "event": "devices_detected",
+                    **current_dev_info
+                })
+
             elif cmd == "get_status":
+                current_dev_info = detect_devices()
                 status_payload = {
                     "event": "status",
                     "state": worker_state,
                     "model": current_model_name,
                     "device": current_device,
-                    "compute_type": current_compute_type
+                    "compute_type": current_compute_type,
+                    "device_info": current_dev_info
                 }
                 if last_error_info:
                     status_payload["last_error"] = last_error_info
@@ -430,8 +571,8 @@ def main():
 
             elif cmd == "load_model":
                 model_name = msg.get("model", "base")
-                device = msg.get("device", "cpu")
-                compute_type = msg.get("compute_type", "int8")
+                device = msg.get("device", "cuda" if dev_info["cuda_available"] else "cpu")
+                compute_type = msg.get("compute_type", "float16" if device == "cuda" else "int8")
                 do_load_model(model_name, device, compute_type)
 
             elif cmd == "start":

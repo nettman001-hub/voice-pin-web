@@ -13,8 +13,33 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { spawn } = require('child_process');
 const readline = require('readline');
+
+function getSttSettingsPath() {
+  const baseDir = process.env.APPDATA || process.env.LOCALAPPDATA || os.tmpdir();
+  return path.join(baseDir, 'voicecap-comment-helper', 'stt-settings.json');
+}
+
+function readSttSettings() {
+  try {
+    const p = getSttSettingsPath();
+    if (fs.existsSync(p)) {
+      return JSON.parse(fs.readFileSync(p, 'utf8'));
+    }
+  } catch (_) {}
+  return {};
+}
+
+function saveSttSettings(settings) {
+  try {
+    const p = getSttSettingsPath();
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    const existing = readSttSettings();
+    fs.writeFileSync(p, JSON.stringify({ ...existing, ...settings }, null, 2), 'utf8');
+  } catch (_) {}
+}
 
 // ---------------------------------------------------------------------------
 // Python 실행 경로 탐색
@@ -52,7 +77,6 @@ function resolveWorkerScript() {
     }
     // 2. app.asar 내부에서 실제 디스크 폴더로 복사
     try {
-      const os = require('os');
       const targetDir = path.join(
         process.env.APPDATA || process.env.LOCALAPPDATA || os.tmpdir(),
         'voicecap-comment-helper',
@@ -80,17 +104,25 @@ class SttBridge {
     this.ownerSocketId = null;
     this.droppedChunksCount = 0;
 
+    const saved = readSttSettings();
+
     this.state = {
       available: false,
       state: 'DISCONNECTED', // DISCONNECTED | LOADING | READY | LISTENING | ERROR
-      requestedModel: 'base',
-      model: 'base',
-      device: 'cpu',
-      computeType: 'int8',
+      requestedModel: saved.model || 'base',
+      model: saved.model || 'base',
+      device: saved.device || 'cuda', // 기본적으로 GPU(CUDA) 우선 시도
+      computeType: saved.computeType || (saved.device === 'cpu' ? 'int8' : 'float16'),
       message: '로컬 STT 초기화 대기 중',
       error: null,
       activeSessionId: '',
-      activeGeneration: 0
+      activeGeneration: 0,
+      hasGpu: false,
+      gpuName: '',
+      availableDevices: [
+        { id: 'cuda', name: 'NVIDIA CUDA GPU (가속 권장)', available: false, compute_type: 'float16' },
+        { id: 'cpu', name: 'CPU (저전력/기본 연산)', available: true, compute_type: 'int8' }
+      ]
     };
   }
 
@@ -208,6 +240,20 @@ class SttBridge {
     }
   }
 
+  updateDeviceInfo(deviceInfo) {
+    if (!deviceInfo) return;
+    this.state.hasGpu = Boolean(deviceInfo.cuda_available);
+    this.state.gpuName = deviceInfo.device_name || '';
+    if (Array.isArray(deviceInfo.devices)) {
+      this.state.availableDevices = deviceInfo.devices;
+    }
+    const saved = readSttSettings();
+    if (!saved.device && deviceInfo.cuda_available) {
+      this.state.device = 'cuda';
+      this.state.computeType = 'float16';
+    }
+  }
+
   handleWorkerMessage(line) {
     if (!line || !line.trim()) return;
     try {
@@ -216,14 +262,28 @@ class SttBridge {
 
       if (event === 'started') {
         this.state.available = !!msg.has_faster_whisper;
+        if (msg.device_info) this.updateDeviceInfo(msg.device_info);
+        this.broadcastStatus();
+      } else if (event === 'devices_detected') {
+        this.updateDeviceInfo(msg);
+        this.broadcastStatus();
       } else if (event === 'status') {
         this.state.state = msg.state || this.state.state;
-        if (msg.model) this.state.model = msg.model;
+        if (msg.model) {
+          this.state.model = msg.model;
+          this.state.requestedModel = msg.model;
+        }
         if (msg.device) this.state.device = msg.device;
         if (msg.compute_type) this.state.computeType = msg.compute_type;
         if (msg.message) this.state.message = msg.message;
+        if (msg.device_info) this.updateDeviceInfo(msg.device_info);
         if (msg.state === 'READY') {
           this.state.error = null;
+          saveSttSettings({
+            device: this.state.device,
+            computeType: this.state.computeType,
+            model: this.state.model
+          });
         }
         this.broadcastStatus();
       } else if (event === 'transcript') {
@@ -242,10 +302,18 @@ class SttBridge {
         this.state.state = 'LISTENING';
         this.state.activeSessionId = msg.session_id;
         this.state.activeGeneration = msg.generation;
-        if (msg.model) this.state.model = msg.model;
+        if (msg.model) {
+          this.state.model = msg.model;
+          this.state.requestedModel = msg.model;
+        }
         if (msg.device) this.state.device = msg.device;
         if (msg.compute_type) this.state.computeType = msg.compute_type;
         this.state.error = null;
+        saveSttSettings({
+          device: this.state.device,
+          computeType: this.state.computeType,
+          model: this.state.model
+        });
         this.broadcastStatus();
         if (this.io) {
           this.io.emit('stt:listening_started', msg);
@@ -282,12 +350,35 @@ class SttBridge {
         socket.emit('stt:status', this.getStatus());
       });
 
+      // 장치 감지 재요청
+      socket.on('stt:detect_devices', () => {
+        this.sendToWorker({ cmd: 'detect_devices' });
+      });
+
+      // 장치 설정 변경 (GPU <-> CPU)
+      socket.on('stt:set_device', (data) => {
+        const device = (data && data.device) || (this.state.hasGpu ? 'cuda' : 'cpu');
+        const computeType = device === 'cuda' ? 'float16' : 'int8';
+        this.state.device = device;
+        this.state.computeType = computeType;
+        saveSttSettings({ device, computeType, model: this.state.model });
+        this.sendToWorker({
+          cmd: 'load_model',
+          model: this.state.model || 'base',
+          device,
+          compute_type: computeType
+        });
+        this.broadcastStatus();
+      });
+
       // 2. 모델 로드 요청
       socket.on('stt:load_model', (data) => {
         const model = (data && data.model) || 'base';
-        const device = (data && data.device) || 'cpu';
-        const computeType = (data && data.computeType) || 'int8';
+        const device = (data && data.device) || this.state.device || 'cuda';
+        const computeType = (data && data.computeType) || (device === 'cuda' ? 'float16' : 'int8');
         this.state.requestedModel = model;
+        this.state.state = 'LOADING';
+        this.state.message = `모델 (${model} / ${device === 'cuda' ? 'GPU' : 'CPU'}) 로딩 중...`;
         this.broadcastStatus();
 
         this.sendToWorker({
@@ -303,15 +394,21 @@ class SttBridge {
         // 이미 다른 활성 소켓이 청취 중인 경우 소유권 전환 허용
         this.ownerSocketId = socket.id;
         this.droppedChunksCount = 0;
+        this.state.activeSessionId = data.sessionId;
+        this.state.activeGeneration = data.generation;
 
         // 요청 모델이 지정되어 있고 현재 로드된 모델과 다르면 모델 로딩 요청 병행
         if (data.model && data.model !== this.state.model) {
           this.state.requestedModel = data.model;
+          this.state.state = 'LOADING';
+          this.state.message = `모델 (${data.model}) 로딩 중...`;
+          this.broadcastStatus();
+
           this.sendToWorker({
             cmd: 'load_model',
             model: data.model,
-            device: data.device || 'cpu',
-            compute_type: data.computeType || 'int8'
+            device: this.state.device || 'cuda',
+            compute_type: this.state.computeType || (this.state.device === 'cpu' ? 'int8' : 'float16')
           });
         }
 
@@ -325,8 +422,10 @@ class SttBridge {
 
       // 4. 오디오 청크 수신 (소유 소켓 검증)
       socket.on('stt:audio', (payload) => {
-        // 다른 소켓의 오디오 혼입 차단
-        if (this.ownerSocketId && socket.id !== this.ownerSocketId) {
+        // 소유 소켓이 아직 등록되지 않았으면 현재 오디오를 보내는 소켓을 소유자로 등록
+        if (!this.ownerSocketId) {
+          this.ownerSocketId = socket.id;
+        } else if (socket.id !== this.ownerSocketId) {
           return;
         }
 

@@ -153,17 +153,20 @@ class LocalSttService {
     }
   }
 
-  public loadModel(model: LocalSttModel | string, device = 'cpu', computeType = 'int8'): void {
+  public loadModel(model: LocalSttModel | string, device?: string, computeType?: string): void {
     this.connect();
     this.status.state = 'LOADING';
     this.status.requestedModel = model;
     this.status.message = `모델 (${model}) 로딩 요청 중...`;
     this.notifyStatusListeners();
 
+    const targetDevice = device || this.status.device || 'cuda';
+    const targetCompute = computeType || this.status.computeType || (targetDevice === 'cuda' ? 'float16' : 'int8');
+
     this.socket?.emit('stt:load_model', {
       model,
-      device,
-      computeType
+      device: targetDevice,
+      computeType: targetCompute
     });
   }
 

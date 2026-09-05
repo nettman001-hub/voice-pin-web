@@ -284,12 +284,14 @@ export const LiveHomePage: React.FC = () => {
               >
                 {localSttStatus.state === 'READY'
                   ? (localSttStatus.model !== localSttModel
-                      ? `준비됨 (현재: ${localSttStatus.model})`
+                      ? `전환 중 (${localSttStatus.model} ➡️ ${localSttModel})`
                       : `준비됨 (${localSttStatus.model})`)
                   : localSttStatus.state === 'LISTENING'
-                  ? `청취 중 (${localSttStatus.model})`
+                  ? (localSttStatus.model !== localSttModel
+                      ? `청취 중 (${localSttStatus.model} ➡️ ${localSttModel})`
+                      : `청취 중 (${localSttStatus.model})`)
                   : localSttStatus.state === 'LOADING'
-                  ? '로딩 중...'
+                  ? `로딩 중 (${localSttModel})...`
                   : localSttStatus.state === 'ERROR'
                   ? `오류 (${localSttStatus.error?.slice(0, 15) || '실패'})`
                   : localSttStatus.state === 'HELPER_OFFLINE'

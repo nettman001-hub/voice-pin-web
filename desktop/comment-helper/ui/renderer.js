@@ -69,7 +69,7 @@ function render(status) {
       const devLabel = stt.device === 'cuda' ? 'GPU 가속' : 'CPU';
       sttStatus.textContent = `준비됨 (${stt.model || 'base'} / ${devLabel})`;
     } else if (stt.state === 'LOADING') {
-      sttStatus.textContent = `로딩 중 (${stt.model || 'base'})`;
+      sttStatus.textContent = `로딩 중 (${stt.requestedModel || stt.model || 'base'})`;
     } else if (stt.state === 'ERROR') {
       sttStatus.textContent = '오류';
     } else {
