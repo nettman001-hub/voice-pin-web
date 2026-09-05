@@ -424,6 +424,37 @@ Deno.serve(async (request) => {
       })
     }
 
+    if (body.action === 'get-workspace-setting') {
+      const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : ''
+      const namespace = typeof body.namespace === 'string' ? body.namespace : ''
+      if (!workspaceId || !namespace) return json({ ok: false, error: 'workspaceId와 namespace가 필요합니다.' }, 400)
+      const { data, error } = await admin
+        .from('workspace_settings')
+        .select('value')
+        .eq('workspace_id', workspaceId)
+        .eq('namespace', namespace)
+        .maybeSingle()
+      if (error) throw error
+      return json({ ok: true, value: data?.value || null })
+    }
+
+    if (body.action === 'save-workspace-setting') {
+      const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : ''
+      const namespace = typeof body.namespace === 'string' ? body.namespace : ''
+      const value = body.value
+      if (!workspaceId || !namespace || value === undefined) {
+        return json({ ok: false, error: 'workspaceId, namespace, value가 필요합니다.' }, 400)
+      }
+      const { error } = await admin.from('workspace_settings').upsert({
+        workspace_id: workspaceId,
+        namespace,
+        value,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'workspace_id,namespace' })
+      if (error) throw error
+      return json({ ok: true })
+    }
+
     if (body.action === 'set-stt-settings') {
       if (user.app_metadata?.role !== 'ADMIN') {
         return json({ ok: false, error: '관리자만 공용 STT 설정을 변경할 수 있습니다.' }, 403)

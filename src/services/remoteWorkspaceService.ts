@@ -1,3 +1,6 @@
+import { RecognitionWordRule } from '../types/rules';
+import { TrainingSentence } from '../types/training';
+import { SttMode, LocalSttModel } from '../types/stt';
 import { CommerceState, CustomerPurchaseClaim, PaymentReceipt, SettlementInvoice, Shipment, SmsMessage } from '../types/commerce';
 import { SaleRecord } from '../types/live';
 import { User } from '../types/auth';
@@ -552,4 +555,110 @@ export const remoteWorkspaceService = {
       .subscribe();
     return () => { void ensureEnabled().removeChannel(channel); };
   },
+
+  /**
+   * 워크스페이스별 설정 조회 (단어 규칙, 훈련 문장, 개인 설정 등)
+   */
+  async fetchWorkspaceSettings<T>(workspaceId: string, namespace: string): Promise<T | null> {
+    if (!isSupabaseConfigured || !workspaceId) return null;
+    const client = requireSupabase();
+
+    // 1차: Supabase RLS 직통 조회
+    try {
+      const { data, error } = await client
+        .from('workspace_settings')
+        .select('value')
+        .eq('workspace_id', workspaceId)
+        .eq('namespace', namespace)
+        .maybeSingle();
+      if (!error && data?.value) {
+        return data.value as T;
+      }
+    } catch (err) {
+      console.warn(`[RemoteWorkspace] fetchWorkspaceSettings direct query failed for ${namespace}:`, err);
+    }
+
+    // 2차: Edge Function 폴백
+    try {
+      const { data, error } = await client.functions.invoke('voicecap-onboard', {
+        body: { action: 'get-workspace-setting', workspaceId, namespace },
+      });
+      if (!error && data?.ok && data.value) {
+        return data.value as T;
+      }
+    } catch (efErr) {
+      console.warn(`[RemoteWorkspace] Edge function get-workspace-setting failed for ${namespace}:`, efErr);
+    }
+
+    return null;
+  },
+
+  /**
+   * 워크스페이스별 설정 저장 (단어 규칙, 훈련 문장, 개인 설정 등)
+   */
+  async saveWorkspaceSettings<T>(workspaceId: string, namespace: string, value: T): Promise<void> {
+    if (!isSupabaseConfigured || !workspaceId) return;
+    const client = requireSupabase();
+
+    // 1차: Supabase RLS 직통 upsert
+    try {
+      const { error } = await client.from('workspace_settings').upsert({
+        workspace_id: workspaceId,
+        namespace,
+        value,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'workspace_id,namespace' });
+      if (!error) return;
+      console.warn(`[RemoteWorkspace] saveWorkspaceSettings direct upsert failed for ${namespace}, trying Edge Function:`, error);
+    } catch (err) {
+      console.warn(`[RemoteWorkspace] saveWorkspaceSettings direct upsert error:`, err);
+    }
+
+    // 2차: Edge Function 폴백
+    try {
+      const { data, error } = await client.functions.invoke('voicecap-onboard', {
+        body: { action: 'save-workspace-setting', workspaceId, namespace, value },
+      });
+      if (error || !data?.ok) {
+        throw new Error(data?.error || error?.message || '설정 저장 실패');
+      }
+    } catch (efErr) {
+      console.error(`[RemoteWorkspace] saveWorkspaceSettings failed completely for ${namespace}:`, efErr);
+    }
+  },
+
+  // 1순위 보물 ①: 단어 치환 규칙
+  async loadRecognitionRules(workspaceId: string): Promise<RecognitionWordRule[] | null> {
+    const res = await this.fetchWorkspaceSettings<{ rules: RecognitionWordRule[] }>(workspaceId, 'recognition_rules');
+    return res?.rules || null;
+  },
+  async saveRecognitionRules(workspaceId: string, rules: RecognitionWordRule[]): Promise<void> {
+    await this.saveWorkspaceSettings(workspaceId, 'recognition_rules', { rules });
+  },
+
+  // 1순위 보물 ②: 음성 학습 문장 목록
+  async loadVoiceTraining(workspaceId: string): Promise<TrainingSentence[] | null> {
+    const res = await this.fetchWorkspaceSettings<{ sentences: TrainingSentence[] }>(workspaceId, 'voice_training');
+    return res?.sentences || null;
+  },
+  async saveVoiceTraining(workspaceId: string, sentences: TrainingSentence[]): Promise<void> {
+    await this.saveWorkspaceSettings(workspaceId, 'voice_training', { sentences });
+  },
+
+  // 추천 개인 설정: STT 모드 및 로컬 모델
+  async loadUserPreferences(workspaceId: string): Promise<{
+    sttMode?: SttMode;
+    localSttModel?: LocalSttModel;
+    sttConfidence?: number;
+  } | null> {
+    return this.fetchWorkspaceSettings(workspaceId, 'user_preferences');
+  },
+  async saveUserPreferences(workspaceId: string, preferences: {
+    sttMode?: SttMode;
+    localSttModel?: LocalSttModel;
+    sttConfidence?: number;
+  }): Promise<void> {
+    await this.saveWorkspaceSettings(workspaceId, 'user_preferences', preferences);
+  },
 };
+

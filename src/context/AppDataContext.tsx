@@ -100,7 +100,7 @@ interface AppDataContextType {
 const AppDataContext = createContext<AppDataContextType | undefined>(undefined);
 
 export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, updateProfile } = useAuth();
+  const { user, workspaceId, updateProfile } = useAuth();
 
   // 규칙 상태
   const [rules, setRules] = useState<RecognitionWordRule[]>([]);
@@ -180,6 +180,45 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, [user]);
 
+  // 클라우드 단어 규칙 및 음성 훈련 문장 동기화
+  useEffect(() => {
+    if (!workspaceId) return;
+    let active = true;
+
+    const syncCloudSettings = async () => {
+      try {
+        // 1. 단어 치환 규칙 동기화
+        const cloudRules = await remoteWorkspaceService.loadRecognitionRules(workspaceId);
+        if (!active) return;
+        if (cloudRules && cloudRules.length > 0) {
+          setRules(cloudRules);
+          storageService.saveRules(cloudRules);
+        } else {
+          // 클라우드에 아직 규칙이 없으면 현재 로컬 규칙을 최초 시딩 저장
+          const currentRules = storageService.getRules();
+          void remoteWorkspaceService.saveRecognitionRules(workspaceId, currentRules);
+        }
+
+        // 2. 음성 학습 문장 목록 동기화
+        const cloudSentences = await remoteWorkspaceService.loadVoiceTraining(workspaceId);
+        if (!active) return;
+        if (cloudSentences && cloudSentences.length > 0) {
+          setTrainingSentences(cloudSentences);
+          storageService.saveTrainingSentences(cloudSentences);
+        } else {
+          // 클라우드에 아직 학습 문장이 없으면 현재 문장을 최초 시딩 저장
+          const currentSentences = storageService.getTrainingSentences();
+          void remoteWorkspaceService.saveVoiceTraining(workspaceId, currentSentences);
+        }
+      } catch (err) {
+        console.warn('[AppDataContext] 클라우드 설정 동기화 실패:', err);
+      }
+    };
+
+    void syncCloudSettings();
+    return () => { active = false; };
+  }, [workspaceId]);
+
   // --- 규칙 메서드 ---
   const addRule = (word: string, action: RecognitionWordRule['action']) => {
     const cleanWord = word.trim();
@@ -202,6 +241,9 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const updated = [...current, newRule];
     storageService.saveRules(updated);
     setRules(updated);
+    if (workspaceId) {
+      void remoteWorkspaceService.saveRecognitionRules(workspaceId, updated);
+    }
     return { success: true };
   };
 
@@ -209,6 +251,9 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const list = storageService.getRules().map((r) => (r.id === updated.id ? updated : r));
     storageService.saveRules(list);
     setRules(list);
+    if (workspaceId) {
+      void remoteWorkspaceService.saveRecognitionRules(workspaceId, list);
+    }
   };
 
   const deleteRule = (id: string) => {
@@ -219,6 +264,9 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const updated = rules.filter((r) => r.id !== id);
     storageService.saveRules(updated);
     setRules(updated);
+    if (workspaceId) {
+      void remoteWorkspaceService.saveRecognitionRules(workspaceId, updated);
+    }
     return { success: true };
   };
 
@@ -226,6 +274,9 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const updated = rules.map((r) => (r.id === id ? { ...r, isEnabled: !r.isEnabled } : r));
     storageService.saveRules(updated);
     setRules(updated);
+    if (workspaceId) {
+      void remoteWorkspaceService.saveRecognitionRules(workspaceId, updated);
+    }
   };
 
   // --- 음성 학습 메서드 ---
@@ -253,6 +304,9 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     storageService.saveTrainingSentences(list);
     setTrainingSentences(list);
+    if (workspaceId) {
+      void remoteWorkspaceService.saveVoiceTraining(workspaceId, list);
+    }
   };
 
   const trainVoiceModel = (id: string) => {

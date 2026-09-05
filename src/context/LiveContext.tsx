@@ -96,7 +96,7 @@ const LiveContext = createContext<LiveContextType | undefined>(undefined);
 
 export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { addSale, updateSale, sales } = useSales();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, workspaceId } = useAuth();
 
   const [isListening, setIsListening] = useState<boolean>(false);
   const [currentSessionId, setCurrentSessionId] = useState<string>(generateSessionId());
