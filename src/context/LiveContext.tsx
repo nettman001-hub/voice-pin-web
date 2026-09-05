@@ -180,6 +180,13 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const listeningGenerationRef = useRef(0);
   const activeListeningUserIdRef = useRef<string | null>(null);
   const startInFlightRef = useRef(false);
+  const cloudSttStartTimeRef = useRef<number | null>(null);
+  const activeCloudProviderRef = useRef<'DEEPGRAM' | 'SONIOX' | null>(null);
+  const currentSessionIdRef = useRef<string>(currentSessionId);
+
+  useEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
 
   useEffect(() => {
     isListeningRef.current = isListening;
@@ -973,6 +980,9 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
+        cloudSttStartTimeRef.current = Date.now();
+        activeCloudProviderRef.current = activeSttProvider;
+
         deepgramService.startLiveStream(
           {
             provider: activeSttProvider,
@@ -1051,6 +1061,24 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     resetSonioxBusinessAccumulator();
     localSttService.stopListening();
     deepgramService.stopLiveStream();
+
+    if (cloudSttStartTimeRef.current && activeCloudProviderRef.current) {
+      const durationSeconds = Math.max(1, Math.round((Date.now() - cloudSttStartTimeRef.current) / 1000));
+      const provider = activeCloudProviderRef.current;
+      const startedAt = new Date(cloudSttStartTimeRef.current).toISOString();
+      const endedAt = new Date().toISOString();
+      const sessionId = currentSessionIdRef.current;
+      cloudSttStartTimeRef.current = null;
+      activeCloudProviderRef.current = null;
+      void remoteWorkspaceService.recordSttUsage({
+        sessionId,
+        provider,
+        durationSeconds,
+        startedAt,
+        endedAt,
+      });
+    }
+
     setSttEngineStatus('DISCONNECTED');
     setSttEngineMessage(
       screenCaptureService.getActiveAudioTrack()

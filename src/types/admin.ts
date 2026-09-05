@@ -34,3 +34,73 @@ export interface NotificationSetting {
   pushEnabled: boolean;
   emailEnabled: boolean;
 }
+
+export interface AdminSaleItem {
+  id: string;
+  workspaceId: string;
+  workspaceName: string;
+  sellerUserId: string;
+  sellerEmail: string;
+  sellerNickname: string;
+  sessionId: string;
+  buyerNickname: string;
+  amount: number;
+  recognizedAt: string;
+  rawTranscript: string;
+  status: '자동저장' | '수동수정' | '확정' | '보류';
+  productName?: string;
+  note?: string;
+  printStatus?: 'NOT_REQUESTED' | 'PRINTED' | 'FAILED';
+  createdAt: string;
+}
+
+export interface SellerSalesGroup {
+  sellerUserId: string;
+  sellerEmail: string;
+  sellerNickname: string;
+  workspaceName: string;
+  totalAmount: number;
+  totalCount: number;
+  sessionCount: number;
+  lastSaleAt: string;
+  sessions: SessionSalesGroup[];
+}
+
+export interface SessionSalesGroup {
+  sessionId: string;
+  sessionTime: string;
+  totalAmount: number;
+  totalCount: number;
+  sales: AdminSaleItem[];
+}
+
+export interface SellerSttUsageSummary {
+  userId: string;
+  email: string;
+  nickname: string;
+  workspaceId: string | null;
+  workspaceName: string | null;
+  deepgramSeconds: number;
+  sonioxSeconds: number;
+  totalSeconds: number;
+  sessionCount: number;
+  lastUsedAt: string | null;
+}
+
+export interface SttUsageLogItem {
+  id: string;
+  sessionId: string;
+  provider: 'DEEPGRAM' | 'SONIOX';
+  durationSeconds: number;
+  startedAt: string;
+  endedAt: string;
+  createdAt: string;
+}
+
+export interface SttUsageRecordPayload {
+  sessionId: string;
+  provider: 'DEEPGRAM' | 'SONIOX';
+  durationSeconds: number;
+  startedAt: string;
+  endedAt: string;
+}

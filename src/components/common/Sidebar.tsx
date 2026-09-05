@@ -90,7 +90,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
       groupName: '시스템 관제',
       items: [
         { name: '관리자 대시보드', path: '/admin', icon: Shield },
-        { name: '회원 관리 & 정지', path: '/admin/members', icon: Users },
+        { name: '전체 판매 & 회차 관제', path: '/admin/sales', icon: ShoppingBag },
+        { name: '회원 관리 & STT', path: '/admin/members', icon: Users },
         { name: '신고 처리 센터', path: '/admin/reports', icon: AlertTriangle },
         { name: '이용 통계 & 시스템 로그', path: '/admin/stats', icon: BarChart3 },
       ]

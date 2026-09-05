@@ -142,6 +142,174 @@ async function getGlobalSttSettings() {
   }
 }
 
+async function listAllSalesForAdmin() {
+  const authUsers = await listVoicecapAuthUsers()
+  const userIds = authUsers.map((u) => u.id)
+  const userMap = new Map(authUsers.map((u) => [u.id, u]))
+
+  const memberships: any[] = []
+  const profiles: any[] = []
+  for (const ids of chunked(userIds)) {
+    const [mRes, pRes] = await Promise.all([
+      admin.from('workspace_members').select('user_id, role, workspace_id').in('user_id', ids),
+      admin.from('profiles').select('id, email, display_name, phone').in('id', ids),
+    ])
+    if (mRes.data) memberships.push(...mRes.data)
+    if (pRes.data) profiles.push(...pRes.data)
+  }
+
+  const profileMap = new Map(profiles.map((p) => [p.id, p]))
+  const workspaceIds = [...new Set(memberships.map((m) => m.workspace_id).filter(Boolean))]
+
+  const workspaces: any[] = []
+  for (const ids of chunked(workspaceIds)) {
+    const { data } = await admin.from('workspaces').select('id, name, owner_id').in('id', ids)
+    if (data) workspaces.push(...data)
+  }
+  const workspaceMap = new Map(workspaces.map((w) => [w.id, w]))
+
+  const sales: any[] = []
+  for (const ids of chunked(workspaceIds)) {
+    const { data, error } = await admin
+      .from('sales')
+      .select('id, workspace_id, session_id, buyer_nickname, amount, recognized_at, raw_transcript, status, product_name, note, print_status, created_at')
+      .in('workspace_id', ids)
+      .order('recognized_at', { ascending: false })
+    if (error) throw error
+    if (data) sales.push(...data)
+  }
+
+  return sales.map((sale) => {
+    const ws = workspaceMap.get(sale.workspace_id)
+    const ownerId = ws?.owner_id
+    const profile = ownerId ? profileMap.get(ownerId) : null
+    const authUser = ownerId ? userMap.get(ownerId) : null
+    return {
+      ...sale,
+      workspaceName: ws?.name || 'VoiceCAP 작업공간',
+      sellerUserId: ownerId || '',
+      sellerEmail: profile?.email || authUser?.email || '',
+      sellerNickname: profile?.display_name || authUser?.user_metadata?.display_name || authUser?.email?.split('@')[0] || '판매자',
+    }
+  })
+}
+
+async function recordSttUsage(userId: string, body: Record<string, unknown>) {
+  const provider = body.provider === 'SONIOX' ? 'SONIOX' : 'DEEPGRAM'
+  const durationSeconds = Math.max(0, Math.round(Number(body.durationSeconds) || 0))
+  const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : ''
+  const startedAt = typeof body.startedAt === 'string' ? body.startedAt : new Date().toISOString()
+  const endedAt = typeof body.endedAt === 'string' ? body.endedAt : new Date().toISOString()
+
+  const { data: membership } = await admin
+    .from('workspace_members')
+    .select('workspace_id')
+    .eq('user_id', userId)
+    .limit(1)
+    .maybeSingle()
+
+  const workspaceId = membership?.workspace_id
+
+  if (workspaceId) {
+    try {
+      await admin.from('stt_usage_logs').insert({
+        workspace_id: workspaceId,
+        user_id: userId,
+        session_id: sessionId,
+        provider,
+        duration_seconds: durationSeconds,
+        started_at: startedAt,
+        ended_at: endedAt,
+      })
+    } catch (e) {
+      console.warn('[EdgeFunction] stt_usage_logs insert failed, fallback:', e)
+    }
+  }
+
+  return { ok: true }
+}
+
+async function listSttUsageSummary() {
+  const authUsers = await listVoicecapAuthUsers()
+  const userIds = authUsers.map((u) => u.id)
+
+  const profiles: any[] = []
+  const memberships: any[] = []
+  for (const ids of chunked(userIds)) {
+    const [pRes, mRes] = await Promise.all([
+      admin.from('profiles').select('id, email, display_name').in('id', ids),
+      admin.from('workspace_members').select('user_id, workspace_id, workspaces(id, name)').in('user_id', ids),
+    ])
+    if (pRes.data) profiles.push(...pRes.data)
+    if (mRes.data) memberships.push(...mRes.data)
+  }
+  const profileMap = new Map(profiles.map((p) => [p.id, p]))
+  const membershipMap = new Map(memberships.map((m) => [m.user_id, m]))
+
+  let logs: any[] = []
+  try {
+    const { data } = await admin
+      .from('stt_usage_logs')
+      .select('user_id, provider, duration_seconds, created_at')
+      .in('user_id', userIds)
+    if (data) logs = data
+  } catch {
+    logs = []
+  }
+
+  const logsByUser = new Map<string, any[]>()
+  for (const log of logs) {
+    if (!logsByUser.has(log.user_id)) logsByUser.set(log.user_id, [])
+    logsByUser.get(log.user_id)!.push(log)
+  }
+
+  return authUsers.map((u) => {
+    const profile = profileMap.get(u.id)
+    const membership = membershipMap.get(u.id)
+    const ws = Array.isArray(membership?.workspaces) ? membership?.workspaces[0] : membership?.workspaces
+    const uLogs = logsByUser.get(u.id) || []
+
+    let deepgramSeconds = 0
+    let sonioxSeconds = 0
+    let lastUsedAt: string | null = null
+
+    for (const l of uLogs) {
+      if (l.provider === 'DEEPGRAM') deepgramSeconds += Number(l.duration_seconds || 0)
+      else if (l.provider === 'SONIOX') sonioxSeconds += Number(l.duration_seconds || 0)
+      if (!lastUsedAt || String(l.created_at) > lastUsedAt) lastUsedAt = String(l.created_at)
+    }
+
+    return {
+      userId: u.id,
+      email: profile?.email || u.email || '',
+      nickname: profile?.display_name || u.user_metadata?.display_name || u.email?.split('@')[0] || '판매자',
+      workspaceId: ws?.id || null,
+      workspaceName: ws?.name || u.user_metadata?.workspace_name || null,
+      deepgramSeconds,
+      sonioxSeconds,
+      totalSeconds: deepgramSeconds + sonioxSeconds,
+      sessionCount: uLogs.length,
+      lastUsedAt,
+    }
+  }).sort((a, b) => b.totalSeconds - a.totalSeconds)
+}
+
+async function listSttUsageLogs(targetUserId: string) {
+  try {
+    const { data, error } = await admin
+      .from('stt_usage_logs')
+      .select('id, session_id, provider, duration_seconds, started_at, ended_at, created_at')
+      .eq('user_id', targetUserId)
+      .order('created_at', { ascending: false })
+      .limit(200)
+    if (error) throw error
+    return data || []
+  } catch (err) {
+    console.warn('[EdgeFunction] listSttUsageLogs error:', err)
+    return []
+  }
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (request.method !== 'POST') return json({ ok: false, error: 'POST 요청만 지원합니다.' }, 405)
@@ -155,6 +323,36 @@ Deno.serve(async (request) => {
       body = await request.json()
     } catch {
       body = {}
+    }
+
+    if (body.action === 'list-all-sales') {
+      if (user.app_metadata?.role !== 'ADMIN') {
+        return json({ ok: false, error: '관리자만 전체 판매 내역을 조회할 수 있습니다.' }, 403)
+      }
+      const sales = await listAllSalesForAdmin()
+      return json({ ok: true, sales })
+    }
+
+    if (body.action === 'record-stt-usage') {
+      const result = await recordSttUsage(user.id, body)
+      return json(result)
+    }
+
+    if (body.action === 'list-stt-usage-summary') {
+      if (user.app_metadata?.role !== 'ADMIN') {
+        return json({ ok: false, error: '관리자만 STT 사용 통계를 조회할 수 있습니다.' }, 403)
+      }
+      const summary = await listSttUsageSummary()
+      return json({ ok: true, summary })
+    }
+
+    if (body.action === 'list-stt-usage-logs') {
+      if (user.app_metadata?.role !== 'ADMIN') {
+        return json({ ok: false, error: '관리자만 STT 세부 로그를 조회할 수 있습니다.' }, 403)
+      }
+      const targetUserId = typeof body.userId === 'string' ? body.userId : ''
+      const logs = await listSttUsageLogs(targetUserId)
+      return json({ ok: true, logs })
     }
 
     if (body.action === 'list-voicecap-sellers') {

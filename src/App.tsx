@@ -39,6 +39,7 @@ import { MyPage } from './pages/my/MyPage';
 import { PermissionErrorModal } from './pages/my/PermissionErrorModal';
 
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
+import { AdminSalesManagementPage } from './pages/admin/AdminSalesManagementPage';
 import { MemberManagementPage } from './pages/admin/MemberManagementPage';
 import { ReportManagementPage } from './pages/admin/ReportManagementPage';
 import { AdminStatsPage } from './pages/admin/AdminStatsPage';
@@ -169,6 +170,7 @@ export const App: React.FC = () => {
                     {/* 5. 관리자 웹 대시보드 (PG-021 ~ PG-024) */}
                     <Route element={<AdminRoute />}>
                       <Route path="/admin" element={<AdminDashboardPage />} />
+                      <Route path="/admin/sales" element={<AdminSalesManagementPage />} />
                       <Route path="/admin/members" element={<MemberManagementPage />} />
                       <Route path="/admin/reports" element={<ReportManagementPage />} />
                       <Route path="/admin/stats" element={<AdminStatsPage />} />

@@ -1,6 +1,7 @@
 import { CommerceState, CustomerPurchaseClaim, PaymentReceipt, SettlementInvoice, Shipment, SmsMessage } from '../types/commerce';
 import { SaleRecord } from '../types/live';
 import { User } from '../types/auth';
+import { AdminSaleItem, SellerSttUsageSummary, SttUsageLogItem, SttUsageRecordPayload } from '../types/admin';
 import { isSupabaseConfigured, requireSupabase } from './supabaseClient';
 
 type Row = Record<string, any>;
@@ -258,6 +259,178 @@ export const remoteWorkspaceService = {
     });
     if (error) throw new Error(`공용 STT 설정 저장 실패: ${error.message}`);
     if (!data?.ok) throw new Error(data?.error || '공용 STT 설정을 저장하지 못했습니다.');
+  },
+
+  /**
+   * 관리자 전용: VoiceCAP 전체 판매자의 판매 내역을 조회합니다.
+   * 타 서비스(sermon-guide-db)와 완벽히 격리된 데이터만 반환합니다.
+   */
+  async fetchAllSalesForAdmin(): Promise<AdminSaleItem[]> {
+    if (!isSupabaseConfigured) return [];
+    const client = requireSupabase();
+
+    // 1차 시도: Edge Function voicecap-onboard (list-all-sales)
+    try {
+      const { data, error } = await client.functions.invoke('voicecap-onboard', {
+        body: { action: 'list-all-sales' },
+      });
+      if (!error && data?.ok && Array.isArray(data.sales)) {
+        return data.sales.map((s: any) => ({
+          id: s.id,
+          workspaceId: s.workspace_id || s.workspaceId,
+          workspaceName: s.workspaceName || 'VoiceCAP 작업공간',
+          sellerUserId: s.sellerUserId || s.seller_user_id || '',
+          sellerEmail: s.sellerEmail || s.seller_email || '',
+          sellerNickname: s.sellerNickname || s.seller_nickname || '판매자',
+          sessionId: s.session_id || s.sessionId,
+          buyerNickname: s.buyer_nickname || s.buyerNickname,
+          amount: Number(s.amount || 0),
+          recognizedAt: s.recognized_at || s.recognizedAt,
+          rawTranscript: s.raw_transcript || s.rawTranscript || '',
+          status: s.status || '확정',
+          productName: s.product_name || s.productName || undefined,
+          note: s.note || undefined,
+          printStatus: s.print_status || s.printStatus || 'NOT_REQUESTED',
+          createdAt: s.created_at || s.createdAt || new Date().toISOString(),
+        }));
+      }
+    } catch (efErr) {
+      console.warn('[RemoteWorkspace] Edge function list-all-sales failed, trying RPC fallback:', efErr);
+    }
+
+    // 2차 시도: Postgres RPC get_admin_all_sales
+    try {
+      const { data, error } = await client.rpc('get_admin_all_sales');
+      if (!error && Array.isArray(data)) {
+        return data.map((s: any) => ({
+          id: s.id,
+          workspaceId: s.workspace_id,
+          workspaceName: s.workspace_name,
+          sellerUserId: s.seller_user_id,
+          sellerEmail: s.seller_email,
+          sellerNickname: s.seller_nickname,
+          sessionId: s.session_id,
+          buyerNickname: s.buyer_nickname,
+          amount: Number(s.amount || 0),
+          recognizedAt: s.recognized_at,
+          rawTranscript: s.raw_transcript || '',
+          status: s.status || '확정',
+          productName: s.product_name || undefined,
+          note: s.note || undefined,
+          printStatus: s.print_status || 'NOT_REQUESTED',
+          createdAt: s.created_at,
+        }));
+      }
+    } catch (rpcErr) {
+      console.warn('[RemoteWorkspace] RPC get_admin_all_sales failed:', rpcErr);
+    }
+
+    return [];
+  },
+
+  /**
+   * 판매자 라이브 청취 종료 시 클라우드 STT(Deepgram, Soniox) 사용 시간을 Supabase에 기록합니다.
+   */
+  async recordSttUsage(payload: SttUsageRecordPayload): Promise<void> {
+    if (!isSupabaseConfigured) return;
+    try {
+      await requireSupabase().functions.invoke('voicecap-onboard', {
+        body: { action: 'record-stt-usage', ...payload },
+      });
+    } catch (err) {
+      console.warn('[RemoteWorkspace] STT 사용량 기록 전송 실패 (무시):', err);
+    }
+  },
+
+  /**
+   * 관리자 전용: 판매자별 클라우드 STT(Deepgram, Soniox) 누적 사용 시간 통계를 조회합니다.
+   */
+  async fetchSttUsageSummary(): Promise<SellerSttUsageSummary[]> {
+    if (!isSupabaseConfigured) return [];
+    const client = requireSupabase();
+
+    // 1차 시도: Edge Function
+    try {
+      const { data, error } = await client.functions.invoke('voicecap-onboard', {
+        body: { action: 'list-stt-usage-summary' },
+      });
+      if (!error && data?.ok && Array.isArray(data.summary)) {
+        return data.summary;
+      }
+    } catch (efErr) {
+      console.warn('[RemoteWorkspace] list-stt-usage-summary edge function failed:', efErr);
+    }
+
+    // 2차 시도: RPC
+    try {
+      const { data, error } = await client.rpc('get_admin_stt_usage_summary');
+      if (!error && Array.isArray(data)) {
+        return data.map((d: any) => ({
+          userId: d.user_id,
+          email: d.email,
+          nickname: d.nickname,
+          workspaceId: d.workspace_id,
+          workspaceName: d.workspace_name,
+          deepgramSeconds: Number(d.deepgram_seconds || 0),
+          sonioxSeconds: Number(d.soniox_seconds || 0),
+          totalSeconds: Number(d.total_seconds || 0),
+          sessionCount: Number(d.session_count || 0),
+          lastUsedAt: d.last_used_at || null,
+        }));
+      }
+    } catch (rpcErr) {
+      console.warn('[RemoteWorkspace] get_admin_stt_usage_summary RPC failed:', rpcErr);
+    }
+
+    return [];
+  },
+
+  /**
+   * 관리자 전용: 특정 회원의 세부 클라우드 STT 사용 로그를 조회합니다.
+   */
+  async fetchSttUsageLogs(userId: string): Promise<SttUsageLogItem[]> {
+    if (!isSupabaseConfigured || !userId) return [];
+    const client = requireSupabase();
+
+    // 1차 시도: Edge Function
+    try {
+      const { data, error } = await client.functions.invoke('voicecap-onboard', {
+        body: { action: 'list-stt-usage-logs', userId },
+      });
+      if (!error && data?.ok && Array.isArray(data.logs)) {
+        return data.logs.map((l: any) => ({
+          id: l.id,
+          sessionId: l.session_id || l.sessionId,
+          provider: l.provider,
+          durationSeconds: Number(l.duration_seconds || l.durationSeconds || 0),
+          startedAt: l.started_at || l.startedAt,
+          endedAt: l.ended_at || l.endedAt,
+          createdAt: l.created_at || l.createdAt,
+        }));
+      }
+    } catch (efErr) {
+      console.warn('[RemoteWorkspace] list-stt-usage-logs edge function failed:', efErr);
+    }
+
+    // 2차 시도: RPC
+    try {
+      const { data, error } = await client.rpc('get_admin_stt_usage_logs', { target_user_id: userId });
+      if (!error && Array.isArray(data)) {
+        return data.map((l: any) => ({
+          id: l.id,
+          sessionId: l.session_id,
+          provider: l.provider,
+          durationSeconds: Number(l.duration_seconds || 0),
+          startedAt: l.started_at,
+          endedAt: l.ended_at,
+          createdAt: l.created_at,
+        }));
+      }
+    } catch (rpcErr) {
+      console.warn('[RemoteWorkspace] get_admin_stt_usage_logs RPC failed:', rpcErr);
+    }
+
+    return [];
   },
 
   async loadSales(workspaceId: string) {
