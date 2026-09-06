@@ -7,13 +7,23 @@ const sourceServer = path.join(repoRoot, 'server');
 const targetServer = path.join(helperRoot, 'server');
 const runtimeDir = path.join(helperRoot, 'build-runtime');
 
-const serverFiles = ['index.js', 'bridgeApi.js', 'bridgeStore.js', 'sttBridge.js', 'stt_worker.py'];
+const serverFiles = ['index.js', 'bridgeApi.js', 'bridgeStore.js', 'sttBridge.js', 'stt_worker.py', 'vulkanRunner.js'];
 
 fs.rmSync(targetServer, { recursive: true, force: true });
 fs.mkdirSync(targetServer, { recursive: true });
 
 for (const filename of serverFiles) {
-  fs.copyFileSync(path.join(sourceServer, filename), path.join(targetServer, filename));
+  const src = path.join(sourceServer, filename);
+  if (fs.existsSync(src)) {
+    fs.copyFileSync(src, path.join(targetServer, filename));
+  }
+}
+
+// whisper-vulkan 바이너리 및 DLL 스테이징
+const sourceBin = path.join(sourceServer, 'bin');
+const targetBin = path.join(targetServer, 'bin');
+if (fs.existsSync(sourceBin)) {
+  fs.cpSync(sourceBin, targetBin, { recursive: true });
 }
 
 fs.mkdirSync(runtimeDir, { recursive: true });

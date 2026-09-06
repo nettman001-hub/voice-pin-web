@@ -327,7 +327,7 @@ export const LiveHomePage: React.FC = () => {
                   title={localSttStatus.hardwareProfile.description}
                 >
                   <span className="font-semibold text-slate-700 truncate max-w-[220px]">
-                    {localSttStatus.hardwareProfile.vendor === 'NVIDIA' ? '⚡ ' : localSttStatus.hardwareProfile.vendor === 'AMD' ? '🖥️ ' : '💻 '}
+                    {localSttStatus.device === 'vulkan' || localSttStatus.hardwareProfile.vendor === 'NVIDIA' || localSttStatus.hardwareProfile.vendor === 'AMD' ? '⚡ ' : '💻 '}
                     {localSttStatus.hardwareProfile.gpu_name || localSttStatus.hardwareProfile.cpu_name}
                   </span>
                   {localSttModel !== localSttStatus.hardwareProfile.recommended_model && !isListening && (

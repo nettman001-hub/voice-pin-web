@@ -19,7 +19,7 @@ export interface HardwareProfile {
   cpu_threads?: number;
   cuda_available: boolean;
   recommended_model: LocalSttModel;
-  recommended_device: 'cpu' | 'cuda' | string;
+  recommended_device: 'cpu' | 'cuda' | 'vulkan' | string;
   recommended_compute_type: 'float16' | 'int8' | string;
   description: string;
 }
@@ -29,7 +29,7 @@ export interface LocalSttStatusPayload {
   state: LocalSttState;
   model: LocalSttModel | string;
   requestedModel?: LocalSttModel | string;
-  device: 'cpu' | 'cuda' | string;
+  device: 'cpu' | 'cuda' | 'vulkan' | string;
   computeType: string;
   message: string;
   error?: string | null;
@@ -48,7 +48,7 @@ export interface LocalSttTranscriptEvent {
   text: string;
   is_final: boolean;
   confidence: number;
-  provider: 'LOCAL_WHISPER';
+  provider: 'LOCAL_WHISPER' | 'VULKAN_WHISPER';
   duration?: number;
   infer_time?: number;
   is_abnormal?: boolean;

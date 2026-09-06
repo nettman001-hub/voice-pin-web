@@ -244,7 +244,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const setLocalSttModel = (model: LocalSttModel) => {
     setLocalSttModelState(model);
     storageService.setLocalSttModel(model);
-    const targetDevice = model === 'large-v3-turbo' ? 'cuda' : undefined;
+    const isAmdOrVulkan = localSttStatus?.device === 'vulkan' || localSttStatus?.hardwareProfile?.vendor === 'AMD';
+    const targetDevice = model === 'large-v3-turbo' ? (isAmdOrVulkan ? 'vulkan' : 'cuda') : undefined;
     localSttService.loadModel(model, targetDevice);
   };
 

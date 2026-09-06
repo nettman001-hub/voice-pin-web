@@ -66,7 +66,7 @@ function render(status) {
     if (!stt) {
       sttStatus.textContent = '대기 중';
     } else if (stt.state === 'READY' || stt.state === 'LISTENING') {
-      const devLabel = stt.device === 'cuda' ? 'GPU 가속' : 'CPU';
+      const devLabel = stt.device === 'cuda' ? 'GPU 가속' : (stt.device === 'vulkan' ? 'Vulkan GPU 가속' : 'CPU');
       sttStatus.textContent = `준비됨 (${stt.model || 'base'} / ${devLabel})`;
     } else if (stt.state === 'LOADING') {
       sttStatus.textContent = `로딩 중 (${stt.requestedModel || stt.model || 'base'})`;
@@ -80,7 +80,10 @@ function render(status) {
   if (status.stt) {
     const stt = status.stt;
     if (gpuBadge) {
-      if (stt.hardwareProfile && stt.hardwareProfile.vendor === 'AMD') {
+      if (stt.device === 'vulkan') {
+        gpuBadge.className = 'badge-gpu';
+        gpuBadge.textContent = `⚡ ${stt.hardwareProfile?.gpu_name || stt.gpuName || 'AMD 라데온'} (Vulkan 가속)`;
+      } else if (stt.hardwareProfile && stt.hardwareProfile.vendor === 'AMD') {
         gpuBadge.className = 'badge-gpu';
         gpuBadge.textContent = `🖥️ ${stt.hardwareProfile.gpu_name || 'AMD 라데온'} 감지`;
       } else if (stt.hasGpu || (stt.hardwareProfile && stt.hardwareProfile.vendor === 'NVIDIA')) {
@@ -112,6 +115,8 @@ function render(status) {
     if (sttDeviceMessage) {
       if (stt.state === 'ERROR') {
         sttDeviceMessage.textContent = `❌ ${stt.error || stt.message || 'STT 워커 오류'}`;
+      } else if (stt.device === 'vulkan') {
+        sttDeviceMessage.textContent = `⚡ Vulkan GPU 가속 활성화: ${stt.hardwareProfile?.gpu_name || 'AMD 라데온'} DirectX 12 / Vulkan 초고속 실시간 음성인식`;
       } else if (stt.hardwareProfile && stt.hardwareProfile.description) {
         sttDeviceMessage.textContent = stt.hardwareProfile.description;
       } else if (stt.device === 'cuda') {

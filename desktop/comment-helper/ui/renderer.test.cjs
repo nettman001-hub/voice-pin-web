@@ -191,3 +191,73 @@ test('AMD GPU 환경에서 그래픽카드 이름과 CPU 연산 장치 목록이
   assert.equal(elements['#stt-device-select'].value, 'cpu');
 });
 
+test('DirectX 12 / Vulkan GPU 가속 환경에서 그래픽카드 이름과 Vulkan 연산 장치가 올바르게 표시된다', async () => {
+  const ids = [
+    'status-dot', 'status-label', 'status-pill', 'status-message', 'live-stats',
+    'tiktok-username', 'comment-count', 'auto-start', 'restart', 'version',
+    'print-enabled', 'printer-select', 'paper-size', 'print-message',
+    'save-printer', 'test-print', 'open-web', 'open-logs', 'hide', 'refresh-printers',
+    'stt-status', 'stt-device-select', 'refresh-devices', 'gpu-badge', 'stt-device-message'
+  ];
+  const elements = Object.fromEntries(ids.map((id) => [`#${id}`, fakeElement()]));
+  let statusListener = () => {};
+
+  const vulkanStatus = {
+    helper: 'running',
+    message: '정상 작동 중입니다.',
+    tiktokState: 'idle',
+    autoStart: false,
+    version: '1.3.4',
+    print: {},
+    stt: {
+      available: true,
+      state: 'READY',
+      device: 'vulkan',
+      computeType: 'float16',
+      model: 'large-v3-turbo',
+      hasGpu: true,
+      gpuName: 'AMD Radeon RX 6800 XT',
+      hardwareProfile: {
+        vendor: 'AMD',
+        gpu_name: 'AMD Radeon RX 6800 XT',
+        cpu_threads: 16,
+        description: 'AMD 라데온 그래픽(AMD Radeon RX 6800 XT) 감지됨: DirectX 12 / Vulkan GPU 초고속 가속 활성화'
+      },
+      availableDevices: [
+        { id: 'vulkan', name: '⚡ AMD Radeon RX 6800 XT (Vulkan GPU 16GB 가속 권장)', available: true, compute_type: 'float16' },
+        { id: 'cpu', name: '🖥️ AMD Radeon RX 6800 XT (CPU 16스레드 연산)', available: true, compute_type: 'int8' },
+        { id: 'cuda', name: 'NVIDIA GPU (미장착 · AMD 환경)', available: false, compute_type: 'float16' }
+      ]
+    }
+  };
+
+  const voicecap = {
+    getPrinters: async () => [],
+    getStatus: async () => vulkanStatus,
+    hideWindow() {},
+    onStatus(listener) { statusListener = listener; },
+    openLogs() {},
+    openWebApp() {},
+    restart: async () => vulkanStatus,
+    savePrintSettings: async () => vulkanStatus,
+    setAutoStart: async (enabled) => enabled,
+    testPrint: async () => ({ ok: true })
+  };
+
+  const document = {
+    createElement: () => fakeElement(),
+    querySelector: (selector) => elements[selector]
+  };
+  const source = fs.readFileSync(path.join(__dirname, 'renderer.js'), 'utf8');
+  vm.runInNewContext(source, { console, document, Option: fakeElement, setTimeout, window: { voicecap } });
+  await flush();
+  await flush();
+
+  assert.equal(elements['#gpu-badge'].textContent, '⚡ AMD Radeon RX 6800 XT (Vulkan 가속)');
+  assert.equal(elements['#stt-status'].textContent, '준비됨 (large-v3-turbo / Vulkan GPU 가속)');
+  assert.equal(elements['#stt-device-select'].options.length, 3);
+  assert.equal(elements['#stt-device-select'].value, 'vulkan');
+  assert.match(elements['#stt-device-message'].textContent, /Vulkan GPU 가속 활성화/);
+});
+
+

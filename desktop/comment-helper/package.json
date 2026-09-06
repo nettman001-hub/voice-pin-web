@@ -1,6 +1,6 @@
 {
   "name": "voicecap-comment-helper",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "description": "VoiceCAP TikTok LIVE comment helper for Windows",
   "main": "main.cjs",
   "author": "VoiceCAP",
@@ -33,7 +33,8 @@
     "copyright": "Copyright © VoiceCAP",
     "asar": true,
     "asarUnpack": [
-      "server/stt_worker.py"
+      "server/stt_worker.py",
+      "server/bin/whisper-vulkan/**"
     ],
     "files": [
       "main.cjs",

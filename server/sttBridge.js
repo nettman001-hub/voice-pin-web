@@ -16,6 +16,7 @@ const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
 const readline = require('readline');
+const { vulkanRunner } = require('./vulkanRunner');
 
 function getSttSettingsPath() {
   const baseDir = process.env.APPDATA || process.env.LOCALAPPDATA || os.tmpdir();
@@ -153,37 +154,49 @@ function detectInitialHardware() {
     vendor = 'INTEL';
   }
 
+  const hasVulkan = vulkanRunner.isAvailable();
   let availableDevices = [];
   let defaultDevice = 'cpu';
   let description = '';
+  let recommendedModel = 'base';
 
   if (vendor === 'NVIDIA') {
     availableDevices = [
       { id: 'cuda', name: `🚀 ${gpuName} (CUDA 가속 권장)`, available: true, compute_type: 'float16' },
+      ...(hasVulkan ? [{ id: 'vulkan', name: `⚡ ${gpuName} (DirectX 12 / Vulkan 가속)`, available: true, compute_type: 'float16' }] : []),
       { id: 'cpu', name: `💻 CPU 기본 연산 (${cpuCount}스레드)`, available: true, compute_type: 'int8' }
     ];
     defaultDevice = 'cuda';
-    description = `NVIDIA GPU (${gpuName}) 감지됨: 실시간 고속 음성인식`;
+    recommendedModel = 'large-v3-turbo';
+    description = `NVIDIA GPU (${gpuName}) 감지됨: 실시간 초고속 음성인식`;
   } else if (vendor === 'AMD') {
     availableDevices = [
-      { id: 'cpu', name: `🖥️ ${gpuName} (CPU ${cpuCount}스레드 고속 연산)`, available: true, compute_type: 'int8' },
+      ...(hasVulkan ? [{ id: 'vulkan', name: `⚡ ${gpuName} (Vulkan GPU 16GB 가속 권장)`, available: true, compute_type: 'float16' }] : []),
+      { id: 'cpu', name: `🖥️ ${gpuName} (CPU ${cpuCount}스레드 연산)`, available: true, compute_type: 'int8' },
       { id: 'cuda', name: 'NVIDIA GPU (미장착 · AMD 환경)', available: false, compute_type: 'float16' }
     ];
-    defaultDevice = 'cpu';
-    description = `AMD 라데온 그래픽(${gpuName}) 감지됨: CPU ${cpuCount}스레드 고속 연산 최적화`;
+    defaultDevice = hasVulkan ? 'vulkan' : 'cpu';
+    recommendedModel = hasVulkan ? 'large-v3-turbo' : 'small';
+    description = hasVulkan
+      ? `AMD 라데온 그래픽(${gpuName}) 감지됨: DirectX 12 / Vulkan GPU 초고속 가속 활성화`
+      : `AMD 라데온 그래픽(${gpuName}) 감지됨: CPU ${cpuCount}스레드 고속 연산 최적화`;
   } else if (vendor === 'INTEL') {
     availableDevices = [
+      ...(hasVulkan ? [{ id: 'vulkan', name: `⚡ ${gpuName || '인텔 그래픽'} (Vulkan GPU 가속)`, available: true, compute_type: 'float16' }] : []),
       { id: 'cpu', name: `💻 ${gpuName || '인텔 그래픽'} (CPU ${cpuCount}스레드 연산)`, available: true, compute_type: 'int8' },
       { id: 'cuda', name: 'NVIDIA GPU (미장착)', available: false, compute_type: 'float16' }
     ];
-    defaultDevice = 'cpu';
-    description = `인텔 그래픽(${gpuName}) 감지됨: CPU ${cpuCount}스레드 연산 모드`;
+    defaultDevice = hasVulkan ? 'vulkan' : 'cpu';
+    recommendedModel = 'small';
+    description = `인텔 그래픽(${gpuName}) 감지됨: ${hasVulkan ? 'Vulkan GPU' : 'CPU'} 연산 모드`;
   } else {
     availableDevices = [
+      ...(hasVulkan ? [{ id: 'vulkan', name: `⚡ GPU (DirectX 12 / Vulkan 가속)`, available: true, compute_type: 'float16' }] : []),
       { id: 'cpu', name: `💻 CPU 기본 연산 (${cpuCount}스레드)`, available: true, compute_type: 'int8' },
       { id: 'cuda', name: 'NVIDIA GPU (미감지)', available: false, compute_type: 'float16' }
     ];
-    defaultDevice = 'cpu';
+    defaultDevice = hasVulkan ? 'vulkan' : 'cpu';
+    recommendedModel = 'base';
     description = `CPU ${cpuCount}스레드 기본 연산 모드`;
   }
 
@@ -192,6 +205,7 @@ function detectInitialHardware() {
     vendor,
     cpuCount,
     defaultDevice,
+    recommendedModel,
     description,
     availableDevices
   };
@@ -213,26 +227,39 @@ class SttBridge {
 
     const initialHw = detectInitialHardware();
     const saved = readSttSettings();
-    const chosenDevice = saved.device || initialHw.defaultDevice;
+    let chosenDevice = saved.device || initialHw.defaultDevice;
+    if (chosenDevice === 'cpu' && initialHw.defaultDevice === 'vulkan') {
+      chosenDevice = 'vulkan';
+    }
+    const initialModel = saved.model || initialHw.recommendedModel || 'base';
+
+    this.vulkanRunner = vulkanRunner;
+    this.vulkanRunner.onTranscriptCallback = (data) => {
+      if (this.io) {
+        this.io.emit('stt:transcript', data);
+      }
+    };
 
     this.state = {
       available: false,
       state: 'DISCONNECTED', // DISCONNECTED | LOADING | READY | LISTENING | ERROR
-      requestedModel: saved.model || 'base',
-      model: saved.model || 'base',
+      requestedModel: initialModel,
+      model: initialModel,
       device: chosenDevice,
-      computeType: saved.computeType || (chosenDevice === 'cuda' ? 'float16' : 'int8'),
+      computeType: saved.computeType || (chosenDevice === 'cuda' || chosenDevice === 'vulkan' ? 'float16' : 'int8'),
       message: '로컬 STT 초기화 대기 중',
       error: null,
       activeSessionId: '',
       activeGeneration: 0,
-      hasGpu: initialHw.vendor === 'NVIDIA',
+      hasGpu: initialHw.vendor === 'NVIDIA' || chosenDevice === 'vulkan' || initialHw.defaultDevice === 'vulkan',
       gpuName: initialHw.gpuName,
       hardwareProfile: {
         vendor: initialHw.vendor,
         gpu_name: initialHw.gpuName,
         cpu_threads: initialHw.cpuCount,
-        description: initialHw.description
+        description: initialHw.description,
+        recommended_model: initialHw.recommendedModel,
+        recommended_device: initialHw.defaultDevice
       },
       availableDevices: initialHw.availableDevices
     };
@@ -240,7 +267,26 @@ class SttBridge {
 
   init(io) {
     this.io = io;
-    this.startWorker();
+    if (this.state.device === 'vulkan') {
+      this.isStarting = true;
+      this.state.state = 'LOADING';
+      this.state.message = `Vulkan GPU 가속 STT (${this.state.model}) 시작 중...`;
+      this.broadcastStatus();
+      this.vulkanRunner.start(this.state.model, (st) => {
+        this.state.state = st.state;
+        this.state.message = st.message;
+        if (st.state === 'READY') {
+          this.state.available = true;
+          this.state.error = null;
+        }
+        this.broadcastStatus();
+      }).catch(err => {
+        console.warn('[SttBridge] Vulkan 시작 실패, Python 워커로 폴백:', err.message);
+        this.startWorker();
+      });
+    } else {
+      this.startWorker();
+    }
     this.bindSocketEvents();
   }
 
@@ -520,13 +566,39 @@ class SttBridge {
         this.sendToWorker({ cmd: 'detect_devices' });
       });
 
-      // 장치 설정 변경 (GPU <-> CPU)
-      socket.on('stt:set_device', (data) => {
-        const device = (data && data.device) || (this.state.hasGpu ? 'cuda' : 'cpu');
-        const computeType = device === 'cuda' ? 'float16' : 'int8';
+      // 장치 설정 변경 (Vulkan <-> CUDA <-> CPU)
+      socket.on('stt:set_device', async (data) => {
+        const device = (data && data.device) || (this.state.hasGpu ? (vulkanRunner.isAvailable() ? 'vulkan' : 'cuda') : 'cpu');
+        const computeType = (device === 'cuda' || device === 'vulkan') ? 'float16' : 'int8';
         this.state.device = device;
         this.state.computeType = computeType;
         saveSttSettings({ device, computeType, model: this.state.model });
+
+        if (device === 'vulkan') {
+          this.state.state = 'LOADING';
+          this.state.message = `Vulkan GPU 가속 (${this.state.model || 'large-v3-turbo'}) 로딩 중...`;
+          this.broadcastStatus();
+          try {
+            await this.vulkanRunner.start(this.state.model || 'large-v3-turbo', (st) => {
+              this.state.state = st.state;
+              this.state.message = st.message;
+              if (st.state === 'READY') {
+                this.state.available = true;
+                this.state.error = null;
+              }
+              this.broadcastStatus();
+            });
+          } catch (err) {
+            this.state.state = 'ERROR';
+            this.state.error = err.message;
+            this.state.message = `Vulkan 가속 시작 실패: ${err.message}`;
+            this.broadcastStatus();
+          }
+          return;
+        }
+
+        // CUDA 또는 CPU로 전환
+        this.vulkanRunner.stop();
         this.consecutiveCrashes = 0;
         if (!this.workerProcess) this.startWorker();
         this.sendToWorker({
@@ -539,21 +611,48 @@ class SttBridge {
       });
 
       // 2. 모델 로드 요청
-      socket.on('stt:load_model', (data) => {
+      socket.on('stt:load_model', async (data) => {
         const model = (data && data.model) || 'base';
         let device = data && data.device;
         if (!device) {
-          if (model === 'large-v3-turbo') {
-            device = 'cuda';
+          if (this.state.hardwareProfile?.vendor === 'AMD' && vulkanRunner.isAvailable()) {
+            device = 'vulkan';
+          } else if (model === 'large-v3-turbo') {
+            device = (this.state.hardwareProfile?.vendor === 'NVIDIA') ? 'cuda' : (vulkanRunner.isAvailable() ? 'vulkan' : 'cpu');
           } else {
-            device = this.state.device || 'cuda';
+            device = this.state.device || (vulkanRunner.isAvailable() && this.state.hardwareProfile?.vendor === 'AMD' ? 'vulkan' : 'cpu');
           }
         }
-        const computeType = (data && data.computeType) || (device === 'cuda' ? (this.state.hardwareProfile?.recommended_compute_type || 'float16') : 'int8');
+        const computeType = (data && data.computeType) || (device === 'cuda' || device === 'vulkan' ? 'float16' : 'int8');
         this.state.device = device;
         this.state.computeType = computeType;
-        saveSttSettings({ device, computeType, model });
         this.state.requestedModel = model;
+        saveSttSettings({ device, computeType, model });
+
+        if (device === 'vulkan') {
+          this.state.state = 'LOADING';
+          this.state.message = `모델 (${model} / Vulkan GPU 가속) 로딩 중...`;
+          this.broadcastStatus();
+          try {
+            await this.vulkanRunner.start(model, (st) => {
+              this.state.state = st.state;
+              this.state.message = st.message;
+              if (st.state === 'READY') {
+                this.state.model = model;
+                this.state.available = true;
+                this.state.error = null;
+              }
+              this.broadcastStatus();
+            });
+          } catch (err) {
+            this.state.state = 'ERROR';
+            this.state.error = err.message;
+            this.state.message = `Vulkan STT 로딩 실패: ${err.message}`;
+            this.broadcastStatus();
+          }
+          return;
+        }
+
         this.state.state = 'LOADING';
         this.state.message = `모델 (${model} / ${device === 'cuda' ? 'GPU' : 'CPU'}) 로딩 중...`;
         this.broadcastStatus();
@@ -572,12 +671,50 @@ class SttBridge {
       });
 
       // 3. 청취 시작 (소유권 등록)
-      socket.on('stt:start', (data) => {
+      socket.on('stt:start', async (data) => {
         // 이미 다른 활성 소켓이 청취 중인 경우 소유권 전환 허용
         this.ownerSocketId = socket.id;
         this.droppedChunksCount = 0;
         this.state.activeSessionId = data.sessionId;
         this.state.activeGeneration = data.generation;
+
+        if (this.state.device === 'vulkan') {
+          const targetModel = data.model || this.state.model || 'large-v3-turbo';
+          if (!this.vulkanRunner.isRunning || this.vulkanRunner.currentModelName !== targetModel) {
+            this.state.requestedModel = targetModel;
+            this.state.state = 'LOADING';
+            this.state.message = `모델 (${targetModel} / Vulkan GPU 가속) 준비 중...`;
+            this.broadcastStatus();
+            try {
+              await this.vulkanRunner.start(targetModel, (st) => {
+                this.state.state = st.state;
+                this.state.message = st.message;
+                if (st.state === 'READY') {
+                  this.state.model = targetModel;
+                  this.state.available = true;
+                  this.state.error = null;
+                }
+                this.broadcastStatus();
+              });
+            } catch (e) {
+              console.error('[SttBridge] Vulkan 시작 예외:', e);
+            }
+          }
+          this.vulkanRunner.startListening(data.sessionId, data.generation);
+          this.state.state = 'LISTENING';
+          this.state.error = null;
+          this.broadcastStatus();
+          if (this.io) {
+            this.io.emit('stt:listening_started', {
+              session_id: data.sessionId,
+              generation: data.generation,
+              model: this.state.model,
+              device: 'vulkan',
+              compute_type: 'float16'
+            });
+          }
+          return;
+        }
 
         // 요청 모델이 지정되어 있고 현재 로드된 모델과 다르면 모델 로딩 요청 병행
         if (data.model && data.model !== this.state.model) {
@@ -614,28 +751,48 @@ class SttBridge {
           return;
         }
 
-        let b64 = '';
+        let buf = null;
         if (Buffer.isBuffer(payload)) {
-          b64 = payload.toString('base64');
+          buf = payload;
         } else if (payload instanceof ArrayBuffer) {
-          b64 = Buffer.from(payload).toString('base64');
+          buf = Buffer.from(payload);
         } else if (payload && payload.data) {
-          b64 = payload.data;
+          buf = Buffer.from(payload.data, 'base64');
         }
 
-        if (b64) {
-          this.sendToWorker({
-            cmd: 'audio',
-            session_id: this.state.activeSessionId,
-            generation: this.state.activeGeneration,
-            data: b64
-          });
+        if (!buf || buf.length === 0) return;
+
+        if (this.state.device === 'vulkan') {
+          this.vulkanRunner.processAudioChunk(buf, this.state.activeSessionId, this.state.activeGeneration);
+          return;
         }
+
+        const b64 = buf.toString('base64');
+        this.sendToWorker({
+          cmd: 'audio',
+          session_id: this.state.activeSessionId,
+          generation: this.state.activeGeneration,
+          data: b64
+        });
       });
 
       // 5. 청취 중지
       socket.on('stt:stop', (data) => {
         if (!this.ownerSocketId || socket.id === this.ownerSocketId) {
+          if (this.state.device === 'vulkan') {
+            this.vulkanRunner.stopListening();
+            this.state.state = 'READY';
+            this.state.activeSessionId = '';
+            this.ownerSocketId = null;
+            this.broadcastStatus();
+            if (this.io) {
+              this.io.emit('stt:listening_stopped', {
+                session_id: (data && data.sessionId) || this.state.activeSessionId
+              });
+            }
+            return;
+          }
+
           this.sendToWorker({
             cmd: 'stop',
             session_id: (data && data.sessionId) || this.state.activeSessionId
@@ -648,11 +805,19 @@ class SttBridge {
       socket.on('disconnect', () => {
         if (this.ownerSocketId && socket.id === this.ownerSocketId) {
           console.log('[SttBridge] 청취 소유 소켓 연결 끊김 -> 청취 자동 정지');
-          this.sendToWorker({
-            cmd: 'stop',
-            session_id: this.state.activeSessionId
-          });
-          this.ownerSocketId = null;
+          if (this.state.device === 'vulkan') {
+            this.vulkanRunner.stopListening();
+            this.state.state = 'READY';
+            this.state.activeSessionId = '';
+            this.ownerSocketId = null;
+            this.broadcastStatus();
+          } else {
+            this.sendToWorker({
+              cmd: 'stop',
+              session_id: this.state.activeSessionId
+            });
+            this.ownerSocketId = null;
+          }
         }
       });
     });
@@ -660,6 +825,9 @@ class SttBridge {
 
   destroy() {
     clearTimeout(this.reconnectTimer);
+    if (this.vulkanRunner) {
+      this.vulkanRunner.stop();
+    }
     if (this.workerProcess) {
       try {
         this.workerProcess.stdin.write(JSON.stringify({ cmd: 'quit' }) + '\n');
