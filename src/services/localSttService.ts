@@ -167,8 +167,8 @@ class LocalSttService {
     this.status.message = `모델 (${model}) 로딩 요청 중...`;
     this.notifyStatusListeners();
 
-    const targetDevice = device || this.status.device || 'cuda';
-    const targetCompute = computeType || this.status.computeType || (targetDevice === 'cuda' ? 'float16' : 'int8');
+    const targetDevice = device || (model === 'large-v3-turbo' ? 'cuda' : (this.status.device || 'cuda'));
+    const targetCompute = computeType || (targetDevice === 'cuda' ? (this.status.hardwareProfile?.recommended_compute_type || 'float16') : 'int8');
 
     this.socket?.emit('stt:load_model', {
       model,

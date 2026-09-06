@@ -39,10 +39,10 @@ async function main() {
   const releaseBody = [
     `### VoiceCAP 댓글 도우미 v${version}`,
     '',
+    '- **large-v3-turbo 모델 선택 시 즉시 GPU 연산 자동 진행**: 모델 선택 시 GPU(CUDA FP16/INT8)를 최우선 연산 장치로 자동 지정하여 즉시 가속 적용',
     '- **오프라인 STT 로딩 무한 반복 현상 수정**: numpy 및 faster-whisper 임포트 예외 방어 및 반복 비정상 종료 시 무한 재시작 방지 루프 차단기 적용',
     '- **전용 독립 가상환경(venv) 자동 우선 인식**: `%LOCALAPPDATA%\\voicecap-comment-helper\\venv` 우선 탐색 및 검증',
     '- **하드웨어(GPU/CPU) 자동 감지 및 최적화**: NVIDIA RTX(Tensor Core FP16 가속), GTX(CUDA INT8 가속), AMD 라데온(CPU 멀티스레드 가속), 온보드 내장 그래픽 자동 판별 및 최적 모델 추천',
-    '- **구형 GPU(GTX 1060 등) CUDA INT8 연산 가속**: 파스칼 세대 GPU의 연산 특성을 반영하여 GPU 가속 유지',
     '- **새 컴퓨터 원클릭 오프라인 STT 설치 스크립트 포함**: `setup-offline-stt.bat` 추가로 Python venv, faster-whisper, numpy, CUDA 라이브러리 자동 구성',
     '- **도우미 및 웹앱 UI 연동**: 감지된 그래픽카드 배지, 오류 상세 원인 표시 및 실시간 상태 표시'
   ].join('\n');

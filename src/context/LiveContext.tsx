@@ -244,7 +244,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const setLocalSttModel = (model: LocalSttModel) => {
     setLocalSttModelState(model);
     storageService.setLocalSttModel(model);
-    localSttService.loadModel(model);
+    const targetDevice = model === 'large-v3-turbo' ? 'cuda' : undefined;
+    localSttService.loadModel(model, targetDevice);
   };
 
   // 비프음/신호음 재생

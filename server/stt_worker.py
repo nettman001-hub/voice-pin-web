@@ -465,14 +465,24 @@ def do_load_model(model_name="base", device="cuda", compute_type="float16"):
         worker_state = "READY"
         last_error_info = None
 
-        device_display = "GPU(CUDA)" if target_device == "cuda" else "CPU"
+        if target_device == "cuda":
+            device_display = f"GPU(CUDA {current_compute_type})"
+            status_msg = f"로컬 STT 준비 완료 ({current_model_name} / {device_display} 초고속 가속)"
+        else:
+            dev_info = detect_devices()
+            vendor = dev_info.get("hardware_profile", {}).get("vendor", "")
+            if vendor == "AMD":
+                status_msg = f"로컬 STT 준비 완료 ({current_model_name} / AMD 환경: CPU {model_kwargs.get('cpu_threads', 8)}스레드 가속)"
+            else:
+                status_msg = f"로컬 STT 준비 완료 ({current_model_name} / CPU {current_compute_type})"
+
         send_event({
             "event": "status",
             "state": "READY",
             "model": current_model_name,
             "device": current_device,
             "compute_type": current_compute_type,
-            "message": f"로컬 STT 준비 완료 ({current_model_name} / {device_display} {current_compute_type})"
+            "message": status_msg
         })
         return True
     except Exception as e:

@@ -290,7 +290,7 @@ export const LiveHomePage: React.FC = () => {
                 >
                   <option value="base">base (가장 가벼움 · 기본)</option>
                   <option value="small">small (보통 속도)</option>
-                  <option value="large-v3-turbo">large-v3-turbo (고성능 PC 권장)</option>
+                  <option value="large-v3-turbo">large-v3-turbo (GPU 고성능 권장)</option>
                 </select>
                 <span
                   className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded shrink-0 ${

@@ -541,8 +541,18 @@ class SttBridge {
       // 2. 모델 로드 요청
       socket.on('stt:load_model', (data) => {
         const model = (data && data.model) || 'base';
-        const device = (data && data.device) || this.state.device || 'cuda';
-        const computeType = (data && data.computeType) || (device === 'cuda' ? 'float16' : 'int8');
+        let device = data && data.device;
+        if (!device) {
+          if (model === 'large-v3-turbo') {
+            device = 'cuda';
+          } else {
+            device = this.state.device || 'cuda';
+          }
+        }
+        const computeType = (data && data.computeType) || (device === 'cuda' ? (this.state.hardwareProfile?.recommended_compute_type || 'float16') : 'int8');
+        this.state.device = device;
+        this.state.computeType = computeType;
+        saveSttSettings({ device, computeType, model });
         this.state.requestedModel = model;
         this.state.state = 'LOADING';
         this.state.message = `모델 (${model} / ${device === 'cuda' ? 'GPU' : 'CPU'}) 로딩 중...`;
@@ -576,11 +586,14 @@ class SttBridge {
           this.state.message = `모델 (${data.model}) 로딩 중...`;
           this.broadcastStatus();
 
+          const targetDevice = data.model === 'large-v3-turbo' ? 'cuda' : (this.state.device || 'cuda');
+          const targetCompute = targetDevice === 'cuda' ? (this.state.hardwareProfile?.recommended_compute_type || 'float16') : 'int8';
+
           this.sendToWorker({
             cmd: 'load_model',
             model: data.model,
-            device: this.state.device || 'cuda',
-            compute_type: this.state.computeType || (this.state.device === 'cpu' ? 'int8' : 'float16')
+            device: targetDevice,
+            compute_type: targetCompute
           });
         }
 
