@@ -49,37 +49,52 @@ function resolvePythonPath() {
     return process.env.PYTHON_PATH;
   }
 
-  // 사용자 환경에 설치된 Python venv 및 설치 경로 우선 탐색
-  const candidates = [
-    // 1. VoiceCAP 전용 독립 가상환경 (새 PC 원클릭 설치 스크립트 대상)
+  // 1. VoiceCAP 전용 독립 가상환경 우선 탐색 (가장 높은 우선순위)
+  const dedicatedVenvs = [
     path.join(process.env.LOCALAPPDATA || '', 'voicecap-comment-helper', 'venv', 'Scripts', 'python.exe'),
-    path.join(process.env.APPDATA || '', 'voicecap-comment-helper', 'venv', 'Scripts', 'python.exe'),
-    // 2. 패키지 내장/임베디드 Python
+    path.join(process.env.APPDATA || '', 'voicecap-comment-helper', 'venv', 'Scripts', 'python.exe')
+  ];
+  for (const v of dedicatedVenvs) {
+    if (fs.existsSync(v)) return v;
+  }
+
+  // 2. 다른 Python 후보들 중 faster-whisper 또는 numpy가 설치된 것을 우선 탐색
+  const candidates = [
     path.join(process.resourcesPath || '', 'python', 'python.exe'),
     path.join(__dirname, '..', 'python', 'python.exe'),
     path.join(__dirname, '..', '..', 'python', 'python.exe'),
-    // 3. 윈도우 사용자 표준 Python 설치 경로
-    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python311', 'python.exe'),
-    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python312', 'python.exe'),
-    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python310', 'python.exe'),
+    'C:\\Python314\\python.exe',
     'C:\\Python311\\python.exe',
     'C:\\Python312\\python.exe',
     'C:\\Python310\\python.exe',
-    'C:\\Python314\\python.exe',
-    // 4. 개발 도구 및 시스템 PATH
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python311', 'python.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python312', 'python.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python310', 'python.exe'),
     path.join(process.env.LOCALAPPDATA || '', 'hermes', 'hermes-agent', 'venv', 'Scripts', 'python.exe'),
     path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'hermes', 'hermes-agent', 'venv', 'Scripts', 'python.exe'),
     'python'
   ];
 
-  for (const p of candidates) {
+  const existing = candidates.filter((p) => p === 'python' || fs.existsSync(p));
+  for (const p of existing) {
     try {
-      if (p === 'python' || fs.existsSync(p)) {
-        return p;
-      }
+      const { execSync } = require('child_process');
+      const testCmd = p === 'python' ? 'python' : `"${p}"`;
+      execSync(`${testCmd} -c "import faster_whisper"`, { timeout: 1500, stdio: 'ignore', windowsHide: true });
+      return p;
     } catch (_) {}
   }
-  return 'python';
+
+  for (const p of existing) {
+    try {
+      const { execSync } = require('child_process');
+      const testCmd = p === 'python' ? 'python' : `"${p}"`;
+      execSync(`${testCmd} -c "import numpy"`, { timeout: 1500, stdio: 'ignore', windowsHide: true });
+      return p;
+    } catch (_) {}
+  }
+
+  return existing[0] || 'python';
 }
 
 function resolveWorkerScript() {
@@ -192,6 +207,9 @@ class SttBridge {
     this.reconnectTimer = null;
     this.ownerSocketId = null;
     this.droppedChunksCount = 0;
+    this.consecutiveCrashes = 0;
+    this.lastStderr = '';
+    this.workerStartTime = 0;
 
     const initialHw = detectInitialHardware();
     const saved = readSttSettings();
@@ -259,6 +277,7 @@ class SttBridge {
 
   startWorker() {
     if (this.workerProcess) return;
+    this.pythonPath = resolvePythonPath();
     this.workerScript = resolveWorkerScript();
     if (!fs.existsSync(this.workerScript)) {
       this.state.state = 'ERROR';
@@ -272,6 +291,7 @@ class SttBridge {
     this.isStarting = true;
     this.state.state = 'LOADING';
     this.state.message = 'faster-whisper 워커 프로세스 시작 중...';
+    this.workerStartTime = Date.now();
     this.broadcastStatus();
 
     try {
@@ -296,19 +316,35 @@ class SttBridge {
       this.workerProcess.stderr.on('data', (chunk) => {
         const errText = chunk.toString('utf8').trim();
         if (errText) {
+          this.lastStderr = errText;
           console.warn('[SttBridge:WorkerStderr]', errText);
         }
       });
 
       this.workerProcess.on('close', (code) => {
-        console.warn(`[SttBridge] 워커 프로세스 종료됨 (exit code: ${code})`);
+        const runDuration = Date.now() - (this.workerStartTime || 0);
+        if (runDuration < 4000 && code !== 0) {
+          this.consecutiveCrashes += 1;
+        } else if (code === 0) {
+          this.consecutiveCrashes = 0;
+        }
+
+        console.warn(`[SttBridge] 워커 프로세스 종료됨 (exit code: ${code}, 연속충돌: ${this.consecutiveCrashes})`);
         this.workerProcess = null;
         this.ownerSocketId = null;
+
+        if (this.consecutiveCrashes >= 2) {
+          this.state.state = 'ERROR';
+          this.state.error = this.lastStderr || 'STT 워커가 반복 종료되었습니다. setup-offline-stt.bat을 실행해 주세요.';
+          this.state.message = this.state.error;
+          this.broadcastStatus();
+          return;
+        }
+
         this.state.state = 'DISCONNECTED';
         this.state.message = `STT 워커가 종료되었습니다 (코드: ${code})`;
         this.broadcastStatus();
 
-        // 3초 후 자동 재시작 시도 (개발/운영 지속성)
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = setTimeout(() => {
           if (!this.workerProcess) {
@@ -382,13 +418,16 @@ class SttBridge {
       const event = msg.event;
 
       if (event === 'started') {
+        this.consecutiveCrashes = 0;
         this.state.available = !!msg.has_faster_whisper;
         if (msg.device_info) this.updateDeviceInfo(msg.device_info);
         this.broadcastStatus();
       } else if (event === 'devices_detected') {
+        this.consecutiveCrashes = 0;
         this.updateDeviceInfo(msg);
         this.broadcastStatus();
       } else if (event === 'status') {
+        this.consecutiveCrashes = 0;
         this.state.state = msg.state || this.state.state;
         if (msg.model) {
           this.state.model = msg.model;
@@ -415,6 +454,9 @@ class SttBridge {
         this.state.state = 'ERROR';
         this.state.error = msg.message || 'STT 워커 오류';
         this.state.message = msg.message || 'STT 워커 오류';
+        if (msg.error_code === 'NO_FASTER_WHISPER' || msg.error_code === 'PACKAGES_MISSING') {
+          this.state.available = false;
+        }
         this.broadcastStatus();
         if (this.io) {
           this.io.emit('stt:error', msg);
@@ -473,6 +515,8 @@ class SttBridge {
 
       // 장치 감지 재요청
       socket.on('stt:detect_devices', () => {
+        this.consecutiveCrashes = 0;
+        if (!this.workerProcess) this.startWorker();
         this.sendToWorker({ cmd: 'detect_devices' });
       });
 
@@ -483,6 +527,8 @@ class SttBridge {
         this.state.device = device;
         this.state.computeType = computeType;
         saveSttSettings({ device, computeType, model: this.state.model });
+        this.consecutiveCrashes = 0;
+        if (!this.workerProcess) this.startWorker();
         this.sendToWorker({
           cmd: 'load_model',
           model: this.state.model || 'base',
@@ -501,6 +547,11 @@ class SttBridge {
         this.state.state = 'LOADING';
         this.state.message = `모델 (${model} / ${device === 'cuda' ? 'GPU' : 'CPU'}) 로딩 중...`;
         this.broadcastStatus();
+
+        this.consecutiveCrashes = 0;
+        if (!this.workerProcess) {
+          this.startWorker();
+        }
 
         this.sendToWorker({
           cmd: 'load_model',

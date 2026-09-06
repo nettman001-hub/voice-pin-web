@@ -57,7 +57,7 @@ echo.
 
 echo [3/4] 오프라인 STT AI 엔진(faster-whisper) 패키지 설치 중...
 "%TARGET_VENV%\Scripts\python.exe" -m pip install --upgrade pip
-"%TARGET_VENV%\Scripts\python.exe" -m pip install faster-whisper ctranslate2
+"%TARGET_VENV%\Scripts\python.exe" -m pip install faster-whisper ctranslate2 numpy
 
 echo.
 echo [4/4] 그래픽카드(GPU) 가속 드라이버 점검 중...

@@ -22,7 +22,10 @@ import gc
 import re
 import wave
 import traceback
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 # ---------------------------------------------------------------------------
 # Windows CUDA 12 DLL 자동 경로 탐색 및 등록 (cuBLAS, cuDNN 등)
@@ -106,7 +109,7 @@ def send_event(event_dict):
 
 def calculate_rms(pcm_bytes):
     """PCM16 바이트 배열의 RMS(음압 레벨) 계산"""
-    if not pcm_bytes or len(pcm_bytes) < 2:
+    if not pcm_bytes or len(pcm_bytes) < 2 or np is None:
         return 0.0
     samples = np.frombuffer(pcm_bytes, dtype=np.int16)
     if len(samples) == 0:
@@ -364,11 +367,16 @@ def detect_devices():
 def do_load_model(model_name="base", device="cuda", compute_type="float16"):
     global current_model, current_model_name, current_device, current_compute_type, worker_state, last_error_info
 
-    if faster_whisper is None:
+    if faster_whisper is None or np is None:
         worker_state = "ERROR"
+        missing = []
+        if faster_whisper is None:
+            missing.append("faster-whisper")
+        if np is None:
+            missing.append("numpy")
         last_error_info = {
             "error_code": "NO_FASTER_WHISPER",
-            "message": "faster-whisper 패키지가 설치되어 있지 않습니다.",
+            "message": f"오프라인 STT 엔진 패키지({', '.join(missing)})가 설치되어 있지 않습니다. 댓글 도우미의 [STT 엔진 설치]를 실행해 주세요.",
             "timestamp": time.time()
         }
         send_event({
@@ -686,16 +694,35 @@ def main():
 
     dev_info = detect_devices()
 
+    has_packages = (faster_whisper is not None and np is not None)
+
     send_event({
         "event": "started",
-        "has_faster_whisper": faster_whisper is not None,
+        "has_faster_whisper": has_packages,
         "device_info": dev_info
     })
 
-    # GPU 사용 가능 시 cuda(float16) 우선 로딩, 저사양 PC는 cpu(int8) 로딩
-    initial_device = dev_info["recommended_device"]
-    initial_compute = dev_info["recommended_compute_type"]
-    do_load_model("base", device=initial_device, compute_type=initial_compute)
+    if not has_packages:
+        worker_state = "ERROR"
+        missing = []
+        if faster_whisper is None:
+            missing.append("faster-whisper")
+        if np is None:
+            missing.append("numpy")
+        last_error_info = {
+            "error_code": "NO_FASTER_WHISPER",
+            "message": f"오프라인 STT 엔진 패키지({', '.join(missing)})가 설치되어 있지 않습니다. 댓글 도우미의 [STT 엔진 설치]를 실행해 주세요.",
+            "timestamp": time.time()
+        }
+        send_event({
+            "event": "error",
+            **last_error_info
+        })
+    else:
+        # GPU 사용 가능 시 cuda(float16) 우선 로딩, 저사양 PC는 cpu(int8) 로딩
+        initial_device = dev_info["recommended_device"]
+        initial_compute = dev_info["recommended_compute_type"]
+        do_load_model("base", device=initial_device, compute_type=initial_compute)
 
     while True:
         try:

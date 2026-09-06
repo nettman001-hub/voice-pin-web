@@ -110,7 +110,9 @@ function render(status) {
       }
     }
     if (sttDeviceMessage) {
-      if (stt.hardwareProfile && stt.hardwareProfile.description) {
+      if (stt.state === 'ERROR') {
+        sttDeviceMessage.textContent = `❌ ${stt.error || stt.message || 'STT 워커 오류'}`;
+      } else if (stt.hardwareProfile && stt.hardwareProfile.description) {
         sttDeviceMessage.textContent = stt.hardwareProfile.description;
       } else if (stt.device === 'cuda') {
         sttDeviceMessage.textContent = `NVIDIA GPU (${stt.gpuName || 'CUDA'}) 가속 활성화됨: 지연 없는 초고속 실시간 음성인식`;
