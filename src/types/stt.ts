@@ -10,6 +10,20 @@ export type LocalSttState =
   | 'LISTENING'
   | 'ERROR';
 
+export type HardwareVendor = 'NVIDIA' | 'AMD' | 'INTEL' | 'CPU' | 'UNKNOWN';
+
+export interface HardwareProfile {
+  vendor: HardwareVendor;
+  gpu_name: string;
+  cpu_name: string;
+  cpu_threads?: number;
+  cuda_available: boolean;
+  recommended_model: LocalSttModel;
+  recommended_device: 'cpu' | 'cuda' | string;
+  recommended_compute_type: 'float16' | 'int8' | string;
+  description: string;
+}
+
 export interface LocalSttStatusPayload {
   available: boolean;
   state: LocalSttState;
@@ -24,6 +38,7 @@ export interface LocalSttStatusPayload {
   pythonPath?: string;
   hasOwner?: boolean;
   droppedChunks?: number;
+  hardwareProfile?: HardwareProfile | null;
 }
 
 export interface LocalSttTranscriptEvent {

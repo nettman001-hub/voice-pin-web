@@ -184,18 +184,39 @@ def dump_audio_if_enabled(pcm_bytes, session_id):
         sys.stderr.write(f"[stt_worker] WAV 덤프 실패: {e}\n")
 
 
+def get_cpu_info():
+    """CPU 모델명 및 논리 코어 수 조회"""
+    cpu_name = "CPU"
+    cores = os.cpu_count() or 4
+    if sys.platform == 'win32':
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'HARDWARE\DESCRIPTION\System\CentralProcessor\0')
+            val, _ = winreg.QueryValueEx(key, 'ProcessorNameString')
+            if val and val.strip():
+                cpu_name = val.strip()
+        except Exception:
+            pass
+    return cpu_name, cores
+
+
 def detect_devices():
     """
-    NVIDIA CUDA GPU 및 CPU 지원 여부 및 장치 정보 검출
+    NVIDIA CUDA GPU, AMD 라데온, Intel 내장 그래픽 및 CPU 하드웨어 정보 검출 및
+    환경별 최적 STT 설정 프로파일 추천
     """
     cuda_available = False
-    device_name = "CPU"
+    device_name = "기본 CPU"
+    vendor = "CPU"
+    cpu_name, cpu_threads = get_cpu_info()
 
+    # 1. NVIDIA CUDA 가속 지원 여부 검출
     try:
         import ctranslate2
         cuda_count = ctranslate2.get_cuda_device_count() if hasattr(ctranslate2, "get_cuda_device_count") else 0
         if cuda_count > 0:
             cuda_available = True
+            vendor = "NVIDIA"
             try:
                 import subprocess
                 res = subprocess.run(
@@ -210,8 +231,69 @@ def detect_devices():
             except Exception:
                 device_name = "NVIDIA CUDA GPU"
     except Exception as e:
-        sys.stderr.write(f"[stt_worker] GPU 감지 오류: {e}\n")
+        sys.stderr.write(f"[stt_worker] GPU CUDA 감지 오류: {e}\n")
         cuda_available = False
+
+    # 2. CUDA가 아닐 경우 Windows 그래픽 컨트롤러(AMD, Intel 내장 등) 조회
+    if not cuda_available and sys.platform == 'win32':
+        try:
+            import subprocess
+            res = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_VideoController).Name"],
+                capture_output=True, text=True, timeout=3
+            )
+            raw_names = [line.strip() for line in res.stdout.strip().split("\n") if line.strip()]
+            for name in raw_names:
+                upper = name.upper()
+                if "RADEON" in upper or "AMD" in upper:
+                    vendor = "AMD"
+                    device_name = name
+                    break
+                elif "INTEL" in upper or "UHD" in upper or "IRIS" in upper:
+                    vendor = "INTEL"
+                    device_name = name
+                    break
+                elif "NVIDIA" in upper or "GEFORCE" in upper:
+                    vendor = "NVIDIA"
+                    device_name = name
+                    break
+                elif "MICROSOFT" not in upper and device_name == "기본 CPU":
+                    device_name = name
+        except Exception as e:
+            sys.stderr.write(f"[stt_worker] Windows GPU 탐색 오류: {e}\n")
+
+    # 3. 하드웨어별 최적 추천 프로파일 결정
+    if vendor == "NVIDIA" and cuda_available:
+        # Pascal(GTX 1060/1070/1080/1050) 및 Maxwell(GTX 900번대)은 텐서 코어가 없어 FP16 대신 INT8 연산 최적화
+        is_pascal_or_older = any(g in device_name for g in ["1060", "1070", "1080", "1050", "GTX 9", "GTX 7", "GTX 16"])
+        if is_pascal_or_older:
+            recommended_device = "cuda"
+            recommended_compute_type = "int8"
+            recommended_model = "small"
+            description = f"NVIDIA GTX 감지됨 ({device_name} · CUDA INT8 가속 · small 권장)"
+        else:
+            recommended_device = "cuda"
+            recommended_compute_type = "float16"
+            recommended_model = "large-v3-turbo"
+            description = f"NVIDIA RTX 감지됨 ({device_name} · Tensor Core 가속 · large-v3-turbo 권장)"
+    elif vendor == "AMD":
+        # AMD 라데온 (RX 6800 XT 등) - Windows CTranslate2는 CPU 모드로 구동
+        recommended_device = "cpu"
+        recommended_compute_type = "int8"
+        recommended_model = "small" if cpu_threads >= 8 else "base"
+        description = f"AMD 라데온 감지됨 ({device_name} · CPU {cpu_threads}스레드 연산 · {recommended_model} 권장)"
+    elif vendor == "INTEL":
+        # Intel 내장 그래픽(온보드)
+        recommended_device = "cpu"
+        recommended_compute_type = "int8"
+        recommended_model = "base"
+        description = f"인텔 그래픽 감지됨 ({device_name} · 경량 base 모델 권장)"
+    else:
+        # 온보드 또는 기본 CPU
+        recommended_device = "cpu"
+        recommended_compute_type = "int8"
+        recommended_model = "small" if cpu_threads >= 8 else "base"
+        description = f"CPU 연산 모드 ({cpu_name} · {cpu_threads}스레드 · {recommended_model} 권장)"
 
     devices = [
         {
@@ -222,18 +304,34 @@ def detect_devices():
         },
         {
             "id": "cpu",
-            "name": "CPU (저전력/기본 연산)",
+            "name": f"CPU 연산 ({cpu_threads}스레드 최적화)",
             "available": True,
             "compute_type": "int8"
         }
     ]
+
+    hardware_profile = {
+        "vendor": vendor,
+        "gpu_name": device_name,
+        "cpu_name": cpu_name,
+        "cpu_threads": cpu_threads,
+        "cuda_available": cuda_available,
+        "recommended_model": recommended_model,
+        "recommended_device": recommended_device,
+        "recommended_compute_type": recommended_compute_type,
+        "description": description
+    }
+
     return {
         "cuda_available": cuda_available,
         "device_name": device_name,
         "devices": devices,
-        "recommended_device": "cuda" if cuda_available else "cpu",
-        "recommended_compute_type": "float16" if cuda_available else "int8"
+        "recommended_device": recommended_device,
+        "recommended_compute_type": recommended_compute_type,
+        "recommended_model": recommended_model,
+        "hardware_profile": hardware_profile
     }
+
 
 
 def do_load_model(model_name="base", device="cuda", compute_type="float16"):
@@ -303,10 +401,17 @@ def do_load_model(model_name="base", device="cuda", compute_type="float16"):
             current_model = None
             gc.collect()
 
+        model_kwargs = {
+            "device": target_device,
+            "compute_type": target_compute
+        }
+        if target_device == "cpu":
+            _, cpu_threads = get_cpu_info()
+            model_kwargs["cpu_threads"] = min(8, max(2, cpu_threads // 2))
+
         current_model = faster_whisper.WhisperModel(
             model_name,
-            device=target_device,
-            compute_type=target_compute
+            **model_kwargs
         )
 
         # 중요: WhisperModel 생성뿐 아니라 실제 transcribe 호출 시 cublas DLL을 로드하므로
@@ -336,18 +441,50 @@ def do_load_model(model_name="base", device="cuda", compute_type="float16"):
         })
         return True
     except Exception as e:
-        # CUDA 로드 실패 시 CPU로 안전 폴백 시도
+        # CUDA 로드 실패 시 구형 GPU(파스칼 등)를 위한 CUDA int8 우선 재시도 후 CPU 폴백
         if target_device == "cuda":
-            sys.stderr.write(f"[stt_worker] CUDA 로딩 실패 ({e}) -> CPU int8 안전 폴백 시도\n")
+            if target_compute != "int8":
+                sys.stderr.write(f"[stt_worker] CUDA float16 실패 ({e}) -> CUDA int8 재시도\n")
+                try:
+                    if current_model is not None:
+                        del current_model
+                        current_model = None
+                        gc.collect()
+                    current_model = faster_whisper.WhisperModel(
+                        model_name,
+                        device="cuda",
+                        compute_type="int8"
+                    )
+                    dummy_pcm = np.zeros(1600, dtype=np.float32)
+                    list(current_model.transcribe(dummy_pcm, language="ko")[0])
+                    current_model_name = model_name
+                    current_device = "cuda"
+                    current_compute_type = "int8"
+                    worker_state = "READY"
+                    last_error_info = None
+                    send_event({
+                        "event": "status",
+                        "state": "READY",
+                        "model": current_model_name,
+                        "device": current_device,
+                        "compute_type": current_compute_type,
+                        "message": f"로컬 STT 준비 완료 (CUDA INT8 자동 최적화: {current_model_name})"
+                    })
+                    return True
+                except Exception as cuda_int8_err:
+                    sys.stderr.write(f"[stt_worker] CUDA int8 실패 ({cuda_int8_err}) -> CPU int8 안전 폴백 시도\n")
+
             try:
                 if current_model is not None:
                     del current_model
                     current_model = None
                     gc.collect()
+                _, cpu_threads = get_cpu_info()
                 current_model = faster_whisper.WhisperModel(
                     model_name,
                     device="cpu",
-                    compute_type="int8"
+                    compute_type="int8",
+                    cpu_threads=min(8, max(2, cpu_threads // 2))
                 )
                 current_model_name = model_name
                 current_device = "cpu"

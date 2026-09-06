@@ -83,9 +83,15 @@ function render(status) {
       if (stt.hasGpu) {
         gpuBadge.className = 'badge-gpu';
         gpuBadge.textContent = `⚡ ${stt.gpuName || 'NVIDIA GPU'} 감지됨`;
+      } else if (stt.hardwareProfile && stt.hardwareProfile.vendor === 'AMD') {
+        gpuBadge.className = 'badge-gpu';
+        gpuBadge.textContent = `🖥️ ${stt.hardwareProfile.gpu_name || 'AMD 라데온'} (CPU 가속)`;
+      } else if (stt.hardwareProfile && stt.hardwareProfile.vendor === 'INTEL') {
+        gpuBadge.className = 'badge-gpu';
+        gpuBadge.textContent = `💻 ${stt.hardwareProfile.gpu_name || '인텔 내장 그래픽'}`;
       } else {
         gpuBadge.className = 'badge-gpu disabled';
-        gpuBadge.textContent = 'GPU 미감지 (CPU 모드)';
+        gpuBadge.textContent = '기본 CPU 모드';
       }
     }
     if (sttDeviceSelect && !sttDeviceSelect.matches(':focus')) {
@@ -106,13 +112,14 @@ function render(status) {
       }
     }
     if (sttDeviceMessage) {
-      if (stt.device === 'cuda') {
+      if (stt.hardwareProfile && stt.hardwareProfile.description) {
+        sttDeviceMessage.textContent = stt.hardwareProfile.description;
+      } else if (stt.device === 'cuda') {
         sttDeviceMessage.textContent = `NVIDIA GPU (${stt.gpuName || 'CUDA'}) 가속 활성화됨: 지연 없는 초고속 실시간 음성인식`;
-        sttDeviceMessage.className = 'stt-message';
       } else {
         sttDeviceMessage.textContent = 'CPU 기본 연산으로 동작 중입니다. 빠른 발화 시 지연이 발생할 수 있습니다.';
-        sttDeviceMessage.className = 'stt-message';
       }
+      sttDeviceMessage.className = 'stt-message';
     }
   }
 }

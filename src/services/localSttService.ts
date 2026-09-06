@@ -27,7 +27,8 @@ class LocalSttService {
     device: 'cpu',
     computeType: 'int8',
     message: '댓글 도우미 연결 대기 중',
-    error: null
+    error: null,
+    hardwareProfile: null
   };
 
   constructor() {
@@ -143,6 +144,12 @@ class LocalSttService {
     this.statusListeners.add(listener);
     listener(this.status);
     return () => this.statusListeners.delete(listener);
+  }
+
+  public detectDevices(): void {
+    if (this.socket && this.socket.connected) {
+      this.socket.emit('stt:detect_devices');
+    }
   }
 
   private notifyStatusListeners(): void {

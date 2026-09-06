@@ -22,7 +22,10 @@ import {
   X,
   MessageSquareText,
   VolumeX,
-  Cpu
+  Cpu,
+  Download,
+  Zap,
+  ExternalLink
 } from 'lucide-react';
 import { LocalSttModel, SttMode } from '../../types/stt';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
@@ -273,47 +276,86 @@ export const LiveHomePage: React.FC = () => {
             </button>
           </div>
 
-          {/* 로컬 STT 전용 모델 선택 및 상태 표시 */}
+          {/* 로컬 STT 전용 모델 선택, 하드웨어 감지 및 상태 표시 */}
           {sttMode === 'LOCAL' && (
-            <div className="flex items-center space-x-1.5 bg-brand-50/70 border border-brand-200/70 px-2.5 py-1.5 rounded-2xl text-xs">
-              <Cpu className="w-3.5 h-3.5 text-brand-600 shrink-0" />
-              <span className="font-bold text-brand-900 shrink-0">모델:</span>
-              <select
-                value={localSttModel}
-                disabled={isListening}
-                onChange={(e) => setLocalSttModel(e.target.value as LocalSttModel)}
-                className="bg-white border border-brand-300 text-brand-900 font-bold rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
-              >
-                <option value="base">base (가장 가벼움 · 기본)</option>
-                <option value="small">small (보통 속도)</option>
-                <option value="large-v3-turbo">large-v3-turbo (고성능 PC 권장)</option>
-              </select>
-              <span
-                className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded shrink-0 ${
-                  localSttStatus.state === 'READY' || localSttStatus.state === 'LISTENING'
-                    ? 'bg-emerald-100 text-emerald-700'
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex items-center space-x-1.5 bg-brand-50/70 border border-brand-200/70 px-2.5 py-1.5 rounded-2xl text-xs">
+                <Cpu className="w-3.5 h-3.5 text-brand-600 shrink-0" />
+                <span className="font-bold text-brand-900 shrink-0">모델:</span>
+                <select
+                  value={localSttModel}
+                  disabled={isListening}
+                  onChange={(e) => setLocalSttModel(e.target.value as LocalSttModel)}
+                  className="bg-white border border-brand-300 text-brand-900 font-bold rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
+                >
+                  <option value="base">base (가장 가벼움 · 기본)</option>
+                  <option value="small">small (보통 속도)</option>
+                  <option value="large-v3-turbo">large-v3-turbo (고성능 PC 권장)</option>
+                </select>
+                <span
+                  className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded shrink-0 ${
+                    localSttStatus.state === 'READY' || localSttStatus.state === 'LISTENING'
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : localSttStatus.state === 'LOADING'
+                      ? 'bg-amber-100 text-amber-700 animate-pulse'
+                      : 'bg-rose-100 text-rose-700'
+                  }`}
+                  title={localSttStatus.error || localSttStatus.message}
+                >
+                  {localSttStatus.state === 'READY'
+                    ? (localSttStatus.model !== localSttModel
+                        ? `전환 중 (${localSttStatus.model} ➡️ ${localSttModel})`
+                        : `준비됨 (${localSttStatus.model})`)
+                    : localSttStatus.state === 'LISTENING'
+                    ? (localSttStatus.model !== localSttModel
+                        ? `청취 중 (${localSttStatus.model} ➡️ ${localSttModel})`
+                        : `청취 중 (${localSttStatus.model})`)
                     : localSttStatus.state === 'LOADING'
-                    ? 'bg-amber-100 text-amber-700 animate-pulse'
-                    : 'bg-rose-100 text-rose-700'
-                }`}
-                title={localSttStatus.error || localSttStatus.message}
-              >
-                {localSttStatus.state === 'READY'
-                  ? (localSttStatus.model !== localSttModel
-                      ? `전환 중 (${localSttStatus.model} ➡️ ${localSttModel})`
-                      : `준비됨 (${localSttStatus.model})`)
-                  : localSttStatus.state === 'LISTENING'
-                  ? (localSttStatus.model !== localSttModel
-                      ? `청취 중 (${localSttStatus.model} ➡️ ${localSttModel})`
-                      : `청취 중 (${localSttStatus.model})`)
-                  : localSttStatus.state === 'LOADING'
-                  ? `로딩 중 (${localSttModel})...`
-                  : localSttStatus.state === 'ERROR'
-                  ? `오류 (${localSttStatus.error?.slice(0, 15) || '실패'})`
-                  : localSttStatus.state === 'HELPER_OFFLINE'
-                  ? '도우미 미실행'
-                  : '대기'}
-              </span>
+                    ? `로딩 중 (${localSttModel})...`
+                    : localSttStatus.state === 'ERROR'
+                    ? `오류 (${localSttStatus.error?.slice(0, 15) || '실패'})`
+                    : localSttStatus.state === 'HELPER_OFFLINE'
+                    ? '도우미 미실행'
+                    : '대기'}
+                </span>
+              </div>
+
+              {/* 하드웨어 감지 배지 및 최적 추천 모델 원클릭 적용 */}
+              {localSttStatus.hardwareProfile && (
+                <div
+                  className="flex items-center space-x-1.5 bg-slate-100/90 border border-slate-200/80 px-2.5 py-1.5 rounded-2xl text-[11px]"
+                  title={localSttStatus.hardwareProfile.description}
+                >
+                  <span className="font-semibold text-slate-700 truncate max-w-[220px]">
+                    {localSttStatus.hardwareProfile.vendor === 'NVIDIA' ? '⚡ ' : localSttStatus.hardwareProfile.vendor === 'AMD' ? '🖥️ ' : '💻 '}
+                    {localSttStatus.hardwareProfile.gpu_name || localSttStatus.hardwareProfile.cpu_name}
+                  </span>
+                  {localSttModel !== localSttStatus.hardwareProfile.recommended_model && !isListening && (
+                    <button
+                      onClick={() => setLocalSttModel(localSttStatus.hardwareProfile!.recommended_model)}
+                      className="px-1.5 py-0.5 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded text-[10px] transition cursor-pointer shadow-2xs shrink-0 flex items-center space-x-0.5"
+                      title={`이 PC에 최적화된 ${localSttStatus.hardwareProfile.recommended_model} 모델로 즉시 변경`}
+                    >
+                      <Zap className="w-2.5 h-2.5" />
+                      <span>추천({localSttStatus.hardwareProfile.recommended_model}) 적용</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* 도우미 미실행 시 다운로드 안내 버튼 */}
+              {localSttStatus.state === 'HELPER_OFFLINE' && (
+                <a
+                  href="https://github.com/nettman001-hub/voice-pin-web/releases"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center space-x-1 bg-amber-500 hover:bg-amber-600 text-white font-bold px-2.5 py-1.5 rounded-2xl text-[11px] transition shadow-2xs"
+                  title="새 컴퓨터에서 무료 오프라인 STT를 사용하려면 댓글 도우미 설치가 필요합니다"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>댓글 도우미 다운로드</span>
+                </a>
+              )}
             </div>
           )}
 

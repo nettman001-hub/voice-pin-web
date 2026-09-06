@@ -49,11 +49,26 @@ function resolvePythonPath() {
     return process.env.PYTHON_PATH;
   }
 
-  // 사용자 환경에 설치된 Python venv 경로 우선 탐색
+  // 사용자 환경에 설치된 Python venv 및 설치 경로 우선 탐색
   const candidates = [
+    // 1. VoiceCAP 전용 독립 가상환경 (새 PC 원클릭 설치 스크립트 대상)
+    path.join(process.env.LOCALAPPDATA || '', 'voicecap-comment-helper', 'venv', 'Scripts', 'python.exe'),
+    path.join(process.env.APPDATA || '', 'voicecap-comment-helper', 'venv', 'Scripts', 'python.exe'),
+    // 2. 패키지 내장/임베디드 Python
+    path.join(process.resourcesPath || '', 'python', 'python.exe'),
+    path.join(__dirname, '..', 'python', 'python.exe'),
+    path.join(__dirname, '..', '..', 'python', 'python.exe'),
+    // 3. 윈도우 사용자 표준 Python 설치 경로
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python311', 'python.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python312', 'python.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python310', 'python.exe'),
+    'C:\\Python311\\python.exe',
+    'C:\\Python312\\python.exe',
+    'C:\\Python310\\python.exe',
+    'C:\\Python314\\python.exe',
+    // 4. 개발 도구 및 시스템 PATH
     path.join(process.env.LOCALAPPDATA || '', 'hermes', 'hermes-agent', 'venv', 'Scripts', 'python.exe'),
     path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'hermes', 'hermes-agent', 'venv', 'Scripts', 'python.exe'),
-    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python311', 'python.exe'),
     'python'
   ];
 
@@ -119,6 +134,7 @@ class SttBridge {
       activeGeneration: 0,
       hasGpu: false,
       gpuName: '',
+      hardwareProfile: null,
       availableDevices: [
         { id: 'cuda', name: 'NVIDIA CUDA GPU (가속 권장)', available: false, compute_type: 'float16' },
         { id: 'cpu', name: 'CPU (저전력/기본 연산)', available: true, compute_type: 'int8' }
@@ -244,13 +260,19 @@ class SttBridge {
     if (!deviceInfo) return;
     this.state.hasGpu = Boolean(deviceInfo.cuda_available);
     this.state.gpuName = deviceInfo.device_name || '';
+    if (deviceInfo.hardware_profile) {
+      this.state.hardwareProfile = deviceInfo.hardware_profile;
+    }
     if (Array.isArray(deviceInfo.devices)) {
       this.state.availableDevices = deviceInfo.devices;
     }
     const saved = readSttSettings();
-    if (!saved.device && deviceInfo.cuda_available) {
-      this.state.device = 'cuda';
-      this.state.computeType = 'float16';
+    if (!saved.device) {
+      this.state.device = deviceInfo.recommended_device || (deviceInfo.cuda_available ? 'cuda' : 'cpu');
+      this.state.computeType = deviceInfo.recommended_compute_type || (this.state.device === 'cuda' ? 'float16' : 'int8');
+      if (deviceInfo.recommended_model && !saved.model) {
+        this.state.requestedModel = deviceInfo.recommended_model;
+      }
     }
   }
 
