@@ -29,16 +29,21 @@ async function main() {
     process.exit(1);
   }
 
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
+  const version = pkg.version || '1.3.0';
+
   const owner = 'nettman001-hub';
   const repo = 'voice-pin-web';
-  const tag = 'comment-helper-v1.2.0';
-  const releaseName = 'VoiceCAP 댓글 도우미 v1.2.0';
+  const tag = `comment-helper-v${version}`;
+  const releaseName = `VoiceCAP 댓글 도우미 v${version}`;
   const releaseBody = [
-    '### VoiceCAP 댓글 도우미 v1.2.0',
+    `### VoiceCAP 댓글 도우미 v${version}`,
     '',
-    '- **무료 오프라인 로컬 STT (faster-whisper) 연동**: 클라우드 API 사용료 없이 사용자 PC에서 실시간 음성인식 처리',
-    '- **도우미 창 UI 보강**: 로컬 STT 준비 상태(`base`, `CPU int8` 가속) 실시간 표시',
-    '- **TikTok 라이브 댓글 및 라벨 프린터(50x30mm) 자동 연동**'
+    '- **하드웨어(GPU/CPU) 자동 감지 및 최적화**: NVIDIA RTX(Tensor Core FP16 가속), GTX(CUDA INT8 가속), AMD 라데온(CPU 멀티스레드 가속), 온보드 내장 그래픽 자동 판별 및 최적 모델 추천',
+    '- **구형 GPU(GTX 1060 등) CUDA INT8 연산 가속**: 파스칼 세대 GPU의 연산 특성을 반영하여 GPU 가속 유지',
+    '- **새 컴퓨터 원클릭 오프라인 STT 설치 스크립트 포함**: `setup-offline-stt.bat` 추가로 Python venv, faster-whisper, CUDA 라이브러리 자동 구성',
+    '- **파이썬 venv 탐색 경로 확장**: 새 컴퓨터 환경에서 독립 가상환경 자동 연동',
+    '- **도우미 및 웹앱 UI 연동**: 감지된 그래픽카드 배지 및 실시간 상태 표시'
   ].join('\n');
 
   const headers = {
@@ -77,20 +82,22 @@ async function main() {
   }
 
   const releaseDir = path.resolve(__dirname, '..', 'release');
+  const batPath = path.resolve(__dirname, 'setup-offline-stt.bat');
   const filesToUpload = [
-    'VoiceCAP-Comment-Helper-Setup.exe',
-    'latest.yml',
-    'VoiceCAP-Comment-Helper-Setup.exe.blockmap'
-  ].filter(f => fs.existsSync(path.join(releaseDir, f)));
+    { name: 'VoiceCAP-Comment-Helper-Setup.exe', path: path.join(releaseDir, 'VoiceCAP-Comment-Helper-Setup.exe'), type: 'application/octet-stream' },
+    { name: 'latest.yml', path: path.join(releaseDir, 'latest.yml'), type: 'text/yaml' },
+    { name: 'VoiceCAP-Comment-Helper-Setup.exe.blockmap', path: path.join(releaseDir, 'VoiceCAP-Comment-Helper-Setup.exe.blockmap'), type: 'application/octet-stream' },
+    { name: 'setup-offline-stt.bat', path: batPath, type: 'application/x-bat' }
+  ].filter(f => fs.existsSync(f.path));
 
-  console.log(`[2/4] 업로드 대상 파일: ${filesToUpload.join(', ')}`);
+  console.log(`[2/4] 업로드 대상 파일: ${filesToUpload.map(f => f.name).join(', ')}`);
 
   // 기존 릴리스에 이미 올라간 동일 파일이 있다면 먼저 삭제
   const existingAssets = release.assets || [];
-  for (const filename of filesToUpload) {
-    const matched = existingAssets.find(a => a.name === filename);
+  for (const fileObj of filesToUpload) {
+    const matched = existingAssets.find(a => a.name === fileObj.name);
     if (matched) {
-      console.log(`기존 에셋 삭제: ${filename} (ID: ${matched.id})`);
+      console.log(`기존 에셋 삭제: ${fileObj.name} (ID: ${matched.id})`);
       await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/assets/${matched.id}`, {
         method: 'DELETE',
         headers
@@ -100,8 +107,9 @@ async function main() {
 
   // 파일 업로드 진행
   console.log('[3/4] 파일 업로드 시작...');
-  for (const filename of filesToUpload) {
-    const filePath = path.join(releaseDir, filename);
+  for (const fileObj of filesToUpload) {
+    const filePath = fileObj.path;
+    const filename = fileObj.name;
     const stat = fs.statSync(filePath);
     const sizeMb = (stat.size / (1024 * 1024)).toFixed(2);
     console.log(`업로드 중: ${filename} (${sizeMb} MB)...`);
@@ -113,7 +121,7 @@ async function main() {
       method: 'POST',
       headers: {
         ...headers,
-        'Content-Type': filename.endsWith('.exe') ? 'application/octet-stream' : 'text/yaml',
+        'Content-Type': fileObj.type,
         'Content-Length': String(stat.size)
       },
       body: fileStream
