@@ -295,20 +295,47 @@ def detect_devices():
         recommended_model = "small" if cpu_threads >= 8 else "base"
         description = f"CPU 연산 모드 ({cpu_name} · {cpu_threads}스레드 · {recommended_model} 권장)"
 
-    devices = [
-        {
+    devices = []
+    if vendor == "NVIDIA" and cuda_available:
+        devices.append({
             "id": "cuda",
-            "name": f"{device_name} (초고속 가속 권장)" if cuda_available else "NVIDIA GPU (미감지/미지원)",
-            "available": cuda_available,
-            "compute_type": "float16"
-        },
-        {
+            "name": f"🚀 {device_name} (CUDA 가속)",
+            "available": True,
+            "compute_type": recommended_compute_type
+        })
+        devices.append({
             "id": "cpu",
-            "name": f"CPU 연산 ({cpu_threads}스레드 최적화)",
+            "name": f"💻 CPU 기본 연산 ({cpu_threads}스레드)",
             "available": True,
             "compute_type": "int8"
-        }
-    ]
+        })
+    elif vendor == "AMD":
+        devices.append({
+            "id": "cpu",
+            "name": f"🖥️ {device_name} (CPU {cpu_threads}스레드 고속 연산)",
+            "available": True,
+            "compute_type": "int8"
+        })
+        devices.append({
+            "id": "cuda",
+            "name": "NVIDIA GPU (미장착 · AMD 환경)",
+            "available": False,
+            "compute_type": "float16"
+        })
+    elif vendor == "INTEL":
+        devices.append({
+            "id": "cpu",
+            "name": f"💻 {device_name} (CPU 저전력 연산)",
+            "available": True,
+            "compute_type": "int8"
+        })
+    else:
+        devices.append({
+            "id": "cpu",
+            "name": f"💻 CPU 연산 ({cpu_threads}스레드)",
+            "available": True,
+            "compute_type": "int8"
+        })
 
     hardware_profile = {
         "vendor": vendor,

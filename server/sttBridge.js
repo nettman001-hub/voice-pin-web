@@ -108,6 +108,80 @@ function resolveWorkerScript() {
   return defaultPath;
 }
 
+function detectInitialHardware() {
+  const cpuCount = (os.cpus() || []).length || 4;
+  let gpuName = '';
+  let vendor = 'UNKNOWN';
+
+  if (process.platform === 'win32') {
+    try {
+      const { execSync } = require('child_process');
+      const out = execSync('powershell -NoProfile -Command "(Get-CimInstance Win32_VideoController).Name"', {
+        timeout: 2500,
+        encoding: 'utf8',
+        windowsHide: true
+      });
+      const lines = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      if (lines.length > 0) {
+        const nvidia = lines.find((l) => /nvidia|geforce|quadro|rtx|gtx/i.test(l));
+        gpuName = nvidia || lines[0];
+      }
+    } catch (_) {}
+  }
+
+  const upper = gpuName.toUpperCase();
+  if (/NVIDIA|GEFORCE|RTX|GTX|QUADRO/.test(upper)) {
+    vendor = 'NVIDIA';
+  } else if (/AMD|RADEON|RX\s*\d/.test(upper)) {
+    vendor = 'AMD';
+  } else if (/INTEL|UHD|IRIS|ARC/.test(upper)) {
+    vendor = 'INTEL';
+  }
+
+  let availableDevices = [];
+  let defaultDevice = 'cpu';
+  let description = '';
+
+  if (vendor === 'NVIDIA') {
+    availableDevices = [
+      { id: 'cuda', name: `🚀 ${gpuName} (CUDA 가속 권장)`, available: true, compute_type: 'float16' },
+      { id: 'cpu', name: `💻 CPU 기본 연산 (${cpuCount}스레드)`, available: true, compute_type: 'int8' }
+    ];
+    defaultDevice = 'cuda';
+    description = `NVIDIA GPU (${gpuName}) 감지됨: 실시간 고속 음성인식`;
+  } else if (vendor === 'AMD') {
+    availableDevices = [
+      { id: 'cpu', name: `🖥️ ${gpuName} (CPU ${cpuCount}스레드 고속 연산)`, available: true, compute_type: 'int8' },
+      { id: 'cuda', name: 'NVIDIA GPU (미장착 · AMD 환경)', available: false, compute_type: 'float16' }
+    ];
+    defaultDevice = 'cpu';
+    description = `AMD 라데온 그래픽(${gpuName}) 감지됨: CPU ${cpuCount}스레드 고속 연산 최적화`;
+  } else if (vendor === 'INTEL') {
+    availableDevices = [
+      { id: 'cpu', name: `💻 ${gpuName || '인텔 그래픽'} (CPU ${cpuCount}스레드 연산)`, available: true, compute_type: 'int8' },
+      { id: 'cuda', name: 'NVIDIA GPU (미장착)', available: false, compute_type: 'float16' }
+    ];
+    defaultDevice = 'cpu';
+    description = `인텔 그래픽(${gpuName}) 감지됨: CPU ${cpuCount}스레드 연산 모드`;
+  } else {
+    availableDevices = [
+      { id: 'cpu', name: `💻 CPU 기본 연산 (${cpuCount}스레드)`, available: true, compute_type: 'int8' },
+      { id: 'cuda', name: 'NVIDIA GPU (미감지)', available: false, compute_type: 'float16' }
+    ];
+    defaultDevice = 'cpu';
+    description = `CPU ${cpuCount}스레드 기본 연산 모드`;
+  }
+
+  return {
+    gpuName,
+    vendor,
+    cpuCount,
+    defaultDevice,
+    description,
+    availableDevices
+  };
+}
+
 class SttBridge {
   constructor() {
     this.workerProcess = null;
@@ -119,26 +193,30 @@ class SttBridge {
     this.ownerSocketId = null;
     this.droppedChunksCount = 0;
 
+    const initialHw = detectInitialHardware();
     const saved = readSttSettings();
+    const chosenDevice = saved.device || initialHw.defaultDevice;
 
     this.state = {
       available: false,
       state: 'DISCONNECTED', // DISCONNECTED | LOADING | READY | LISTENING | ERROR
       requestedModel: saved.model || 'base',
       model: saved.model || 'base',
-      device: saved.device || 'cuda', // 기본적으로 GPU(CUDA) 우선 시도
-      computeType: saved.computeType || (saved.device === 'cpu' ? 'int8' : 'float16'),
+      device: chosenDevice,
+      computeType: saved.computeType || (chosenDevice === 'cuda' ? 'float16' : 'int8'),
       message: '로컬 STT 초기화 대기 중',
       error: null,
       activeSessionId: '',
       activeGeneration: 0,
-      hasGpu: false,
-      gpuName: '',
-      hardwareProfile: null,
-      availableDevices: [
-        { id: 'cuda', name: 'NVIDIA CUDA GPU (가속 권장)', available: false, compute_type: 'float16' },
-        { id: 'cpu', name: 'CPU (저전력/기본 연산)', available: true, compute_type: 'int8' }
-      ]
+      hasGpu: initialHw.vendor === 'NVIDIA',
+      gpuName: initialHw.gpuName,
+      hardwareProfile: {
+        vendor: initialHw.vendor,
+        gpu_name: initialHw.gpuName,
+        cpu_threads: initialHw.cpuCount,
+        description: initialHw.description
+      },
+      availableDevices: initialHw.availableDevices
     };
   }
 
@@ -259,11 +337,11 @@ class SttBridge {
   updateDeviceInfo(deviceInfo) {
     if (!deviceInfo) return;
     this.state.hasGpu = Boolean(deviceInfo.cuda_available);
-    this.state.gpuName = deviceInfo.device_name || '';
+    this.state.gpuName = deviceInfo.device_name || this.state.gpuName || '';
     if (deviceInfo.hardware_profile) {
       this.state.hardwareProfile = deviceInfo.hardware_profile;
     }
-    if (Array.isArray(deviceInfo.devices)) {
+    if (Array.isArray(deviceInfo.devices) && deviceInfo.devices.length > 0) {
       this.state.availableDevices = deviceInfo.devices;
     }
     const saved = readSttSettings();
@@ -274,6 +352,27 @@ class SttBridge {
         this.state.requestedModel = deviceInfo.recommended_model;
       }
     }
+  }
+
+  setDevice(device) {
+    const dev = device || (this.state.hasGpu ? 'cuda' : 'cpu');
+    const computeType = dev === 'cuda' ? 'float16' : 'int8';
+    this.state.device = dev;
+    this.state.computeType = computeType;
+    saveSttSettings({ device: dev, computeType, model: this.state.model });
+    this.sendToWorker({
+      cmd: 'load_model',
+      model: this.state.model || 'base',
+      device: dev,
+      compute_type: computeType
+    });
+    this.broadcastStatus();
+    return this.getStatus();
+  }
+
+  detectDevices() {
+    this.sendToWorker({ cmd: 'detect_devices' });
+    return this.getStatus();
   }
 
   handleWorkerMessage(line) {

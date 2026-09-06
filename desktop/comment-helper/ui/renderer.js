@@ -80,12 +80,12 @@ function render(status) {
   if (status.stt) {
     const stt = status.stt;
     if (gpuBadge) {
-      if (stt.hasGpu) {
+      if (stt.hardwareProfile && stt.hardwareProfile.vendor === 'AMD') {
         gpuBadge.className = 'badge-gpu';
-        gpuBadge.textContent = `⚡ ${stt.gpuName || 'NVIDIA GPU'} 감지됨`;
-      } else if (stt.hardwareProfile && stt.hardwareProfile.vendor === 'AMD') {
+        gpuBadge.textContent = `🖥️ ${stt.hardwareProfile.gpu_name || 'AMD 라데온'} 감지`;
+      } else if (stt.hasGpu || (stt.hardwareProfile && stt.hardwareProfile.vendor === 'NVIDIA')) {
         gpuBadge.className = 'badge-gpu';
-        gpuBadge.textContent = `🖥️ ${stt.hardwareProfile.gpu_name || 'AMD 라데온'} (CPU 가속)`;
+        gpuBadge.textContent = `⚡ ${stt.gpuName || stt.hardwareProfile?.gpu_name || 'NVIDIA GPU'} 감지됨`;
       } else if (stt.hardwareProfile && stt.hardwareProfile.vendor === 'INTEL') {
         gpuBadge.className = 'badge-gpu';
         gpuBadge.textContent = `💻 ${stt.hardwareProfile.gpu_name || '인텔 내장 그래픽'}`;
@@ -94,19 +94,17 @@ function render(status) {
         gpuBadge.textContent = '기본 CPU 모드';
       }
     }
-    if (sttDeviceSelect && !sttDeviceSelect.matches(':focus')) {
+    if (sttDeviceSelect && !sttDeviceSelect.matches?.(':focus')) {
       if (Array.isArray(stt.availableDevices) && stt.availableDevices.length > 0) {
         sttDeviceSelect.replaceChildren();
         stt.availableDevices.forEach((dev) => {
           const opt = document.createElement('option');
           opt.value = dev.id;
-          opt.textContent = dev.id === 'cuda'
-            ? `🚀 GPU 가속 (${dev.name})`
-            : `💻 CPU (${dev.name})`;
+          opt.textContent = dev.name;
           opt.disabled = !dev.available;
           sttDeviceSelect.append(opt);
         });
-        sttDeviceSelect.value = stt.device || 'cuda';
+        sttDeviceSelect.value = stt.device || 'cpu';
       } else if (stt.device) {
         sttDeviceSelect.value = stt.device;
       }

@@ -205,6 +205,16 @@ app.get('/api/stt/status', (_req, res) => {
   res.json({ ok: true, ...sttBridge.getStatus() });
 });
 
+app.post('/api/stt/device', (req, res) => {
+  const result = sttBridge.setDevice(req.body && req.body.device);
+  res.json({ ok: true, ...result });
+});
+
+app.post('/api/stt/detect', (_req, res) => {
+  const result = sttBridge.detectDevices();
+  res.json({ ok: true, ...result });
+});
+
 // engine.io가 /socket.io/ OPTIONS preflight를 직접 처리하므로(express 미들웨어보다 먼저),
 // 리스너 배열 맨 앞에 붙여 PNA 헤더를 모든 응답(특히 socket.io preflight)에 보장한다.
 httpServer.prependListener('request', (req, res) => {

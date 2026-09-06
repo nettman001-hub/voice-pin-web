@@ -14,6 +14,7 @@ function fakeElement() {
     options: [],
     textContent: '',
     value: '',
+    matches: () => false,
     addEventListener(type, listener) { listeners.set(type, listener); },
     append(option) { this.options.push(option); },
     dispatch(type) { return listeners.get(type)?.(); },
@@ -119,3 +120,74 @@ test('자동 출력 토글을 즉시 저장하고 상태 갱신에도 선택값�
   assert.equal(elements['#print-message'].textContent, '자동 출력을 켜려면 Windows 프린터를 선택해 주세요.');
   assert.equal(elements['#print-message'].className, 'print-message print-warning');
 });
+
+test('AMD GPU 환경에서 그래픽카드 이름과 CPU 연산 장치 목록이 올바르게 표시된다', async () => {
+  const ids = [
+    'status-dot', 'status-label', 'status-pill', 'status-message', 'live-stats',
+    'tiktok-username', 'comment-count', 'auto-start', 'restart', 'version',
+    'print-enabled', 'printer-select', 'paper-size', 'print-message',
+    'save-printer', 'test-print', 'open-web', 'open-logs', 'hide', 'refresh-printers',
+    'stt-status', 'stt-device-select', 'refresh-devices', 'gpu-badge', 'stt-device-message'
+  ];
+  const elements = Object.fromEntries(ids.map((id) => [`#${id}`, fakeElement()]));
+  let statusListener = () => {};
+
+  const amdStatus = {
+    helper: 'running',
+    message: '정상 작동 중입니다.',
+    tiktokState: 'idle',
+    autoStart: false,
+    version: '1.3.1',
+    print: {},
+    stt: {
+      available: true,
+      state: 'READY',
+      device: 'cpu',
+      computeType: 'int8',
+      model: 'small',
+      hasGpu: false,
+      gpuName: 'AMD Radeon RX 6800 XT',
+      hardwareProfile: {
+        vendor: 'AMD',
+        gpu_name: 'AMD Radeon RX 6800 XT',
+        cpu_threads: 16,
+        description: 'AMD 라데온 감지됨 (AMD Radeon RX 6800 XT · CPU 16스레드 연산)'
+      },
+      availableDevices: [
+        { id: 'cpu', name: '🖥️ AMD Radeon RX 6800 XT (CPU 16스레드 고속 연산)', available: true, compute_type: 'int8' },
+        { id: 'cuda', name: 'NVIDIA GPU (미장착 · AMD 환경)', available: false, compute_type: 'float16' }
+      ]
+    }
+  };
+
+  const voicecap = {
+    getPrinters: async () => [],
+    getStatus: async () => amdStatus,
+    hideWindow() {},
+    onStatus(listener) { statusListener = listener; },
+    openLogs() {},
+    openWebApp() {},
+    restart: async () => amdStatus,
+    savePrintSettings: async () => amdStatus,
+    setAutoStart: async (enabled) => enabled,
+    testPrint: async () => ({ ok: true })
+  };
+
+  const document = {
+    createElement: () => fakeElement(),
+    querySelector: (selector) => elements[selector]
+  };
+  const source = fs.readFileSync(path.join(__dirname, 'renderer.js'), 'utf8');
+  vm.runInNewContext(source, { console, document, Option: fakeElement, setTimeout, window: { voicecap } });
+  await flush();
+  await flush();
+
+  assert.equal(elements['#gpu-badge'].textContent, '🖥️ AMD Radeon RX 6800 XT 감지');
+  assert.equal(elements['#stt-device-select'].options.length, 2);
+  assert.equal(elements['#stt-device-select'].options[0].value, 'cpu');
+  assert.equal(elements['#stt-device-select'].options[0].textContent, '🖥️ AMD Radeon RX 6800 XT (CPU 16스레드 고속 연산)');
+  assert.equal(elements['#stt-device-select'].options[1].value, 'cuda');
+  assert.equal(elements['#stt-device-select'].options[1].disabled, true);
+  assert.equal(elements['#stt-device-select'].value, 'cpu');
+});
+
