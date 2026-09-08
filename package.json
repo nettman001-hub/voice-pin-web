@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test:contracts": "node --test contracts/product-sales/v1/validate-contracts.test.mjs"
+    "test:contracts": "node --test contracts/product-sales/v1/validate-contracts.test.mjs",
+    "test:api": "node --test test/sales-api-auth.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",

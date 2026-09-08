@@ -28,6 +28,7 @@ import { SettlementPage } from './pages/seller/SettlementPage';
 import { CaptureViewerModal } from './pages/seller/CaptureViewerModal';
 import { InvoiceManagementPage } from './pages/seller/InvoiceManagementPage';
 import { ShipmentManagementPage } from './pages/seller/ShipmentManagementPage';
+import { DeviceManagementPage } from './pages/seller/DeviceManagementPage';
 import { CommerceProvider } from './context/CommerceContext';
 
 import { PlanSelectionPage } from './pages/subscription/PlanSelectionPage';
@@ -144,6 +145,8 @@ export const App: React.FC = () => {
                     <Route path="/invoices" element={<InvoiceManagementPage />} />
                     <Route path="/shipments" element={<ShipmentManagementPage />} />
                     <Route path="/settlement" element={<SettlementPage />} />
+                    <Route path="/seller/devices" element={<DeviceManagementPage />} />
+                    <Route path="/devices" element={<DeviceManagementPage />} />
 
                     {/* 3. 구독 섹션 (PG-014 ~ PG-017) */}
                     <Route path="/subscription" element={<Navigate to="/subscription/plans" replace />} />

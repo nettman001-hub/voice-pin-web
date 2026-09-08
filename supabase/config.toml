@@ -8,3 +8,7 @@ verify_jwt = false
 
 [functions.sms-bridge]
 verify_jwt = false
+
+[functions.sales-api]
+verify_jwt = false
+
