@@ -27,7 +27,7 @@
 
 | 체크포인트 | 작업 | 상태 | 완료 커밋 | 검증 증거와 남은 항목 |
 | --- | --- | --- | --- | --- |
-| G0 | 환경 기준, ANDROID-01, CORE-01 계약 Schema·fixture | PASS |  | ANDROID-01 빌드/테스트 기준 확보, CORE-01 공통 스키마 및 10개 fixture, validate-contracts.test.mjs 8개 테스트 통과, 검토 C1 완료 |
+| G0 | 환경 기준, ANDROID-01, CORE-01 계약 Schema·fixture | PASS | `856a1ff` | ANDROID-01 빌드/테스트 기준 확보, CORE-01 공통 스키마 및 10개 fixture, validate-contracts.test.mjs 8개 테스트 통과, 검토 C1 완료 |
 | G1 | CORE-02~CORE-05 DB·인증·상품·댓글 API | IN_PROGRESS |  |  |
 | G2 | ANDROID-02~ANDROID-06, CORE-06~CORE-08 | NOT_STARTED |  |  |
 | G3 | CORE-09~CORE-10, ANDROID-07~ANDROID-09 | NOT_STARTED |  |  |
@@ -38,8 +38,8 @@
 | 티켓 | 상태 | 커밋 | 실행한 테스트 | 미검증·차단 사항 |
 | --- | --- | --- | --- | --- |
 | ANDROID-01 | PASS | `44ddf7f` | Gradle 9.3.1, JDK 17, SDK 35/36 환경 구성. `:app:assembleDebug`, `:app:testDebugUnitTest`, `:app:lintDebug` 완료 | 실기기/에뮬레이터 미확보로 connectedDebugAndroidTest 및 실기기 SMS 회귀는 미검증으로 기록 |
-| CORE-01 | PASS |  | `contracts/product-sales/v1/`: JSON Schema, 10개 핵심 fixture, `npm run test:contracts` (8개 테스트 전원 통과), C1 검토 완료 | 없음 |
-| CORE-02 | NOT_STARTED |  |  |  |
+| CORE-01 | PASS | `856a1ff` | `contracts/product-sales/v1/`: JSON Schema, 10개 핵심 fixture, `npm run test:contracts` (8개 테스트 전원 통과), C1 검토 완료 | 없음 |
+| CORE-02 | PASS |  | `202609080001_product_sales_core.sql`: 11개 신규 테이블, 제약조건, sales 하위호환 컬럼, RLS 및 디바이스 권한 확장 검증 | 운영 DB 배포는 승인 전까지 미실행 |
 | CORE-03 | NOT_STARTED |  |  |  |
 | CORE-04 | NOT_STARTED |  |  |  |
 | CORE-05 | NOT_STARTED |  |  |  |
