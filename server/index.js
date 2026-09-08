@@ -19,11 +19,14 @@ const { Server } = require('socket.io');
 const { BridgeStore } = require('./bridgeStore');
 const { createBridgeRouter } = require('./bridgeApi');
 const { sttBridge, setupSttBridge } = require('./sttBridge');
+const { CloudCommentPublisher } = require('./cloudCommentPublisher');
 const {
   TikTokLiveConnection,
   WebcastEvent,
   SignConfig
 } = require('tiktok-live-connector');
+
+const commentPublisher = new CloudCommentPublisher();
 
 // ---------------------------------------------------------------------------
 // 설정
@@ -291,6 +294,13 @@ io.on('connection', (socket) => {
     stopCollecting();
   });
 
+  socket.on('cloud:config', (payload) => {
+    if (payload && typeof payload === 'object') {
+      commentPublisher.configure(payload);
+      log(`클라우드 댓글 수집기 설정 업데이트 (세션: ${payload.sessionId || '없음'})`);
+    }
+  });
+
   socket.on('print:sale', (payload, acknowledge) => {
     const reply = typeof acknowledge === 'function' ? acknowledge : () => {};
     sendPrintToHelper(payload || {}, reply);
@@ -340,6 +350,7 @@ function stopCollecting(silentWhenNoBrowser = false) {
   teardownConnection();
   desiredUsername = '';
   viewerCount = 0;
+  void commentPublisher.flush();
   if (!silentWhenNoBrowser) {
     setState('idle', '수집 중지됨');
   } else {
@@ -397,14 +408,17 @@ async function connectTikTok(username) {
     stats.totalComments += 1;
     stats.lastCommentAt = new Date().toISOString();
 
-    io.emit('comment:new', {
+    const commentPayload = {
       id: String((data.common && data.common.msgId) || `${Date.now()}-${stats.totalComments}`),
       uniqueId: String(user.displayId || user.uniqueId || ''),
       nickname: String(user.nickname || user.displayId || user.uniqueId || '알 수 없음'),
       userId: user.id != null ? String(user.id) : undefined,
       content: comment,
       receivedAt: new Date().toISOString()
-    });
+    };
+
+    io.emit('comment:new', commentPayload);
+    commentPublisher.enqueue(commentPayload);
   });
 
   nextConnection.on(WebcastEvent.ROOM_USER, (data) => {

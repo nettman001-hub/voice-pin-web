@@ -28,7 +28,7 @@
 | 체크포인트 | 작업 | 상태 | 완료 커밋 | 검증 증거와 남은 항목 |
 | --- | --- | --- | --- | --- |
 | G0 | 환경 기준, ANDROID-01, CORE-01 계약 Schema·fixture | PASS | `856a1ff` | ANDROID-01 빌드/테스트 기준 확보, CORE-01 공통 스키마 및 10개 fixture, validate-contracts.test.mjs 8개 테스트 통과, 검토 C1 완료 |
-| G1 | CORE-02~CORE-05 DB·인증·상품·댓글 API | IN_PROGRESS |  |  |
+| G1 | CORE-02~CORE-05 DB·인증·상품·댓글 API | PASS | `7f29b9b` | DB 마이그레이션(11개 테이블·제약조건), sales-api(인증·권한·조작·기기관리), 상품등록/초안만료/0007보존, 클라우드댓글 수집 worker 및 feed API 구현 완료, 웹·서버·계약 테스트 37개 전원 통과 |
 | G2 | ANDROID-02~ANDROID-06, CORE-06~CORE-08 | NOT_STARTED |  |  |
 | G3 | CORE-09~CORE-10, ANDROID-07~ANDROID-09 | NOT_STARTED |  |  |
 | G4 | ANDROID-10, CORE-11~CORE-12, T01~T22 | NOT_STARTED |  |  |
@@ -41,8 +41,8 @@
 | CORE-01 | PASS | `856a1ff` | `contracts/product-sales/v1/`: JSON Schema, 10개 핵심 fixture, `npm run test:contracts` (8개 테스트 전원 통과), C1 검토 완료 | 없음 |
 | CORE-02 | PASS | `d93ad2f` | `202609080001_product_sales_core.sql`: 11개 신규 테이블, 제약조건, sales 하위호환 컬럼, RLS 및 디바이스 권한 확장 검증 | 운영 DB 배포는 승인 전까지 미실행 |
 | CORE-03 | PASS | `827b0ec` | `npm run build` (tsc & vite 성공), `npm run test:api` (9/9개 테스트 전원 통과: 인증, 기기 권한 격리, 조작 hash 검증, 봉투 규격), 웹 기기관리 화면 라우트 추가 | 운영 Edge 배포 미실행 (규정 준수) |
-| CORE-04 | PASS | `c92249c` | `node --test test/products-sessions.test.mjs` (8/8 테스트 전원 통과: 음성명령 중복 거절, 0007 선행 0 보존, 중복 번호 409 거절, 번호이미지 대체, 초안 만료 및 원자적 회차 활성화, 미등록 판매·출력 부재 검증) | 없음 |
-| CORE-05 | NOT_STARTED |  |  |  |
+| CORE-04 | PASS | `1e6e87d` | `node --test test/products-sessions.test.mjs` (8/8 테스트 전원 통과: 음성명령 중복 거절, 0007 선행 0 보존, 중복 번호 409 거절, 번호이미지 대체, 초안 만료 및 원자적 회차 활성화, 미등록 판매·출력 부재 검증) | 없음 |
+| CORE-05 | PASS | `7f29b9b` | `server/` 내 `npm test` (8/8 통과: CloudCommentPublisher 정규화, 버퍼링, 재시도 포함), `test/feed-comments.test.mjs` (4/4 통과: feed 페이징, 동일 구매자 댓글 2개 1인 합산·기본수량 1, 수동 구매자 확정, 통계 갱신), `stage-server.cjs` worker 스테이징 반영, 전체 `npm test` (29/29 통과) | 없음 |
 | ANDROID-02 | NOT_STARTED |  |  |  |
 | ANDROID-03 | NOT_STARTED |  |  |  |
 | ANDROID-04 | NOT_STARTED |  |  |  |

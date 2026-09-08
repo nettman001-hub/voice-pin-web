@@ -1,4 +1,4 @@
-﻿import { admin, successResponse, errorResponse } from '../../_shared/productSales.ts'
+import { admin, successResponse, errorResponse } from '../../_shared/productSales.ts'
 import { calculateSummary, calculateBuyerStats } from './common.ts'
 
 export async function handleIngestComments(workspaceId: string, actorId: string, body: any) {
@@ -142,13 +142,19 @@ export async function handleSearchBuyers(workspaceId: string, body: any) {
     .limit(limit)
 
   return successResponse({
-    buyers: buyers || [],
+    buyers: (buyers || []).map((b) => ({
+      id: b.id,
+      platform: b.platform,
+      platformUserId: b.platform_user_id || undefined,
+      displayNickname: b.display_nickname,
+      identityStatus: b.identity_status,
+    })),
     nextCursor: null,
   })
 }
 
 export async function handleConfirmBuyer(workspaceId: string, body: any) {
-  const { displayNickname, selectedBuyerId } = body
+  const { displayNickname, selectedBuyerId, confirmationReason } = body
   if (selectedBuyerId) {
     const { data: existing } = await admin
       .from('buyers')
@@ -156,7 +162,17 @@ export async function handleConfirmBuyer(workspaceId: string, body: any) {
       .eq('id', selectedBuyerId)
       .eq('workspace_id', workspaceId)
       .single()
-    if (existing) return successResponse({ buyer: existing })
+    if (existing) {
+      return successResponse({
+        buyer: {
+          id: existing.id,
+          platform: existing.platform,
+          platformUserId: existing.platform_user_id || undefined,
+          displayNickname: existing.display_nickname,
+          identityStatus: existing.identity_status,
+        },
+      })
+    }
   }
 
   const { data: newBuyer } = await admin
@@ -170,5 +186,12 @@ export async function handleConfirmBuyer(workspaceId: string, body: any) {
     .select('*')
     .single()
 
-  return successResponse({ buyer: newBuyer })
+  return successResponse({
+    buyer: {
+      id: newBuyer.id,
+      platform: newBuyer.platform,
+      displayNickname: newBuyer.display_nickname,
+      identityStatus: newBuyer.identity_status,
+    },
+  })
 }
