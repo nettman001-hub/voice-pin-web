@@ -1,0 +1,109 @@
+{
+  "claimPrintJobs": {
+    "request": {
+      "action": "claim-print-jobs",
+      "limit": 10
+    },
+    "response": {
+      "ok": true,
+      "apiVersion": 1,
+      "serverTime": "2026-09-08T09:21:00.000Z",
+      "data": {
+        "jobs": [
+          {
+            "id": "dddddddd-1111-4ddd-8ddd-111111111111",
+            "saleId": "sale-101-cheolsu",
+            "saleRevision": 1,
+            "kind": "SALE",
+            "status": "CLAIMED",
+            "immutablePayload": {
+              "sessionCode": "2026-09-08 라이브 1회차",
+              "productCode": "P-20260907-000123",
+              "productName": "123번 니트",
+              "buyerNickname": "철수",
+              "quantity": 2,
+              "unitPrice": 20000,
+              "amount": 40000,
+              "createdAt": "2026-09-08T09:00:03.000Z",
+              "kind": "SALE"
+            },
+            "attempts": 1
+          }
+        ],
+        "leaseToken": "lease_tok_1111222233334444",
+        "leaseExpiresAt": "2026-09-08T09:21:30.000Z"
+      }
+    }
+  },
+  "renewPrintLease": {
+    "request": {
+      "action": "renew-print-lease",
+      "jobId": "dddddddd-1111-4ddd-8ddd-111111111111",
+      "leaseToken": "lease_tok_1111222233334444"
+    },
+    "response": {
+      "ok": true,
+      "apiVersion": 1,
+      "serverTime": "2026-09-08T09:21:10.000Z",
+      "data": {
+        "leaseExpiresAt": "2026-09-08T09:21:40.000Z"
+      }
+    }
+  },
+  "beginPrintJobSubmitting": {
+    "request": {
+      "action": "begin-print-job",
+      "jobId": "dddddddd-1111-4ddd-8ddd-111111111111",
+      "leaseToken": "lease_tok_1111222233334444",
+      "payloadHash": "hash_payload_11112222",
+      "expectedSaleRevision": 1
+    },
+    "response": {
+      "ok": true,
+      "apiVersion": 1,
+      "serverTime": "2026-09-08T09:21:15.000Z",
+      "data": {
+        "status": "SUBMITTING",
+        "serverRecordedAt": "2026-09-08T09:21:15.000Z"
+      }
+    }
+  },
+  "acknowledgePrintJobSubmitted": {
+    "request": {
+      "action": "acknowledge-print-job",
+      "jobId": "dddddddd-1111-4ddd-8ddd-111111111111",
+      "leaseToken": "lease_tok_1111222233334444",
+      "result": "SUCCESS",
+      "spoolJobId": 1042
+    },
+    "response": {
+      "ok": true,
+      "apiVersion": 1,
+      "serverTime": "2026-09-08T09:21:16.000Z",
+      "data": {
+        "status": "SUBMITTED",
+        "job": {
+          "id": "dddddddd-1111-4ddd-8ddd-111111111111",
+          "status": "SUBMITTED",
+          "spoolJobId": 1042
+        }
+      }
+    }
+  },
+  "unknownPrintJobStatus": {
+    "ok": true,
+    "apiVersion": 1,
+    "serverTime": "2026-09-08T09:22:00.000Z",
+    "data": {
+      "jobs": [
+        {
+          "id": "dddddddd-1111-4ddd-8ddd-111111111111",
+          "saleId": "sale-101-cheolsu",
+          "status": "UNKNOWN",
+          "message": "인쇄 시스템 접수 상태가 불명확하여 수동 확인이 필요합니다.",
+          "requiresManualReview": true
+        }
+      ]
+    }
+  }
+}

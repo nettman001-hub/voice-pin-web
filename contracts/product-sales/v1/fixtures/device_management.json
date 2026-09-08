@@ -1,0 +1,88 @@
+{
+  "listDevices": {
+    "ok": true,
+    "apiVersion": 1,
+    "serverTime": "2026-09-08T09:00:00.000Z",
+    "data": {
+      "devices": [
+        {
+          "id": "99999999-9999-4999-8999-999999999999",
+          "displayName": "갤럭시 S24 (판매관리 단말)",
+          "deviceType": "ANDROID_PHONE",
+          "capabilities": [
+            "SALES_READ",
+            "SALES_WRITE",
+            "PRODUCT_WRITE"
+          ],
+          "isOutputDevice": false,
+          "revision": 3,
+          "lastSeenAt": "2026-09-08T08:59:00.000Z"
+        },
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "displayName": "메인 PC 프린터 (POS-80)",
+          "deviceType": "WINDOWS_HELPER",
+          "capabilities": [
+            "PRINT",
+            "COMMENT_INGEST"
+          ],
+          "isOutputDevice": true,
+          "revision": 5,
+          "lastSeenAt": "2026-09-08T08:59:30.000Z"
+        }
+      ],
+      "nextCursor": null
+    }
+  },
+  "updateDeviceCapabilities": {
+    "request": {
+      "action": "update-device-capabilities",
+      "operationId": "eeeeeeee-4444-4eee-8eee-111111111111",
+      "deviceId": "99999999-9999-4999-8999-999999999999",
+      "expectedDeviceRevision": 3,
+      "capabilities": [
+        "SALES_READ",
+        "SALES_WRITE",
+        "PRODUCT_WRITE"
+      ]
+    },
+    "response": {
+      "ok": true,
+      "apiVersion": 1,
+      "serverTime": "2026-09-08T09:00:10.000Z",
+      "data": {
+        "device": {
+          "id": "99999999-9999-4999-8999-999999999999",
+          "displayName": "갤럭시 S24 (판매관리 단말)",
+          "capabilities": [
+            "SALES_READ",
+            "SALES_WRITE",
+            "PRODUCT_WRITE"
+          ],
+          "revision": 4
+        },
+        "auditLogId": "audit-log-uuid-9999"
+      }
+    }
+  },
+  "setOutputDevice": {
+    "request": {
+      "action": "set-output-device",
+      "operationId": "eeeeeeee-4444-4eee-8eee-222222222222",
+      "deviceId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "expectedSettingsRevision": 1
+    },
+    "response": {
+      "ok": true,
+      "apiVersion": 1,
+      "serverTime": "2026-09-08T09:00:15.000Z",
+      "data": {
+        "outputDevice": {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "displayName": "메인 PC 프린터 (POS-80)"
+        },
+        "settingsRevision": 2
+      }
+    }
+  }
+}

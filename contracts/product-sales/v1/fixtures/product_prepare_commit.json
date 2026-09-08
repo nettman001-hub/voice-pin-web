@@ -1,0 +1,92 @@
+{
+  "prepareProductCode0007": {
+    "request": {
+      "action": "prepare-product",
+      "operationId": "eeeeeeee-1111-4eee-8eee-111111111111",
+      "sessionId": "33333333-3333-4333-8333-333333333333",
+      "expectedSessionRevision": 8,
+      "requestedProductCode": "0007",
+      "name": "0007 실크 스카프",
+      "unitPrice": 35000,
+      "imageKind": "PHOTO"
+    },
+    "response": {
+      "ok": true,
+      "apiVersion": 1,
+      "serverTime": "2026-09-08T09:10:00.000Z",
+      "data": {
+        "draftId": "55555555-dddd-4ddd-8ddd-555555555555",
+        "draftRevision": 1,
+        "productId": "55555555-5555-4555-8555-000000000007",
+        "productCode": "0007",
+        "imageUpload": {
+          "uploadUrl": "https://storage.voicecap.local/upload/drafts/0007.jpg",
+          "method": "PUT",
+          "headers": {
+            "Content-Type": "image/jpeg"
+          },
+          "maxSizeBytes": 2097152
+        },
+        "expiresAt": "2026-09-08T09:25:00.000Z"
+      }
+    }
+  },
+  "updateProductDraftFallbackNumberImage": {
+    "request": {
+      "action": "update-product-draft",
+      "operationId": "eeeeeeee-1111-4eee-8eee-222222222222",
+      "draftId": "55555555-dddd-4ddd-8ddd-555555555555",
+      "expectedDraftRevision": 1,
+      "imageKind": "NUMBER_IMAGE",
+      "imageFallbackConfirmed": true
+    },
+    "response": {
+      "ok": true,
+      "apiVersion": 1,
+      "serverTime": "2026-09-08T09:11:00.000Z",
+      "data": {
+        "draft": {
+          "id": "55555555-dddd-4ddd-8ddd-555555555555",
+          "draftRevision": 2,
+          "productId": "55555555-5555-4555-8555-000000000007",
+          "productCode": "0007",
+          "name": "0007 실크 스카프",
+          "unitPrice": 35000,
+          "imageKind": "NUMBER_IMAGE",
+          "status": "READY"
+        }
+      }
+    }
+  },
+  "commitProduct": {
+    "request": {
+      "action": "commit-product",
+      "operationId": "eeeeeeee-1111-4eee-8eee-333333333333",
+      "draftId": "55555555-dddd-4ddd-8ddd-555555555555",
+      "expectedDraftRevision": 2,
+      "expectedSessionRevision": 8
+    },
+    "response": {
+      "ok": true,
+      "apiVersion": 1,
+      "serverTime": "2026-09-08T09:12:00.000Z",
+      "data": {
+        "product": {
+          "id": "55555555-5555-4555-8555-000000000007",
+          "productCode": "0007",
+          "name": "0007 실크 스카프",
+          "unitPrice": 35000,
+          "imageKind": "NUMBER_IMAGE",
+          "imageUrl": "https://storage.voicecap.local/products/number_image_0007.png",
+          "revision": 1,
+          "salesRevision": 0
+        },
+        "session": {
+          "id": "33333333-3333-4333-8333-333333333333",
+          "activeProductId": "55555555-5555-4555-8555-000000000007",
+          "revision": 9
+        }
+      }
+    }
+  }
+}

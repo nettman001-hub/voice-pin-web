@@ -1,0 +1,191 @@
+{
+  "prepareProductImage": {
+    "request": {
+      "action": "prepare-product-image",
+      "operationId": "eeeeeeee-3333-4eee-8eee-111111111111",
+      "productId": "55555555-5555-4555-8555-555555555555",
+      "expectedProductRevision": 2,
+      "fileName": "knit_updated.jpg",
+      "mimeType": "image/jpeg",
+      "size": 154320
+    },
+    "response": {
+      "ok": true,
+      "apiVersion": 1,
+      "serverTime": "2026-09-08T09:20:00.000Z",
+      "data": {
+        "imageId": "img-change-5555-1111",
+        "imageUpload": {
+          "uploadUrl": "https://storage.voicecap.local/upload/products/knit_updated.jpg",
+          "method": "PUT",
+          "headers": {
+            "Content-Type": "image/jpeg"
+          },
+          "maxSizeBytes": 2097152
+        },
+        "expiresAt": "2026-09-08T09:35:00.000Z"
+      }
+    }
+  },
+  "previewProductChange": {
+    "request": {
+      "action": "preview-product-change",
+      "productId": "55555555-5555-4555-8555-555555555555",
+      "expectedProductRevision": 2,
+      "expectedSalesRevision": 1,
+      "proposedProduct": {
+        "unitPrice": 25000
+      },
+      "proposedSales": [
+        {
+          "saleId": "sale-101-cheolsu",
+          "expectedRevision": 1,
+          "quantity": 2
+        },
+        {
+          "saleId": "sale-101-yeonghui",
+          "expectedRevision": 1,
+          "quantity": 1
+        }
+      ]
+    },
+    "response": {
+      "ok": true,
+      "apiVersion": 1,
+      "serverTime": "2026-09-08T09:20:05.000Z",
+      "data": {
+        "previewToken": "prevtok_0123456789abcdef0123456789abcdef",
+        "expiresAt": "2026-09-08T09:22:05.000Z",
+        "before": {
+          "unitPrice": 20000,
+          "salesQuantity": 3,
+          "salesAmount": 60000,
+          "sessionQuantity": 5,
+          "sessionAmount": 100000
+        },
+        "after": {
+          "unitPrice": 25000,
+          "salesQuantity": 3,
+          "salesAmount": 75000,
+          "sessionQuantity": 5,
+          "sessionAmount": 115000
+        },
+        "diffAmount": 15000,
+        "affectedBuyers": [
+          {
+            "buyerId": "66666666-6666-4666-8666-666666666666",
+            "displayNickname": "철수",
+            "quantity": 2,
+            "oldUnitPrice": 20000,
+            "newUnitPrice": 25000,
+            "oldAmount": 40000,
+            "newAmount": 50000,
+            "diffAmount": 10000,
+            "newTotalPurchaseCount": 6,
+            "newTotalPurchaseAmount": 170000
+          },
+          {
+            "buyerId": "77777777-7777-4777-8777-777777777777",
+            "displayNickname": "영희",
+            "quantity": 1,
+            "oldUnitPrice": 20000,
+            "newUnitPrice": 25000,
+            "oldAmount": 20000,
+            "newAmount": 25000,
+            "diffAmount": 5000,
+            "newTotalPurchaseCount": 1,
+            "newTotalPurchaseAmount": 25000
+          }
+        ],
+        "settlements": {
+          "affectedSettlementsCount": 0,
+          "requiresManualReview": false
+        }
+      }
+    }
+  },
+  "commitProductChange": {
+    "request": {
+      "action": "commit-product-change",
+      "operationId": "eeeeeeee-3333-4eee-8eee-222222222222",
+      "previewToken": "prevtok_0123456789abcdef0123456789abcdef"
+    },
+    "response": {
+      "ok": true,
+      "apiVersion": 1,
+      "serverTime": "2026-09-08T09:20:10.000Z",
+      "data": {
+        "product": {
+          "id": "55555555-5555-4555-8555-555555555555",
+          "productCode": "P-20260907-000123",
+          "name": "123번 니트",
+          "unitPrice": 25000,
+          "imageKind": "PHOTO",
+          "imageUrl": "https://storage.voicecap.local/products/p101.jpg",
+          "revision": 3,
+          "salesRevision": 2
+        },
+        "sales": [
+          {
+            "id": "sale-101-cheolsu",
+            "buyerId": "66666666-6666-4666-8666-666666666666",
+            "buyerNickname": "철수",
+            "quantity": 2,
+            "unitPrice": 25000,
+            "amount": 50000,
+            "revision": 2,
+            "recordState": "ACTIVE"
+          },
+          {
+            "id": "sale-101-yeonghui",
+            "buyerId": "77777777-7777-4777-8777-777777777777",
+            "buyerNickname": "영희",
+            "quantity": 1,
+            "unitPrice": 25000,
+            "amount": 25000,
+            "revision": 2,
+            "recordState": "ACTIVE"
+          }
+        ],
+        "summary": {
+          "sessionQuantity": 5,
+          "sessionAmount": 115000
+        },
+        "buyerStats": {
+          "66666666-6666-4666-8666-666666666666": {
+            "buyerId": "66666666-6666-4666-8666-666666666666",
+            "displayNickname": "철수",
+            "sessionQuantity": 4,
+            "sessionAmount": 90000,
+            "totalPurchaseCount": 6,
+            "totalPurchaseAmount": 170000
+          },
+          "77777777-7777-4777-8777-777777777777": {
+            "buyerId": "77777777-7777-4777-8777-777777777777",
+            "displayNickname": "영희",
+            "sessionQuantity": 1,
+            "sessionAmount": 25000,
+            "totalPurchaseCount": 1,
+            "totalPurchaseAmount": 25000
+          }
+        },
+        "printJobs": [
+          {
+            "id": "dddddddd-3333-4ddd-8ddd-333333333333",
+            "saleId": "sale-101-cheolsu",
+            "saleRevision": 2,
+            "kind": "CORRECTION",
+            "status": "QUEUED"
+          },
+          {
+            "id": "dddddddd-4444-4ddd-8ddd-444444444444",
+            "saleId": "sale-101-yeonghui",
+            "saleRevision": 2,
+            "kind": "CORRECTION",
+            "status": "QUEUED"
+          }
+        ]
+      }
+    }
+  }
+}

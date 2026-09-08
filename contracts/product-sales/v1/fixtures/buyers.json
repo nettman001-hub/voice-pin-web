@@ -1,0 +1,59 @@
+{
+  "searchBuyers": {
+    "ok": true,
+    "apiVersion": 1,
+    "serverTime": "2026-09-08T09:00:00.000Z",
+    "data": {
+      "buyers": [
+        {
+          "id": "66666666-6666-4666-8666-666666666666",
+          "platform": "TIKTOK",
+          "platformUserId": "tt-cheolsu-101",
+          "displayNickname": "철수",
+          "identityStatus": "VERIFIED",
+          "stats": {
+            "sessionQuantity": 2,
+            "sessionAmount": 40000,
+            "totalPurchaseCount": 5,
+            "totalPurchaseAmount": 120000
+          }
+        },
+        {
+          "id": "88888888-8888-4888-8888-888888888888",
+          "platform": "TIKTOK",
+          "platformUserId": "tt-cheolsu-999",
+          "displayNickname": "철수",
+          "identityStatus": "UNRESOLVED",
+          "stats": {
+            "sessionQuantity": 0,
+            "sessionAmount": 0,
+            "totalPurchaseCount": 0,
+            "totalPurchaseAmount": 0
+          }
+        }
+      ],
+      "nextCursor": null
+    }
+  },
+  "confirmBuyerManual": {
+    "request": {
+      "action": "confirm-buyer",
+      "operationId": "eeeeeeee-5555-4eee-8eee-111111111111",
+      "displayNickname": "철수삼촌",
+      "confirmationReason": "판매자가 라이브 방송 중 신원을 구두 확인하고 수동 생성"
+    },
+    "response": {
+      "ok": true,
+      "apiVersion": 1,
+      "serverTime": "2026-09-08T09:05:00.000Z",
+      "data": {
+        "buyer": {
+          "id": "66666666-7777-4666-8666-666666666666",
+          "platform": "MANUAL",
+          "displayNickname": "철수삼촌",
+          "identityStatus": "MANUAL_CONFIRMED"
+        }
+      }
+    }
+  }
+}

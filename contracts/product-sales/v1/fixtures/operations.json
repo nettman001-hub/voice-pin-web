@@ -1,0 +1,38 @@
+{
+  "notFound": {
+    "ok": false,
+    "apiVersion": 1,
+    "serverTime": "2026-09-08T09:00:00.000Z",
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "해당 operationId가 서버에 접수되지 않았습니다. 원본 요청 본문으로 재전송하십시오.",
+      "retryable": true,
+      "details": {
+        "operationId": "eeeeeeee-9999-4eee-8eee-999999999999"
+      }
+    }
+  },
+  "processing": {
+    "ok": true,
+    "apiVersion": 1,
+    "serverTime": "2026-09-08T09:00:01.000Z",
+    "data": {
+      "operationId": "eeeeeeee-2222-4eee-8eee-111111111111",
+      "status": "PROCESSING"
+    }
+  },
+  "succeeded": {
+    "ok": true,
+    "apiVersion": 1,
+    "serverTime": "2026-09-08T09:00:03.000Z",
+    "data": {
+      "operationId": "eeeeeeee-2222-4eee-8eee-111111111111",
+      "status": "SUCCEEDED",
+      "result": {
+        "salesCount": 2,
+        "sessionQuantity": 5,
+        "sessionAmount": 100000
+      }
+    }
+  }
+}

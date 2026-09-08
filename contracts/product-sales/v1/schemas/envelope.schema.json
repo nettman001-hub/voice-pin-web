@@ -1,0 +1,47 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://voicecap.shop/schemas/contracts/v1/envelope.json",
+  "title": "VoiceCAP API Common Envelope",
+  "type": "object",
+  "required": ["ok", "apiVersion"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "apiVersion": { "type": "integer", "const": 1 },
+    "serverTime": { "type": "string", "format": "date-time" },
+    "data": { "type": "object" },
+    "error": {
+      "type": "object",
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "AUTH_REQUIRED",
+            "DEVICE_REVOKED",
+            "CAPABILITY_DENIED",
+            "REVISION_CONFLICT",
+            "ACTIVE_PRODUCT_CHANGED",
+            "PRODUCT_CODE_EXISTS",
+            "OPERATION_PAYLOAD_MISMATCH",
+            "COMMENT_ALREADY_COMMITTED",
+            "PREVIEW_EXPIRED",
+            "DRAFT_EXPIRED",
+            "VALIDATION_ERROR",
+            "PRICE_REQUIRED",
+            "BUYER_UNRESOLVED",
+            "RATE_LIMITED",
+            "TEMPORARILY_UNAVAILABLE",
+            "NOT_FOUND"
+          ]
+        },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" },
+        "details": { "type": "object" }
+      }
+    }
+  },
+  "oneOf": [
+    { "required": ["ok", "data"], "properties": { "ok": { "const": true } } },
+    { "required": ["ok", "error"], "properties": { "ok": { "const": false } } }
+  ]
+}

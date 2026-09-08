@@ -1,0 +1,67 @@
+{
+  "ok": true,
+  "apiVersion": 1,
+  "serverTime": "2026-09-08T09:00:00.000Z",
+  "data": {
+    "workspaceId": "11111111-1111-4111-8111-111111111111",
+    "settings": {
+      "revision": 1,
+      "productRegistrationEnabled": true,
+      "captureProductImageEnabled": true,
+      "productNameInputEnabled": true,
+      "voicePreviewMs": 2500,
+      "voiceCommands": {
+        "registerProduct": [
+          "상품등록"
+        ],
+        "captureProduct": [
+          "상품캡처"
+        ],
+        "setProductName": [
+          "상품번호",
+          "상품명"
+        ],
+        "setPrice": [
+          "금액",
+          "가격"
+        ],
+        "confirmSale": [
+          "판매완료",
+          "구매확정"
+        ],
+        "setBuyer": [
+          "닉네임"
+        ]
+      }
+    },
+    "activeSession": {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "displayCode": "2026-09-08 라이브 1회차",
+      "status": "ACTIVE",
+      "activeProductId": "55555555-5555-4555-8555-555555555555",
+      "revision": 8,
+      "startedAt": "2026-09-08T08:00:00.000Z"
+    },
+    "activeProduct": {
+      "id": "55555555-5555-4555-8555-555555555555",
+      "productCode": "P-20260907-000123",
+      "name": "123번 니트",
+      "unitPrice": 20000,
+      "imageKind": "PHOTO",
+      "imageUrl": "https://storage.voicecap.local/products/p101.jpg",
+      "revision": 2,
+      "salesRevision": 0
+    },
+    "printerStatus": {
+      "outputDeviceId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "outputDeviceName": "포스 프린터 메인 (POS-80)",
+      "online": true,
+      "queuedJobsCount": 0
+    },
+    "permissions": [
+      "SALES_READ",
+      "SALES_WRITE",
+      "PRODUCT_WRITE"
+    ]
+  }
+}

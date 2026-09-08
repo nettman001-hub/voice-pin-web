@@ -1,0 +1,95 @@
+{
+  "revisionConflict": {
+    "ok": false,
+    "apiVersion": 1,
+    "serverTime": "2026-09-08T09:00:00.000Z",
+    "error": {
+      "code": "REVISION_CONFLICT",
+      "message": "다른 기기에서 상품 또는 회차가 변경되었습니다. 최신 내용을 확인해 주세요.",
+      "retryable": false,
+      "details": {
+        "currentProductRevision": 3,
+        "currentSessionRevision": 9
+      }
+    }
+  },
+  "capabilityDenied": {
+    "ok": false,
+    "apiVersion": 1,
+    "serverTime": "2026-09-08T09:00:00.000Z",
+    "error": {
+      "code": "CAPABILITY_DENIED",
+      "message": "이 기기는 판매관리 권한(SALES_WRITE)이 없습니다. 웹 관리자에게 권한을 요청하세요.",
+      "retryable": false,
+      "details": {
+        "requiredCapability": "SALES_WRITE"
+      }
+    }
+  },
+  "productCodeExists": {
+    "ok": false,
+    "apiVersion": 1,
+    "serverTime": "2026-09-08T09:00:00.000Z",
+    "error": {
+      "code": "PRODUCT_CODE_EXISTS",
+      "message": "이미 사용 중이거나 예약된 상품번호입니다. 다른 번호를 입력해 주세요.",
+      "retryable": false,
+      "details": {
+        "productCode": "0007"
+      }
+    }
+  },
+  "operationPayloadMismatch": {
+    "ok": false,
+    "apiVersion": 1,
+    "serverTime": "2026-09-08T09:00:00.000Z",
+    "error": {
+      "code": "OPERATION_PAYLOAD_MISMATCH",
+      "message": "동일한 operationId로 내용이 다른 요청이 전송되었습니다.",
+      "retryable": false,
+      "details": {
+        "operationId": "eeeeeeee-2222-4eee-8eee-111111111111"
+      }
+    }
+  },
+  "commentAlreadyCommitted": {
+    "ok": false,
+    "apiVersion": 1,
+    "serverTime": "2026-09-08T09:00:00.000Z",
+    "error": {
+      "code": "COMMENT_ALREADY_COMMITTED",
+      "message": "이미 해당 상품의 판매로 등록된 댓글입니다.",
+      "retryable": false,
+      "details": {
+        "commentId": "cccccccc-1111-4ccc-8ccc-111111111111",
+        "existingSaleId": "sale-101-cheolsu"
+      }
+    }
+  },
+  "previewExpired": {
+    "ok": false,
+    "apiVersion": 1,
+    "serverTime": "2026-09-08T09:00:00.000Z",
+    "error": {
+      "code": "PREVIEW_EXPIRED",
+      "message": "수정 미리보기 시간이 만료되었습니다. 다시 변경 내용을 확인해 주세요.",
+      "retryable": false,
+      "details": {
+        "previewToken": "prevtok_0123456789abcdef0123456789abcdef"
+      }
+    }
+  },
+  "validationErrorPriceRequired": {
+    "ok": false,
+    "apiVersion": 1,
+    "serverTime": "2026-09-08T09:00:00.000Z",
+    "error": {
+      "code": "PRICE_REQUIRED",
+      "message": "판매 단가를 입력해 주세요. 가격 없는 상품은 판매를 완료할 수 없습니다.",
+      "retryable": false,
+      "details": {
+        "field": "unitPrice"
+      }
+    }
+  }
+}

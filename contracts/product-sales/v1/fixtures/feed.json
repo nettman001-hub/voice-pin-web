@@ -1,0 +1,122 @@
+{
+  "normalFeedWithComments": {
+    "ok": true,
+    "apiVersion": 1,
+    "serverTime": "2026-09-08T09:00:01.000Z",
+    "data": {
+      "comments": [
+        {
+          "id": "cccccccc-3333-4ccc-8ccc-333333333333",
+          "sessionId": "33333333-3333-4333-8333-333333333333",
+          "collectorId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "platformMessageId": "msg-tiktok-3333",
+          "buyerId": "77777777-7777-4777-8777-777777777777",
+          "nicknameSnapshot": "영희",
+          "content": "구매할게요",
+          "capturedAt": "2026-09-08T09:00:00.900Z",
+          "ingestSequence": 3
+        },
+        {
+          "id": "cccccccc-2222-4ccc-8ccc-222222222222",
+          "sessionId": "33333333-3333-4333-8333-333333333333",
+          "collectorId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "platformMessageId": "msg-tiktok-2222",
+          "buyerId": "66666666-6666-4666-8666-666666666666",
+          "nicknameSnapshot": "철수",
+          "content": "저요 123번",
+          "capturedAt": "2026-09-08T09:00:00.500Z",
+          "ingestSequence": 2
+        },
+        {
+          "id": "cccccccc-1111-4ccc-8ccc-111111111111",
+          "sessionId": "33333333-3333-4333-8333-333333333333",
+          "collectorId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "platformMessageId": "msg-tiktok-1111",
+          "buyerId": "66666666-6666-4666-8666-666666666666",
+          "nicknameSnapshot": "철수",
+          "content": "저요",
+          "capturedAt": "2026-09-08T09:00:00.100Z",
+          "ingestSequence": 1
+        }
+      ],
+      "buyerStats": {
+        "66666666-6666-4666-8666-666666666666": {
+          "buyerId": "66666666-6666-4666-8666-666666666666",
+          "displayNickname": "철수",
+          "sessionQuantity": 2,
+          "sessionAmount": 40000,
+          "totalPurchaseCount": 5,
+          "totalPurchaseAmount": 120000
+        },
+        "77777777-7777-4777-8777-777777777777": {
+          "buyerId": "77777777-7777-4777-8777-777777777777",
+          "displayNickname": "영희",
+          "sessionQuantity": 0,
+          "sessionAmount": 0,
+          "totalPurchaseCount": 0,
+          "totalPurchaseAmount": 0
+        }
+      },
+      "summary": {
+        "sessionQuantity": 2,
+        "sessionAmount": 40000
+      },
+      "activeProduct": {
+        "id": "55555555-5555-4555-8555-555555555555",
+        "productCode": "P-20260907-000123",
+        "name": "123번 니트",
+        "unitPrice": 20000,
+        "imageKind": "PHOTO",
+        "imageUrl": "https://storage.voicecap.local/products/p101.jpg",
+        "revision": 2,
+        "salesRevision": 0
+      },
+      "sessionRevision": 8,
+      "nextCursor": "cursor-comment-feed-seq-3",
+      "hasMore": false
+    }
+  },
+  "emptyCommentsWithWatchedBuyersStatsUpdate": {
+    "ok": true,
+    "apiVersion": 1,
+    "serverTime": "2026-09-08T09:00:05.000Z",
+    "data": {
+      "comments": [],
+      "buyerStats": {
+        "66666666-6666-4666-8666-666666666666": {
+          "buyerId": "66666666-6666-4666-8666-666666666666",
+          "displayNickname": "철수",
+          "sessionQuantity": 4,
+          "sessionAmount": 80000,
+          "totalPurchaseCount": 6,
+          "totalPurchaseAmount": 160000
+        },
+        "77777777-7777-4777-8777-777777777777": {
+          "buyerId": "77777777-7777-4777-8777-777777777777",
+          "displayNickname": "영희",
+          "sessionQuantity": 1,
+          "sessionAmount": 20000,
+          "totalPurchaseCount": 1,
+          "totalPurchaseAmount": 20000
+        }
+      },
+      "summary": {
+        "sessionQuantity": 5,
+        "sessionAmount": 100000
+      },
+      "activeProduct": {
+        "id": "55555555-5555-4555-8555-555555555555",
+        "productCode": "P-20260907-000123",
+        "name": "123번 니트",
+        "unitPrice": 20000,
+        "imageKind": "PHOTO",
+        "imageUrl": "https://storage.voicecap.local/products/p101.jpg",
+        "revision": 2,
+        "salesRevision": 1
+      },
+      "sessionRevision": 8,
+      "nextCursor": "cursor-comment-feed-seq-3",
+      "hasMore": false
+    }
+  }
+}
