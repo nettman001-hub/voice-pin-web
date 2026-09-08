@@ -40,8 +40,8 @@
 | ANDROID-01 | PASS | `44ddf7f` | Gradle 9.3.1, JDK 17, SDK 35/36 환경 구성. `:app:assembleDebug`, `:app:testDebugUnitTest`, `:app:lintDebug` 완료 | 실기기/에뮬레이터 미확보로 connectedDebugAndroidTest 및 실기기 SMS 회귀는 미검증으로 기록 |
 | CORE-01 | PASS | `856a1ff` | `contracts/product-sales/v1/`: JSON Schema, 10개 핵심 fixture, `npm run test:contracts` (8개 테스트 전원 통과), C1 검토 완료 | 없음 |
 | CORE-02 | PASS | `d93ad2f` | `202609080001_product_sales_core.sql`: 11개 신규 테이블, 제약조건, sales 하위호환 컬럼, RLS 및 디바이스 권한 확장 검증 | 운영 DB 배포는 승인 전까지 미실행 |
-| CORE-03 | PASS | `63c5410` | `npm run build` (tsc & vite 성공), `npm run test:api` (9/9개 테스트 전원 통과: 인증, 기기 권한 격리, 조작 hash 검증, 봉투 규격), 웹 기기관리 화면 라우트 추가 | 운영 Edge 배포 미실행 (규정 준수) |
-| CORE-04 | NOT_STARTED |  |  |  |
+| CORE-03 | PASS | `827b0ec` | `npm run build` (tsc & vite 성공), `npm run test:api` (9/9개 테스트 전원 통과: 인증, 기기 권한 격리, 조작 hash 검증, 봉투 규격), 웹 기기관리 화면 라우트 추가 | 운영 Edge 배포 미실행 (규정 준수) |
+| CORE-04 | PASS | `c92249c` | `node --test test/products-sessions.test.mjs` (8/8 테스트 전원 통과: 음성명령 중복 거절, 0007 선행 0 보존, 중복 번호 409 거절, 번호이미지 대체, 초안 만료 및 원자적 회차 활성화, 미등록 판매·출력 부재 검증) | 없음 |
 | CORE-05 | NOT_STARTED |  |  |  |
 | ANDROID-02 | NOT_STARTED |  |  |  |
 | ANDROID-03 | NOT_STARTED |  |  |  |

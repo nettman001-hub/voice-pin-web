@@ -1,4 +1,4 @@
-﻿import { admin, successResponse, errorResponse } from '../../_shared/productSales.ts'
+import { admin, successResponse, errorResponse } from '../../_shared/productSales.ts'
 import { getWorkspaceSettings } from './common.ts'
 
 export async function handleGetBootstrap(workspaceId: string, capabilities: Set<string>) {
@@ -75,6 +75,31 @@ export async function handleUpdateSettings(workspaceId: string, body: any) {
     return errorResponse('REVISION_CONFLICT', '설정 버전 충돌이 발생했습니다.', 409, {
       currentRevision: current.revision,
     })
+  }
+
+  // Validate voiceCommands overlap
+  if (settings.voiceCommands && typeof settings.voiceCommands === 'object') {
+    const seenWords = new Map<string, string>()
+    for (const [actionName, words] of Object.entries(settings.voiceCommands)) {
+      if (Array.isArray(words)) {
+        for (const w of words) {
+          const trimmed = String(w).trim()
+          if (!trimmed) continue
+          if (seenWords.has(trimmed)) {
+            const prevAction = seenWords.get(trimmed)
+            if (prevAction !== actionName) {
+              return errorResponse(
+                'VALIDATION_ERROR',
+                `명령 단어 '${trimmed}'가 서로 다른 동작(${prevAction}, ${actionName})에 중복 설정되었습니다.`,
+                400,
+                { conflictingWord: trimmed, actions: [prevAction, actionName] }
+              )
+            }
+          }
+          seenWords.set(trimmed, actionName)
+        }
+      }
+    }
   }
 
   const newRevision = (current.revision || 1) + 1

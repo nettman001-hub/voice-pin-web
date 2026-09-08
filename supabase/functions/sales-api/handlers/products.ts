@@ -1,9 +1,27 @@
-﻿import { admin, successResponse, errorResponse, sha256 } from '../../_shared/productSales.ts'
+import { admin, successResponse, errorResponse, sha256 } from '../../_shared/productSales.ts'
 import { calculateSummary, calculateBuyerStats } from './common.ts'
 
 export async function handlePrepareProduct(workspaceId: string, actorId: string, body: any) {
-  const { sessionId, requestedProductCode, name, unitPrice, imageKind } = body
+  const { sessionId, expectedSessionRevision, requestedProductCode, name, unitPrice, imageKind } = body
   const effectiveImageKind = imageKind || 'PHOTO'
+
+  if (sessionId) {
+    const { data: session } = await admin
+      .from('live_sessions')
+      .select('id, revision')
+      .eq('id', sessionId)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+
+    if (!session) {
+      return errorResponse('NOT_FOUND', '회차를 찾을 수 없습니다.', 404)
+    }
+    if (expectedSessionRevision !== undefined && session.revision !== expectedSessionRevision) {
+      return errorResponse('REVISION_CONFLICT', '회차 버전 충돌이 발생했습니다.', 409, {
+        currentSessionRevision: session.revision,
+      })
+    }
+  }
 
   let productCode = requestedProductCode ? String(requestedProductCode).trim() : null
   if (productCode) {
@@ -19,6 +37,19 @@ export async function handlePrepareProduct(workspaceId: string, actorId: string,
         productCode,
       })
     }
+
+    const { data: existingProduct } = await admin
+      .from('products')
+      .select('product_code')
+      .eq('workspace_id', workspaceId)
+      .eq('product_code', productCode)
+      .maybeSingle()
+
+    if (existingProduct) {
+      return errorResponse('PRODUCT_CODE_EXISTS', '이미 사용 중이거나 예약된 상품번호입니다.', 409, {
+        productCode,
+      })
+    }
   } else {
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     const rnd = Math.floor(100000 + Math.random() * 900000)
@@ -27,12 +58,14 @@ export async function handlePrepareProduct(workspaceId: string, actorId: string,
 
   const draftId = crypto.randomUUID()
   const productId = crypto.randomUUID()
+  const expiresAt = new Date(Date.now() + 15 * 60000).toISOString()
 
   await admin.from('product_code_reservations').insert({
     workspace_id: workspaceId,
     product_code: productCode,
     product_id: productId,
     draft_id: draftId,
+    expires_at: expiresAt,
   })
 
   await admin.from('product_drafts').insert({
@@ -47,6 +80,7 @@ export async function handlePrepareProduct(workspaceId: string, actorId: string,
     status: 'READY',
     revision: 1,
     actor_id: actorId,
+    expires_at: expiresAt,
   })
 
   return successResponse({
@@ -55,12 +89,12 @@ export async function handlePrepareProduct(workspaceId: string, actorId: string,
     productId,
     productCode,
     imageUpload: {
-      uploadUrl: `https://storage.voicecap.local/upload/drafts/${draftId}.jpg`,
+      uploadUrl: `https://storage.voicecap.local/upload/drafts/${productCode}.jpg`,
       method: 'PUT',
       headers: { 'Content-Type': 'image/jpeg' },
       maxSizeBytes: 2097152,
     },
-    expiresAt: new Date(Date.now() + 15 * 60000).toISOString(),
+    expiresAt,
   })
 }
 
@@ -76,6 +110,12 @@ export async function handleUpdateProductDraft(workspaceId: string, body: any) {
   if (!draft) return errorResponse('NOT_FOUND', '초안을 찾을 수 없습니다.', 404)
   if (expectedDraftRevision !== undefined && draft.revision !== expectedDraftRevision) {
     return errorResponse('REVISION_CONFLICT', '초안 버전 충돌이 발생했습니다.', 409)
+  }
+  if (draft.status !== 'READY') {
+    return errorResponse('INVALID_DRAFT_STATE', `초안 상태(${draft.status})가 유효하지 않습니다.`, 400)
+  }
+  if (draft.expires_at && new Date(draft.expires_at).getTime() < Date.now()) {
+    return errorResponse('DRAFT_EXPIRED', '초안 유효시간(15분)이 만료되었습니다. 다시 상품을 등록해 주세요.', 410)
   }
 
   const nextRev = draft.revision + 1
@@ -117,6 +157,12 @@ export async function handleCommitProduct(workspaceId: string, body: any) {
   if (expectedDraftRevision !== undefined && draft.revision !== expectedDraftRevision) {
     return errorResponse('REVISION_CONFLICT', '초안 버전 충돌이 발생했습니다.', 409)
   }
+  if (draft.status !== 'READY') {
+    return errorResponse('INVALID_DRAFT_STATE', '이미 확정되었거나 취소된 초안입니다.', 400)
+  }
+  if (draft.expires_at && new Date(draft.expires_at).getTime() < Date.now()) {
+    return errorResponse('DRAFT_EXPIRED', '초안 유효시간(15분)이 만료되었습니다. 다시 상품을 등록해 주세요.', 410)
+  }
 
   const { data: session } = await admin
     .from('live_sessions')
@@ -130,6 +176,10 @@ export async function handleCommitProduct(workspaceId: string, body: any) {
     return errorResponse('REVISION_CONFLICT', '회차 버전 충돌이 발생했습니다.', 409)
   }
 
+  const imagePath = draft.image_kind === 'NUMBER_IMAGE'
+    ? `products/number_image_${draft.product_code}.png`
+    : `products/${draft.product_id}.jpg`
+
   const { data: product } = await admin
     .from('products')
     .insert({
@@ -140,7 +190,7 @@ export async function handleCommitProduct(workspaceId: string, body: any) {
       name: draft.name,
       unit_price: draft.unit_price,
       image_kind: draft.image_kind,
-      image_path: draft.image_kind === 'NUMBER_IMAGE' ? `products/number_${draft.product_code}.png` : `products/${draft.product_id}.jpg`,
+      image_path: imagePath,
       revision: 1,
       sales_revision: 0,
     })
