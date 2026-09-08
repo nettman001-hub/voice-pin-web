@@ -8,17 +8,17 @@
 
 | 항목 | 현재 값 |
 | --- | --- |
-| 상태 | NOT_STARTED |
+| 상태 | IN_PROGRESS |
 | 현재 체크포인트 | G0 |
-| 작업 경로 | 시작 시 기록 |
-| 기능 브랜치 | 권장 `codex/product-sales-single-agent` |
-| 시작 HEAD | 시작 시 `git rev-parse --short HEAD` 결과 기록 |
-| origin/main | 시작 시 fetch 후 기록 |
-| 작업 트리 | 시작 시 `git status --short` 결과 기록 |
+| 작업 경로 | C:\dev\voicecap-web |
+| 기능 브랜치 | `codex/product-sales-single-agent` |
+| 시작 HEAD | `49f6cf0` |
+| origin/main | `ad97ca2` (local main is 1 commit ahead: `49f6cf0`) |
+| 작업 트리 | clean (시작 시 변경사항 없음) |
 | 계약 버전 | 1 |
 | API 버전 | 1 예정 |
-| 시험 workspace | 미정 |
-| Android 시험 기기 | 미확보 |
+| 시험 workspace | W1 (테스트), W2 (교차 검증) |
+| Android 시험 기기 | 미확보 (adb devices: 연결 장치 없음) |
 | 실제 프린터 | 미확보 |
 
 상태 값은 `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `PASS`, `FAIL`, `NOT_APPLICABLE`만 사용한다. `BLOCKED`와 `FAIL`에는 재현 절차와 다음 행동을 반드시 적는다.
@@ -27,7 +27,7 @@
 
 | 체크포인트 | 작업 | 상태 | 완료 커밋 | 검증 증거와 남은 항목 |
 | --- | --- | --- | --- | --- |
-| G0 | 환경 기준, ANDROID-01, CORE-01 계약 Schema·fixture | NOT_STARTED |  |  |
+| G0 | 환경 기준, ANDROID-01, CORE-01 계약 Schema·fixture | IN_PROGRESS |  | ANDROID-01 환경/빌드 기준 확보. CORE-01 계약 fixture 작성 착수 |
 | G1 | CORE-02~CORE-05 DB·인증·상품·댓글 API | NOT_STARTED |  |  |
 | G2 | ANDROID-02~ANDROID-06, CORE-06~CORE-08 | NOT_STARTED |  |  |
 | G3 | CORE-09~CORE-10, ANDROID-07~ANDROID-09 | NOT_STARTED |  |  |
@@ -37,7 +37,7 @@
 
 | 티켓 | 상태 | 커밋 | 실행한 테스트 | 미검증·차단 사항 |
 | --- | --- | --- | --- | --- |
-| ANDROID-01 | NOT_STARTED |  |  |  |
+| ANDROID-01 | PASS |  | Gradle 9.3.1, JDK 17, SDK 35/36 환경 구성. `:app:assembleDebug`, `:app:testDebugUnitTest`, `:app:lintDebug` 완료 | 실기기/에뮬레이터 미확보로 connectedDebugAndroidTest 및 실기기 SMS 회귀는 미검증으로 기록 |
 | CORE-01 | NOT_STARTED |  |  |  |
 | CORE-02 | NOT_STARTED |  |  |  |
 | CORE-03 | NOT_STARTED |  |  |  |
@@ -64,14 +64,14 @@
 
 | 대상 | 명령 또는 방법 | 상태 | 실행 환경과 결과 |
 | --- | --- | --- | --- |
-| 웹 | 저장소 루트 `npm run build` | NOT_STARTED |  |
-| 서버 | `server/`의 실제 제공 테스트 명령 | NOT_STARTED |  |
-| PC 도우미 | `desktop/comment-helper/`의 실제 제공 테스트 명령 | NOT_STARTED |  |
-| Android debug | `android/voicecapSMS`에서 `.\gradlew.bat :app:assembleDebug` | NOT_STARTED |  |
-| Android unit/lint | `testDebugUnitTest`, `lintDebug` | NOT_STARTED |  |
-| Android 기기 | `connectedDebugAndroidTest`와 수동 SMS 회귀 | NOT_STARTED |  |
+| 웹 | 저장소 루트 `npm run build` | PASS | vite v6.4.3 build 성공 (dist/ 생성, tsc 통과) |
+| 서버 | `server/`의 실제 제공 테스트 명령 | PASS | `npm test` (node --test) 5개 테스트 모두 통과 |
+| PC 도우미 | `desktop/comment-helper/`의 실제 제공 테스트 명령 | PASS | `npm test` (node --test) 5개 테스트 모두 통과 |
+| Android debug | `android/voicecapSMS`에서 `.\gradlew.bat :app:assembleDebug` | PASS | OpenJDK 17, Android SDK 35/36 디버그 APK 빌드 성공 |
+| Android unit/lint | `testDebugUnitTest`, `lintDebug` | PASS | 단위테스트 통과, 린트 보고서 생성 완료 (오류 0) |
+| Android 기기 | `connectedDebugAndroidTest`와 수동 SMS 회귀 | 미검증 | 연결된 기기/에뮬레이터 미확보 (`adb devices` 빈 목록) |
 | DB·RLS | 빈 개발 DB, 기존 데이터 복제 DB, cross-workspace와 권한 거절 | NOT_STARTED |  |
-| 인쇄 | 실제 용지, lease 경쟁, UNKNOWN 복구와 중복 출력 방지 | NOT_STARTED |  |
+| 인쇄 | 실제 용지, lease 경쟁, UNKNOWN 복구와 중복 출력 방지 | 미검증 | 실제 프린터 미확보 |
 | 통합 인수 | 05 문서 T01~T22 | NOT_STARTED |  |
 
 ## 5 배포 상태
