@@ -121,8 +121,8 @@ public class SalesRepositoryTest {
                 assertEquals(1, result.saleIds.size());
                 assertEquals(2, result.totalQuantity);
                 assertEquals(40000L, result.totalAmount); // 2 * 20000
-                assertEquals(4, result.summary.sessionQuantity); // 2 initial + 2 new
-                assertEquals(80000L, result.summary.sessionAmount); // 40000 + 40000
+                assertEquals(5, result.summary.sessionQuantity); // 3 initial + 2 new
+                assertEquals(100000L, result.summary.sessionAmount); // 60000 + 40000
                 assertEquals(1, result.printJobs.size());
                 assertEquals("QUEUED", result.printJobs.get(0).status);
             }
@@ -130,6 +130,85 @@ public class SalesRepositoryTest {
             @Override
             public void onError(SalesError error) {
                 fail("Commit sales error: " + error.getMessage());
+            }
+        });
+    }
+
+    @Test
+    public void testPreviewAndCommitProductChange() {
+        FakeSalesRepository repo = new FakeSalesRepository();
+
+        // 1. Preview price change from 20000 to 25000
+        repo.previewProductChange("55555555-5555-4555-8555-555555555555", 2, 0, 25000L, null, new SalesRepository.Callback<PreviewChangeResult>() {
+            @Override
+            public void onSuccess(PreviewChangeResult preview) {
+                assertNotNull(preview);
+                assertEquals("prevtok_0123456789abcdef0123456789abcdef", preview.previewToken);
+                assertEquals(20000L, preview.beforeUnitPrice);
+                assertEquals(60000L, preview.beforeSalesAmount);
+                assertEquals(25000L, preview.afterUnitPrice);
+                assertEquals(75000L, preview.afterSalesAmount);
+                assertEquals(15000L, preview.diffAmount);
+                assertEquals(2, preview.affectedBuyers.size());
+
+                // 2. Commit change
+                repo.commitProductChange("op-change-commit", preview.previewToken, new SalesRepository.Callback<CommitProductChangeResult>() {
+                    @Override
+                    public void onSuccess(CommitProductChangeResult commit) {
+                        assertNotNull(commit);
+                        assertEquals(Long.valueOf(25000L), commit.product.unitPrice);
+                        assertEquals(3, commit.product.revision);
+                        assertEquals(1, commit.product.salesRevision);
+                        assertEquals(2, commit.sales.size());
+                        assertEquals(50000L, commit.sales.get(0).amount);
+                        assertEquals(25000L, commit.sales.get(1).amount);
+                        assertEquals(75000L, commit.summary.sessionAmount);
+                        assertEquals(2, commit.printJobs.size());
+                    }
+
+                    @Override
+                    public void onError(SalesError error) {
+                        fail("Commit change error: " + error.getMessage());
+                    }
+                });
+            }
+
+            @Override
+            public void onError(SalesError error) {
+                fail("Preview error: " + error.getMessage());
+            }
+        });
+    }
+
+    @Test
+    public void testSearchAndConfirmBuyer() {
+        FakeSalesRepository repo = new FakeSalesRepository();
+        repo.searchBuyers("철수", new SalesRepository.Callback<List<Buyer>>() {
+            @Override
+            public void onSuccess(List<Buyer> buyers) {
+                assertNotNull(buyers);
+                assertEquals(2, buyers.size());
+                assertEquals("철수", buyers.get(0).displayNickname);
+
+                // Confirm buyer
+                repo.confirmBuyer("op-conf-buyer", "철수", buyers.get(0).id, "수동 확인", new SalesRepository.Callback<Buyer>() {
+                    @Override
+                    public void onSuccess(Buyer confirmed) {
+                        assertNotNull(confirmed);
+                        assertEquals("MANUAL_CONFIRMED", confirmed.identityStatus);
+                        assertEquals("철수", confirmed.displayNickname);
+                    }
+
+                    @Override
+                    public void onError(SalesError error) {
+                        fail("Confirm error: " + error.getMessage());
+                    }
+                });
+            }
+
+            @Override
+            public void onError(SalesError error) {
+                fail("Search error: " + error.getMessage());
             }
         });
     }

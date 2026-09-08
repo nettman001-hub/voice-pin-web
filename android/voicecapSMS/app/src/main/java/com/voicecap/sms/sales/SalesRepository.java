@@ -20,4 +20,8 @@ public interface SalesRepository {
     void getPrintStatus(String sessionId, Callback<List<PrintJobInfo>> callback);
     void searchBuyers(String query, Callback<List<Buyer>> callback);
     void confirmBuyer(String operationId, String displayNickname, String selectedBuyerId, String reason, Callback<Buyer> callback);
+    void listSessionProducts(String sessionId, Callback<List<Product>> callback);
+    void getProductSales(String sessionId, String productId, Callback<List<ProductSale>> callback);
+    void previewProductChange(String productId, int expectedProductRevision, int expectedSalesRevision, Long proposedUnitPrice, List<ProposedSale> proposedSales, Callback<PreviewChangeResult> callback);
+    void commitProductChange(String operationId, String previewToken, Callback<CommitProductChangeResult> callback);
 }

@@ -555,4 +555,220 @@ public final class SalesModels {
             );
         }
     }
+
+    public static final class ProductSale {
+        public final String id;
+        public final String productId;
+        public final String buyerId;
+        public final String buyerNickname;
+        public final int quantity;
+        public final long unitPrice;
+        public final long amount;
+        public final int revision;
+        public final String recordState;
+
+        public ProductSale(String id, String productId, String buyerId, String buyerNickname, int quantity, long unitPrice, long amount, int revision, String recordState) {
+            this.id = id;
+            this.productId = productId;
+            this.buyerId = buyerId;
+            this.buyerNickname = buyerNickname;
+            this.quantity = quantity;
+            this.unitPrice = unitPrice;
+            this.amount = amount;
+            this.revision = revision;
+            this.recordState = recordState;
+        }
+
+        public static ProductSale fromJson(JSONObject json) {
+            if (json == null) return null;
+            return new ProductSale(
+                json.optString("id", ""),
+                json.optString("productId", ""),
+                json.optString("buyerId", ""),
+                json.optString("buyerNickname", ""),
+                json.optInt("quantity", 1),
+                json.optLong("unitPrice", 0),
+                json.optLong("amount", 0),
+                json.optInt("revision", 1),
+                json.optString("recordState", "ACTIVE")
+            );
+        }
+    }
+
+    public static final class ProposedSale {
+        public final String saleId;
+        public final Integer expectedRevision;
+        public final String buyerId;
+        public final Integer quantity;
+        public final Boolean cancelled;
+
+        public ProposedSale(String saleId, Integer expectedRevision, String buyerId, Integer quantity, Boolean cancelled) {
+            this.saleId = saleId;
+            this.expectedRevision = expectedRevision;
+            this.buyerId = buyerId;
+            this.quantity = quantity;
+            this.cancelled = cancelled;
+        }
+
+        public JSONObject toJson() {
+            try {
+                JSONObject json = new JSONObject();
+                if (saleId != null) json.put("saleId", saleId);
+                if (expectedRevision != null) json.put("expectedRevision", expectedRevision);
+                if (buyerId != null) json.put("buyerId", buyerId);
+                if (quantity != null) json.put("quantity", quantity);
+                if (cancelled != null) json.put("cancelled", cancelled);
+                return json;
+            } catch (Exception e) {
+                return new JSONObject();
+            }
+        }
+    }
+
+    public static final class AffectedBuyer {
+        public final String buyerId;
+        public final String displayNickname;
+        public final int quantity;
+        public final long oldUnitPrice;
+        public final long newUnitPrice;
+        public final long oldAmount;
+        public final long newAmount;
+        public final long diffAmount;
+
+        public AffectedBuyer(String buyerId, String displayNickname, int quantity, long oldUnitPrice, long newUnitPrice, long oldAmount, long newAmount, long diffAmount) {
+            this.buyerId = buyerId;
+            this.displayNickname = displayNickname;
+            this.quantity = quantity;
+            this.oldUnitPrice = oldUnitPrice;
+            this.newUnitPrice = newUnitPrice;
+            this.oldAmount = oldAmount;
+            this.newAmount = newAmount;
+            this.diffAmount = diffAmount;
+        }
+
+        public static AffectedBuyer fromJson(JSONObject json) {
+            if (json == null) return null;
+            return new AffectedBuyer(
+                json.optString("buyerId", ""),
+                json.optString("displayNickname", ""),
+                json.optInt("quantity", 0),
+                json.optLong("oldUnitPrice", 0),
+                json.optLong("newUnitPrice", 0),
+                json.optLong("oldAmount", 0),
+                json.optLong("newAmount", 0),
+                json.optLong("diffAmount", 0)
+            );
+        }
+    }
+
+    public static final class PreviewChangeResult {
+        public final String previewToken;
+        public final String expiresAt;
+        public final long beforeUnitPrice;
+        public final int beforeSalesQuantity;
+        public final long beforeSalesAmount;
+        public final int beforeSessionQuantity;
+        public final long beforeSessionAmount;
+        public final long afterUnitPrice;
+        public final int afterSalesQuantity;
+        public final long afterSalesAmount;
+        public final int afterSessionQuantity;
+        public final long afterSessionAmount;
+        public final long diffAmount;
+        public final List<AffectedBuyer> affectedBuyers;
+
+        public PreviewChangeResult(String previewToken, String expiresAt, long beforeUnitPrice, int beforeSalesQuantity, long beforeSalesAmount, int beforeSessionQuantity, long beforeSessionAmount, long afterUnitPrice, int afterSalesQuantity, long afterSalesAmount, int afterSessionQuantity, long afterSessionAmount, long diffAmount, List<AffectedBuyer> affectedBuyers) {
+            this.previewToken = previewToken;
+            this.expiresAt = expiresAt;
+            this.beforeUnitPrice = beforeUnitPrice;
+            this.beforeSalesQuantity = beforeSalesQuantity;
+            this.beforeSalesAmount = beforeSalesAmount;
+            this.beforeSessionQuantity = beforeSessionQuantity;
+            this.beforeSessionAmount = beforeSessionAmount;
+            this.afterUnitPrice = afterUnitPrice;
+            this.afterSalesQuantity = afterSalesQuantity;
+            this.afterSalesAmount = afterSalesAmount;
+            this.afterSessionQuantity = afterSessionQuantity;
+            this.afterSessionAmount = afterSessionAmount;
+            this.diffAmount = diffAmount;
+            this.affectedBuyers = affectedBuyers;
+        }
+
+        public static PreviewChangeResult fromJson(JSONObject json) {
+            if (json == null) return null;
+            JSONObject before = json.optJSONObject("before");
+            JSONObject after = json.optJSONObject("after");
+            List<AffectedBuyer> list = new ArrayList<>();
+            JSONArray arr = json.optJSONArray("affectedBuyers");
+            if (arr != null) {
+                for (int i = 0; i < arr.length(); i++) list.add(AffectedBuyer.fromJson(arr.optJSONObject(i)));
+            }
+
+            return new PreviewChangeResult(
+                json.optString("previewToken", ""),
+                json.optString("expiresAt", ""),
+                before != null ? before.optLong("unitPrice", 0) : 0,
+                before != null ? before.optInt("salesQuantity", 0) : 0,
+                before != null ? before.optLong("salesAmount", 0) : 0,
+                before != null ? before.optInt("sessionQuantity", 0) : 0,
+                before != null ? before.optLong("sessionAmount", 0) : 0,
+                after != null ? after.optLong("unitPrice", 0) : 0,
+                after != null ? after.optInt("salesQuantity", 0) : 0,
+                after != null ? after.optLong("salesAmount", 0) : 0,
+                after != null ? after.optInt("sessionQuantity", 0) : 0,
+                after != null ? after.optLong("sessionAmount", 0) : 0,
+                json.optLong("diffAmount", 0),
+                list
+            );
+        }
+    }
+
+    public static final class CommitProductChangeResult {
+        public final Product product;
+        public final List<ProductSale> sales;
+        public final SalesSummary summary;
+        public final Map<String, BuyerStats> buyerStats;
+        public final List<PrintJobInfo> printJobs;
+
+        public CommitProductChangeResult(Product product, List<ProductSale> sales, SalesSummary summary, Map<String, BuyerStats> buyerStats, List<PrintJobInfo> printJobs) {
+            this.product = product;
+            this.sales = sales;
+            this.summary = summary;
+            this.buyerStats = buyerStats;
+            this.printJobs = printJobs;
+        }
+
+        public static CommitProductChangeResult fromJson(JSONObject json) {
+            if (json == null) return null;
+            List<ProductSale> saleList = new ArrayList<>();
+            JSONArray sArr = json.optJSONArray("sales");
+            if (sArr != null) {
+                for (int i = 0; i < sArr.length(); i++) saleList.add(ProductSale.fromJson(sArr.optJSONObject(i)));
+            }
+
+            Map<String, BuyerStats> bMap = new HashMap<>();
+            JSONObject bObj = json.optJSONObject("buyerStats");
+            if (bObj != null) {
+                Iterator<String> it = bObj.keys();
+                while (it.hasNext()) {
+                    String k = it.next();
+                    bMap.put(k, BuyerStats.fromJson(bObj.optJSONObject(k)));
+                }
+            }
+
+            List<PrintJobInfo> pjList = new ArrayList<>();
+            JSONArray pjArr = json.optJSONArray("printJobs");
+            if (pjArr != null) {
+                for (int i = 0; i < pjArr.length(); i++) pjList.add(PrintJobInfo.fromJson(pjArr.optJSONObject(i)));
+            }
+
+            return new CommitProductChangeResult(
+                Product.fromJson(json.optJSONObject("product")),
+                saleList,
+                SalesSummary.fromJson(json.optJSONObject("summary")),
+                bMap,
+                pjList
+            );
+        }
+    }
 }

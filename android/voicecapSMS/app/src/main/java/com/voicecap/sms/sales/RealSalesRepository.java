@@ -362,4 +362,112 @@ public class RealSalesRepository implements SalesRepository {
             callback.onError(new SalesError("REQUEST_ERROR", e.getMessage(), false, null));
         }
     }
+
+    @Override
+    public void listSessionProducts(String sessionId, Callback<List<Product>> callback) {
+        try {
+            JSONObject body = new JSONObject();
+            body.put("sessionId", sessionId);
+            postAction("list-session-products", body, new Callback<JSONObject>() {
+                @Override
+                public void onSuccess(JSONObject data) {
+                    List<Product> list = new ArrayList<>();
+                    JSONArray arr = data.optJSONArray("products");
+                    if (arr != null) {
+                        for (int i = 0; i < arr.length(); i++) list.add(Product.fromJson(arr.optJSONObject(i)));
+                    }
+                    callback.onSuccess(list);
+                }
+                @Override
+                public void onError(SalesError error) {
+                    callback.onError(error);
+                }
+            });
+        } catch (Exception e) {
+            callback.onError(new SalesError("REQUEST_ERROR", e.getMessage(), false, null));
+        }
+    }
+
+    @Override
+    public void getProductSales(String sessionId, String productId, Callback<List<ProductSale>> callback) {
+        try {
+            JSONObject body = new JSONObject();
+            body.put("sessionId", sessionId);
+            body.put("productId", productId);
+            postAction("get-product-sales", body, new Callback<JSONObject>() {
+                @Override
+                public void onSuccess(JSONObject data) {
+                    List<ProductSale> list = new ArrayList<>();
+                    JSONArray arr = data.optJSONArray("sales");
+                    if (arr != null) {
+                        for (int i = 0; i < arr.length(); i++) list.add(ProductSale.fromJson(arr.optJSONObject(i)));
+                    }
+                    callback.onSuccess(list);
+                }
+                @Override
+                public void onError(SalesError error) {
+                    callback.onError(error);
+                }
+            });
+        } catch (Exception e) {
+            callback.onError(new SalesError("REQUEST_ERROR", e.getMessage(), false, null));
+        }
+    }
+
+    @Override
+    public void previewProductChange(String productId, int expectedProductRevision, int expectedSalesRevision, Long proposedUnitPrice, List<ProposedSale> proposedSales, Callback<PreviewChangeResult> callback) {
+        try {
+            JSONObject body = new JSONObject();
+            body.put("productId", productId);
+            body.put("expectedProductRevision", expectedProductRevision);
+            body.put("expectedSalesRevision", expectedSalesRevision);
+
+            if (proposedUnitPrice != null) {
+                JSONObject prod = new JSONObject();
+                prod.put("unitPrice", proposedUnitPrice);
+                body.put("proposedProduct", prod);
+            }
+
+            if (proposedSales != null) {
+                JSONArray sArr = new JSONArray();
+                for (ProposedSale ps : proposedSales) sArr.put(ps.toJson());
+                body.put("proposedSales", sArr);
+            }
+
+            postAction("preview-product-change", body, new Callback<JSONObject>() {
+                @Override
+                public void onSuccess(JSONObject data) {
+                    callback.onSuccess(PreviewChangeResult.fromJson(data));
+                }
+                @Override
+                public void onError(SalesError error) {
+                    callback.onError(error);
+                }
+            });
+        } catch (Exception e) {
+            callback.onError(new SalesError("REQUEST_ERROR", e.getMessage(), false, null));
+        }
+    }
+
+    @Override
+    public void commitProductChange(String operationId, String previewToken, Callback<CommitProductChangeResult> callback) {
+        try {
+            JSONObject body = new JSONObject();
+            body.put("operationId", operationId);
+            body.put("previewToken", previewToken);
+
+            postAction("commit-product-change", body, new Callback<JSONObject>() {
+                @Override
+                public void onSuccess(JSONObject data) {
+                    callback.onSuccess(CommitProductChangeResult.fromJson(data));
+                }
+                @Override
+                public void onError(SalesError error) {
+                    callback.onError(error);
+                }
+            });
+        } catch (Exception e) {
+            callback.onError(new SalesError("REQUEST_ERROR", e.getMessage(), false, null));
+        }
+    }
 }

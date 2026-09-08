@@ -124,12 +124,33 @@ public class ProductSalesView extends LinearLayout {
         cardParams.topMargin = dp(12);
         card.setLayoutParams(cardParams);
 
+        LinearLayout statsRow = new LinearLayout(getContext());
+        statsRow.setOrientation(HORIZONTAL);
+        statsRow.setGravity(Gravity.CENTER_VERTICAL);
+
         tvSummaryStats = new TextView(getContext());
         tvSummaryStats.setText("이번 회차: 0개 · ₩0");
         tvSummaryStats.setTextSize(16);
         tvSummaryStats.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         tvSummaryStats.setTextColor(Color.rgb(2, 111, 199));
-        card.addView(tvSummaryStats);
+        LinearLayout.LayoutParams tsParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        tvSummaryStats.setLayoutParams(tsParams);
+        statsRow.addView(tvSummaryStats);
+
+        Button btnEditSales = new Button(getContext());
+        btnEditSales.setText("수정");
+        btnEditSales.setTextSize(12);
+        btnEditSales.setOnClickListener(v -> {
+            if (bootstrap != null && bootstrap.activeSession != null) {
+                ProductChangeDialog.show(getContext(), repository, bootstrap.activeSession, bootstrap.activeProduct, () -> {
+                    loadBootstrap();
+                });
+            } else {
+                Toast.makeText(getContext(), "활성 회차가 없습니다.", Toast.LENGTH_SHORT).show();
+            }
+        });
+        statsRow.addView(btnEditSales);
+        card.addView(statsRow);
 
         tvActiveProduct = new TextView(getContext());
         tvActiveProduct.setText("현재 상품: 없음");
@@ -389,6 +410,13 @@ public class ProductSalesView extends LinearLayout {
         }
 
         row.setOnClickListener(v -> {
+            if (comment.buyerId == null) {
+                BuyerConfirmDialog.show(getContext(), repository, comment.nicknameSnapshot, confirmed -> {
+                    toggleCommentSelection(comment, confirmed.id);
+                    renderFeed();
+                });
+                return;
+            }
             toggleCommentSelection(comment, buyerId);
             renderFeed();
         });
@@ -447,6 +475,10 @@ public class ProductSalesView extends LinearLayout {
 
         List<CommitSaleBuyer> commitList = new ArrayList<>();
         for (SelectedBuyer sb : selectedBuyers.values()) {
+            if (sb.buyerId == null || sb.buyerId.trim().isEmpty()) {
+                Toast.makeText(getContext(), "구매자 '" + sb.nickname + "'의 신원이 확인되지 않았습니다.", Toast.LENGTH_LONG).show();
+                return;
+            }
             commitList.add(new CommitSaleBuyer(sb.buyerId, sb.quantity, new ArrayList<>(sb.sourceCommentIds)));
         }
 
@@ -464,7 +496,14 @@ public class ProductSalesView extends LinearLayout {
             new SalesRepository.Callback<SalesResult>() {
                 @Override
                 public void onSuccess(SalesResult result) {
-                    Toast.makeText(getContext(), "판매 " + result.totalQuantity + "개(총 " + result.saleIds.size() + "건) 저장 완료!", Toast.LENGTH_LONG).show();
+                    StringBuilder msg = new StringBuilder("판매 " + result.totalQuantity + "개(총 " + result.saleIds.size() + "건) 저장 완료!");
+                    if (result.printJobs != null && !result.printJobs.isEmpty()) {
+                        msg.append("\n[출력 접수]");
+                        for (PrintJobInfo pj : result.printJobs) {
+                            msg.append("\n• ").append(pj.buyerNickname).append(": ").append(mapPrintStatus(pj.status));
+                        }
+                    }
+                    Toast.makeText(getContext(), msg.toString(), Toast.LENGTH_LONG).show();
                     selectedBuyers.clear();
                     btnCommitSales.setEnabled(true);
                     btnCommitSales.setText("판매등록완료");
@@ -479,6 +518,15 @@ public class ProductSalesView extends LinearLayout {
                 }
             }
         );
+    }
+
+    private static String mapPrintStatus(String status) {
+        if ("QUEUED".equals(status)) return "출력 대기";
+        if ("CLAIMED".equals(status)) return "처리 준비";
+        if ("SUBMITTING".equals(status)) return "접수 중";
+        if ("SUBMITTED".equals(status)) return "Windows 인쇄 접수";
+        if ("FAILED".equals(status)) return "실패";
+        return "출력 여부 확인 필요";
     }
 
     private int dp(int v) {

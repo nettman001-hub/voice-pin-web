@@ -13,8 +13,9 @@ public class FakeSalesRepository implements SalesRepository {
 
     private final List<LiveComment> comments = new ArrayList<>();
     private final Map<String, BuyerStats> buyerStats = new HashMap<>();
-    private SalesSummary summary = new SalesSummary(2, 40000L);
+    private SalesSummary summary = new SalesSummary(3, 60000L);
     private final Map<String, DraftData> drafts = new HashMap<>();
+    private final Map<String, ProductSale> salesMap = new LinkedHashMap<>();
 
     public FakeSalesRepository() {
         // Initial fixture comments
@@ -23,7 +24,10 @@ public class FakeSalesRepository implements SalesRepository {
         comments.add(new LiveComment("cccccccc-1111-4ccc-8ccc-111111111111", session.id, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "msg-tiktok-1111", "66666666-6666-4666-8666-666666666666", "철수", "저요", "2026-09-08T09:00:00.100Z", 1));
 
         buyerStats.put("66666666-6666-4666-8666-666666666666", new BuyerStats("66666666-6666-4666-8666-666666666666", "철수", 2, 40000L, 5, 120000L));
-        buyerStats.put("77777777-7777-4777-8777-777777777777", new BuyerStats("77777777-7777-4777-8777-777777777777", "영희", 0, 0L, 0, 0L));
+        buyerStats.put("77777777-7777-4777-8777-777777777777", new BuyerStats("77777777-7777-4777-8777-777777777777", "영희", 1, 20000L, 1, 20000L));
+
+        salesMap.put("sale-101-cheolsu", new ProductSale("sale-101-cheolsu", activeProduct.id, "66666666-6666-4666-8666-666666666666", "철수", 2, 20000L, 40000L, 1, "ACTIVE"));
+        salesMap.put("sale-101-yeonghui", new ProductSale("sale-101-yeonghui", activeProduct.id, "77777777-7777-4777-8777-777777777777", "영희", 1, 20000L, 20000L, 1, "ACTIVE"));
     }
 
     @Override
@@ -168,5 +172,116 @@ public class FakeSalesRepository implements SalesRepository {
     @Override
     public void confirmBuyer(String operationId, String displayNickname, String selectedBuyerId, String reason, Callback<Buyer> callback) {
         callback.onSuccess(new Buyer("66666666-7777-4666-8666-666666666666", "MANUAL", null, displayNickname, "MANUAL_CONFIRMED"));
+    }
+
+    @Override
+    public void listSessionProducts(String sessionId, Callback<List<Product>> callback) {
+        callback.onSuccess(activeProduct != null ? Collections.singletonList(activeProduct) : Collections.emptyList());
+    }
+
+    @Override
+    public void getProductSales(String sessionId, String productId, Callback<List<ProductSale>> callback) {
+        List<ProductSale> list = new ArrayList<>();
+        for (ProductSale s : salesMap.values()) {
+            if (s.productId.equals(productId)) list.add(s);
+        }
+        callback.onSuccess(list);
+    }
+
+    @Override
+    public void previewProductChange(String productId, int expectedProductRevision, int expectedSalesRevision, Long proposedUnitPrice, List<ProposedSale> proposedSales, Callback<PreviewChangeResult> callback) {
+        if (activeProduct == null || !activeProduct.id.equals(productId)) {
+            callback.onError(new SalesError("NOT_FOUND", "상품을 찾을 수 없습니다.", false, null));
+            return;
+        }
+        if (activeProduct.revision != expectedProductRevision || activeProduct.salesRevision != expectedSalesRevision) {
+            callback.onError(new SalesError("REVISION_CONFLICT", "버전 충돌이 발생했습니다.", false, null));
+            return;
+        }
+
+        long newPrice = proposedUnitPrice != null ? proposedUnitPrice : (activeProduct.unitPrice != null ? activeProduct.unitPrice : 0L);
+        long oldPrice = activeProduct.unitPrice != null ? activeProduct.unitPrice : 0L;
+
+        int oldSalesQty = 0;
+        long oldSalesAmt = 0;
+        int newSalesQty = 0;
+        long newSalesAmt = 0;
+        List<AffectedBuyer> affected = new ArrayList<>();
+
+        for (ProductSale s : salesMap.values()) {
+            if (!s.productId.equals(productId) || !"ACTIVE".equals(s.recordState)) continue;
+            oldSalesQty += s.quantity;
+            oldSalesAmt += s.amount;
+
+            ProposedSale prop = null;
+            if (proposedSales != null) {
+                for (ProposedSale p : proposedSales) {
+                    if (s.id.equals(p.saleId)) {
+                        prop = p;
+                        break;
+                    }
+                }
+            }
+
+            int qty = prop != null && prop.quantity != null ? prop.quantity : s.quantity;
+            boolean cancelled = prop != null && Boolean.TRUE.equals(prop.cancelled);
+
+            if (!cancelled) {
+                long newAmt = qty * newPrice;
+                newSalesQty += qty;
+                newSalesAmt += newAmt;
+                affected.add(new AffectedBuyer(s.buyerId, s.buyerNickname, qty, oldPrice, newPrice, s.amount, newAmt, newAmt - s.amount));
+            }
+        }
+
+        long diff = newSalesAmt - oldSalesAmt;
+        callback.onSuccess(new PreviewChangeResult(
+            "prevtok_0123456789abcdef0123456789abcdef",
+            "2026-09-08T09:22:05.000Z",
+            oldPrice,
+            oldSalesQty,
+            oldSalesAmt,
+            summary.sessionQuantity,
+            summary.sessionAmount,
+            newPrice,
+            newSalesQty,
+            newSalesAmt,
+            summary.sessionQuantity + (newSalesQty - oldSalesQty),
+            summary.sessionAmount + diff,
+            diff,
+            affected
+        ));
+    }
+
+    @Override
+    public void commitProductChange(String operationId, String previewToken, Callback<CommitProductChangeResult> callback) {
+        if (!"prevtok_0123456789abcdef0123456789abcdef".equals(previewToken)) {
+            callback.onError(new SalesError("PREVIEW_EXPIRED", "미리보기가 만료되었습니다.", false, null));
+            return;
+        }
+
+        long newPrice = 25000L;
+        activeProduct = new Product(activeProduct.id, activeProduct.productCode, activeProduct.name, newPrice, activeProduct.imageKind, activeProduct.imageUrl, activeProduct.revision + 1, activeProduct.salesRevision + 1);
+
+        List<ProductSale> updatedList = new ArrayList<>();
+        List<PrintJobInfo> pJobs = new ArrayList<>();
+
+        for (Map.Entry<String, ProductSale> entry : salesMap.entrySet()) {
+            ProductSale s = entry.getValue();
+            long newAmt = s.quantity * newPrice;
+            ProductSale updated = new ProductSale(s.id, s.productId, s.buyerId, s.buyerNickname, s.quantity, newPrice, newAmt, s.revision + 1, "ACTIVE");
+            entry.setValue(updated);
+            updatedList.add(updated);
+
+            BuyerStats bs = buyerStats.get(s.buyerId);
+            if (bs != null) {
+                buyerStats.put(s.buyerId, new BuyerStats(s.buyerId, bs.displayNickname, bs.sessionQuantity, bs.sessionAmount + (newAmt - s.amount), bs.totalPurchaseCount, bs.totalPurchaseAmount + (newAmt - s.amount)));
+            }
+
+            pJobs.add(new PrintJobInfo(UUID.randomUUID().toString(), "QUEUED", s.id, s.buyerNickname, newAmt));
+        }
+
+        summary = new SalesSummary(summary.sessionQuantity, 75000L);
+        callback.onSuccess(new CommitProductChangeResult(activeProduct, updatedList, summary, new HashMap<>(buyerStats), pJobs));
     }
 }
