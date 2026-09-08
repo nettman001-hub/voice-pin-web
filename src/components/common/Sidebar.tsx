@@ -51,6 +51,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
       groupName: '라이브 방송 관제',
       items: [
         { name: '라이브 청취 홈', path: '/live', icon: Radio, badge: isListening ? 'ON AIR' : undefined },
+        { name: '상품 판매 관리', path: '/seller/product-sales', icon: ShoppingBag },
         { name: '음성인식 훈련 (학습)', path: '/voice-training', icon: Sparkles },
         { name: '캡처 영역 & 단어 규칙', path: '/recognition-rules', icon: Sliders },
       ]

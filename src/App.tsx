@@ -29,7 +29,9 @@ import { CaptureViewerModal } from './pages/seller/CaptureViewerModal';
 import { InvoiceManagementPage } from './pages/seller/InvoiceManagementPage';
 import { ShipmentManagementPage } from './pages/seller/ShipmentManagementPage';
 import { DeviceManagementPage } from './pages/seller/DeviceManagementPage';
+import { ProductSalesPage } from './pages/seller/ProductSalesPage';
 import { CommerceProvider } from './context/CommerceContext';
+import { ProductSalesProvider } from './context/ProductSalesContext';
 
 import { PlanSelectionPage } from './pages/subscription/PlanSelectionPage';
 import { PaymentPage } from './pages/subscription/PaymentPage';
@@ -114,39 +116,42 @@ export const App: React.FC = () => {
       <AuthProvider>
         <SalesProvider>
           <CommerceProvider>
-          <LiveProvider>
-            <CommentCaptureProvider>
-              <AppDataProvider>
-                <AppLayout>
-                <Routes>
-                  {/* 루트 리다이렉트 */}
-                  <Route path="/" element={<RootRedirect />} />
+            <ProductSalesProvider>
+              <LiveProvider>
+                <CommentCaptureProvider>
+                  <AppDataProvider>
+                    <AppLayout>
+                      <Routes>
+                        {/* 루트 리다이렉트 */}
+                        <Route path="/" element={<RootRedirect />} />
 
-                  {/* 1. 시작 및 인증 (PG-001 ~ PG-005) */}
-                  <Route path="/onboarding" element={<OnboardingPage />} />
-                  <Route path="/login" element={<LoginPage />} />
-                  <Route path="/signup" element={<SignupPage />} />
-                  <Route path="/password/reset" element={<PasswordResetPage />} />
-                  <Route path="/pricing" element={<PricingPage />} />
-                  <Route path="/privacy" element={<PrivacyPolicyPage />} />
+                        {/* 1. 시작 및 인증 (PG-001 ~ PG-005) */}
+                        <Route path="/onboarding" element={<OnboardingPage />} />
+                        <Route path="/login" element={<LoginPage />} />
+                        <Route path="/signup" element={<SignupPage />} />
+                        <Route path="/password/reset" element={<PasswordResetPage />} />
+                        <Route path="/pricing" element={<PricingPage />} />
+                        <Route path="/privacy" element={<PrivacyPolicyPage />} />
 
-                  <Route element={<ProtectedRoute />}>
-                    {/* 2. 판매자 핵심 기능 (PG-006 ~ PG-013) */}
-                    <Route path="/live" element={<LiveHomePage />} />
-                    <Route path="/voice-training" element={<VoiceTrainingPage />} />
-                    <Route path="/training" element={<VoiceTrainingPage />} />
-                    <Route path="/recognition-rules" element={<RecognitionRulesPage />} />
-                    <Route path="/rules" element={<RecognitionRulesPage />} />
-                    <Route path="/comments" element={<CommentRecordsPage />} />
-                    <Route path="/sales" element={<SalesListPage />} />
-                    <Route path="/sales/:id" element={<SalesDetailPage />} />
-                    <Route path="/sales/:id/capture" element={<CaptureViewerModal />} />
-                    <Route path="/sales/review" element={<SalesReviewPage />} />
-                    <Route path="/invoices" element={<InvoiceManagementPage />} />
-                    <Route path="/shipments" element={<ShipmentManagementPage />} />
-                    <Route path="/settlement" element={<SettlementPage />} />
-                    <Route path="/seller/devices" element={<DeviceManagementPage />} />
-                    <Route path="/devices" element={<DeviceManagementPage />} />
+                        <Route element={<ProtectedRoute />}>
+                          {/* 2. 판매자 핵심 기능 (PG-006 ~ PG-013) */}
+                          <Route path="/live" element={<LiveHomePage />} />
+                          <Route path="/seller/product-sales" element={<ProductSalesPage />} />
+                          <Route path="/sales/product" element={<ProductSalesPage />} />
+                          <Route path="/voice-training" element={<VoiceTrainingPage />} />
+                          <Route path="/training" element={<VoiceTrainingPage />} />
+                          <Route path="/recognition-rules" element={<RecognitionRulesPage />} />
+                          <Route path="/rules" element={<RecognitionRulesPage />} />
+                          <Route path="/comments" element={<CommentRecordsPage />} />
+                          <Route path="/sales" element={<SalesListPage />} />
+                          <Route path="/sales/:id" element={<SalesDetailPage />} />
+                          <Route path="/sales/:id/capture" element={<CaptureViewerModal />} />
+                          <Route path="/sales/review" element={<SalesReviewPage />} />
+                          <Route path="/invoices" element={<InvoiceManagementPage />} />
+                          <Route path="/shipments" element={<ShipmentManagementPage />} />
+                          <Route path="/settlement" element={<SettlementPage />} />
+                          <Route path="/seller/devices" element={<DeviceManagementPage />} />
+                          <Route path="/devices" element={<DeviceManagementPage />} />
 
                     {/* 3. 구독 섹션 (PG-014 ~ PG-017) */}
                     <Route path="/subscription" element={<Navigate to="/subscription/plans" replace />} />
@@ -187,6 +192,7 @@ export const App: React.FC = () => {
               </AppDataProvider>
             </CommentCaptureProvider>
           </LiveProvider>
+          </ProductSalesProvider>
           </CommerceProvider>
         </SalesProvider>
       </AuthProvider>

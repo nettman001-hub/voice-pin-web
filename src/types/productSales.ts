@@ -1,4 +1,4 @@
-﻿export type IdentityStatus = 'VERIFIED' | 'MANUAL_CONFIRMED' | 'UNRESOLVED';
+export type IdentityStatus = 'VERIFIED' | 'MANUAL_CONFIRMED' | 'UNRESOLVED';
 export type ImageKind = 'PHOTO' | 'NUMBER_IMAGE';
 export type RecordState = 'ACTIVE' | 'CANCELLED';
 export type PrintJobStatus = 'QUEUED' | 'CLAIMED' | 'SUBMITTING' | 'SUBMITTED' | 'FAILED' | 'UNKNOWN' | 'CANCELLED';
@@ -148,3 +148,47 @@ export interface CommonApiResponse<T = unknown> {
   data?: T;
   error?: ApiError;
 }
+
+export interface CommitSaleBuyer {
+  buyerId: string;
+  quantity: number;
+  sourceCommentIds?: string[];
+}
+
+export interface ProductSalesBootstrapData {
+  workspaceId: string;
+  settings: ProductSalesSettings;
+  activeSession: LiveSession | null;
+  activeProduct: Product | null;
+  printerStatus: {
+    outputDeviceId: string | null;
+    outputDeviceName: string | null;
+    online: boolean;
+    queuedJobsCount: number;
+  };
+  permissions: string[];
+}
+
+export interface ProductSalesFeedData {
+  comments: LiveComment[];
+  buyerStats: Record<string, BuyerStats>;
+  summary: SessionSummary;
+  activeProduct: Product | null;
+  sessionRevision: number;
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export interface ProductSalesResult {
+  operationId: string;
+  status: 'SUCCEEDED' | 'PROCESSING' | 'FAILED';
+  sales: Sale[];
+  summary: SessionSummary;
+  buyerStats: Record<string, BuyerStats>;
+  printJobs: PrintJob[];
+}
+
+export type ProductSalesProduct = Product;
+export type ProductSalesSession = LiveSession;
+export type ProductSalesDraft = ProductDraft;
+
