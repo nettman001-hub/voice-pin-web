@@ -51,8 +51,8 @@
 | CORE-06 | PASS | `67f0d95` | `src/services/voiceSaleCandidate.ts`, `ProductRegistrationPreview.tsx`: 2.5초 카운트다운, 수정 중 일시정지/재개, 단가 누락 시 ERROR 검증, `test/candidate-sales.test.mjs` (3개 테스트 통과) | 없음 |
 | CORE-07 | PASS | `67f0d95` | `commit-sales` handler 및 `ProductSalesContext`: 멱등성(동일 operationId), PRICE_REQUIRED 단가 검증, 동일 구매자 댓글 1인 합산, COMMENT_ALREADY_COMMITTED 중복 방지, `test/candidate-sales.test.mjs` (5개 테스트 통과) | 없음 |
 | CORE-08 | PASS | `67f0d95` | `src/pages/seller/ProductSalesPage.tsx`: 상품 중심 판매관리 페이지, 0007 선행 0 보존 모달, 실시간 댓글 피드 및 수량 증감, 하단 스티키 합계 바, `Sidebar.tsx` 메뉴 연동, `test/candidate-sales.test.mjs` (3개 음성명령 파싱 테스트 통과), `npm run build` (tsc & vite) 성공 | 없음 |
-| CORE-09 | PASS | 진행중 | `preview-product-change`, `commit-product-change`: 단가 일괄 수정(20,000원→25,000원, 60,000원→75,000원), 기존 판매 ID 보존 및 revision 증가, sale_revisions 이력 기록, CORRECTION 전표 발행, REVISION_CONFLICT/PREVIEW_EXPIRED 검증, `test/product-change.test.mjs` (4개 테스트 통과), 전체 `npm test` (44/44 통과) | 없음 |
-| CORE-10 | PASS | 진행중 | `supabase/functions/sales-api/handlers/print.ts`, `server/printJobStore.js`, `server/cloudPrintWorker.js`: 30초 lease/10초 갱신, begin-print-job 서버 동기화 후 spool, acknowledge-print-job, 멱등 hash 중복 방지, UNKNOWN 예외 보존, 전표 템플릿 확장, `server/` 내 `npm test` (11/11 통과), `desktop/comment-helper/` `npm test` (5/5 통과) 및 `npm run stage` 성공 | 실제 하드웨어 인쇄 출력은 미검증으로 기록 |
+| CORE-09 | PASS | `c5daf2f` | `preview-product-change`, `commit-product-change`: 단가 일괄 수정(20,000원→25,000원, 60,000원→75,000원), 기존 판매 ID 보존 및 revision 증가, sale_revisions 이력 기록, CORRECTION 전표 발행, REVISION_CONFLICT/PREVIEW_EXPIRED 검증, `test/product-change.test.mjs` (4개 테스트 통과), 전체 `npm test` (44/44 통과) | 없음 |
+| CORE-10 | PASS | `c5daf2f` | `supabase/functions/sales-api/handlers/print.ts`, `server/printJobStore.js`, `server/cloudPrintWorker.js`: 30초 lease/10초 갱신, begin-print-job 서버 동기화 후 spool, acknowledge-print-job, 멱등 hash 중복 방지, UNKNOWN 예외 보존, 전표 템플릿 확장, `server/` 내 `npm test` (11/11 통과), `desktop/comment-helper/` `npm test` (5/5 통과) 및 `npm run stage` 성공 | 실제 하드웨어 인쇄 출력은 미검증으로 기록 |
 | ANDROID-07 | NOT_STARTED |  |  |  |
 | ANDROID-08 | NOT_STARTED |  |  |  |
 | ANDROID-09 | NOT_STARTED |  |  |  |
