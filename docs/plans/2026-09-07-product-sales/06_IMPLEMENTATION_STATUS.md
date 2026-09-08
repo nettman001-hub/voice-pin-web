@@ -10,10 +10,10 @@
 | --- | --- |
 | 상태 | PASS |
 | 현재 체크포인트 | G4 (완료) |
-| 작업 경로 | C:\dev\voicecap-web |
-| 기능 브랜치 | `codex/product-sales-single-agent` |
+| 작업 경로 | C:\dev\voice-pin-anti |
+| 기능 브랜치 | `main` |
 | 시작 HEAD | `49f6cf0` |
-| origin/main | `ad97ca2` (local main is 1 commit ahead: `49f6cf0`) |
+| origin/main | `cc811a8` (운영 배포 기준 커밋) |
 | 작업 트리 | clean (시작 시 변경사항 없음) |
 | 계약 버전 | 1 |
 | API 버전 | 1 |
@@ -78,12 +78,13 @@
 
 | 대상 | 상태 | 적용 버전·환경 | 증거·복구 방법 |
 | --- | --- | --- | --- |
-| migration | NOT_STARTED | 배포 전 승인 필요 |  |
-| RPC·RLS | NOT_STARTED | 배포 전 승인 필요 |  |
-| sales-api Edge Function | NOT_STARTED | 배포 전 승인 필요 |  |
-| PC 도우미 | NOT_STARTED | 배포 전 승인 필요 |  |
-| 웹 | NOT_STARTED | 배포 전 승인 필요 |  |
-| Android | NOT_STARTED | 배포 전 승인 필요 |  |
+| migration | PASS | Supabase `ymegrhxpbeanvxwdzfym` | `202609050002`, `202609080001` 적용 및 전체 마이그레이션 이력 일치 확인 |
+| RPC·RLS | PASS | 운영 Postgres | 상품/STT 테이블 200, 익명 관리자 RPC 401/42501 확인 |
+| sales-api Edge Function | PASS | v1 ACTIVE | 인증 없는 bootstrap 요청 401/AUTH_REQUIRED 확인 |
+| PC 도우미 | PASS | GitHub Release v1.3.5 | 설치 EXE, blockmap, latest.yml, 오프라인 STT 설치 스크립트 게시 완료 |
+| 웹 | PASS | Vercel Production `cc811a8` | Ready 및 `voicecap.shop`, `www.voicecap.shop` alias 확인 |
+| Android GitHub Release | PASS | v1.3.2 | 기존 업로드 키로 서명한 APK/AAB 게시 및 로컬 서명 검증 완료 |
+| Android Google Play | BLOCKED | Play Console 개발자 계정 없음 | 개발자 계정과 운영자 정보 등록 후 내부 테스트 트랙에 AAB 업로드 필요 |
 
 `main` push, 운영 DB 변경, Edge Function 배포, 설치 파일 배포, Play 배포는 코드 완료와 별도다. 사용자 승인 없이 이 표의 배포 상태를 `PASS`로 변경하지 않는다.
 

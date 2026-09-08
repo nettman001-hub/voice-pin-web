@@ -15,7 +15,7 @@
 | 소스 | 브랜치 codex/product-sales-single-agent, commit e63ae4 |
 | 웹 | vite v6.4.3 build 성공 (dist/ 생성, tsc 통과) |
 | 서버 | migration 202609080001_product_sales_core.sql, sales-api v1 |
-| Android | APK/AAB 1.3.1 (versionCode 5), compileSdk 35, targetSdk 36, minSdk 26 |
+| Android | APK/AAB 1.3.2 (versionCode 6), compileSdk 35, targetSdk 36, minSdk 26 |
 | PC | voicecap-comment-helper 1.3.4, Windows 11 x64, Vulkan/DirectX12 지원 |
 | 출력 | ESC-POS 50x30 / 80mm 전표 템플릿, CloudPrintWorker (물리 인쇄: 미검증) |
 | 음성 | Soniox / Deepgram / Whisper-Vulkan 로컬 STT 브릿지 (테스트 이벤트 주입) |

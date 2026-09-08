@@ -1,12 +1,12 @@
 # VoiceCAP 프로젝트 통합 인계인수서 (Handover Document)
 
-> **최종 개정일**: 2026년 9월 8일 (Asia/Seoul)  
+> **최종 개정일**: 2026년 9월 9일 (Asia/Seoul)
 > **프로젝트**: VoiceCAP (라이브 커머스 상품 중심 판매관리 + 실시간 댓글 수집 + 감열식 영수증 자동 출력 + 모바일 SMS/판매 브리지 + 오프라인 하이브리드 STT)  
 > **공식 저장소**: [https://github.com/nettman001-hub/voice-pin-web](https://github.com/nettman001-hub/voice-pin-web)  
 > **운영 브랜치**: `main` (Vercel 프로덕션 자동 배포 연동)  
 > **작업 브랜치**: `codex/product-sales-single-agent`  
 > **운영 웹 주소**: [https://www.voicecap.shop](https://www.voicecap.shop)  
-> **최신 릴리스**: 데스크톱 도우미 `v1.3.4` / 안드로이드 앱 `v1.3.1`  
+> **최신 릴리스**: 데스크톱 도우미 `v1.3.5` / 안드로이드 앱 `v1.3.2`
 
 ---
 
@@ -36,8 +36,8 @@ VoiceCAP은 라이브 커머스 판매자를 위한 **실시간 댓글 수집·�
 | **Vercel 프로젝트** | `voice-pin-web` | 도메인: `www.voicecap.shop`, `voicecap.shop` |
 | **Supabase 프로젝트** | `ymegrhxpbeanvxwdzfym` (sermon-guide-db 공유) | 위치: `https://ymegrhxpbeanvxwdzfym.supabase.co` |
 | **Edge Functions** | `sales-api`, `voicecap-onboard`, `device-pair`, `sms-bridge` | Base URL: `.../functions/v1` |
-| **데스크톱 도우미** | `desktop/comment-helper` (v1.3.4) | Electron 44, Windows x64 NSIS 인스톨러 |
-| **안드로이드 앱** | `android/voicecapSMS` (v1.3.1, `shop.voicecap.smsbridge`) | Java 17, compileSdk 35 / targetSdk 35 (Android 15) |
+| **데스크톱 도우미** | `desktop/comment-helper` (v1.3.5) | Electron 44, Windows x64 NSIS 인스톨러 |
+| **안드로이드 앱** | `android/voicecapSMS` (v1.3.2, `shop.voicecap.smsbridge`) | Java 17, compileSdk 35 / targetSdk 36 |
 | **공통 규격** | `contracts/product-sales/v1/` | JSON Schema v1 및 44개 자동 검증 테스트 완비 |
 
 ---
@@ -48,7 +48,7 @@ VoiceCAP은 라이브 커머스 판매자를 위한 **실시간 댓글 수집·�
 ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
 │                                 VoiceCAP 통합 플랫폼 아키텍처                                   │
 ├──────────────────────────────┬──────────────────────────────┬───────────────────────────────┤
-│    🌐 웹 프론트엔드 (Vercel)    │   ☁️ 클라우드 백엔드 (Supabase)  │    📱 안드로이드 앱 (v1.3.1)    │
+│    🌐 웹 프론트엔드 (Vercel)    │   ☁️ 클라우드 백엔드 (Supabase)  │    📱 안드로이드 앱 (v1.3.2)    │
 │  React 18 + TS + Vite + TW   │   Postgres RLS + Edge Funcs  │  Java 17 + AndroidX + Camera  │
 ├──────────────────────────────┼──────────────────────────────┼───────────────────────────────┤
 │ • 실시간 방송 댓글/판매 대시보드│ • /sales-api (13개 공통 액션)│ • 🛍 판매관리 탭               │
@@ -61,10 +61,10 @@ VoiceCAP은 라이브 커머스 판매자를 위한 **실시간 댓글 수집·�
                │ WebSocket (포트 2137)        │ HTTPS (X-Device-Token)        │ HTTPS
                ▼                              ▼                               ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
-│                          🖥️ PC 데스크톱 댓글 도우미 (desktop/comment-helper v1.3.4)          │
+│                          🖥️ PC 데스크톱 댓글 도우미 (desktop/comment-helper v1.3.5)          │
 ├─────────────────────────────────────────────────────────────────────────────────────────────┤
 │ • 틱톡 라이브 웹소켓 실시간 댓글 수집 (tiktok-live-connector + eulerstream_key.txt)         │
-│ • 클라우드 인쇄 큐 폴링 워커 (salesPrintWorker.cjs / salesPrintBridge.js)                    │
+│ • 클라우드 인쇄 큐 폴링 워커 (server/cloudPrintWorker.js / server/printJobStore.js)          │
 │ • Windows 감열식 라벨/영수증 자동 출력 (Xprinter, 50x30, 80mm ESC/POS 및 텍스트 래스터)       │
 │ • 하이브리드 오프라인 STT 엔진 (server/sttBridge.js):                                        │
 │   - AMD RX 6800 XT / Intel: whisper.cpp Vulkan 가속 (server/bin/whisper-vulkan/, 포트 2139) │
@@ -156,7 +156,7 @@ VITE_VOICECAP_API_BASE_URL=https://ymegrhxpbeanvxwdzfym.supabase.co/functions/v1
 위치: `C:\dev\voicecap-web\server\.env`
 ```dotenv
 PORT=2137
-SMS_BRIDGE_API_KEY=voicecap-bridge-secure-key-2026
+SMS_BRIDGE_API_KEY=<generate-a-strong-unique-key>
 TIKTOK_ROOM_ID=
 ```
 
@@ -244,7 +244,7 @@ cd C:\dev\voicecap-web\android\voicecapSMS
 
 ### 마이그레이션 파일 목록
 1. `supabase/migrations/202608300001_initial_multitenant.sql`: 멀티테넌트 기본 테이블 (`workspaces`, `workspace_members`, `profiles`, `workspace_settings`).
-2. `supabase/migrations/20260907_product_sales.sql`: **상품 중심 판매관리 테이블**:
+2. `supabase/migrations/202609080001_product_sales_core.sql`: **상품 중심 판매관리 테이블**:
    - `sessions`: 방송 회차 정보 및 낙관적 락 버전(`revision`).
    - `products`: 상품 정보, 단가(`unit_price`), 이미지 종류(`image_kind`: PHOTO / NUMBER_IMAGE), `revision`, `sales_revision`.
    - `sales`: 구매자별 판매 내역, 단가, 수량, 주문 상태(`ACTIVE` / `CANCELLED`), 출처 댓글 목록(`source_comment_ids`).
@@ -285,10 +285,10 @@ npm run upload  # GitHub Releases로 VoiceCAP-Comment-Helper-Setup.exe 자동 �
 
 ### 7.3 안드로이드 앱 설치 파일 배포
 - **실기기 테스트용 APK 파일 위치**:
-  `C:\dev\voicecap-web\android\voicecapSMS\build\voicecap-sms-v1.3.1-install.apk` (약 917 KB)
+  `C:\dev\voicecap-web\android\voicecapSMS\build\voicecap-sms-v1.3.2-install.apk` (약 697 KB)
 - **설치 명령어 (USB 연결 시)**:
   ```powershell
-  adb install -r C:\dev\voicecap-web\android\voicecapSMS\build\voicecap-sms-v1.3.1-install.apk
+  adb install -r C:\dev\voicecap-web\android\voicecapSMS\build\voicecap-sms-v1.3.2-install.apk
   ```
 - **스토어 배포**: `app-release.aab` 파일을 Google Play Console의 내부 테스트 트랙에 업로드합니다.
 

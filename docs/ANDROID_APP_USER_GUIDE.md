@@ -1,4 +1,4 @@
-# VoiceCAP Android 앱 상세 기능 설명서 (v1.3.1)
+# VoiceCAP Android 앱 상세 기능 설명서 (v1.3.2)
 
 본 문서는 **VoiceCAP(보이스캡)** 라이브 커머스 판매관리 및 SMS 브리지 Android 전용 앱(`shop.voicecap.smsbridge`)의 전체 아키텍처, 화면별 기능, 상세 조작 방법 및 예외 처리 가이드를 제공합니다.
 
@@ -237,7 +237,7 @@ VoiceCAP Android 앱은 라이브 방송 중 스마트폰을 통해 **실시간 
 개발 및 테스트에 바로 사용할 수 있도록 다음 패키지가 빌드되어 있습니다.
 
 - **설치용 디버그 APK** (테스트 폰 설치용):
-  - 파일 경로: `C:\dev\voicecap-web\android\voicecapSMS\build\voicecap-sms-v1.3.1-install.apk` (또는 `app\build\outputs\apk\debug\app-debug.apk`)
+  - 파일 경로: `C:\dev\voicecap-web\android\voicecapSMS\build\voicecap-sms-v1.3.2-install.apk` (또는 `app\build\outputs\apk\release\app-release.apk`)
   - 용량: 약 917 KB
 - **배포용 Google Play 번들 (AAB)**:
   - 파일 경로: `C:\dev\voicecap-web\android\voicecapSMS\app\build\outputs\bundle\release\app-release.aab`
@@ -249,7 +249,7 @@ VoiceCAP Android 앱은 라이브 방송 중 스마트폰을 통해 **실시간 
 1. **ADB 명령어를 통한 직접 설치 (권장)**:
    스마트폰을 USB로 PC에 연결(USB 디버깅 허용)한 후 PowerShell에서 다음 명령을 실행합니다.
    ```powershell
-   adb install -r C:\dev\voicecap-web\android\voicecapSMS\build\voicecap-sms-v1.3.1-install.apk
+   adb install -r C:\dev\voicecap-web\android\voicecapSMS\build\voicecap-sms-v1.3.2-install.apk
    ```
 2. **스마트폰 파일 전송을 통한 설치**:
    - APK 파일을 카카오톡 나에게 보내기나 USB 복사를 통해 스마트폰의 `다운로드(Download)` 폴더에 넣습니다.
