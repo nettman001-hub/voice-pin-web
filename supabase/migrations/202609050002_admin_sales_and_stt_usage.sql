@@ -86,10 +86,13 @@ as $$
   join public.workspaces w on w.id = s.workspace_id
   left join public.profiles p on p.id = w.owner_id
   left join auth.users u on u.id = w.owner_id
+  where auth.role() = 'service_role'
+     or coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'ADMIN'
   order by s.recognized_at desc;
 $$;
 
-grant execute on function public.get_admin_all_sales() to authenticated, anon;
+revoke all on function public.get_admin_all_sales() from public, anon;
+grant execute on function public.get_admin_all_sales() to authenticated, service_role;
 
 -- 3. 관리자 전용 판매자별 STT 사용 시간 요약 RPC 함수
 create or replace function public.get_admin_stt_usage_summary()
@@ -126,11 +129,16 @@ as $$
   left join public.profiles p on p.id = u.id
   left join public.stt_usage_logs l on l.user_id = u.id
   where u.raw_user_meta_data->>'auth_app' = 'voicecap'
+    and (
+      auth.role() = 'service_role'
+      or coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'ADMIN'
+    )
   group by u.id, p.email, u.email, p.display_name, u.raw_user_meta_data, w.id, w.name
   order by total_seconds desc, last_used_at desc nulls last;
 $$;
 
-grant execute on function public.get_admin_stt_usage_summary() to authenticated, anon;
+revoke all on function public.get_admin_stt_usage_summary() from public, anon;
+grant execute on function public.get_admin_stt_usage_summary() to authenticated, service_role;
 
 -- 4. 특정 판매자의 STT 사용 세부 로그 조회 RPC 함수
 create or replace function public.get_admin_stt_usage_logs(target_user_id uuid)
@@ -157,8 +165,13 @@ as $$
     l.created_at
   from public.stt_usage_logs l
   where l.user_id = target_user_id
+    and (
+      auth.role() = 'service_role'
+      or coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'ADMIN'
+    )
   order by l.created_at desc
   limit 200;
 $$;
 
-grant execute on function public.get_admin_stt_usage_logs(uuid) to authenticated, anon;
+revoke all on function public.get_admin_stt_usage_logs(uuid) from public, anon;
+grant execute on function public.get_admin_stt_usage_logs(uuid) to authenticated, service_role;

@@ -39,11 +39,11 @@ async function main() {
   const releaseBody = [
     `### VoiceCAP 댓글 도우미 v${version}`,
     '',
-    '- **DirectX 12 / Vulkan GPU 가속 백엔드(whisper.cpp Vulkan 연동) 신규 탑재**: AMD 라데온(RX 6800 XT 등 16GB VRAM) 및 DirectX 12 / Vulkan 지원 그래픽카드에서 100% 네이티브 GPU 가속 완벽 지원',
-    '- **large-v3-turbo 모델 선택 시 Vulkan GPU 초고속 실시간 연산**: AMD 환경에서 large-v3-turbo 모델을 16GB VRAM에 상주시켜 0.2~0.4초대 초고속 전사 (CPU 대비 15~20배 속도 향상, 오디오 청크 유실 0개 달성)',
-    '- **하이브리드 듀얼 GPU 가속 엔진**: NVIDIA 환경은 CUDA 12 Tensor Core FP16 가속, AMD 및 범용 환경은 DirectX 12 / Vulkan GPU 가속 자동 선택',
-    '- **오프라인 STT 로딩 무한 반복 방지 및 에러 복구 강화**: 상태 동기화 및 무한 재시작 방지 루프 차단기 적용',
-    '- **도우미 및 웹앱 UI 연동**: ⚡ AMD Radeon RX 6800 XT (Vulkan GPU 가속) 배지 및 실시간 상태 동기화'
+    '- **클라우드 댓글 수집 연동**: 플랫폼 댓글 ID, 사용자 ID, 닉네임과 원문을 상품 판매 피드로 안정적으로 전달',
+    '- **판매·정정 전표 자동 출력**: 클라우드 인쇄 큐의 lease, spool, acknowledge 흐름과 중복 출력 방지 적용',
+    '- **불확실한 출력 결과 보호**: 프린터 응답이 불명확하면 UNKNOWN으로 보존하고 자동 재출력하지 않도록 처리',
+    '- **Vulkan GPU 오프라인 STT 포함**: DirectX 12/Vulkan 지원 환경의 whisper.cpp 가속 바이너리 패키징',
+    '- **기존 판매 기록 호환**: productId가 없는 이전 판매 데이터와 신규 상품 중심 판매 흐름을 함께 지원'
   ].join('\n');
 
   const headers = {
