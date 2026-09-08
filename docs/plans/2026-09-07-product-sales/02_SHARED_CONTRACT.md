@@ -1,8 +1,8 @@
 # VoiceCAP 상품 판매 공통 구현 명세
 
-작성일 2026년 9월 7일 · 계약 버전 1 · 담당 개발자 A · 공동 검토 개발자 B
+작성일 2026년 9월 7일 · 단일 에이전트 실행안 개정 2026년 9월 8일 · 계약 버전 1
 
-이 문서는 웹, Android, 서버, PC 댓글 도우미가 같은 상품과 판매를 다루기 위한 구현 계약이다. 아래 테이블과 API는 이번 개발에서 추가할 설계이며 현재 운영에 존재하는 API가 아니다. 개발자 B는 이 문서의 JSON을 기준으로 Android 화면을 먼저 만들고, A는 같은 형식으로 서버를 구현한다. 계약 변경은 두 사람이 합의한 후 문서와 예제부터 함께 갱신한다.
+이 문서는 웹, Android, 서버, PC 댓글 도우미가 같은 상품과 판매를 다루기 위한 구현 계약이다. 아래 테이블과 API는 이번 개발에서 추가할 설계이며 현재 운영에 존재하는 API가 아니다. 하나의 Antigravity 에이전트가 먼저 이 문서에서 JSON Schema와 fixture를 확정하고, 서버와 각 클라이언트를 같은 형식으로 순차 구현한다. 계약 변경은 코드보다 이 문서, Schema, fixture와 변경 기록을 먼저 갱신한 뒤 모든 구성요소에 반영한다.
 
 ## 1 확정된 업무 규칙
 
@@ -304,11 +304,11 @@ PC 수집기는 원본 user ID와 메시지 ID를 보존해 0.5초 단위 또는
 
 이미지는 앱 전용 임시파일, private storage, 만료되는 서명 URL을 사용한다. 업로드용 URL은 인증된 draft 경로에만 발급한다. 기본 JPEG 긴 변 1280px, 최대 2MB를 제안한다. 번호이미지는 PNG로 저장한다. 상품등록 완료 전 서버가 경로 소유권·MIME·실제 파일·크기와 업로드 상태를 검증한다. draft 취소·만료 후 미참조 파일을 정리하되 판매나 수정 이력이 참조하는 이미지는 삭제하지 않는다.
 
-## 12 A가 먼저 제공할 계약 테스트 자료
+## 12 에이전트가 먼저 확정할 계약 테스트 자료
 
 `contracts/product-sales/v1/`에 정상 bootstrap, 댓글 feed, 판매 성공, 수정 preview와 성공, 권한 거절, revision 충돌, 응답 유실 재조회, 출력 대기·확인필요 예제를 만든다. 이 위치는 개발 시 생성할 예정 경로다. 금액 예제는 05_ACCEPTANCE_TESTS.md의 계산과 일치해야 한다.
 
-API 명칭, 대소문자, 필수 필드, null 허용, 페이지 커서, 오류코드, max/min은 A가 fixture와 JSON Schema로 확정한다. B는 FakeSalesRepository가 이 fixture를 읽도록 하며 임의로 응답을 새로 만들지 않는다. 계약을 바꾸면 버전 변경 또는 하위호환 규칙을 함께 기록한다.
+API 명칭, 대소문자, 필수 필드, null 허용, 페이지 커서, 오류코드, max/min은 서버 구현 전에 fixture와 JSON Schema로 확정한다. Android의 FakeSalesRepository와 웹 테스트도 이 공통 fixture를 읽도록 하며 구성요소별로 다른 응답을 만들지 않는다. 계약을 바꾸면 버전 변경 또는 하위호환 규칙과 영향을 받는 서버·웹·Android·도우미 테스트를 함께 기록한다.
 
 ## 13 공식 참고자료
 
@@ -318,4 +318,4 @@ API 명칭, 대소문자, 필수 필드, null 허용, 페이지 커서, 오류�
 - CameraX 촬영: https://developer.android.com/media/camera/camerax/take-photo
 - CameraX 생명주기: https://developer.android.com/media/camera/camerax/architecture
 
-확인일은 2026년 9월 7일이다. 라이브러리 버전은 각 개발자의 환경 검증 단계에서 실제 Gradle 또는 npm 조합으로 고정한다.
+최초 확인일은 2026년 9월 7일이다. 라이브러리 버전은 에이전트의 환경 검증 단계에서 실제 Gradle 또는 npm 조합으로 고정한다.

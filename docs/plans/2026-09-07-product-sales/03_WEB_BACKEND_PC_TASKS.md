@@ -1,8 +1,8 @@
-# 개발자 A 작업지시서: 웹·서버·PC 도우미
+# 단일 에이전트 작업지시서: 공통 계약·웹·서버·PC 도우미
 
-작성일 2026년 9월 7일 · 작업 기준 [공통 계약](02_SHARED_CONTRACT.md) 버전 1
+작성일 2026년 9월 7일 · 단일 에이전트 실행안 개정 2026년 9월 8일 · 작업 기준 [공통 계약](02_SHARED_CONTRACT.md) 버전 1
 
-이 문서는 구현 순서와 완료 기준이다. 현재 완료된 기능을 설명하는 문서가 아니다. A는 웹, Supabase, PC 수집·인쇄 도우미와 계약 fixture를 맡는다. Android 코드는 B만 수정하며, A는 B에게 API와 예제 데이터를 제공한다. 상품·판매·수정·출력을 같은 서버 상태로 연결하는 것이 이번 작업의 완료 조건이다.
+이 문서는 하나의 Antigravity 에이전트가 공통 계약, 웹, Supabase, PC 수집·인쇄 도우미를 구현하는 순서와 완료 기준이다. 현재 완료된 기능을 설명하는 문서가 아니다. Android 작업은 [Android 작업지시서](04_ANDROID_TASKS.md)에 따라 같은 에이전트가 별도 단계에서 수행한다. 상품·판매·수정·출력을 같은 서버 상태로 연결하는 것이 이번 작업의 완료 조건이다.
 
 ## 1 작업 범위와 시작 조건
 
@@ -11,7 +11,7 @@
 - 먼저 공통 계약 전체를 읽는다. API action, 오류코드, 금액 범위, revision, 출력 상태를 임의로 바꾸지 않는다.
 - 한 티켓씩 구현하고 완료 증거를 남긴다. 표의 신규 경로는 생성 예정이며 이미 존재한다고 가정하지 않는다.
 - 운영 DB·Edge Function·릴리스 변경은 로컬 코드 작성과 별도 단계다. 실제 배포 전에 6절 검토 관문을 통과한다.
-- 각 단계에서 브랜치·작업 트리·현재 배포 버전을 확인하고, 다른 개발자의 변경은 보존한다.
+- 각 단계에서 브랜치·작업 트리·현재 배포 버전을 확인하고, 기존 변경과 사용자 작업을 보존한다.
 
 ## 2 기존 파일 지도와 신규 파일 계획
 
@@ -38,11 +38,11 @@
 
 ## 3 순서와 티켓
 
-A-01 → A-02 → A-03을 먼저 완료해 B가 사용할 계약과 서버 기반을 고정한다. 이후 상품·댓글 API와 웹 화면, 도우미 작업을 이어간다. A-09 이후의 금액 수정과 A-10 출력은 반드시 함께 통합 검증한다.
+[Android 작업지시서](04_ANDROID_TASKS.md)의 `ANDROID-01`에서 기존 Android·SMS 기준을 먼저 기록한다. 이어서 `CORE-01` → `CORE-02` → `CORE-03` → `CORE-04` → `CORE-05`를 완료해 모든 클라이언트가 사용할 계약과 서버 기반을 고정한다. 이후 `ANDROID-02`부터 `ANDROID-06`까지 fixture 기반 작업을 수행한 뒤 이 문서의 `CORE-06`으로 돌아온다. `CORE-09`의 금액 수정과 `CORE-10`의 출력은 반드시 함께 통합 검증한다.
 
-### A-01 계약 fixture와 경계 확정
+### CORE-01 계약 fixture와 경계 확정
 
-선행 조건: 공통 계약 전체를 읽고 B와 응답 형식, null, 필수 필드를 확인했다.
+선행 조건: 공통 계약 전체를 읽고 서버·웹·Android 관점에서 응답 형식, null, 필수 필드를 대조했다.
 
 1. 신규 `contracts/product-sales/v1/`에 요청·응답 JSON Schema와 정상/오류 fixture를 만든다.
 2. 모든 예제 ID는 유효 UUID를 사용한다. 기존 text sale ID와 새 UUID 상품 ID의 구분을 유지한다.
@@ -51,19 +51,19 @@ A-01 → A-02 → A-03을 먼저 완료해 B가 사용할 계약과 서버 기�
 5. `operationId`, request hash, `expectedProductRevision`, `expectedSessionRevision`, `expectedSalesRevision`, 각 sale revision의 역할을 예제에 표시한다.
 6. 댓글 cursor의 신규 조회/과거 페이지 구분과 `renew-print-lease`의 요청·응답을 fixture에 포함한다.
 7. 동일 구매자 댓글 두 개·수량 1, 수량 2, 가격 일괄 수정, 응답 유실 후 조회, UNKNOWN 출력 예제를 만든다.
-8. 공통 계약과 인수 테스트의 금액 계산을 대조하고 B의 FakeSalesRepository 입력 자료로 전달한다.
+8. 공통 계약과 인수 테스트의 금액 계산을 대조하고 Android FakeSalesRepository 입력 자료로 사용할 수 있게 구성한다.
 9. requestedProductCode의 `0007` 보존·예약 번호 재사용 거절, draftRevision 변경, imageFallbackConfirmed, 기존 상품사진 imageId 참조 fixture를 만든다.
 10. MANUAL_CONFIRMED 구매자, watchedBuyerIds 통계만 바뀌는 빈 댓글 응답, get-operation NOT_FOUND, 기기 권한 변경, begin-print-job과 수정 경쟁을 fixture에 포함한다.
 
-산출물: Schema·fixture·변경 이력, B가 확인한 필드/오류 처리표, 필수값이 빠진 fixture를 거절하는 검증 실행 방법.
+산출물: Schema·fixture·변경 이력, 웹·Android·도우미별 필드/오류 처리표, 필수값이 빠진 fixture를 거절하는 검증 실행 방법.
 
-완료 확인: A와 B가 같은 fixture로 합계·수량·오류 화면을 설명할 수 있고, 임의 응답이나 실토큰이 fixture에 없다.
+완료 확인: 서버·웹·Android 모델 관점에서 같은 fixture의 합계·수량·오류를 대조했고, 임의 응답이나 실토큰이 fixture에 없다.
 
-검토 C1: A/B가 상호 검토한 버전으로 후속 티켓을 시작한다. 변경 필요 시 문서·Schema·fixture를 먼저 함께 수정한다. 일정 문서의 G0~G4와 이 문서의 C1~C4는 다른 표기다.
+검토 C1: 구현과 분리된 검토 턴에서 Schema·fixture·action·오류·cursor·계산식을 다시 대조한 뒤 후속 티켓을 시작한다. 변경 필요 시 코드보다 문서·Schema·fixture를 먼저 함께 수정한다. 일정 문서의 G0~G4와 이 문서의 C1~C4는 다른 표기다.
 
-### A-02 추가 migration과 데이터 무결성
+### CORE-02 추가 migration과 데이터 무결성
 
-선행 조건: A-01 완료. 개발 DB와 운영 DB를 구별하고 기존 row 수·관계·권한을 읽기 전용으로 확인했다.
+선행 조건: CORE-01 완료. 개발 DB와 운영 DB를 구별하고 기존 row 수·관계·권한을 읽기 전용으로 확인했다.
 
 1. 새 migration에 `live_sessions`, `products`, `buyers`, `live_comments`, `sale_revisions`, `operations`, `product_change_previews`, `print_jobs`를 정의한다.
 2. `product_drafts`, `product_code_reservations`, `sale_comment_sources`를 추가해 revision 있는 초안·번호 예약·댓글 소비 unique 제약을 실제 저장 구조로 만든다.
@@ -79,9 +79,9 @@ A-01 → A-02 → A-03을 먼저 완료해 B가 사용할 계약과 서버 기�
 
 완료 확인: migration을 빈 개발 DB와 기존 데이터 복제 개발 DB에서 검증하고, SMS·정산서·배송의 sale 참조가 유지된다.
 
-### A-03 인증·RLS·sales-api 기본 구조
+### CORE-03 인증·RLS·sales-api 기본 구조
 
-선행 조건: A-02와 C1 완료. 기존 사용자 인증·기기 토큰 흐름을 이해했다.
+선행 조건: CORE-02와 C1 완료. 기존 사용자 인증·기기 토큰 흐름을 이해했다.
 
 1. 신규 `sales-api` Edge Function을 만들고 `get-bootstrap`부터 구현한다. 응답은 apiVersion 1과 공통 envelope를 따른다.
 2. 웹 Bearer와 기기 토큰을 구분해 검증하고 workspace·actor를 서버에서 결정한다. 클라이언트 sellerId를 권한으로 사용하지 않는다.
@@ -98,9 +98,9 @@ A-01 → A-02 → A-03을 먼저 완료해 B가 사용할 계약과 서버 기�
 
 완료 확인: 다른 workspace ID, 폐기 기기, SMS 전용 기기, 무인증 요청이 모두 적절히 차단된다. 운영 비밀값이 출력되지 않는다.
 
-### A-04 설정·회차·상품등록 API
+### CORE-04 설정·회차·상품등록 API
 
-선행 조건: A-03 완료. 번호이미지를 만들 런타임과 private storage 제한을 확인했다.
+선행 조건: CORE-03 완료. 번호이미지를 만들 런타임과 private storage 제한을 확인했다.
 
 1. `update-settings`에 expectedRevision을 적용하고 명령 단어의 서로 다른 동작 중복을 거절한다.
 2. `start-session`, `end-session`을 구현한다. 탭 이동·STT 정지·재접속은 현재 회차 조회로 복구한다.
@@ -118,9 +118,9 @@ A-01 → A-02 → A-03을 먼저 완료해 B가 사용할 계약과 서버 기�
 
 완료 확인: 사진만/이름만/가격 null 상품, `0007` 보존, 중복·과거 번호 재사용 거절, 촬영 실패 대체 확인, draft 만료·재시도·충돌, 동시 상품 전환이 계약대로 처리된다.
 
-### A-05 클라우드 댓글·구매자 식별·feed
+### CORE-05 클라우드 댓글·구매자 식별·feed
 
-선행 조건: A-03·A-04 완료. 한 회차의 수집 담당 PC와 collector ID 정책을 정했다.
+선행 조건: CORE-03·CORE-04 완료. 한 회차의 수집 담당 PC와 collector ID 정책을 정했다.
 
 1. server/index.js에서 받은 원본 메시지 ID, 안정 user ID, uniqueId를 보존해 cloudCommentPublisher에 넘긴다.
 2. 0.5초 또는 최대 100건 단위로 `ingest-comments`를 호출한다. 전송 전 대기 데이터를 writable userData에 보관하고 서버 수락 후 제거해 재시작에도 같은 원본 ID로 재시도한다.
@@ -137,9 +137,9 @@ A-01 → A-02 → A-03을 먼저 완료해 B가 사용할 계약과 서버 기�
 
 완료 확인: 동일 구매자 반복 댓글은 여러 댓글로 표시되고 구매자 선택은 한 명·기본 수량 1이다. 다른 기기에서 같은 feed와 합계를 읽는다.
 
-### A-06 웹 상품·규칙 화면과 2.5초 후보
+### CORE-06 웹 상품·규칙 화면과 2.5초 후보
 
-선행 조건: A-04·A-05 완료. 저장 API는 A-07 fixture로 먼저 연결할 수 있다.
+선행 조건: CORE-04·CORE-05와 ANDROID-01~ANDROID-06 완료. 저장 API는 CORE-07 fixture로 먼저 연결할 수 있다.
 
 1. 신규 ProductSalesContext와 상품 등록 미리보기에서 현재 회차·활성 상품·사진/번호이미지·가격을 표시한다.
 2. 상품등록/상품캡처/상품번호·상품명/가격·금액/판매완료·구매확정/닉네임을 같은 설정 기반 명령 해석기로 연결한다.
@@ -156,9 +156,9 @@ A-01 → A-02 → A-03을 먼저 완료해 B가 사용할 계약과 서버 기�
 
 완료 확인: 각 공급자에서 같은 멘트가 같은 후보로 보이며, 2.5초 이전 수정·취소와 상품 전환이 잘못된 매출/인쇄를 만들지 않는다.
 
-### A-07 판매 일괄 확정 transaction
+### CORE-07 판매 일괄 확정 transaction
 
-선행 조건: A-02부터 A-05까지 완료. A/B가 DB transaction과 unique 충돌 처리안을 상호 검토했다. 고위험 DB 설계에는 경험자 추가 검토를 권장한다.
+선행 조건: CORE-02부터 CORE-05까지 완료. 구현과 분리된 검토 턴에서 DB transaction과 unique 충돌 처리안을 다시 확인했다. 고위험 DB 설계에는 경험자 추가 검토를 권장한다.
 
 1. `commit-sales`의 구매자 목록을 서버에서 검증한다. 같은 buyer의 여러 댓글은 한 행으로 합치고 수량은 지정값·기본 1로 처리한다.
 2. session ACTIVE, 활성 상품, 설정, expectedSessionRevision, expectedProductRevision, buyer 신원, 근거 댓글 소유권을 확인한다.
@@ -174,9 +174,9 @@ A-01 → A-02 → A-03을 먼저 완료해 B가 사용할 계약과 서버 기�
 
 완료 확인: 2명 구매자 배치의 반복 요청이 2개 판매·2개 원본 출력 작업만 만들고 금액/수량은 한 번만 증가한다.
 
-### A-08 판매 조회·웹 합계·구매자 통계
+### CORE-08 판매 조회·웹 합계·구매자 통계
 
-선행 조건: A-07 완료. 구기록의 buyerId 미연결 범위를 제품 검토자가 확인했다.
+선행 조건: CORE-07 완료. 구기록의 buyerId 미연결 범위를 제품 검토자가 확인했다.
 
 1. `list-session-products`, `get-product-sales`를 구현하고 현재 상품과 판매된 상품을 같은 ID로 탐색한다.
 2. 판매 타입에 quantity, unitPrice, productId, buyerId, revision, recordState와 snapshot을 추가한다. 이름/사진을 키로 쓰지 않는다.
@@ -190,11 +190,11 @@ A-01 → A-02 → A-03을 먼저 완료해 B가 사용할 계약과 서버 기�
 
 산출물: 상품별 판매 화면, 통계 API와 UI, 합계 fixture 대조표.
 
-완료 확인: 웹과 B의 Android 화면이 동일 fixture·실서버에서 같은 수량/합계/구매횟수를 보인다.
+완료 확인: 웹과 Android 화면이 동일 fixture·실서버에서 같은 수량/합계/구매횟수를 보인다.
 
-### A-09 상품·가격·구매자 수정 preview와 commit
+### CORE-09 상품·가격·구매자 수정 preview와 commit
 
-선행 조건: A-07·A-08 완료. 정산서·입금·배송의 연결 영향 표시 정책을 확인했다.
+선행 조건: CORE-07·CORE-08 완료. 정산서·입금·배송의 연결 영향 표시 정책을 확인했다.
 
 1. 기존 상품 사진 교체는 `prepare-product-image`가 발급한 private 업로드에 저장하고 imageId로 preview를 참조한다. `preview-product-change`는 이미지 소유권·검증 상태, proposedProduct/proposedSales, expectedProductRevision/expectedSalesRevision을 검증한다.
 2. 기존 sale의 expectedRevision, 구매자 변경·수량 변경·제외, 추가 구매자의 근거를 검증하고 서버가 전후 총액을 계산한다.
@@ -212,9 +212,9 @@ A-01 → A-02 → A-03을 먼저 완료해 B가 사용할 계약과 서버 기�
 
 완료 확인: 20,000원·수량 2와 1을 25,000원으로 변경하면 총 60,000원에서 75,000원으로 바뀌고 새 매출 행으로 이중 계산되지 않는다.
 
-### A-10 서버 출력 작업과 도우미 영속 큐
+### CORE-10 서버 출력 작업과 도우미 영속 큐
 
-선행 조건: A-07·A-09 완료. 개발용 페어링 기기와 실제 프린터 또는 인쇄 대체 장치를 준비했다.
+선행 조건: CORE-07·CORE-09 완료. 개발용 페어링 기기와 실제 프린터 또는 인쇄 대체 장치를 준비했다.
 
 1. `claim-print-jobs`, `renew-print-lease`, `begin-print-job`, `acknowledge-print-job`, `get-print-status`, `request-reprint`를 공통 action 이름으로 구현한다.
 2. PRINT 권한·지정 기기·lease token을 검사한다. 초기 lease 30초, 처리 중 10초 heartbeat로 갱신한다.
@@ -232,9 +232,9 @@ A-01 → A-02 → A-03을 먼저 완료해 B가 사용할 계약과 서버 기�
 
 완료 확인: 웹창 없이 Android 저장→PC 접수가 가능하며 2대 PC가 같은 job을 동시에 출력하지 않는다. 불명확한 물리 출력은 확인 필요로 남는다.
 
-### A-11 구경로 전환과 패키징
+### CORE-11 구경로 전환과 패키징
 
-선행 조건: A-06부터 A-10까지 통합 완료. workspace별 전환 상태와 지원 도우미 버전을 서버가 판단할 수 있다.
+선행 조건: CORE-06부터 CORE-10과 ANDROID-07부터 ANDROID-10까지 통합 완료. workspace별 전환 상태와 지원 도우미 버전을 서버가 판단할 수 있다.
 
 1. 신규 모드의 SalesContext를 sales-api 응답 중심으로 바꾼다. saveSale 직접 upsert와 addSale 직후 printSale를 함께 끈다.
 2. 원격 판매 갱신 이벤트에서 별도 출력 요청을 만들지 않는다. Realtime은 조회/대기열 갱신 힌트로만 사용한다.
@@ -249,20 +249,20 @@ A-01 → A-02 → A-03을 먼저 완료해 B가 사용할 계약과 서버 기�
 
 완료 확인: 전환한 workspace는 판매 한 번에 서버 job만 생성하고 로컬 직접 인쇄가 중복 실행되지 않는다. 기존 SMS 기능도 유지된다.
 
-### A-12 배포·B 연동·인수
+### CORE-12 배포 준비·전체 연동·인수
 
 선행 조건: 6절 C2·C3 통과. 실제 운영 배포 권한과 대상 Supabase project를 확인했다.
 
 1. 개발 환경에서 migration → RPC/RLS → sales-api → 도우미 → 웹 → Android 연동 순으로 검증한다.
-2. B에게 API 주소·apiVersion·fixture 버전·권한 설정 방법·테스트 계정/기기의 안전한 제공 경로를 전달한다.
+2. API 주소·apiVersion·fixture 버전·권한 설정 방법·테스트 계정/기기의 안전한 사용 경로를 작업 기록에 남기고 Android 실제 연결 설정과 대조한다.
 3. 운영 배포는 DB 백업/적용 계획 확인 → 추가 migration → Edge Function 별도 배포 → 권한/응답 확인 순으로 진행한다.
 4. 호환 가능한 도우미와 웹을 먼저 배포하고, 선택한 시험 workspace만 신규 흐름을 켠 뒤 Android와 함께 검증한다.
 5. Vercel 웹 배포가 Supabase migration이나 sales-api를 배포한다고 가정하지 않는다. 각각 적용 버전·명령 결과·환경을 기록한다.
 6. 문제 발생 시 신규 쓰기 진입을 제어하고 이미 생성된 print_jobs를 먼저 확인한다. 큐 삭제·과거 DB 복원으로 인쇄 상태를 지우지 않는다.
 7. 적용 migration을 급히 drop하거나 기존 sales ID를 되돌리지 않는다. 수정 migration과 호환 코드 배포로 복구 계획을 검토한다.
-8. 수동 인수 시나리오를 A/B가 함께 실행하고 화면·서버 행·operation·job의 ID와 합계를 대조한다.
+8. 수동 인수 시나리오를 별도 검증 턴으로 실행하고 화면·서버 행·operation·job의 ID와 합계를 대조한다.
 
-산출물: 환경별 배포 기록, smoke 결과, B 연동 기록, 운영 복구 안내, 인계 문서 갱신.
+산출물: 환경별 배포 기록, smoke 결과, Android 연동 기록, 운영 복구 안내, 완료·운영 문서 갱신.
 
 완료 확인: 아래 수동 인수와 C4를 통과했다. 로컬 build 성공만으로 전체 기능 완료라고 보고하지 않는다.
 
@@ -292,11 +292,11 @@ DB 검증에는 cross-workspace, 권한 없는 device, 동일 operation 동시 �
 
 ## 6 검토 관문과 완료 보고
 
-- C1 계약: A/B가 Schema·fixture·action·오류·cursor·계산식을 함께 확인한 뒤 구현 시작.
-- C2 서버: A/B가 migration/RLS/service-only RPC/잠금 순서/operation 중복/preview 경쟁을 상호 확인한 뒤 시험 환경 배포. 권한·금액 transaction은 경험자 추가 검토를 권장한다.
-- C3 출력: A/B가 서버 begin 승인·spool 전후 영속 상태·UNKNOWN 복구·lease·구판 취소와 정정 경쟁을 상호 확인한 뒤 실제 프린터 검증. 인쇄 복구 설계는 경험자 추가 검토를 권장한다.
-- C4 인수: A/B와 제품 담당자가 수동 시나리오·구기능·시험 workspace 결과를 확인한 뒤 운영 확대.
+- C1 계약: 구현과 분리된 검토 턴에서 Schema·fixture·action·오류·cursor·계산식을 확인한 뒤 구현 시작.
+- C2 서버: migration/RLS/service-only RPC/잠금 순서/operation 중복/preview 경쟁을 테스트와 검토 체크리스트로 확인한 뒤 시험 환경 배포. 권한·금액 transaction은 경험자 추가 검토를 권장한다.
+- C3 출력: 서버 begin 승인·spool 전후 영속 상태·UNKNOWN 복구·lease·구판 취소와 정정 경쟁을 검토한 뒤 실제 프린터에서 검증. 인쇄 복구 설계는 경험자 추가 검토를 권장한다.
+- C4 인수: 에이전트가 증거를 정리하고 제품 담당자가 수동 시나리오·구기능·시험 workspace 결과를 확인한 뒤 운영 확대.
 
-이 C1~C4는 일정 문서의 G0~G4를 다시 정의하지 않는 기술 확인표다. 별도 세 번째 상근 검토자를 필수 선행 인력으로 두지 않는다. A/B 상호 검토를 기본으로 진행하며 권한·금액·물리 인쇄의 검증 실패나 설명하지 못한 위험이 남으면 해당 부분을 보완하고 경험자 검토를 요청한다.
+이 C1~C4는 일정 문서의 G0~G4를 다시 정의하지 않는 기술 확인표다. 별도 상근 검토자를 필수 선행 인력으로 두지는 않지만, 에이전트는 각 관문에서 구현 대화의 결론을 그대로 신뢰하지 않고 별도의 검토 턴과 재현 가능한 테스트를 수행한다. 권한·금액·물리 인쇄의 검증 실패나 설명하지 못한 위험이 남으면 해당 부분을 보완하고 제품 담당자 또는 경험자 검토를 요청한다.
 
 최종 보고에는 완료 티켓, 변경 파일, 배포된 DB/함수/웹/도우미 버전, 실행 검증, 실제 하드웨어 결과, 남은 제한을 쓴다. 아직 배포하지 않은 항목과 실제 적용된 항목을 분명히 구분한다. 제품 계약을 바꾸거나 운영 전체 전환 범위를 넓힐 필요가 있으면 그 변경안과 영향부터 검토받는다.
