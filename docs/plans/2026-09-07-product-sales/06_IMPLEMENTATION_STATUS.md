@@ -29,7 +29,7 @@
 | --- | --- | --- | --- | --- |
 | G0 | 환경 기준, ANDROID-01, CORE-01 계약 Schema·fixture | PASS | `856a1ff` | ANDROID-01 빌드/테스트 기준 확보, CORE-01 공통 스키마 및 10개 fixture, validate-contracts.test.mjs 8개 테스트 통과, 검토 C1 완료 |
 | G1 | CORE-02~CORE-05 DB·인증·상품·댓글 API | PASS | `fb2be1b` | DB 마이그레이션(11개 테이블·제약조건), sales-api(인증·권한·조작·기기관리), 상품등록/초안만료/0007보존, 클라우드댓글 수집 worker 및 feed API 구현 완료, 웹·서버·계약 테스트 37개 전원 통과 |
-| G2 | ANDROID-02~ANDROID-06, CORE-06~CORE-08 | PASS | 진행중 | Android 판매관리 탭·모델·UI·등록 다이얼로그 전원 통과, 웹 음성 후보 2.5초 카운트다운/수정일시정지/단가검증(CORE-06), commit-sales 멱등성·단가필수·동일구매자합산(CORE-07), 상품판매 페이지·피드UI·라우트(CORE-08), npm test 40/40개 전원 통과 |
+| G2 | ANDROID-02~ANDROID-06, CORE-06~CORE-08 | PASS | `67f0d95` | Android 판매관리 탭·모델·UI·등록 다이얼로그 전원 통과, 웹 음성 후보 2.5초 카운트다운/수정일시정지/단가검증(CORE-06), commit-sales 멱등성·단가필수·동일구매자합산(CORE-07), 상품판매 페이지·피드UI·라우트(CORE-08), npm test 40/40개 전원 통과 |
 | G3 | CORE-09~CORE-10, ANDROID-07~ANDROID-09 | NOT_STARTED |  |  |
 | G4 | ANDROID-10, CORE-11~CORE-12, T01~T22 | NOT_STARTED |  |  |
 
@@ -48,9 +48,9 @@
 | ANDROID-04 | PASS | `51a52eb` | `ProductSalesView` 회차/상품/프린터 카드, `SalesSettingsDialog` 계약 3토글 연동 검증 | 없음 |
 | ANDROID-05 | PASS | `51a52eb` | 댓글 피드 목록, 동일 구매자 1인 합산 및 수량 조절, 하단 스티키 통계/완료 바, 1.5초 주기 폴링 | 없음 |
 | ANDROID-06 | PASS | `51a52eb` | `ProductRegistrationDialog`, `0007` 선행 0 보존, 2초 카운트다운 모의 및 번호이미지 대체 확인, 3단계(prepare/draft/commit) 연동, `:app:assembleDebug`, `:app:testDebugUnitTest`, `:app:lintDebug` 전원 통과 | 실기기 카메라 하드웨어 연동은 미검증 |
-| CORE-06 | PASS | 진행중 | `src/services/voiceSaleCandidate.ts`, `ProductRegistrationPreview.tsx`: 2.5초 카운트다운, 수정 중 일시정지/재개, 단가 누락 시 ERROR 검증, `test/candidate-sales.test.mjs` (3개 테스트 통과) | 없음 |
-| CORE-07 | PASS | 진행중 | `commit-sales` handler 및 `ProductSalesContext`: 멱등성(동일 operationId), PRICE_REQUIRED 단가 검증, 동일 구매자 댓글 1인 합산, COMMENT_ALREADY_COMMITTED 중복 방지, `test/candidate-sales.test.mjs` (5개 테스트 통과) | 없음 |
-| CORE-08 | PASS | 진행중 | `src/pages/seller/ProductSalesPage.tsx`: 상품 중심 판매관리 페이지, 0007 선행 0 보존 모달, 실시간 댓글 피드 및 수량 증감, 하단 스티키 합계 바, `Sidebar.tsx` 메뉴 연동, `test/candidate-sales.test.mjs` (3개 음성명령 파싱 테스트 통과), `npm run build` (tsc & vite) 성공 | 없음 |
+| CORE-06 | PASS | `67f0d95` | `src/services/voiceSaleCandidate.ts`, `ProductRegistrationPreview.tsx`: 2.5초 카운트다운, 수정 중 일시정지/재개, 단가 누락 시 ERROR 검증, `test/candidate-sales.test.mjs` (3개 테스트 통과) | 없음 |
+| CORE-07 | PASS | `67f0d95` | `commit-sales` handler 및 `ProductSalesContext`: 멱등성(동일 operationId), PRICE_REQUIRED 단가 검증, 동일 구매자 댓글 1인 합산, COMMENT_ALREADY_COMMITTED 중복 방지, `test/candidate-sales.test.mjs` (5개 테스트 통과) | 없음 |
+| CORE-08 | PASS | `67f0d95` | `src/pages/seller/ProductSalesPage.tsx`: 상품 중심 판매관리 페이지, 0007 선행 0 보존 모달, 실시간 댓글 피드 및 수량 증감, 하단 스티키 합계 바, `Sidebar.tsx` 메뉴 연동, `test/candidate-sales.test.mjs` (3개 음성명령 파싱 테스트 통과), `npm run build` (tsc & vite) 성공 | 없음 |
 | CORE-09 | NOT_STARTED |  |  |  |
 | CORE-10 | NOT_STARTED |  |  |  |
 | ANDROID-07 | NOT_STARTED |  |  |  |
