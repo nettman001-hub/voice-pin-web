@@ -8,15 +8,15 @@
 
 | 항목 | 현재 값 |
 | --- | --- |
-| 상태 | IN_PROGRESS |
-| 현재 체크포인트 | G0 |
+| 상태 | PASS |
+| 현재 체크포인트 | G4 (완료) |
 | 작업 경로 | C:\dev\voicecap-web |
 | 기능 브랜치 | `codex/product-sales-single-agent` |
 | 시작 HEAD | `49f6cf0` |
 | origin/main | `ad97ca2` (local main is 1 commit ahead: `49f6cf0`) |
 | 작업 트리 | clean (시작 시 변경사항 없음) |
 | 계약 버전 | 1 |
-| API 버전 | 1 예정 |
+| API 버전 | 1 |
 | 시험 workspace | W1 (테스트), W2 (교차 검증) |
 | Android 시험 기기 | 미확보 (adb devices: 연결 장치 없음) |
 | 실제 프린터 | 미확보 |
@@ -31,7 +31,7 @@
 | G1 | CORE-02~CORE-05 DB·인증·상품·댓글 API | PASS | `fb2be1b` | DB 마이그레이션(11개 테이블·제약조건), sales-api(인증·권한·조작·기기관리), 상품등록/초안만료/0007보존, 클라우드댓글 수집 worker 및 feed API 구현 완료, 웹·서버·계약 테스트 37개 전원 통과 |
 | G2 | ANDROID-02~ANDROID-06, CORE-06~CORE-08 | PASS | `67f0d95` | Android 판매관리 탭·모델·UI·등록 다이얼로그 전원 통과, 웹 음성 후보 2.5초 카운트다운/수정일시정지/단가검증(CORE-06), commit-sales 멱등성·단가필수·동일구매자합산(CORE-07), 상품판매 페이지·피드UI·라우트(CORE-08), npm test 40/40개 전원 통과 |
 | G3 | CORE-09~CORE-10, ANDROID-07~ANDROID-09 | PASS | `c5daf2f`, `ab14cb2` | CORE-09(단가 변경 이력/정정 전표), CORE-10(인쇄 lease/중복 방지/전표 템플릿), ANDROID-07(판매등록·단가/구매자 검증·전표상태 표시), ANDROID-08(상품별 수정 다이얼로그·미리보기/소급적용·구매자 추가/제외), ANDROID-09(실제 API 연결·오류 코드 매핑), 단위테스트 및 lintDebug 전원 통과 | 하드웨어 인쇄 및 실기기 연결은 미검증 |
-| G4 | ANDROID-10, CORE-11~CORE-12, T01~T22 | PASS | pending | ANDROID-10(assembleDebug, bundleRelease, testDebugUnitTest, lintDebug 통과), CORE-11(stage-server 모듈 패키징, 구버전 호환, 전환 매트릭스), CORE-12(통합 인수시험 T01~T22 결과 기록: 20 통과, 2 하드웨어 미검증, 0 실패), 전체 웹/서버/Android/PC 검증 통과 | 하드웨어 인쇄 및 실기기 연결은 미검증 유지 |
+| G4 | ANDROID-10, CORE-11~CORE-12, T01~T22 | PASS | `619f379` | ANDROID-10(assembleDebug, bundleRelease, testDebugUnitTest, lintDebug 통과), CORE-11(stage-server 모듈 패키징, 구버전 호환, 전환 매트릭스), CORE-12(통합 인수시험 T01~T22 결과 기록: 20 통과, 2 하드웨어 미검증, 0 실패), 전체 웹/서버/Android/PC 검증 통과 | 하드웨어 인쇄 및 실기기 연결은 미검증 유지 |
 
 ## 3 티켓 기록
 
@@ -56,9 +56,9 @@
 | ANDROID-07 | PASS | `ab14cb2` | 판매등록 누르는 즉시 session/product revision 고정, 단가 누락 및 미확인 구매자 검증 차단, 완료 시 인쇄 전표 상태(QUEUED/CLAIMED/SUBMITTING/SUBMITTED/FAILED/UNKNOWN) 매핑 표시, SalesRepositoryTest 통과 | 없음 |
 | ANDROID-08 | PASS | `ab14cb2` | `ProductChangeDialog`: 회차 상품 목록 선택, 상품단가/명칭 수정, 구매자 수량 변경/취소/추가, preview-product-change 및 commit-product-change 연동, 가격 변경 소급 적용 안내 및 전후 금액/구매자 diff 카드 표시, 정정 전표 결과 표시 | 없음 |
 | ANDROID-09 | PASS | `ab14cb2` | `RealSalesRepository`: listSessionProducts, getProductSales, previewProductChange, commitProductChange, searchBuyers, confirmBuyer, getPrintStatus 실제 HTTP 연동 및 401/403/409/410/422/429/503 오류 매핑, BuyerConfirmDialog 신원 확인 연동 | 운영 Edge 배포 미실행 |
-| ANDROID-10 | PASS | pending | `gradlew :app:assembleDebug`, `:app:bundleRelease`, `:app:testDebugUnitTest`, `:app:lintDebug` 통과 (린트 오류 0), SMS 브릿지 백그라운드 서비스 독립성 검증 완료 | connectedDebugAndroidTest는 연결 장치 부재로 미검증 기록 |
-| CORE-11 | PASS | pending | `stage-server.cjs` 신규 모듈 9개 스테이징 및 comment-helper files 패키징 검증, productId=null 구버전 호환 유지, 한국어 상태(대기/처리중/출력완료)와 신규 상태(QUEUED/CLAIMED/SUBMITTED) 매핑 검증, comment-helper `npm test` (5/5) 통과 | 없음 |
-| CORE-12 | PASS | pending | `05_ACCEPTANCE_TESTS.md` T01~T22 전체 대조 완료 (20개 통과, 2개 하드웨어 미검증, 0 실패), 웹 빌드(tsc & vite), 루트 npm test (44/44), 서버 npm test (11/11), Android/PC 빌드 전원 통과 | 하드웨어 인쇄/카메라 미검증 명시 유지 |
+| ANDROID-10 | PASS | `619f379` | `gradlew :app:assembleDebug`, `:app:bundleRelease`, `:app:testDebugUnitTest`, `:app:lintDebug` 통과 (린트 오류 0), SMS 브릿지 백그라운드 서비스 독립성 검증 완료 | connectedDebugAndroidTest는 연결 장치 부재로 미검증 기록 |
+| CORE-11 | PASS | `619f379` | `stage-server.cjs` 신규 모듈 9개 스테이징 및 comment-helper files 패키징 검증, productId=null 구버전 호환 유지, 한국어 상태(대기/처리중/출력완료)와 신규 상태(QUEUED/CLAIMED/SUBMITTED) 매핑 검증, comment-helper `npm test` (5/5) 통과 | 없음 |
+| CORE-12 | PASS | `619f379` | `05_ACCEPTANCE_TESTS.md` T01~T22 전체 대조 완료 (20개 통과, 2개 하드웨어 미검증, 0 실패), 웹 빌드(tsc & vite), 루트 npm test (44/44), 서버 npm test (11/11), Android/PC 빌드 전원 통과 | 하드웨어 인쇄/카메라 미검증 명시 유지 |
 
 ## 4 필수 검증
 
