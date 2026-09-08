@@ -30,7 +30,7 @@
 | G0 | 환경 기준, ANDROID-01, CORE-01 계약 Schema·fixture | PASS | `856a1ff` | ANDROID-01 빌드/테스트 기준 확보, CORE-01 공통 스키마 및 10개 fixture, validate-contracts.test.mjs 8개 테스트 통과, 검토 C1 완료 |
 | G1 | CORE-02~CORE-05 DB·인증·상품·댓글 API | PASS | `fb2be1b` | DB 마이그레이션(11개 테이블·제약조건), sales-api(인증·권한·조작·기기관리), 상품등록/초안만료/0007보존, 클라우드댓글 수집 worker 및 feed API 구현 완료, 웹·서버·계약 테스트 37개 전원 통과 |
 | G2 | ANDROID-02~ANDROID-06, CORE-06~CORE-08 | PASS | `67f0d95` | Android 판매관리 탭·모델·UI·등록 다이얼로그 전원 통과, 웹 음성 후보 2.5초 카운트다운/수정일시정지/단가검증(CORE-06), commit-sales 멱등성·단가필수·동일구매자합산(CORE-07), 상품판매 페이지·피드UI·라우트(CORE-08), npm test 40/40개 전원 통과 |
-| G3 | CORE-09~CORE-10, ANDROID-07~ANDROID-09 | PASS | `c5daf2f` + pending | CORE-09(단가 변경 이력/정정 전표), CORE-10(인쇄 lease/중복 방지/전표 템플릿), ANDROID-07(판매등록·단가/구매자 검증·전표상태 표시), ANDROID-08(상품별 수정 다이얼로그·미리보기/소급적용·구매자 추가/제외), ANDROID-09(실제 API 연결·오류 코드 매핑), 단위테스트 및 lintDebug 전원 통과 | 하드웨어 인쇄 및 실기기 연결은 미검증 |
+| G3 | CORE-09~CORE-10, ANDROID-07~ANDROID-09 | PASS | `c5daf2f`, `ab14cb2` | CORE-09(단가 변경 이력/정정 전표), CORE-10(인쇄 lease/중복 방지/전표 템플릿), ANDROID-07(판매등록·단가/구매자 검증·전표상태 표시), ANDROID-08(상품별 수정 다이얼로그·미리보기/소급적용·구매자 추가/제외), ANDROID-09(실제 API 연결·오류 코드 매핑), 단위테스트 및 lintDebug 전원 통과 | 하드웨어 인쇄 및 실기기 연결은 미검증 |
 | G4 | ANDROID-10, CORE-11~CORE-12, T01~T22 | NOT_STARTED |  |  |
 
 ## 3 티켓 기록
@@ -53,9 +53,9 @@
 | CORE-08 | PASS | `67f0d95` | `src/pages/seller/ProductSalesPage.tsx`: 상품 중심 판매관리 페이지, 0007 선행 0 보존 모달, 실시간 댓글 피드 및 수량 증감, 하단 스티키 합계 바, `Sidebar.tsx` 메뉴 연동, `test/candidate-sales.test.mjs` (3개 음성명령 파싱 테스트 통과), `npm run build` (tsc & vite) 성공 | 없음 |
 | CORE-09 | PASS | `c5daf2f` | `preview-product-change`, `commit-product-change`: 단가 일괄 수정(20,000원→25,000원, 60,000원→75,000원), 기존 판매 ID 보존 및 revision 증가, sale_revisions 이력 기록, CORRECTION 전표 발행, REVISION_CONFLICT/PREVIEW_EXPIRED 검증, `test/product-change.test.mjs` (4개 테스트 통과), 전체 `npm test` (44/44 통과) | 없음 |
 | CORE-10 | PASS | `c5daf2f` | `supabase/functions/sales-api/handlers/print.ts`, `server/printJobStore.js`, `server/cloudPrintWorker.js`: 30초 lease/10초 갱신, begin-print-job 서버 동기화 후 spool, acknowledge-print-job, 멱등 hash 중복 방지, UNKNOWN 예외 보존, 전표 템플릿 확장, `server/` 내 `npm test` (11/11 통과), `desktop/comment-helper/` `npm test` (5/5 통과) 및 `npm run stage` 성공 | 실제 하드웨어 인쇄 출력은 미검증으로 기록 |
-| ANDROID-07 | PASS | pending | 판매등록 누르는 즉시 session/product revision 고정, 단가 누락 및 미확인 구매자 검증 차단, 완료 시 인쇄 전표 상태(QUEUED/CLAIMED/SUBMITTING/SUBMITTED/FAILED/UNKNOWN) 매핑 표시, SalesRepositoryTest 통과 | 없음 |
-| ANDROID-08 | PASS | pending | `ProductChangeDialog`: 회차 상품 목록 선택, 상품단가/명칭 수정, 구매자 수량 변경/취소/추가, preview-product-change 및 commit-product-change 연동, 가격 변경 소급 적용 안내 및 전후 금액/구매자 diff 카드 표시, 정정 전표 결과 표시 | 없음 |
-| ANDROID-09 | PASS | pending | `RealSalesRepository`: listSessionProducts, getProductSales, previewProductChange, commitProductChange, searchBuyers, confirmBuyer, getPrintStatus 실제 HTTP 연동 및 401/403/409/410/422/429/503 오류 매핑, BuyerConfirmDialog 신원 확인 연동 | 운영 Edge 배포 미실행 |
+| ANDROID-07 | PASS | `ab14cb2` | 판매등록 누르는 즉시 session/product revision 고정, 단가 누락 및 미확인 구매자 검증 차단, 완료 시 인쇄 전표 상태(QUEUED/CLAIMED/SUBMITTING/SUBMITTED/FAILED/UNKNOWN) 매핑 표시, SalesRepositoryTest 통과 | 없음 |
+| ANDROID-08 | PASS | `ab14cb2` | `ProductChangeDialog`: 회차 상품 목록 선택, 상품단가/명칭 수정, 구매자 수량 변경/취소/추가, preview-product-change 및 commit-product-change 연동, 가격 변경 소급 적용 안내 및 전후 금액/구매자 diff 카드 표시, 정정 전표 결과 표시 | 없음 |
+| ANDROID-09 | PASS | `ab14cb2` | `RealSalesRepository`: listSessionProducts, getProductSales, previewProductChange, commitProductChange, searchBuyers, confirmBuyer, getPrintStatus 실제 HTTP 연동 및 401/403/409/410/422/429/503 오류 매핑, BuyerConfirmDialog 신원 확인 연동 | 운영 Edge 배포 미실행 |
 | ANDROID-10 | NOT_STARTED |  |  |  |
 | CORE-11 | NOT_STARTED |  |  |  |
 | CORE-12 | NOT_STARTED |  |  |  |
