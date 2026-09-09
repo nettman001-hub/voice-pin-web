@@ -87,6 +87,8 @@ interface LiveContextType {
   liveTranscriptFlow: Array<{ id: string; text: string; timestamp: string }>;
   lastMatchedRuleItem: MatchedRuleItem | null;
   transcriptLogs: SttTranscriptLog[];
+  totalSessionTranscriptCount: number;
+  downloadSessionTranscripts: (format?: 'txt' | 'csv') => void;
   recentCaptures: CaptureItem[];
   isVoiceEditing: boolean;
   editingFieldInfo: string | null;
@@ -133,6 +135,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [liveTranscriptFlow, setLiveTranscriptFlow] = useState<Array<{ id: string; text: string; timestamp: string }>>([]);
   const [lastMatchedRuleItem, setLastMatchedRuleItem] = useState<MatchedRuleItem | null>(null);
   const [transcriptLogs, setTranscriptLogs] = useState<SttTranscriptLog[]>([]);
+  const [totalSessionTranscriptCount, setTotalSessionTranscriptCount] = useState<number>(0);
+  const allSessionTranscriptsRef = useRef<SttTranscriptLog[]>([]);
   const [recentCaptures, setRecentCaptures] = useState<CaptureItem[]>([]);
   const [sttEngineStatus, setSttEngineStatus] = useState<'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR'>('DISCONNECTED');
   const [sttEngineMessage, setSttEngineMessage] = useState<string>('대기 중');
@@ -1040,8 +1044,75 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       actionTriggered
     };
 
-    setTranscriptLogs((prev) => [newLog, ...prev.slice(0, 49)]);
+    // 전사 로그 적재: 화면 UI에는 최근 300건을 유지하여 렉을 원천 방지하고,
+    // 전체 회차 전사 로그는 allSessionTranscriptsRef에 8시간 이상 무제한으로 누적 보관
+    allSessionTranscriptsRef.current.push(newLog);
+    setTotalSessionTranscriptCount(allSessionTranscriptsRef.current.length);
+    setTranscriptLogs((prev) => [newLog, ...prev.slice(0, 299)]);
   }
+
+  // 오늘 방송 전체 전사 로그 파일 다운로드 (.txt / .csv)
+  const downloadSessionTranscripts = (format: 'txt' | 'csv' = 'txt') => {
+    const logs = allSessionTranscriptsRef.current.length > 0
+      ? allSessionTranscriptsRef.current
+      : [...transcriptLogs].reverse();
+
+    if (logs.length === 0) {
+      alert('다운로드할 전사 로그가 없습니다.');
+      return;
+    }
+
+    const sessionCode = currentSessionId || new Date().toISOString().slice(0, 10);
+    const fileName = `VoiceCAP_전사로그_${sessionCode}.${format}`;
+
+    if (format === 'txt') {
+      const header = [
+        '================================================================',
+        `  VoiceCAP 실시간 음성인식 전체 전사 로그`,
+        `  방송 회차: ${sessionCode}`,
+        `  저장 일시: ${new Date().toLocaleString('ko-KR')}`,
+        `  총 전사 건수: ${logs.length.toLocaleString()}건`,
+        '================================================================\n',
+      ].join('\n');
+
+      const lines = logs.map((log, index) => {
+        const actionLabel = log.actionTriggered === 'SALE_SAVED' ? ' [판매저장]'
+          : log.actionTriggered === 'SCREEN_CAPTURED' ? ' [댓글캡처]'
+          : log.actionTriggered === 'VOICE_EDIT_START' ? ' [수정모드]'
+          : '';
+        return `[${log.timestamp || index + 1}]${actionLabel} ${log.text}`;
+      }).join('\n');
+
+      const blob = new Blob([header + lines], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } else {
+      const csvHeader = '번호,시간,전사 내용,정확도,감지 키워드,실행 액션\r\n';
+      const csvRows = logs.map((log, index) => {
+        const escapedText = `"${(log.text || '').replace(/"/g, '""')}"`;
+        const keywords = `"${(log.matchedKeywords || []).join('; ').replace(/"/g, '""')}"`;
+        const action = `"${log.actionTriggered || ''}"`;
+        const confidence = log.confidence ? (log.confidence * 100).toFixed(1) + '%' : '';
+        return `${index + 1},"${log.timestamp || ''}",${escapedText},"${confidence}",${keywords},${action}`;
+      }).join('\r\n');
+
+      const blob = new Blob(['\uFEFF' + csvHeader + csvRows], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  };
 
   // 라이브 청취 시작 (크롬 탭 방송 소리 또는 마이크)
   const startListening = async (mode: 'TAB_AUDIO' | 'MIC' = 'TAB_AUDIO') => {
@@ -1406,6 +1477,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         liveTranscriptFlow,
         lastMatchedRuleItem,
         transcriptLogs,
+        totalSessionTranscriptCount,
+        downloadSessionTranscripts,
         recentCaptures,
         isVoiceEditing,
         editingFieldInfo,
