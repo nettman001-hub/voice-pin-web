@@ -15,6 +15,8 @@ import {
   ArrowRight,
   Clock
 } from 'lucide-react';
+import { formatAmountAsDecimal, formatMultiSaleAmount } from '../../services/salesExtractor';
+import { areNicknamesSimilar } from '../../services/nicknameMatcher';
 
 interface BuyerGroupedSale {
   buyerNickname: string;
@@ -391,9 +393,26 @@ export const SalesListPage: React.FC = () => {
                       <div className="flex items-center space-x-4 w-full sm:w-auto justify-between sm:justify-end">
                         <div className="text-right">
                           <span className="text-[10px] text-slate-500">총 구매 합계</span>
-                          <div className="text-lg font-black text-brand-600">
-                            {buyer.totalAmount.toLocaleString()}원
-                          </div>
+                          {(() => {
+                            const multi = formatMultiSaleAmount(buyer.records.map((r) => r.amount));
+                            if (multi.isMulti) {
+                              return (
+                                <div className="flex flex-col items-end">
+                                  <span className="text-xs font-bold text-brand-600 font-mono">
+                                    {multi.decimalExpression} =
+                                  </span>
+                                  <span className="text-lg font-black text-brand-700">
+                                    {multi.totalFormatted}
+                                  </span>
+                                </div>
+                              );
+                            }
+                            return (
+                              <div className="text-lg font-black text-brand-600">
+                                {buyer.totalAmount.toLocaleString()}원
+                              </div>
+                            );
+                          })()}
                         </div>
 
                         <div className="p-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-500">
@@ -436,7 +455,10 @@ export const SalesListPage: React.FC = () => {
                             </div>
 
                             <div className="flex items-center space-x-4 flex-shrink-0">
-                              <span className="font-bold text-slate-900 text-sm">{rec.amount.toLocaleString()}원</span>
+                              <span className="font-bold text-slate-900 text-sm">
+                                {rec.amount.toLocaleString()}원
+                                <span className="text-xs text-brand-600 font-mono ml-1 font-semibold">({formatAmountAsDecimal(rec.amount)})</span>
+                              </span>
                               <span className="text-[10px] text-slate-400">{new Date(rec.recognizedAt).toLocaleTimeString('ko-KR')}</span>
                               <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
                             </div>
@@ -454,63 +476,89 @@ export const SalesListPage: React.FC = () => {
                 조회 조건에 맞는 판매 내역이 없습니다.
               </div>
             ) : (
-              sortedIndividualSales.map((sale) => (
-                <Link
-                  key={sale.id}
-                  to={`/sales/${sale.id}`}
-                  className="block p-4 rounded-2xl bg-white border border-slate-200 hover:border-brand-400 transition shadow-sm group"
-                >
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                    <div className="flex items-start space-x-4">
-                      <div className="w-11 h-11 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden flex-shrink-0">
-                        {sale.captureImageUrls && sale.captureImageUrls.length > 0 ? (
-                          <img src={sale.captureImageUrls[0]} alt="캡처" className="w-full h-full object-cover" />
-                        ) : (
-                          <ShoppingBag className="w-5 h-5 text-brand-600" />
-                        )}
-                      </div>
+              sortedIndividualSales.map((sale) => {
+                const buyerSales = filteredSales
+                  .filter((s) => areNicknamesSimilar(s.buyerNickname, sale.buyerNickname))
+                  .sort((a, b) => new Date(a.recognizedAt).getTime() - new Date(b.recognizedAt).getTime());
+                const multi = formatMultiSaleAmount(buyerSales.map((s) => s.amount));
 
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <span className="text-base font-bold text-slate-900 group-hover:text-brand-600 transition">
-                            {sale.buyerNickname}
-                          </span>
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              sale.status === '보류'
-                                ? 'bg-amber-400 text-slate-950'
-                                : sale.status === '수동수정'
-                                ? 'bg-purple-100 text-purple-700'
-                                : sale.status === '확정'
-                                ? 'bg-emerald-50 text-emerald-700'
-                                : 'bg-brand-50 text-brand-700'
-                            }`}
-                          >
-                            {sale.status}
-                          </span>
-                          <BuyerStatusBadges saleIds={[sale.id]} />
-                          <span className="text-[10px] text-slate-600 font-mono bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                            회차: {sale.sessionId}
-                          </span>
+                return (
+                  <Link
+                    key={sale.id}
+                    to={`/sales/${sale.id}`}
+                    className="block p-4 rounded-2xl bg-white border border-slate-200 hover:border-brand-400 transition shadow-sm group"
+                  >
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div className="flex items-start space-x-4">
+                        <div className="w-11 h-11 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden flex-shrink-0">
+                          {sale.captureImageUrls && sale.captureImageUrls.length > 0 ? (
+                            <img src={sale.captureImageUrls[0]} alt="캡처" className="w-full h-full object-cover" />
+                          ) : (
+                            <ShoppingBag className="w-5 h-5 text-brand-600" />
+                          )}
                         </div>
-                        <p className="text-xs text-slate-600 mt-1 line-clamp-1">
-                          "{sale.rawTranscript}"
-                        </p>
-                      </div>
-                    </div>
 
-                    <div className="flex sm:flex-col items-baseline sm:items-end justify-between w-full sm:w-auto gap-1">
-                      <div className="text-lg font-black text-brand-600">
-                        {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}
+                        <div>
+                          <div className="flex items-center space-x-2 flex-wrap gap-1">
+                            <span className="text-base font-bold text-slate-900 group-hover:text-brand-600 transition">
+                              {sale.buyerNickname}
+                            </span>
+                            {multi.isMulti && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200">
+                                ★ 다건 {buyerSales.length}건
+                              </span>
+                            )}
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                sale.status === '보류'
+                                  ? 'bg-amber-400 text-slate-950'
+                                  : sale.status === '수동수정'
+                                  ? 'bg-purple-100 text-purple-700'
+                                  : sale.status === '확정'
+                                  ? 'bg-emerald-50 text-emerald-700'
+                                  : 'bg-brand-50 text-brand-700'
+                              }`}
+                            >
+                              {sale.status}
+                            </span>
+                            <BuyerStatusBadges saleIds={[sale.id]} />
+                            <span className="text-[10px] text-slate-600 font-mono bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                              회차: {sale.sessionId}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600 mt-1 line-clamp-1">
+                            "{sale.rawTranscript}"
+                          </p>
+                        </div>
                       </div>
-                      <div className="text-[11px] text-slate-400 flex items-center space-x-1">
-                        <Clock className="w-3 h-3" />
-                        <span>{new Date(sale.recognizedAt).toLocaleString('ko-KR')}</span>
+
+                      <div className="flex sm:flex-col items-baseline sm:items-end justify-between w-full sm:w-auto gap-1">
+                        {multi.isMulti ? (
+                          <div className="flex flex-col items-start sm:items-end">
+                            <span className="text-xs font-bold text-brand-600 font-mono">
+                              {multi.decimalExpression} =
+                            </span>
+                            <span className="text-lg font-black text-brand-700">
+                              {multi.totalFormatted}
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              (현재건: {sale.amount > 0 ? `${sale.amount.toLocaleString()}원 (${formatAmountAsDecimal(sale.amount)})` : '금액 미확인'})
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="text-lg font-black text-brand-600">
+                            {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}
+                          </div>
+                        )}
+                        <div className="text-[11px] text-slate-400 flex items-center space-x-1">
+                          <Clock className="w-3 h-3" />
+                          <span>{new Date(sale.recognizedAt).toLocaleString('ko-KR')}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </Link>
-              ))
+                  </Link>
+                );
+              })
             )
           )}
         </div>

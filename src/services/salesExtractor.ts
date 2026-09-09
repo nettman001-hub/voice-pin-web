@@ -202,3 +202,56 @@ export function extractSaleFromTranscript(transcript: string, activeKeywords: st
     matchedKeywords
   };
 }
+
+/**
+ * 단건 금액을 만 원 단위 소수점으로 변환 (예: 9,000원 -> "0.9", 17,000원 -> "1.7", 20,000원 -> "2.0")
+ */
+export function formatAmountAsDecimal(amount: number): string {
+  if (!amount || amount <= 0) return '0.0';
+  const val = amount / 10000;
+  return val % 1 === 0 ? val.toFixed(1) : parseFloat(val.toFixed(2)).toString();
+}
+
+export interface MultiSaleAmountFormat {
+  isMulti: boolean;
+  itemDecimals: string[];
+  decimalExpression: string;
+  totalAmount: number;
+  totalFormatted: string;
+  displayFull: string;
+}
+
+/**
+ * 다건/단건 구매자의 건당 소수점 금액 및 합계 금액 포맷팅
+ * - 다건: 건당 금액은 소숫점으로 (예: 0.9) 표시하고 "+"를 붙이고 맨 뒤에 합계금액은 정상적인 금액표시로 쓴다. (예: "0.9 + 1.5 = 24,000원")
+ * - 단건: "17,000원"
+ */
+export function formatMultiSaleAmount(amounts: number[]): MultiSaleAmountFormat {
+  const validAmounts = (amounts || []).filter((a) => typeof a === 'number' && a > 0);
+  const totalAmount = validAmounts.reduce((sum, a) => sum + a, 0);
+  const totalFormatted = totalAmount > 0 ? `${totalAmount.toLocaleString()}원` : '금액 미확인';
+
+  if (validAmounts.length <= 1) {
+    return {
+      isMulti: false,
+      itemDecimals: validAmounts.map(formatAmountAsDecimal),
+      decimalExpression: validAmounts.map(formatAmountAsDecimal).join(' + '),
+      totalAmount,
+      totalFormatted,
+      displayFull: totalFormatted
+    };
+  }
+
+  const itemDecimals = validAmounts.map(formatAmountAsDecimal);
+  const decimalExpression = itemDecimals.join(' + ');
+  const displayFull = `${decimalExpression} = ${totalFormatted}`;
+
+  return {
+    isMulti: true,
+    itemDecimals,
+    decimalExpression,
+    totalAmount,
+    totalFormatted,
+    displayFull
+  };
+}

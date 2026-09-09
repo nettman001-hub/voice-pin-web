@@ -31,6 +31,8 @@ import {
 import { LocalSttModel, SttMode } from '../../types/stt';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
 import { useProductSales } from '../../context/ProductSalesContext';
+import { formatMultiSaleAmount } from '../../services/salesExtractor';
+import { areNicknamesSimilar } from '../../services/nicknameMatcher';
 
 const SILENCE_WARNING_DELAY_MS = 5 * 60 * 1000;
 const SILENCE_STOP_COUNTDOWN_SECONDS = 20;
@@ -924,6 +926,13 @@ export const LiveHomePage: React.FC = () => {
                       : sale.source === 'MANUAL'
                         ? '웹'
                         : '기존';
+
+                  // 다건 구매자 판정 및 금액 포맷팅 (시간순 정렬)
+                  const buyerSessionSales = currentSessionSales
+                    .filter((s) => areNicknamesSimilar(s.buyerNickname, sale.buyerNickname))
+                    .sort((a, b) => new Date(a.recognizedAt).getTime() - new Date(b.recognizedAt).getTime());
+                  const multiAmount = formatMultiSaleAmount(buyerSessionSales.map((s) => s.amount));
+
                   return (
                   <Link
                     key={sale.id}
@@ -940,6 +949,11 @@ export const LiveHomePage: React.FC = () => {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center space-x-2 flex-wrap gap-1">
                           <span className="font-bold text-sm text-slate-900 truncate">{sale.buyerNickname}</span>
+                          {multiAmount.isMulti && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200">
+                              ★ 다건 {buyerSessionSales.length}건
+                            </span>
+                          )}
                           <CustomerStatsBadge
                             nickname={sale.buyerNickname}
                             variant="pill"
@@ -989,9 +1003,20 @@ export const LiveHomePage: React.FC = () => {
                             </span>
                           )}
                         </div>
-                        <div className="text-base font-black text-brand-600 mt-1">
-                          {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}
-                        </div>
+                        {multiAmount.isMulti ? (
+                          <div className="mt-1 flex items-baseline flex-wrap gap-x-1.5 gap-y-0.5">
+                            <span className="text-xs sm:text-sm font-bold text-brand-600 font-mono">
+                              {multiAmount.decimalExpression} =
+                            </span>
+                            <span className="text-base sm:text-lg font-black text-brand-700">
+                              {multiAmount.totalFormatted}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="text-base font-black text-brand-600 mt-1">
+                            {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}
+                          </div>
+                        )}
                         {(sale.productCode || sale.productName) && (
                           <div className="text-[11px] font-semibold text-slate-600 mt-1">
                             상품 {sale.productCode || '번호 없음'}{sale.productName ? ` · ${sale.productName}` : ''}
