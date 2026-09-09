@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
 import { SaleStatus } from '../../types/live';
@@ -29,7 +29,10 @@ export const SalesDetailPage: React.FC = () => {
   const [amount, setAmount] = useState(sale?.amount.toString() || '0');
   const [status, setStatus] = useState<SaleStatus>(sale?.status || '자동저장');
   const [note, setNote] = useState(sale?.note || '');
+  const [productImageUrl, setProductImageUrl] = useState(sale?.productImageUrl || sale?.captureImageUrls?.[0] || '');
+  const [captureImages, setCaptureImages] = useState<string[]>(sale?.captureImageUrls || []);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!sale) {
     return (
@@ -42,6 +45,28 @@ export const SalesDetailPage: React.FC = () => {
     );
   }
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('이미지 파일(JPG, PNG 등)만 등록 가능합니다.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert('5MB 이하의 이미지만 등록 가능합니다.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl) {
+        setProductImageUrl(dataUrl);
+        setCaptureImages((prev) => [dataUrl, ...prev.filter((u) => u !== dataUrl)]);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     const updated = {
@@ -50,7 +75,9 @@ export const SalesDetailPage: React.FC = () => {
       productName,
       amount: parseInt(amount, 10) || 0,
       status,
-      note
+      note,
+      productImageUrl: productImageUrl || undefined,
+      captureImageUrls: captureImages.length > 0 ? captureImages : undefined,
     };
     updateSale(updated);
     setToastMsg('판매 정보가 성공적으로 수정 저장되었습니다.');
@@ -137,6 +164,58 @@ export const SalesDetailPage: React.FC = () => {
           variant="detailed"
           currentSessionId={sale.sessionId}
         />
+
+        {/* 상품 대표 사진 및 캡처 이미지 등록/변경 카드 */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-white border border-slate-200 overflow-hidden flex-shrink-0 shadow-sm flex items-center justify-center relative group">
+            {productImageUrl ? (
+              <img src={productImageUrl} alt="상품 사진" className="w-full h-full object-cover" />
+            ) : (
+              <div className="flex flex-col items-center justify-center text-slate-400 p-2 text-center">
+                <ShoppingBag className="w-6 h-6 text-brand-500 mb-1" />
+                <span className="text-[10px] font-bold text-slate-500">사진 없음</span>
+              </div>
+            )}
+          </div>
+          <div className="flex-1 min-w-0 space-y-1">
+            <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+              <Camera className="w-3.5 h-3.5 text-brand-600" />
+              <span>상품 대표 사진 / 캡처 이미지</span>
+            </h4>
+            <p className="text-[11px] text-slate-500">
+              방송 중 캡처가 누락되었거나 상품 사진을 교체하고 싶으시면 PC나 스마트폰의 사진을 직접 등록할 수 있습니다.
+            </p>
+            <div className="pt-1.5 flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200 shadow-sm flex items-center gap-1.5 transition active:scale-95"
+              >
+                <Camera className="w-3.5 h-3.5 text-brand-600" />
+                <span>{productImageUrl ? '사진 교체하기' : '사진 직접 등록하기'}</span>
+              </button>
+              {productImageUrl && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProductImageUrl('');
+                    setCaptureImages([]);
+                  }}
+                  className="px-2.5 py-1.5 rounded-xl text-rose-600 hover:bg-rose-50 text-xs font-bold transition"
+                >
+                  사진 삭제
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
 
         {/* 수정 폼 */}
         <form onSubmit={handleSave} className="space-y-4">
