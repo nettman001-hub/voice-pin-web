@@ -1,9 +1,16 @@
 import { admin, successResponse, errorResponse, sha256 } from '../../_shared/productSales.ts'
 import { calculateSummary, calculateBuyerStats } from './common.ts'
+import { ensureActiveSession } from './sessions.ts'
 
 export async function handlePrepareProduct(workspaceId: string, actorId: string, body: any) {
-  const { sessionId, expectedSessionRevision, requestedProductCode, name, unitPrice, imageKind } = body
+  const { sessionId: requestedSessionId, expectedSessionRevision, requestedProductCode, name, unitPrice, imageKind } = body
   const effectiveImageKind = imageKind || 'PHOTO'
+  let sessionId = requestedSessionId
+
+  if (!sessionId) {
+    const activeSession = await ensureActiveSession(workspaceId)
+    sessionId = activeSession.id
+  }
 
   if (sessionId) {
     const { data: session } = await admin
