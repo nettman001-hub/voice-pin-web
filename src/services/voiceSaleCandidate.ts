@@ -47,6 +47,16 @@ export interface ParsedVoiceCommand {
 
 export function parseKoreanNumber(text: string): number | undefined {
   if (!text) return undefined;
+
+  // 0. 소숫점 가격 표현 감지 (예: "1.7" -> 17,000원)
+  const decimalMatch = text.match(/(?<!\d\.)(?<!\d)(\d{1,3})\s*(?:[.]|점)\s*(\d{1,2})(?!\.\d)(?!\s*(?:월|일|시|분|초|버전|ver))\b/u);
+  if (decimalMatch) {
+    const compactValue = Number(`${decimalMatch[1]}.${decimalMatch[2]}`);
+    if (Number.isFinite(compactValue) && compactValue > 0) {
+      return Math.round(compactValue * 10000);
+    }
+  }
+
   const cleaned = text.replace(/[, \s]/g, '');
 
   const numMatch = cleaned.match(/(\d+)/);

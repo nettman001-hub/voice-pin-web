@@ -1,4 +1,4 @@
-import { SaleRecord, SaleStatus } from '../types/live';
+import type { SaleRecord, SaleStatus } from '../types/live.ts';
 
 /**
  * 한국어 금액 표현(예: "35,000원", "3만 5천원", "3만원", "42000원", "5천원")을 숫자(number)로 변환
@@ -7,34 +7,50 @@ import { SaleRecord, SaleStatus } from '../types/live';
  * "가격 0.8"은 0.8만 원, 즉 8,000원으로 해석한다.
  * 따라서 1.5 → 15,000원, 2.9 → 29,000원이다.
  */
+const KOREAN_DIGIT_WORDS: Record<string, number> = {
+  영: 0, 공: 0,
+  일: 1, 하나: 1, 한: 1,
+  이: 2, 둘: 2, 두: 2,
+  삼: 3, 셋: 3, 세: 3,
+  사: 4, 넷: 4, 네: 4,
+  오: 5, 다섯: 5,
+  육: 6, 여섯: 6,
+  칠: 7, 일곱: 7,
+  팔: 8, 여덟: 8,
+  구: 9, 아홉: 9,
+  십: 10
+};
+
 export function parseKoreanAmount(text: string): number | null {
   if (!text) return null;
 
-  // 0.8, 1.5, 2.9처럼 가격/금액 뒤에 붙는 '만 원 단위 축약 소수'
-  // (숫자에 10을 곱한 뒤 1,000원을 곱하는 것과 같은 의미 = 숫자 * 10,000원)
-  // 일반 소수(수량, 시간 등)를 가격으로 오인하지 않도록 가격 문맥 안에서만 적용한다.
-  const decimalMatch = text.match(/(\d{1,3})\s*(?:[.]|점)\s*(\d{1,2})/u);
-  if (decimalMatch) {
-    const decimalStart = decimalMatch.index ?? 0;
-    const decimalEnd = decimalStart + decimalMatch[0].length;
-    const contextStart = Math.max(0, decimalStart - 24);
-    const contextEnd = Math.min(text.length, decimalEnd + 24);
-    const nearbyContext = text.slice(contextStart, contextEnd);
-    const hasPriceContext = /(가격|금액|입금액|구매금액)/u.test(nearbyContext);
-    const followingUnit = text.slice(decimalEnd).match(/^\s*(만|천|백)/u);
+  // 0. 사용자 명시 규칙: "소숫점 숫자가 나오면 무조건 가격을 말하는 것으로 확정한다. 예를 들어 '1.7' 이면 17,000원 이다."
+  // 0-1) 한글 발음 소수 표현 (예: "일점칠", "이점오", "삼점오", "영점팔" 등)
+  const koWordMatch = text.match(/([영공일이삼사오육칠팔구십]+)\s*(?:[.]|점)\s*([영공일이삼사오육칠팔구]+)/u);
+  if (koWordMatch) {
+    const wholeVal = KOREAN_DIGIT_WORDS[koWordMatch[1]];
+    const fracVal = KOREAN_DIGIT_WORDS[koWordMatch[2]];
+    if (wholeVal !== undefined && fracVal !== undefined) {
+      const compactValue = wholeVal + fracVal / 10;
+      return Math.round(compactValue * 10000);
+    }
+  }
 
-    if (hasPriceContext) {
-      const compactValue = Number(`${decimalMatch[1]}.${decimalMatch[2]}`);
-      if (Number.isFinite(compactValue) && compactValue > 0) {
-        // 단위가 생략된 0.8/1.5/2.9는 '만 원' 단위로 본다.
-        // 명시적으로 천/백 단위를 붙인 경우에는 그 단위를 우선한다.
-        const multiplier = followingUnit?.[1] === '천'
-          ? 1000
-          : followingUnit?.[1] === '백'
-            ? 100
-            : 10000;
-        return Math.round(compactValue * multiplier);
-      }
+  // 0-2) 숫자 소수 표현 (예: "1.7", "0.8", "2.5", "15.5", "1점7", "1.7만", "1.7원" 등)
+  // 단, 날짜(2026.09.10)나 버전(1.2.3), 시/분/초 등은 제외
+  const decimalMatch = text.match(/(?<!\d\.)(?<!\d)(\d{1,3})\s*(?:[.]|점)\s*(\d{1,2})(?!\.\d)(?!\s*(?:월|일|시|분|초|버전|ver))\b/u);
+  if (decimalMatch) {
+    const compactValue = Number(`${decimalMatch[1]}.${decimalMatch[2]}`);
+    if (Number.isFinite(compactValue) && compactValue > 0) {
+      const decimalStart = decimalMatch.index ?? 0;
+      const decimalEnd = decimalStart + decimalMatch[0].length;
+      const followingUnit = text.slice(decimalEnd).match(/^\s*(만|천|백)/u);
+      const multiplier = followingUnit?.[1] === '천'
+        ? 1000
+        : followingUnit?.[1] === '백'
+          ? 100
+          : 10000;
+      return Math.round(compactValue * multiplier);
     }
   }
 
@@ -79,10 +95,13 @@ export function parseKoreanAmount(text: string): number | null {
     return total;
   }
 
-  // 3. 숫자만 추출
-  const fallbackNum = text.match(/\b\d{3,7}\b/);
-  if (fallbackNum) {
-    return parseInt(fallbackNum[0], 10);
+  // 3. 숫자만 추출 (날짜나 버전 표시는 제외)
+  const isDateOrVersion = /\b\d{4}[./-]\d{1,2}[./-]\d{1,2}\b/.test(text) || /\bv?\d+\.\d+\.\d+\b/i.test(text);
+  if (!isDateOrVersion) {
+    const fallbackNum = text.match(/\b\d{3,7}\b/);
+    if (fallbackNum) {
+      return parseInt(fallbackNum[0], 10);
+    }
   }
 
   return null;
@@ -145,8 +164,12 @@ export function extractSaleFromTranscript(transcript: string, activeKeywords: st
   
   // 판매 멘트 감지 키워드 목록
   const saleTriggers = ['구매확정', '구매 확정', '구매하신 분', '구매하신분', '결제완료', '결제 완료', '주문확정', '낙찰', '판매완료'];
+  const hasDecimal = /(?<!\d\.)(?<!\d)\d{1,3}\s*(?:[.]|점)\s*\d{1,2}(?!\.\d)(?!\s*(?:월|일|시|분|초|버전|ver))\b/u.test(text) ||
+    /([영공일이삼사오육칠팔구십]+)\s*(?:[.]|점)\s*([영공일이삼사오육칠팔구]+)/u.test(text);
+
   const hasTrigger = saleTriggers.some(trigger => text.includes(trigger)) ||
-    (text.includes('닉네임') && (text.includes('원') || text.includes('금액') || text.includes('가격')));
+    (text.includes('닉네임') && (hasDecimal || text.includes('원') || text.includes('금액') || text.includes('가격'))) ||
+    (hasDecimal && /(?:[가-힣a-zA-Z0-9_]{2,12}\s*님|뒷번호|끝번호|구매자)/u.test(text));
 
   if (!hasTrigger) {
     return null;
@@ -158,6 +181,9 @@ export function extractSaleFromTranscript(transcript: string, activeKeywords: st
       matchedKeywords.push(kw);
     }
   });
+  if (hasDecimal && !matchedKeywords.includes('소수점가격')) {
+    matchedKeywords.push('소수점가격');
+  }
 
   const nickname = parseBuyerNickname(text);
   const amount = parseKoreanAmount(text);
