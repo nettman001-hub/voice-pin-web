@@ -26,6 +26,7 @@ interface BuyerGroupedSale {
   hasPending: boolean;
   hasManualEdited: boolean;
   latestRecognizedAt: string;
+  productImageUrls: string[];
   captureImageUrls: string[];
   sessionIds: string[];
 }
@@ -76,6 +77,7 @@ export const SalesListPage: React.FC = () => {
           hasPending: false,
           hasManualEdited: false,
           latestRecognizedAt: sale.recognizedAt,
+          productImageUrls: [],
           captureImageUrls: [],
           sessionIds: []
         };
@@ -89,6 +91,9 @@ export const SalesListPage: React.FC = () => {
       if (sale.status === '수동수정') group.hasManualEdited = true;
       if (new Date(sale.recognizedAt).getTime() > new Date(group.latestRecognizedAt).getTime()) {
         group.latestRecognizedAt = sale.recognizedAt;
+      }
+      if (sale.productImageUrl && !group.productImageUrls.includes(sale.productImageUrl)) {
+        group.productImageUrls.push(sale.productImageUrl);
       }
       if (sale.captureImageUrls) {
         sale.captureImageUrls.forEach((imageUrl) => {
@@ -343,6 +348,9 @@ export const SalesListPage: React.FC = () => {
               buyerGroupedList.map((buyer) => {
                 const isExpanded = expandedBuyers.includes(buyer.buyerNickname);
                 const buyerSaleIds = buyer.records.map((record) => record.id);
+                const buyerThumbnail = buyer.productImageUrls[0]
+                  || buyer.records.find((r) => r.productImageUrl || (r.captureImageUrls && r.captureImageUrls.length > 0))?.productImageUrl
+                  || buyer.captureImageUrls[0];
 
                 return (
                   <div
@@ -360,9 +368,20 @@ export const SalesListPage: React.FC = () => {
                       className="w-full p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left cursor-pointer hover:bg-slate-50/80 transition"
                     >
                       <div className="flex items-center space-x-3.5">
-                        <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-brand-600 to-purple-600 text-white flex items-center justify-center font-bold text-sm shadow">
-                          {buyer.buyerNickname[0]}
-                        </div>
+                        {buyerThumbnail ? (
+                          <div className="relative w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex-shrink-0 shadow-sm flex items-center justify-center">
+                            <img src={buyerThumbnail} alt={`${buyer.buyerNickname} 구매 상품`} className="w-full h-full object-cover" />
+                            {buyer.orderCount > 1 && (
+                              <span className="absolute bottom-0 right-0 bg-slate-900/80 text-white text-[9px] px-1 rounded-tl font-bold">
+                                +{buyer.orderCount}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-brand-600 to-purple-600 text-white flex items-center justify-center font-bold text-sm shadow flex-shrink-0">
+                            {buyer.buyerNickname[0]}
+                          </div>
+                        )}
 
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
@@ -433,25 +452,43 @@ export const SalesListPage: React.FC = () => {
                           <span>{buyer.buyerNickname}님의 상세 구매 목록 ({buyer.records.length}건):</span>
                           <span className="text-slate-400">항목 클릭 시 상세 수정 가능</span>
                         </div>
-                        {buyer.records.map((rec) => (
+                        {buyer.records.map((rec) => {
+                          const recImage = rec.productImageUrl || rec.captureImageUrls?.[0];
+                          return (
                           <Link
                             key={rec.id}
                             to={`/sales/${rec.id}`}
-                            className="p-3 rounded-xl bg-white border border-slate-200 hover:border-brand-400 flex items-center justify-between text-xs transition block shadow-sm"
+                            className="p-3 rounded-xl bg-white border border-slate-200 hover:border-brand-400 flex items-center justify-between text-xs transition block shadow-sm group"
                           >
-                            <div className="flex items-center space-x-3">
-                              <span
-                                className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                                  rec.status === '보류'
-                                    ? 'bg-amber-400 text-slate-950'
-                                    : rec.status === '수동수정'
-                                    ? 'bg-purple-100 text-purple-700'
-                                    : 'bg-emerald-50 text-emerald-700'
-                                }`}
-                              >
-                                {rec.status}
-                              </span>
-                              <span className="text-slate-700 italic truncate max-w-md">"{rec.rawTranscript}"</span>
+                            <div className="flex items-center space-x-3 min-w-0 flex-1 mr-2">
+                              <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200/80 bg-slate-100 flex-shrink-0 flex items-center justify-center shadow-xs">
+                                {recImage ? (
+                                  <img src={recImage} alt={rec.productCode || rec.productName || '상품'} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200" />
+                                ) : (
+                                  <ShoppingBag className="w-4 h-4 text-brand-600/70" />
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center space-x-2">
+                                  <span
+                                    className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                      rec.status === '보류'
+                                        ? 'bg-amber-400 text-slate-950'
+                                        : rec.status === '수동수정'
+                                        ? 'bg-purple-100 text-purple-700'
+                                        : 'bg-emerald-50 text-emerald-700'
+                                    }`}
+                                  >
+                                    {rec.status}
+                                  </span>
+                                  {(rec.productCode || rec.productName) && (
+                                    <span className="text-[11px] font-semibold text-slate-700">
+                                      상품 {rec.productCode || ''}{rec.productName ? ` · ${rec.productName}` : ''}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-slate-600 italic truncate max-w-md mt-0.5">"{rec.rawTranscript}"</p>
+                              </div>
                             </div>
 
                             <div className="flex items-center space-x-4 flex-shrink-0">
@@ -460,10 +497,11 @@ export const SalesListPage: React.FC = () => {
                                 <span className="text-xs text-brand-600 font-mono ml-1 font-semibold">({formatAmountAsDecimal(rec.amount)})</span>
                               </span>
                               <span className="text-[10px] text-slate-400">{new Date(rec.recognizedAt).toLocaleTimeString('ko-KR')}</span>
-                              <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+                              <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-brand-600 transition" />
                             </div>
                           </Link>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -482,6 +520,8 @@ export const SalesListPage: React.FC = () => {
                   .sort((a, b) => new Date(a.recognizedAt).getTime() - new Date(b.recognizedAt).getTime());
                 const multi = formatMultiSaleAmount(buyerSales.map((s) => s.amount));
 
+                const saleImage = sale.productImageUrl || sale.captureImageUrls?.[0];
+
                 return (
                   <Link
                     key={sale.id}
@@ -489,16 +529,25 @@ export const SalesListPage: React.FC = () => {
                     className="block p-4 rounded-2xl bg-white border border-slate-200 hover:border-brand-400 transition shadow-sm group"
                   >
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                      <div className="flex items-start space-x-4">
-                        <div className="w-11 h-11 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden flex-shrink-0">
-                          {sale.captureImageUrls && sale.captureImageUrls.length > 0 ? (
-                            <img src={sale.captureImageUrls[0]} alt="캡처" className="w-full h-full object-cover" />
+                      <div className="flex items-start space-x-3.5 sm:space-x-4 min-w-0 flex-1">
+                        <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-slate-100 border border-slate-200/80 flex items-center justify-center overflow-hidden flex-shrink-0 shadow-sm">
+                          {saleImage ? (
+                            <img
+                              src={saleImage}
+                              alt={sale.productName || sale.productCode || '상품'}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                            />
                           ) : (
-                            <ShoppingBag className="w-5 h-5 text-brand-600" />
+                            <div className="flex flex-col items-center justify-center text-slate-400 p-1">
+                              <ShoppingBag className="w-5 h-5 text-brand-600/70" />
+                              <span className="text-[9px] font-mono text-slate-500 font-semibold mt-0.5">
+                                {sale.productCode || '상품'}
+                              </span>
+                            </div>
                           )}
                         </div>
 
-                        <div>
+                        <div className="min-w-0 flex-1">
                           <div className="flex items-center space-x-2 flex-wrap gap-1">
                             <span className="text-base font-bold text-slate-900 group-hover:text-brand-600 transition">
                               {sale.buyerNickname}
@@ -526,6 +575,13 @@ export const SalesListPage: React.FC = () => {
                               회차: {sale.sessionId}
                             </span>
                           </div>
+
+                          {(sale.productCode || sale.productName) && (
+                            <div className="text-[11px] font-semibold text-slate-600 mt-0.5">
+                              상품 {sale.productCode || '번호 없음'}{sale.productName ? ` · ${sale.productName}` : ''}
+                            </div>
+                          )}
+
                           <p className="text-xs text-slate-600 mt-1 line-clamp-1">
                             "{sale.rawTranscript}"
                           </p>

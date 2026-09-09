@@ -26,7 +26,8 @@ import {
   Download,
   FileSpreadsheet,
   Zap,
-  ExternalLink
+  ExternalLink,
+  ShoppingBag
 } from 'lucide-react';
 import { LocalSttModel, SttMode } from '../../types/stt';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
@@ -86,7 +87,7 @@ export const LiveHomePage: React.FC = () => {
   } = useCommentCapture();
 
   const { sales } = useSales();
-  const { activeSession } = useProductSales();
+  const { activeSession, activeProduct } = useProductSales();
   const navigate = useNavigate();
   const [selectedCaptureModal, setSelectedCaptureModal] = useState<string | null>(null);
   const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
@@ -918,7 +919,9 @@ export const LiveHomePage: React.FC = () => {
                 </div>
               ) : (
                 currentSessionSales.map((sale) => {
-                  const productImage = sale.productImageUrl || sale.captureImageUrls?.[0];
+                  const productImage = sale.productImageUrl
+                    || (sale.productCode && sale.productCode === activeProduct?.productCode ? activeProduct?.imageUrl : undefined)
+                    || sale.captureImageUrls?.[0];
                   const sourceLabel = sale.source === 'ANDROID_COMMENTS'
                     ? '앱'
                     : sale.source === 'WEB_VOICE'
@@ -945,7 +948,25 @@ export const LiveHomePage: React.FC = () => {
                         : 'bg-slate-50/70 border-slate-200 text-slate-800'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-3 sm:gap-3.5">
+                      {/* 상품 이미지 썸네일 */}
+                      <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden border border-slate-200/80 bg-slate-100 flex-shrink-0 shadow-sm flex items-center justify-center">
+                        {productImage ? (
+                          <img
+                            src={productImage}
+                            alt={`${sale.productCode || sale.buyerNickname} 상품`}
+                            className="w-full h-full object-cover hover:scale-105 transition-transform duration-200"
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center text-slate-400 p-1">
+                            <ShoppingBag className="w-5 h-5 text-brand-600/70" />
+                            <span className="text-[9px] font-mono text-slate-500 font-semibold mt-0.5">
+                              {sale.productCode || '상품'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center space-x-2 flex-wrap gap-1">
                           <span className="font-bold text-sm text-slate-900 truncate">{sale.buyerNickname}</span>
@@ -1018,22 +1039,16 @@ export const LiveHomePage: React.FC = () => {
                           </div>
                         )}
                         {(sale.productCode || sale.productName) && (
-                          <div className="text-[11px] font-semibold text-slate-600 mt-1">
+                          <div className="text-[11px] font-semibold text-slate-600 mt-0.5">
                             상품 {sale.productCode || '번호 없음'}{sale.productName ? ` · ${sale.productName}` : ''}
                           </div>
                         )}
+
+                        <p className="text-[11px] text-slate-500 mt-1.5 truncate">
+                          "{sale.rawTranscript}"
+                        </p>
                       </div>
-
-                      {productImage && (
-                        <div className="w-14 h-14 sm:w-12 sm:h-12 rounded-xl overflow-hidden border border-slate-200 flex-shrink-0 shadow-sm">
-                          <img src={productImage} alt={`${sale.productCode || sale.buyerNickname} 상품`} className="w-full h-full object-cover" />
-                        </div>
-                      )}
                     </div>
-
-                    <p className="text-[11px] text-slate-500 mt-2 truncate">
-                      "{sale.rawTranscript}"
-                    </p>
                   </Link>
                   );
                 })

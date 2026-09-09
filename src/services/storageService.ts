@@ -54,7 +54,9 @@ export const INITIAL_SALES: SaleRecord[] = [
     recognizedAt: new Date(Date.now() - 3600000 * 5).toISOString(),
     rawTranscript: '구매확정 됐습니다. 닉네임 러블리샵님 금액은 32,000원입니다.',
     status: '확정',
+    productCode: '101',
     productName: '라이브 의류 1점',
+    productImageUrl: 'https://images.unsplash.com/photo-1512436991641-6745cdb1723f?w=600&q=80',
     captureImageUrls: ['https://images.unsplash.com/photo-1512436991641-6745cdb1723f?w=600&q=80']
   },
   {
@@ -65,7 +67,9 @@ export const INITIAL_SALES: SaleRecord[] = [
     recognizedAt: new Date(Date.now() - 3600000 * 4).toISOString(),
     rawTranscript: '구매확정! 구매하신 분은 달콤한하루님 이시구요 가격 4만 5천원입니다.',
     status: '확정',
+    productCode: '102',
     productName: '라이브 의류 세트',
+    productImageUrl: 'https://images.unsplash.com/photo-1434389677669-e08b4cac3105?w=600&q=80',
   },
   {
     id: 's3',
@@ -85,6 +89,9 @@ export const INITIAL_SALES: SaleRecord[] = [
     recognizedAt: new Date(Date.now() - 1800000).toISOString(),
     rawTranscript: '구매확정입니다 닉네임 민트초코님 가격 만구천구백원 캡처해주세요',
     status: '자동저장',
+    productCode: '103',
+    productName: '초코 민트 굿즈',
+    productImageUrl: 'https://images.unsplash.com/photo-1578932750294-f5075e85f44a?w=600&q=80',
   },
   {
     id: 's5',
@@ -94,6 +101,9 @@ export const INITIAL_SALES: SaleRecord[] = [
     recognizedAt: new Date(Date.now() - 900000).toISOString(),
     rawTranscript: '수정 완료! 닉네임 황금돼지님 금액 58000원입니다.',
     status: '수동수정',
+    productCode: '104',
+    productName: '골드 피그 인형 세트',
+    productImageUrl: 'https://images.unsplash.com/photo-1558769132-cb1aea458c5e?w=600&q=80',
   }
 ];
 
