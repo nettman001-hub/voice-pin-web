@@ -94,6 +94,12 @@ export function parseKoreanAmount(text: string): number | null {
 export function parseBuyerNickname(text: string): string | null {
   if (!text) return null;
 
+  // 패턴 0: 뒷번호/끝번호 4자리 호칭 ("뒷번호 0517님", "끝번호 1234님", "전화번호 뒤 0517님")
+  const p0 = text.match(/(?:뒷\s*번호|끝\s*번호|뒤\s*번호|전화\s*번호\s*뒤|전화\s*뒤|뒷\s*자리|끝\s*자리|핸드폰\s*뒤|폰\s*뒤|번호)\s*[:：#]?\s*(\d{4})(?:\s*번)?(?:\s*님|\s*이|\s*씨|\s*고객)?/u);
+  if (p0 && p0[1]) {
+    return `뒷번호 ${p0[1]}`;
+  }
+
   // 패턴 1: "닉네임은 [xxx]님", "닉네임 [xxx]님", "[xxx]님 이시구요", "[xxx]님이"
   const p1 = text.match(/(?:닉네임은?|구매하신\s*분은?|구매자(?:는)?)\s*([가-힣a-zA-Z0-9_]{1,15})(?:\s*님|\s*이|\s*씨|\s*고객)/);
   if (p1 && p1[1]) {

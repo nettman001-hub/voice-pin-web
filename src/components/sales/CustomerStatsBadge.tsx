@@ -5,6 +5,7 @@ import { useLive } from '../../context/LiveContext';
 import { useProductSales } from '../../context/ProductSalesContext';
 import { SaleRecord } from '../../types/live';
 import { CustomerPurchaseClaim, SettlementInvoice, Shipment } from '../../types/commerce';
+import { areNicknamesSimilar, normalizeNickname } from '../../services/nicknameMatcher';
 
 interface CustomerStatsBadgeProps {
   nickname?: string;
@@ -15,13 +16,7 @@ interface CustomerStatsBadgeProps {
 
 /** 닉네임 비교용 정규화: 특수문자, 공백, 접미사 '님' 제거 및 소문자화 */
 export const normalizeBuyerNickname = (name?: string): string => {
-  if (!name) return '';
-  return name
-    .trim()
-    .replace(/^@/, '')
-    .replace(/\s+/g, '')
-    .replace(/님$/u, '')
-    .toLowerCase();
+  return normalizeNickname(name);
 };
 
 export interface CustomerStats {
@@ -59,10 +54,13 @@ export const calculateCustomerStats = ({
     return { purchaseCount: 0, totalRevenue: 0, defaultCount: 0, isFirstTimeBuyer: false, validSales: [] };
   }
 
-  // 해당 고객의 모든 주문 건 매칭
-  const customerSales = sales.filter(
-    (s) => normalizeBuyerNickname(s.buyerNickname) === normalizedTarget
-  );
+  // 해당 고객의 모든 주문 건 매칭 (정규화 일치 및 규칙 1, 2, 3 비교 적용)
+  const customerSales = sales.filter((s) => {
+    const saleNorm = normalizeBuyerNickname(s.buyerNickname);
+    if (!saleNorm || saleNorm === '미확인' || saleNorm === '미확인(보류)') return false;
+    if (saleNorm === normalizedTarget) return true;
+    return areNicknamesSimilar(s.buyerNickname, nickname);
+  });
 
   if (customerSales.length === 0) {
     return { purchaseCount: 0, totalRevenue: 0, defaultCount: 0, isFirstTimeBuyer: false, validSales: [] };

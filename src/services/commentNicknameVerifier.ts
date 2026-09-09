@@ -1,4 +1,9 @@
 import type { CommentRecord } from '../types/comment';
+import {
+  compareNicknames,
+  extractPhoneSuffix4Digits,
+  normalizeNickname
+} from './nicknameMatcher';
 
 const COMMENT_TIME_WINDOW_MS = 3 * 60 * 1000;
 const PURCHASE_INTENT_PATTERN = /(저요|ㅈ\s*ㅇ|구매|살게요|살께요|주세요|주문|결제|입금|확정)/u;
@@ -35,53 +40,16 @@ interface CommentCandidate {
   hasPurchaseIntent: boolean;
 }
 
-const normalizeNickname = (value: string) =>
-  String(value || '')
-    .normalize('NFKC')
-    .toLocaleLowerCase('ko-KR')
-    // JavaScript의 \W는 한글을 단어 문자가 아닌 것으로 취급하므로 쓰지 않는다.
-    // 공백·문장부호·기호만 제거하고 한글/영문/숫자는 그대로 비교한다.
-    .replace(/[\s\p{P}\p{S}]+/gu, '');
-
 const getSuffixDigits = (transcript: string) => {
   const match = String(transcript || '').match(/(?:끝|뒷|뒤)\s*(?:번호|자리)\s*(\d{3,12})\s*(?:번)?\s*(?:님|고객)?/u);
   return match?.[1] || undefined;
 };
 
-const levenshteinDistance = (left: string, right: string) => {
-  if (left === right) return 0;
-  if (!left) return right.length;
-  if (!right) return left.length;
-
-  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
-  for (let row = 1; row <= left.length; row += 1) {
-    const current = [row];
-    for (let column = 1; column <= right.length; column += 1) {
-      current[column] = Math.min(
-        current[column - 1] + 1,
-        previous[column] + 1,
-        previous[column - 1] + (left[row - 1] === right[column - 1] ? 0 : 1)
-      );
-    }
-    previous = current;
-  }
-  return previous[right.length];
-};
-
 const similarityScore = (spoken: string, candidate: CommentCandidate) => {
-  const target = candidate.normalizedNickname;
-  if (spoken === target) return 100;
+  const comp = compareNicknames(spoken, candidate.record.nickname);
+  if (!comp.isSimilar && !comp.isSame) return 0;
 
-  let score = 0;
-  if (spoken.length >= 3 && (target.includes(spoken) || spoken.includes(target))) {
-    score = 86;
-  } else if (spoken.length >= 3 && target.length >= 3) {
-    const distance = levenshteinDistance(spoken, target);
-    const ratio = 1 - distance / Math.max(spoken.length, target.length);
-    if (ratio >= 0.72) score = Math.round(ratio * 90);
-  }
-
-  if (!score) return 0;
+  let score = comp.score;
   if (candidate.distanceMs <= 30_000) score += 6;
   else if (candidate.distanceMs <= 90_000) score += 3;
   if (candidate.hasPurchaseIntent) score += 3;
@@ -110,7 +78,10 @@ export function verifyNicknameFromComments({
   recognizedAt,
   comments
 }: VerificationInput): NicknameVerificationResult {
-  const suffixDigits = getSuffixDigits(transcript);
+  const suffixDigits =
+    extractPhoneSuffix4Digits(transcript) ||
+    extractPhoneSuffix4Digits(spokenNickname) ||
+    getSuffixDigits(transcript);
   const normalizedSpoken = normalizeNickname(spokenNickname);
   const recognizedAtMs = new Date(recognizedAt).getTime();
 
@@ -138,7 +109,11 @@ export function verifyNicknameFromComments({
   }
 
   if (suffixDigits) {
-    const suffixMatches = candidates.filter((candidate) => candidate.normalizedNickname.endsWith(suffixDigits));
+    const suffixMatches = candidates.filter(
+      (candidate) =>
+        candidate.normalizedNickname.endsWith(suffixDigits) ||
+        compareNicknames(spokenNickname, candidate.record.nickname).isSame
+    );
     if (suffixMatches.length === 1) {
       const matched = suffixMatches[0];
       return {
@@ -175,10 +150,19 @@ export function verifyNicknameFromComments({
     return { kind: 'AMBIGUOUS', spokenNickname };
   }
 
+  const comp = compareNicknames(normalizedSpoken, first.candidate.record.nickname);
+  const kind: NicknameVerificationKind =
+    comp.reason === 'EXACT'
+      ? 'EXACT'
+      : comp.reason === 'SUFFIX_CONFIRMED'
+        ? 'SUFFIX'
+        : 'SIMILAR';
+
   return {
-    kind: first.score === 100 ? 'EXACT' : 'SIMILAR',
+    kind,
     verifiedNickname: first.candidate.record.nickname,
     spokenNickname,
+    suffixDigits: comp.matchedSuffixDigits || suffixDigits,
     commentId: first.candidate.record.id
   };
 }

@@ -1,14 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { areNicknamesSimilar, normalizeNickname } from '../src/services/nicknameMatcher.ts';
 
 export const normalizeBuyerNickname = (name) => {
-  if (!name) return '';
-  return name
-    .trim()
-    .replace(/^@/, '')
-    .replace(/\s+/g, '')
-    .replace(/님$/u, '')
-    .toLowerCase();
+  return normalizeNickname(name);
 };
 
 export const calculateCustomerStats = ({
@@ -26,9 +21,12 @@ export const calculateCustomerStats = ({
     return { purchaseCount: 0, totalRevenue: 0, defaultCount: 0, isFirstTimeBuyer: false, validSales: [] };
   }
 
-  const customerSales = sales.filter(
-    (s) => normalizeBuyerNickname(s.buyerNickname) === normalizedTarget
-  );
+  const customerSales = sales.filter((s) => {
+    const saleNorm = normalizeBuyerNickname(s.buyerNickname);
+    if (!saleNorm || saleNorm === '미확인' || saleNorm === '미확인(보류)') return false;
+    if (saleNorm === normalizedTarget) return true;
+    return areNicknamesSimilar(s.buyerNickname, nickname);
+  });
 
   if (customerSales.length === 0) {
     return { purchaseCount: 0, totalRevenue: 0, defaultCount: 0, isFirstTimeBuyer: false, validSales: [] };
@@ -343,5 +341,55 @@ test('사용자 명시 규칙: 이번 판매회차의 주문 변경/취소/보�
   assert.equal(stats.purchaseCount, 3, '총 구매횟수는 과거 2건 + 이번 회차 1건 = 3회');
   assert.equal(stats.defaultCount, 0, '이번 판매회차는 미이행 횟수에서 제외되고 지난 회차에도 미이행이 없으므로 0회');
   assert.equal(stats.totalRevenue, 80000, '누적 매출은 과거 유효 주문 80000원');
+});
+
+test('닉네임 보강 규칙 1, 2, 3이 적용된 고객 통계 연동 검증', () => {
+  const sales = [
+    // 1. 과거에 mindset0517 로 구매한 건
+    {
+      id: 'past-sale-mindset',
+      sessionId: 'session-20260801',
+      buyerNickname: 'mindset0517',
+      amount: 45000,
+      recognizedAt: '2026-08-01T10:00:00Z',
+      status: '확정'
+    },
+    // 2. 과거에 코맹 으로 구매한 건
+    {
+      id: 'past-sale-comaeng',
+      sessionId: 'session-20260801',
+      buyerNickname: '코맹',
+      amount: 20000,
+      recognizedAt: '2026-08-01T10:00:00Z',
+      status: '확정'
+    }
+  ];
+
+  // 규칙 2 검증: "마인드셋"으로 조회해도 과거 "mindset0517" 주문이 매칭되어야 함
+  const statsMindset = calculateCustomerStats({
+    nickname: '마인드셋',
+    sales,
+    currentSessionId: 'session-today'
+  });
+  assert.equal(statsMindset.purchaseCount, 1, '마인드셋은 mindset0517과 발음 매칭되어 1건 집계되어야 함');
+  assert.equal(statsMindset.totalRevenue, 45000);
+
+  // 규칙 3 검증: "뒷번호 0517님"으로 조회해도 "mindset0517" 주문이 매칭되어야 함
+  const statsSuffix = calculateCustomerStats({
+    nickname: '뒷번호 0517님',
+    sales,
+    currentSessionId: 'session-today'
+  });
+  assert.equal(statsSuffix.purchaseCount, 1, '뒷번호 0517님은 mindset0517과 식별자 일치로 1건 집계되어야 함');
+  assert.equal(statsSuffix.totalRevenue, 45000);
+
+  // 규칙 1 검증: "코맹맹"으로 조회해도 과거 "코맹" 주문이 매칭되어야 함
+  const statsComaeng = calculateCustomerStats({
+    nickname: '코맹맹',
+    sales,
+    currentSessionId: 'session-today'
+  });
+  assert.equal(statsComaeng.purchaseCount, 1, '코맹맹은 코맹과 반복글자/편집거리1 매칭되어 1건 집계되어야 함');
+  assert.equal(statsComaeng.totalRevenue, 20000);
 });
 
