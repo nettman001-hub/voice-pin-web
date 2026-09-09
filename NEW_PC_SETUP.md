@@ -1,5 +1,8 @@
 # 새 컴퓨터 로컬 파일 복구 및 환경 구축 안내
 
+> [!IMPORTANT]
+> 최신 기능·버전·배포 상태와 새 PC 체크리스트는 [`HANDOFF.md`](HANDOFF.md)를 우선 확인하세요. 이 문서는 이전 환경 구축 절차를 보존한 참고 자료입니다.
+
 Git에서 제외된 항목(시크릿 파일, 환경변수 등)이 없는 것은 정상입니다. 아래 가이드를 따라 새 PC에서 환경을 복구하고 실행합니다.
 
 > **상세 종합 인계인수서**: [PROJECT_HANDOVER.md](file:///c:/dev/voicecap-web/PROJECT_HANDOVER.md)  

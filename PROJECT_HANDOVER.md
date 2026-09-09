@@ -1,5 +1,8 @@
 # VoiceCAP 프로젝트 통합 인계인수서 (Handover Document)
 
+> [!IMPORTANT]
+> 최신 기능, v1.3.3 Android, 배포 기준점과 새 PC 작업 순서는 [`HANDOFF.md`](HANDOFF.md)를 우선 확인하세요. 이 문서는 전체 시스템의 과거 종합 설명을 보존한 참고 자료입니다.
+
 > **최종 개정일**: 2026년 9월 9일 (Asia/Seoul)
 > **프로젝트**: VoiceCAP (라이브 커머스 상품 중심 판매관리 + 실시간 댓글 수집 + 감열식 영수증 자동 출력 + 모바일 SMS/판매 브리지 + 오프라인 하이브리드 STT)  
 > **공식 저장소**: [https://github.com/nettman001-hub/voice-pin-web](https://github.com/nettman001-hub/voice-pin-web)  
