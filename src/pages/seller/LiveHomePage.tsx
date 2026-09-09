@@ -586,7 +586,7 @@ export const LiveHomePage: React.FC = () => {
                     <span className={`w-2 h-2 rounded-full mr-1.5 ${isListening ? 'bg-emerald-500 animate-ping' : 'bg-slate-400'}`}></span>
                     <span>1. 실시간 전체 자막 스트림</span>
                   </div>
-                  <div className="flex items-center space-x-1.5">
+                  <div className="flex items-center space-x-1.5 flex-wrap gap-1">
                     <button
                       onClick={() => injectTestMent('구매확정! 닉네임 러블리샵님 금액 35,000원입니다.')}
                       className="px-2 py-0.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-[10px] border border-emerald-200 transition"
@@ -601,6 +601,13 @@ export const LiveHomePage: React.FC = () => {
                     >
                       📸 캡처하세요
                     </button>
+                    <button
+                      onClick={() => injectTestMent('안녕하세요 오늘 라이브 방송 찾아와 주신 모든 분들 환영합니다. 이번 특가 상품은 고급 린넨 원피스이며 지금 바로 구매확정 닉네임 꽃길님 삼만오천원에 등록됩니다.')}
+                      className="px-2 py-0.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-[10px] border border-purple-200 transition"
+                      title="긴 발화 2줄 분할 자막 테스트"
+                    >
+                      ✂️ 긴멘트 2줄분할
+                    </button>
                   </div>
                 </div>
 
@@ -614,16 +621,16 @@ export const LiveHomePage: React.FC = () => {
                     </div>
                   ) : (
                     <>
-                      {liveTranscriptFlow.slice(-6).map((flow) => (
+                      {liveTranscriptFlow.slice(-10).map((flow) => (
                         <div key={flow.id} className="leading-relaxed flex items-baseline space-x-2 text-slate-700 font-medium">
                           <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">{flow.timestamp}</span>
-                          <span className="break-words">{flow.text}</span>
+                          <span className="break-words line-clamp-2 whitespace-pre-line">{flow.text}</span>
                         </div>
                       ))}
                       {currentInterimTranscript && (
                         <div className="leading-relaxed flex items-baseline space-x-2 text-brand-600 font-bold animate-pulse">
                           <span className="text-[10px] text-brand-400 font-mono flex-shrink-0">듣는 중...</span>
-                          <span className="break-words">{currentInterimTranscript}</span>
+                          <span className="break-words line-clamp-2 whitespace-pre-line">{currentInterimTranscript}</span>
                         </div>
                       )}
                     </>

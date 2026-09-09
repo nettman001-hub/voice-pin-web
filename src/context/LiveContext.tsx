@@ -19,6 +19,7 @@ import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
 import { useProductSales } from './ProductSalesContext';
 import { ProductSalesProduct } from '../types/productSales';
 import { createNumberProductImage } from '../services/productImageService';
+import { InterimStreamChunker } from '../services/captionStreamService';
 
 const SONIOX_SALE_TIMEOUT_MS = 10000;
 const SONIOX_BUFFER_LIMIT = 600;
@@ -146,6 +147,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sonioxCommandTailRef = useRef<string>('');
   const productSalesRef = useRef(productSales);
   const voiceProductDraftRef = useRef<VoiceProductDraft | null>(null);
+  const interimStreamChunkerRef = useRef<InterimStreamChunker>(new InterimStreamChunker());
 
   // 관리자 공통 STT 공급자 및 API Key 설정
   const [deepgramApiKey, setDeepgramApiKeyState] = useState<string>('');
@@ -828,7 +830,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     if (!data.isFinal) {
-      setCurrentInterimTranscript(data.text);
+      const { newFlowItems, displayInterimText } = interimStreamChunkerRef.current.processInterim(data.text);
+      if (newFlowItems.length > 0) {
+        setLiveTranscriptFlow((prev) => [...prev.slice(-30), ...newFlowItems]);
+      }
+      setCurrentInterimTranscript(displayInterimText);
       return;
     }
 
@@ -877,6 +883,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (data.isAbnormal) {
       const abnormalTime = new Date().toLocaleTimeString('ko-KR');
       console.warn(`[LiveContext] 로컬 STT 비정상 반복 전사 차단 (${data.abnormalReason}):`, data.text);
+      interimStreamChunkerRef.current.reset();
+      setCurrentInterimTranscript('');
       setLiveTranscriptFlow((prev) => [
         ...prev.slice(-30),
         {
@@ -894,7 +902,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     if (!data.isFinal) {
-      setCurrentInterimTranscript(data.text);
+      const { newFlowItems, displayInterimText } = interimStreamChunkerRef.current.processInterim(data.text);
+      if (newFlowItems.length > 0) {
+        setLiveTranscriptFlow((prev) => [...prev.slice(-30), ...newFlowItems]);
+      }
+      setCurrentInterimTranscript(displayInterimText);
       return;
     }
 
@@ -903,11 +915,14 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const fullText = data.text.trim();
     const nowTime = new Date().toLocaleTimeString('ko-KR');
 
-    // 윗부분 자막 스트림에 추가
-    setLiveTranscriptFlow((prev) => [
-      ...prev.slice(-30),
-      { id: `flow-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`, text: fullText, timestamp: nowTime }
-    ]);
+    // 윗부분 자막 스트림에 추가 (최대 2줄 분할 및 순차 시간표시 적용)
+    const finalizedFlowItems = interimStreamChunkerRef.current.finalize(fullText);
+    if (finalizedFlowItems.length > 0) {
+      setLiveTranscriptFlow((prev) => [
+        ...prev.slice(-30),
+        ...finalizedFlowItems
+      ]);
+    }
 
     const rules = storageService.getRules().filter((r) => r.isEnabled);
     const activeKeywords = rules.map((r) => r.word);
@@ -1064,6 +1079,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const newSessionId = generateSessionId();
       setCurrentSessionId(newSessionId);
       setSessionStartTime(new Date().toISOString());
+      setCurrentInterimTranscript('');
+      interimStreamChunkerRef.current.reset();
       setIsListening(true);
       setSttEngineStatus('CONNECTING');
       setSttEngineMessage(mode === 'TAB_AUDIO' ? '방송 탭 오디오 연결 확인 중' : '마이크 연결 확인 중');
@@ -1303,6 +1320,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAudioLevel(0);
     setWaveform(new Uint8Array(128));
     setCurrentInterimTranscript('');
+    interimStreamChunkerRef.current.reset();
     isVoiceEditingRef.current = false;
     setIsVoiceEditing(false);
     setEditingFieldInfo(null);

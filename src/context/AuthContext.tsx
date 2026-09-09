@@ -93,6 +93,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const client = supabase;
     if (!isSupabaseConfigured || !client) {
+      try {
+        const saved = localStorage.getItem('voicecap_local_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setUser(parsed.user);
+          setWorkspaceId(parsed.workspaceId || null);
+          setToken('local-dev-token');
+        }
+      } catch (e) {
+        console.error('로컬 유저 복원 오류:', e);
+      }
       setIsInitialized(true);
       return;
     }
@@ -139,7 +150,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await syncRemoteIdentity(data.user, data.session?.access_token);
       return { success: true };
     }
-    return { success: false, message: '클라우드 회원 서버가 설정되지 않았습니다.' };
+
+    // 로컬 개발/오프라인 환경용 데모 계정 로그인 허용
+    const isDemoSeller = email.includes('seller') || email === 'seller@dadryeo.com';
+    const isDemoAdmin = email.includes('admin') || email === 'admin@dadryeo.com';
+    if (isDemoSeller || isDemoAdmin || pass.includes('demo')) {
+      const demoUser: User = {
+        id: isDemoAdmin ? 'local-admin-id' : 'local-seller-id',
+        email,
+        nickname: isDemoAdmin ? '관리자(데모)' : '판매자(데모)',
+        role: isDemoAdmin ? '관리자' : '판매자',
+        status: '활성',
+        createdAt: new Date().toISOString().slice(0, 10),
+        allowAdminSttKey: true,
+        subscriptionPlan: '프로',
+        isTrial: false,
+      };
+      setUser(demoUser);
+      setWorkspaceId(isDemoAdmin ? 'local-admin-ws' : 'local-seller-ws');
+      setToken('local-dev-token');
+      try {
+        localStorage.setItem('voicecap_local_user', JSON.stringify({ user: demoUser, workspaceId: isDemoAdmin ? 'local-admin-ws' : 'local-seller-ws' }));
+      } catch (e) {}
+      return { success: true };
+    }
+
+    return { success: false, message: '클라우드 회원 서버가 설정되지 않았습니다. 하단의 데모 계정 버튼을 눌러 로그인해 주세요.' };
   };
 
   const signup = async (email: string, pass: string, role: UserRole, nickname: string): Promise<AuthResult> => {
@@ -186,6 +222,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async () => {
     rememberSessionRefreshToken(null);
     if (isSupabaseConfigured) await requireSupabase().auth.signOut();
+    try {
+      localStorage.removeItem('voicecap_local_user');
+    } catch (e) {}
     setUser(null); setWorkspaceId(null); setToken(null);
   };
 
