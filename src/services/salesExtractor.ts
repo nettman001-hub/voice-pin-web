@@ -113,10 +113,12 @@ export function parseKoreanAmount(text: string): number | null {
 export function parseBuyerNickname(text: string): string | null {
   if (!text) return null;
 
-  // 패턴 0: 뒷번호/끝번호 4자리 호칭 ("뒷번호 0517님", "끝번호 1234님", "전화번호 뒤 0517님")
-  const p0 = text.match(/(?:뒷\s*번호|끝\s*번호|뒤\s*번호|전화\s*번호\s*뒤|전화\s*뒤|뒷\s*자리|끝\s*자리|핸드폰\s*뒤|폰\s*뒤|번호)\s*[:：#]?\s*(\d{4})(?:\s*번)?(?:\s*님|\s*이|\s*씨|\s*고객)?/u);
+  // 패턴 0: 접미부/접두부 위치 호칭 (예: "뒷번호 0517님", "뒷자리 에스엠디아이님", "끝번호 smdi님", "앞자리 지아이이님")
+  const p0 = text.match(
+    /(?:마지막\s*자리|마지막\s*번호|전화\s*번호\s*뒤|핸드폰\s*뒤|폰\s*뒤|전화\s*뒤|뒷\s*자리|뒷\s*번호|뒤\s*번호|끝\s*자리|끝\s*번호|마지막|처음\s*자리|앞\s*자리|앞\s*번호|첫\s*자리|첫\s*번호|처음)\s*[:：#]?\s*([가-힣a-zA-Z0-9_]{1,16})(?:\s*번)?(?:\s*님|\s*이|\s*씨|\s*고객)?/u
+  );
   if (p0 && p0[1]) {
-    return `뒷번호 ${p0[1]}`;
+    return p0[0].replace(/(?:\s*번)?(?:\s*님|\s*이|\s*씨|\s*고객)$/u, '').trim();
   }
 
   // 패턴 1: "닉네임은 [xxx]님", "닉네임 [xxx]님", "[xxx]님 이시구요", "[xxx]님이"

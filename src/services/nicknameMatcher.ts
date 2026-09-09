@@ -22,12 +22,25 @@
  *    - 일치 시 동일인 후보가 아니라 "같은 닉네임"으로 확정 (SUFFIX_CONFIRMED)
  */
 
+export type NicknameMatchType =
+  | 'exact'
+  | 'spelled-pronunciation'
+  | 'word-pronunciation'
+  | 'prefix'
+  | 'suffix'
+  | 'numeric'
+  | 'fuzzy'
+  | 'none';
+
 export type NicknameMatchReason =
   | 'EXACT'                        // 완전 일치
-  | 'SUFFIX_CONFIRMED'            // 규칙 3: 뒷번호 4자리 식별자 일치 (같은 닉네임 확정)
+  | 'SPELLED_PRONUNCIATION'        // 영문 철자 발음 완전 일치 (gieblsmdi = 지아이이비엘에스엠디아이)
+  | 'SUFFIX_CONFIRMED'            // 규칙 3: 뒷번호/뒷자리 식별자 일치 (같은 닉네임 확정)
+  | 'PREFIX_CONFIRMED'            // 앞자리 식별자 일치 (같은 닉네임 확정)
   | 'BASE_EXACT'                  // 숫자 제거 후 기본 텍스트 완전 일치
   | 'PHONETIC_EXACT'              // 규칙 2: 영문-한글 발음 완전 일치 (mindset = 마인드셋)
   | 'PHONETIC_SIMILAR'            // 규칙 2: 영문-한글 발음 후 유사 일치
+  | 'NUMERIC_MATCH'               // 숫자 부분 전체 일치
   | 'EDIT_DISTANCE_1'             // 규칙 1: 편집 거리 <= 1
   | 'INCLUSION_DIFF_1'            // 규칙 1: 한쪽 포함 및 길이차 <= 1 (코맹 ↔ 코맹맹)
   | 'REPEATED_TRAILING_CHAR'      // 규칙 1: 마지막 글자 반복 추가/삭제 (코맹 ↔ 코맹맹)
@@ -39,11 +52,179 @@ export interface NicknameComparisonResult {
   isSimilar: boolean;             // 유사 닉네임 여부 (규칙 1, 2, 3 등)
   score: number;                  // 0 ~ 100 점수
   reason: NicknameMatchReason;
+  matchType?: NicknameMatchType;
   matchedSuffixDigits?: string;
   normalizedLeft?: string;
   normalizedRight?: string;
   details?: string;
 }
+
+export interface NicknameAliases {
+  original: string;
+  normalized: string;
+  spelledPronunciations: string[];
+  wordPronunciations: string[];
+  numericPronunciations: string[];
+  combinedPronunciations: string[];
+}
+
+export interface NicknameMatchResult {
+  matched: boolean;
+  ambiguous: boolean;
+  score: number;
+  matchType: NicknameMatchType;
+  matchedNickname?: string;
+  candidates?: string[];
+  reason: string;
+}
+
+// =========================================================================
+// 1. 영문자별 한국어 철자 발음 매핑 (A-Z)
+// =========================================================================
+export const ALPHABET_SPELLED_MAP: Record<string, string> = {
+  a: '에이',
+  b: '비',
+  c: '씨',
+  d: '디',
+  e: '이',
+  f: '에프',
+  g: '지',
+  h: '에이치',
+  i: '아이',
+  j: '제이',
+  k: '케이',
+  l: '엘',
+  m: '엠',
+  n: '엔',
+  o: '오',
+  p: '피',
+  q: '큐',
+  r: '알',
+  s: '에스',
+  t: '티',
+  u: '유',
+  v: '브이',
+  w: '더블유',
+  x: '엑스',
+  y: '와이',
+  z: '지'
+};
+
+// 철자 발음 역변환 토큰 (긴 음절 우선)
+export const SPELLED_KOREAN_TOKENS: Array<{ kor: string; letter: string }> = [
+  { kor: '더블유', letter: 'w' },
+  { kor: '에이치', letter: 'h' },
+  { kor: '에이', letter: 'a' },
+  { kor: '에프', letter: 'f' },
+  { kor: '아이', letter: 'i' },
+  { kor: '제이', letter: 'j' },
+  { kor: '케이', letter: 'k' },
+  { kor: '에스', letter: 's' },
+  { kor: '브이', letter: 'v' },
+  { kor: '엑스', letter: 'x' },
+  { kor: '와이', letter: 'y' },
+  { kor: '비', letter: 'b' },
+  { kor: '씨', letter: 'c' },
+  { kor: '디', letter: 'd' },
+  { kor: '이', letter: 'e' },
+  { kor: '지', letter: 'g' },
+  { kor: '엘', letter: 'l' },
+  { kor: '엠', letter: 'm' },
+  { kor: '엔', letter: 'n' },
+  { kor: '오', letter: 'o' },
+  { kor: '피', letter: 'p' },
+  { kor: '큐', letter: 'q' },
+  { kor: '알', letter: 'r' },
+  { kor: '티', letter: 't' },
+  { kor: '유', letter: 'u' }
+];
+
+// =========================================================================
+// 2. 숫자 한 자리씩 발음 매핑 (0-9)
+// =========================================================================
+export const DIGIT_PRONUNCIATION_MAP: Record<string, string[]> = {
+  '0': ['공', '영', '제로'],
+  '1': ['일', '하나'],
+  '2': ['이', '둘'],
+  '3': ['삼', '셋'],
+  '4': ['사', '넷'],
+  '5': ['오', '다섯'],
+  '6': ['육', '여섯'],
+  '7': ['칠', '일곱'],
+  '8': ['팔', '여덟'],
+  '9': ['구', '아홉']
+};
+
+export const KOREAN_DIGIT_TOKENS: Array<{ kor: string; digit: string }> = [
+  { kor: '제로', digit: '0' },
+  { kor: '하나', digit: '1' },
+  { kor: '다섯', digit: '5' },
+  { kor: '여섯', digit: '6' },
+  { kor: '일곱', digit: '7' },
+  { kor: '여덟', digit: '8' },
+  { kor: '아홉', digit: '9' },
+  { kor: '영', digit: '0' },
+  { kor: '공', digit: '0' },
+  { kor: '일', digit: '1' },
+  { kor: '이', digit: '2' },
+  { kor: '둘', digit: '2' },
+  { kor: '삼', digit: '3' },
+  { kor: '셋', digit: '3' },
+  { kor: '사', digit: '4' },
+  { kor: '넷', digit: '4' },
+  { kor: '오', digit: '5' },
+  { kor: '육', digit: '6' },
+  { kor: '칠', digit: '7' },
+  { kor: '팔', digit: '8' },
+  { kor: '구', digit: '9' }
+];
+
+// =========================================================================
+// 3. 접두부/접미부 위치 표현 및 안내어/호칭 목록
+// =========================================================================
+export const SUFFIX_KEYWORDS = [
+  '마지막자리',
+  '마지막번호',
+  '전화번호뒤',
+  '전화번호 뒤',
+  '핸드폰뒤',
+  '핸드폰 뒤',
+  '전화뒤',
+  '전화 뒤',
+  '폰뒤',
+  '폰 뒤',
+  '뒷자리',
+  '뒷번호',
+  '뒤번호',
+  '끝자리',
+  '끝번호',
+  '마지막'
+];
+
+export const PREFIX_KEYWORDS = [
+  '처음자리',
+  '앞자리',
+  '앞번호',
+  '첫자리',
+  '첫번호',
+  '처음'
+];
+
+export const REMOVABLE_HONORIFICS = [
+  '고객님',
+  '회원님',
+  '아이디',
+  '닉네임',
+  '계정명',
+  '사용자',
+  '고객',
+  '회원',
+  '계정',
+  '유저',
+  '님',
+  '씨',
+  '이'
+];
 
 // 4자리 전화번호 뒷번호 호칭 정규식
 // 예: "뒷번호 0517", "끝번호 1234", "전화번호 뒤 5678", "전화 뒤 0517", "뒷자리 0517", "끝자리 0517", "번호 0517", "0517번", "0517님"
@@ -299,27 +480,339 @@ function checkRepeatedTrailingChars(a: string, b: string): boolean {
 }
 
 /**
+ * 불필요한 호칭 및 안내어 안전 제거 (문자열 앞뒤 경계 기반)
+ */
+export function cleanHonorificsAndGuides(text?: string): string {
+  if (!text) return '';
+  let clean = String(text)
+    .normalize('NFKC')
+    .trim()
+    .replace(/^@/, '')
+    .replace(/[\s\p{P}\p{S}]+/gu, '');
+
+  // 앞부분 안내어 제거: 닉네임은, 닉네임, 아이디, 계정명, 계정, 사용자, 유저, 회원님, 회원, 고객님, 고객
+  clean = clean.replace(/^(?:닉네임은?|닉네임|아이디|계정명|계정|사용자|유저|회원님|회원|고객님|고객)[:：#\s]*/u, '');
+
+  // 뒷부분 호칭 제거: 고객님, 회원님, 아이디, 닉네임, 계정명, 계정, 사용자, 유저, 고객, 회원, 님
+  clean = clean.replace(/(?:고객님|회원님|아이디|닉네임|계정명|계정|사용자|유저|고객|회원|님)$/u, '');
+
+  return clean;
+}
+
+// 접두부/접미부 감지용 정규식 (호칭/위치 표현에 띄어쓰기가 들어간 경우도 완벽 대응)
+const SUFFIX_REGEX = /^(?:마지막\s*자리|마지막\s*번호|전화\s*번호\s*뒤|핸드폰\s*뒤|폰\s*뒤|전화\s*뒤|뒷\s*자리|뒷\s*번호|뒤\s*번호|끝\s*자리|끝\s*번호|마지막)\s*[:：#]?\s*(.+)$/u;
+const PREFIX_REGEX = /^(?:처음\s*자리|앞\s*자리|앞\s*번호|첫\s*자리|첫\s*번호|처음)\s*[:：#]?\s*(.+)$/u;
+
+/**
+ * 접두부/접미부 위치 표현 감지
+ */
+export function detectPositionExpression(text?: string): {
+  position: 'prefix' | 'suffix' | 'none';
+  keyword?: string;
+  cleanTarget: string;
+} {
+  if (!text) return { position: 'none', cleanTarget: '' };
+  const raw = String(text).normalize('NFKC').trim().replace(/^@/, '');
+
+  // 1. 접미부 정규식 검사
+  const suffixMatch = raw.match(SUFFIX_REGEX);
+  if (suffixMatch && suffixMatch[1]) {
+    const target = cleanHonorificsAndGuides(suffixMatch[1]);
+    if (target) {
+      return { position: 'suffix', cleanTarget: target };
+    }
+  }
+
+  // 2. 접두부 정규식 검사
+  const prefixMatch = raw.match(PREFIX_REGEX);
+  if (prefixMatch && prefixMatch[1]) {
+    const target = cleanHonorificsAndGuides(prefixMatch[1]);
+    if (target) {
+      return { position: 'prefix', cleanTarget: target };
+    }
+  }
+
+  // 3. 띄어쓰기 제거된 문자열에서도 접미부/접두부 시작 확인
+  const cleanRaw = raw.replace(/[\s\p{P}\p{S}]+/gu, '');
+  for (const kw of SUFFIX_KEYWORDS) {
+    const kwClean = kw.replace(/\s+/g, '');
+    if (cleanRaw.startsWith(kwClean) && cleanRaw.length > kwClean.length) {
+      const target = cleanHonorificsAndGuides(cleanRaw.slice(kwClean.length));
+      if (target) {
+        return { position: 'suffix', keyword: kw, cleanTarget: target };
+      }
+    }
+  }
+
+  for (const kw of PREFIX_KEYWORDS) {
+    const kwClean = kw.replace(/\s+/g, '');
+    if (cleanRaw.startsWith(kwClean) && cleanRaw.length > kwClean.length) {
+      const target = cleanHonorificsAndGuides(cleanRaw.slice(kwClean.length));
+      if (target) {
+        return { position: 'prefix', keyword: kw, cleanTarget: target };
+      }
+    }
+  }
+
+  return {
+    position: 'none',
+    cleanTarget: cleanHonorificsAndGuides(raw)
+  };
+}
+
+/**
+ * 영문 알파벳 철자 한국어 발음 변환 (예: "gieblsmdi" -> "지아이이비엘에스엠디아이")
+ */
+export function spellEnglishToKorean(text?: string): string {
+  if (!text) return '';
+  const clean = text.toLowerCase().replace(/[^a-z]/g, '');
+  return Array.from(clean)
+    .map((ch) => ALPHABET_SPELLED_MAP[ch] || '')
+    .join('');
+}
+
+/**
+ * 한국어 철자 발음 영문 역변환 (예: "지아이이비엘에스엠디아이" -> "gieblsmdi", "에스엠디아이" -> "smdi")
+ */
+export function parseSpelledKoreanToEnglish(text?: string): string {
+  if (!text) return '';
+  const clean = text.replace(/[\s\p{P}\p{S}]+/gu, '');
+  let remaining = clean;
+  let result = '';
+
+  while (remaining.length > 0) {
+    let matched = false;
+    for (const token of SPELLED_KOREAN_TOKENS) {
+      if (remaining.startsWith(token.kor)) {
+        result += token.letter;
+        remaining = remaining.slice(token.kor.length);
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      break;
+    }
+  }
+
+  return remaining.length === 0 ? result : '';
+}
+
+/**
+ * 숫자를 한 자리씩 읽은 한국어 발음 생성 (예: "0517" -> ["공오일칠", "영오일칠", "제로오일칠"])
+ */
+export function convertDigitsToKoreanPronunciations(digits?: string): string[] {
+  if (!digits || !/^\d+$/.test(digits)) return [];
+  const chars = Array.from(digits);
+
+  const gongVersion = chars.map((ch) => (ch === '0' ? '공' : DIGIT_PRONUNCIATION_MAP[ch]?.[0] || ch)).join('');
+  const youngVersion = chars.map((ch) => (ch === '0' ? '영' : DIGIT_PRONUNCIATION_MAP[ch]?.[0] || ch)).join('');
+  const zeroVersion = chars.map((ch) => (ch === '0' ? '제로' : DIGIT_PRONUNCIATION_MAP[ch]?.[0] || ch)).join('');
+
+  const result = new Set<string>();
+  result.add(gongVersion);
+  result.add(youngVersion);
+  result.add(zeroVersion);
+  return Array.from(result);
+}
+
+/**
+ * 한 자리씩 읽은 한국어 숫자 발음을 아라비아 숫자로 변환 (예: "공오일칠" -> "0517", "오일칠" -> "517")
+ */
+export function parseKoreanDigitsToNumber(text?: string): string | null {
+  if (!text) return null;
+  const clean = text.replace(/[\s\p{P}\p{S}]+/gu, '');
+  if (/^\d+$/.test(clean)) return clean;
+
+  let remaining = clean;
+  let digits = '';
+
+  while (remaining.length > 0) {
+    let matched = false;
+    for (const token of KOREAN_DIGIT_TOKENS) {
+      if (remaining.startsWith(token.kor)) {
+        digits += token.digit;
+        remaining = remaining.slice(token.kor.length);
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      if (/^\d/.test(remaining)) {
+        digits += remaining[0];
+        remaining = remaining.slice(1);
+        matched = true;
+      } else {
+        break;
+      }
+    }
+  }
+
+  return remaining.length === 0 && digits.length > 0 ? digits : null;
+}
+
+/**
+ * 철자 발음(영문/숫자 혼합)과 일반 문자를 종합 파싱
+ */
+export function parseSpelledKoreanOrAlphanumeric(text?: string): { converted: string; isFullSpelled: boolean } {
+  if (!text) return { converted: '', isFullSpelled: false };
+  const clean = text.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+  if (!clean) return { converted: '', isFullSpelled: false };
+
+  let remaining = clean;
+  let converted = '';
+  let fullSpelled = true;
+
+  while (remaining.length > 0) {
+    let matched = false;
+
+    // 1. Korean digit tokens 우선 매칭 (예: '공', '영', '제로', '일', '오', '칠' 등 숫자 발음)
+    for (const token of KOREAN_DIGIT_TOKENS) {
+      if (remaining.startsWith(token.kor)) {
+        converted += token.digit;
+        remaining = remaining.slice(token.kor.length);
+        matched = true;
+        break;
+      }
+    }
+    if (matched) continue;
+
+    // 2. Spelled Korean letter tokens (예: '더블유', '에이치', '에이', '에스', '엠', '지' 등 영문 철자)
+    for (const token of SPELLED_KOREAN_TOKENS) {
+      if (remaining.startsWith(token.kor)) {
+        converted += token.letter;
+        remaining = remaining.slice(token.kor.length);
+        matched = true;
+        break;
+      }
+    }
+    if (matched) continue;
+
+    // 3. Raw alphanumeric character [a-z0-9]
+    if (/^[a-z0-9]/.test(remaining)) {
+      converted += remaining[0];
+      remaining = remaining.slice(1);
+      continue;
+    }
+
+    // 4. Other characters
+    converted += remaining[0];
+    remaining = remaining.slice(1);
+    fullSpelled = false;
+  }
+
+  return { converted, isFullSpelled: fullSpelled };
+}
+
+/**
+ * 각 닉네임에 대한 가능한 비교용 별칭 표현 생성
+ */
+export function generateNicknameAliases(nickname?: string): NicknameAliases {
+  const original = String(nickname || '').trim();
+  const normalized = normalizeNickname(cleanHonorificsAndGuides(original));
+  if (!normalized) {
+    return {
+      original,
+      normalized: '',
+      spelledPronunciations: [],
+      wordPronunciations: [],
+      numericPronunciations: [],
+      combinedPronunciations: []
+    };
+  }
+
+  const match = normalized.match(/^([a-z가-힣_]+)?(\d+)?$/i);
+  const letters = (match?.[1] || '').toLowerCase().replace(/[^a-z가-힣]/g, '');
+  const digits = match?.[2] || '';
+
+  const spelledPronunciations = new Set<string>();
+  const wordPronunciations = new Set<string>();
+  const numericPronunciations = new Set<string>();
+  const combinedPronunciations = new Set<string>();
+
+  combinedPronunciations.add(normalized);
+
+  // 1. 영문 철자 발음 (순수 문자 및 문자+숫자 복합 발음)
+  if (/^[a-z]+$/.test(letters)) {
+    const spelledLetters = spellEnglishToKorean(letters);
+    if (spelledLetters) {
+      spelledPronunciations.add(spelledLetters);
+      combinedPronunciations.add(spelledLetters);
+
+      if (digits) {
+        spelledPronunciations.add(`${spelledLetters}${digits}`);
+        const digitProns = convertDigitsToKoreanPronunciations(digits);
+        for (const dp of digitProns) {
+          spelledPronunciations.add(`${spelledLetters}${dp}`);
+        }
+      }
+    }
+  }
+
+  // 2. 단어식 음역 발음 (순수 문자 및 문자+숫자 복합 발음)
+  if (letters) {
+    const wordPron = transliterateEnglishToKorean(letters);
+    if (wordPron && wordPron !== letters) {
+      wordPronunciations.add(wordPron);
+      combinedPronunciations.add(wordPron);
+
+      if (digits) {
+        wordPronunciations.add(`${wordPron}${digits}`);
+        const digitProns = convertDigitsToKoreanPronunciations(digits);
+        for (const dp of digitProns) {
+          wordPronunciations.add(`${wordPron}${dp}`);
+        }
+      }
+    }
+  }
+
+  // 3. 숫자 한 자리씩 발음
+  if (digits) {
+    numericPronunciations.add(digits);
+    const digitProns = convertDigitsToKoreanPronunciations(digits);
+    for (const dp of digitProns) {
+      numericPronunciations.add(dp);
+      combinedPronunciations.add(dp);
+    }
+  }
+
+  // 4. 결합 발음
+  for (const sp of spelledPronunciations) combinedPronunciations.add(sp);
+  for (const wp of wordPronunciations) combinedPronunciations.add(wp);
+
+  return {
+    original,
+    normalized,
+    spelledPronunciations: Array.from(spelledPronunciations),
+    wordPronunciations: Array.from(wordPronunciations),
+    numericPronunciations: Array.from(numericPronunciations),
+    combinedPronunciations: Array.from(combinedPronunciations)
+  };
+}
+
+/**
  * 닉네임 정밀 비교 메인 함수
- * 규칙 1, 2, 3을 순차 적용하여 비교 결과를 산출한다.
+ * 원본 문자열, 철자 발음, 단어 음역, 접두/접미부, 숫자, 편집거리 등을 종합 평가한다.
  */
 export function compareNicknames(left?: string, right?: string): NicknameComparisonResult {
   const rawLeft = String(left || '').trim();
   const rawRight = String(right || '').trim();
 
   if (!rawLeft || !rawRight) {
-    return { isSame: false, isSimilar: false, score: 0, reason: 'NO_MATCH' };
+    return { isSame: false, isSimilar: false, score: 0, reason: 'NO_MATCH', matchType: 'none' };
   }
 
   const cleanLeft = normalizeNickname(rawLeft);
   const cleanRight = normalizeNickname(rawRight);
 
-  // 1. 완전 일치 (Exact Match)
+  // 1. 완전 일치 (100점: 정규화한 전체 문자열이 정확히 일치)
   if (cleanLeft === cleanRight) {
     return {
       isSame: true,
       isSimilar: true,
       score: 100,
       reason: 'EXACT',
+      matchType: 'exact',
       normalizedLeft: cleanLeft,
       normalizedRight: cleanRight,
       details: '닉네임 문자열 완전 일치'
@@ -327,22 +820,83 @@ export function compareNicknames(left?: string, right?: string): NicknameCompari
   }
 
   // -------------------------------------------------------------
-  // 규칙 3: 전화번호 뒷번호 4자리 식별자 일치 판정
+  // 2. 접두부/접미부 위치 표현 감지 검사 (94점)
+  // "뒷자리 에스엠디아이", "끝번호 smdi", "앞자리 지아이이", "뒷번호 0517" 등
+  // -------------------------------------------------------------
+  const posLeft = detectPositionExpression(rawLeft);
+  const posRight = detectPositionExpression(rawRight);
+
+  if (posLeft.position !== 'none' || posRight.position !== 'none') {
+    const isLeftQuery = posLeft.position !== 'none';
+    const posType = isLeftQuery ? posLeft.position : posRight.position;
+    const cleanTarget = isLeftQuery ? posLeft.cleanTarget : posRight.cleanTarget;
+    const candRaw = isLeftQuery ? rawRight : rawLeft;
+    const candNorm = isLeftQuery ? cleanRight : cleanLeft;
+
+    const parsedTarget = parseSpelledKoreanOrAlphanumeric(cleanTarget).converted;
+    const targetDigits = parseKoreanDigitsToNumber(cleanTarget);
+    const candLetters = candNorm.replace(/[^a-z]/g, '');
+    const candSpelled = spellEnglishToKorean(candLetters);
+
+    if (posType === 'suffix') {
+      const matchSuffix =
+        (parsedTarget && candNorm.endsWith(parsedTarget)) ||
+        (cleanTarget && candNorm.endsWith(cleanTarget)) ||
+        (targetDigits && candNorm.endsWith(targetDigits)) ||
+        (cleanTarget && candSpelled.endsWith(cleanTarget));
+
+      if (matchSuffix) {
+        const isPhone4 = /^\d{4}$/.test(targetDigits || '') || /^\d{4}$/.test(parsedTarget || '');
+        return {
+          isSame: true,
+          isSimilar: true,
+          score: isPhone4 ? 100 : 94,
+          reason: 'SUFFIX_CONFIRMED',
+          matchType: 'suffix',
+          matchedSuffixDigits: targetDigits || parsedTarget || cleanTarget,
+          normalizedLeft: cleanLeft,
+          normalizedRight: cleanRight,
+          details: `접미부("${cleanTarget}" -> "${parsedTarget || cleanTarget}") 일치로 같은 닉네임 확정`
+        };
+      }
+    } else if (posType === 'prefix') {
+      const matchPrefix =
+        (parsedTarget && candNorm.startsWith(parsedTarget)) ||
+        (cleanTarget && candNorm.startsWith(cleanTarget)) ||
+        (targetDigits && candNorm.startsWith(targetDigits)) ||
+        (cleanTarget && candSpelled.startsWith(cleanTarget));
+
+      if (matchPrefix) {
+        return {
+          isSame: true,
+          isSimilar: true,
+          score: 94,
+          reason: 'PREFIX_CONFIRMED',
+          matchType: 'prefix',
+          normalizedLeft: cleanLeft,
+          normalizedRight: cleanRight,
+          details: `접두부("${cleanTarget}" -> "${parsedTarget || cleanTarget}") 일치로 같은 닉네임 확정`
+        };
+      }
+    }
+  }
+
+  // -------------------------------------------------------------
+  // 3. 기존 규칙 3: 전화번호 뒷번호 4자리 식별자 일치 판정 (100점)
   // "뒷번호 0517님" ↔ "mindset0517"
-  // 둘이 같으면 동일인 후보가 아니라 "같은 닉네임"으로 확정!
   // -------------------------------------------------------------
   const phoneSuffixLeft = extractPhoneSuffix4Digits(rawLeft);
   const phoneSuffixRight = extractPhoneSuffix4Digits(rawRight);
   const trailing4Left = extractTrailing4Digits(rawLeft);
   const trailing4Right = extractTrailing4Digits(rawRight);
 
-  // Left가 뒷번호 호칭이고 Right의 끝 4자리와 일치할 때
   if (phoneSuffixLeft && trailing4Right && phoneSuffixLeft === trailing4Right) {
     return {
       isSame: true,
       isSimilar: true,
       score: 100,
       reason: 'SUFFIX_CONFIRMED',
+      matchType: 'suffix',
       matchedSuffixDigits: phoneSuffixLeft,
       normalizedLeft: cleanLeft,
       normalizedRight: cleanRight,
@@ -350,13 +904,13 @@ export function compareNicknames(left?: string, right?: string): NicknameCompari
     };
   }
 
-  // Right가 뒷번호 호칭이고 Left의 끝 4자리와 일치할 때
   if (phoneSuffixRight && trailing4Left && phoneSuffixRight === trailing4Left) {
     return {
       isSame: true,
       isSimilar: true,
       score: 100,
       reason: 'SUFFIX_CONFIRMED',
+      matchType: 'suffix',
       matchedSuffixDigits: phoneSuffixRight,
       normalizedLeft: cleanLeft,
       normalizedRight: cleanRight,
@@ -364,13 +918,13 @@ export function compareNicknames(left?: string, right?: string): NicknameCompari
     };
   }
 
-  // 둘 다 뒷번호 호칭이고 4자리가 일치할 때
   if (phoneSuffixLeft && phoneSuffixRight && phoneSuffixLeft === phoneSuffixRight) {
     return {
       isSame: true,
       isSimilar: true,
       score: 100,
       reason: 'SUFFIX_CONFIRMED',
+      matchType: 'suffix',
       matchedSuffixDigits: phoneSuffixLeft,
       normalizedLeft: cleanLeft,
       normalizedRight: cleanRight,
@@ -379,12 +933,60 @@ export function compareNicknames(left?: string, right?: string): NicknameCompari
   }
 
   // -------------------------------------------------------------
-  // 규칙 2: 영문 단어 한글 발음 변환 및 숫자 식별자 분리
-  // "mindset0517" ↔ "마인드셋"
-  // 대소문자 통일 -> 숫자 제거 -> 한글 발음 변환 -> 교차 비교
+  // 4. 전체 영문 철자 및 숫자 발음 일치 검사 (98점)
+  // "gieblsmdi" ↔ "지아이이비엘에스엠디아이"
+  // "gie0517" ↔ "지아이이공오일칠"
+  // "mindset0517" ↔ "엠아이엔디에스이티공오일칠"
   // -------------------------------------------------------------
-  const baseLeft = cleanLeft.replace(/\d+/g, '');
-  const baseRight = cleanRight.replace(/\d+/g, '');
+  const aliasesLeft = generateNicknameAliases(rawLeft);
+  const aliasesRight = generateNicknameAliases(rawRight);
+
+  const cleanNoHonorificLeft = cleanHonorificsAndGuides(cleanLeft);
+  const cleanNoHonorificRight = cleanHonorificsAndGuides(cleanRight);
+
+  // 별칭의 spelledPronunciations 교차 검사
+  const matchSpelled =
+    aliasesLeft.spelledPronunciations.includes(cleanNoHonorificRight) ||
+    aliasesRight.spelledPronunciations.includes(cleanNoHonorificLeft) ||
+    aliasesLeft.spelledPronunciations.some((sp) => aliasesRight.spelledPronunciations.includes(sp));
+
+  const spelledParsedLeft = parseSpelledKoreanOrAlphanumeric(cleanNoHonorificLeft);
+  const spelledParsedRight = parseSpelledKoreanOrAlphanumeric(cleanNoHonorificRight);
+
+  if (
+    matchSpelled ||
+    (spelledParsedLeft.isFullSpelled && spelledParsedLeft.converted === aliasesRight.normalized) ||
+    (spelledParsedRight.isFullSpelled && spelledParsedRight.converted === aliasesLeft.normalized) ||
+    (spelledParsedLeft.isFullSpelled &&
+      spelledParsedRight.isFullSpelled &&
+      spelledParsedLeft.converted === spelledParsedRight.converted &&
+      spelledParsedLeft.converted.length > 0)
+  ) {
+    return {
+      isSame: true,
+      isSimilar: true,
+      score: 98,
+      reason: 'SPELLED_PRONUNCIATION',
+      matchType: 'spelled-pronunciation',
+      normalizedLeft: cleanLeft,
+      normalizedRight: cleanRight,
+      details: `전체 영문/숫자 철자 발음 일치`
+    };
+  }
+
+  // -------------------------------------------------------------
+  // 5. 전체 영단어 음역 발음 일치 검사 (96점)
+  // "mindset0517" ↔ "마인드셋"
+  // "mindset" ↔ "마인드셋"
+  // "pinkstar77" ↔ "핑크스타"
+  // -------------------------------------------------------------
+  const matchWord =
+    aliasesLeft.wordPronunciations.includes(cleanNoHonorificRight) ||
+    aliasesRight.wordPronunciations.includes(cleanNoHonorificLeft) ||
+    aliasesLeft.wordPronunciations.some((wp) => aliasesRight.wordPronunciations.includes(wp));
+
+  const baseLeft = cleanNoHonorificLeft.replace(/\d+/g, '');
+  const baseRight = cleanNoHonorificRight.replace(/\d+/g, '');
 
   if (baseLeft && baseRight) {
     // A. 숫자 제거 후 기본 문자열 완전 일치 (예: mindset0517 vs mindset)
@@ -394,6 +996,7 @@ export function compareNicknames(left?: string, right?: string): NicknameCompari
         isSimilar: true,
         score: 98,
         reason: 'BASE_EXACT',
+        matchType: 'exact',
         normalizedLeft: cleanLeft,
         normalizedRight: cleanRight,
         details: `숫자 제거 후 기본 닉네임 일치 ("${baseLeft}")`
@@ -404,23 +1007,21 @@ export function compareNicknames(left?: string, right?: string): NicknameCompari
     const phoneticLeft = transliterateEnglishToKorean(baseLeft);
     const phoneticRight = transliterateEnglishToKorean(baseRight);
 
-    // 발음 변환 후 일치 검사:
-    // 1) phoneticLeft === baseRight (예: "마인드셋" === "마인드셋")
-    // 2) phoneticRight === baseLeft (예: "마인드셋" === "마인드셋")
-    // 3) phoneticLeft === phoneticRight (둘 다 영문 변환 후 일치)
     if (
+      matchWord ||
       (phoneticLeft && phoneticLeft === baseRight) ||
       (phoneticRight && phoneticRight === baseLeft) ||
       (phoneticLeft && phoneticRight && phoneticLeft === phoneticRight && phoneticLeft !== baseLeft)
     ) {
       return {
-        isSame: false,
+        isSame: true,
         isSimilar: true,
-        score: 95,
+        score: 96,
         reason: 'PHONETIC_EXACT',
+        matchType: 'word-pronunciation',
         normalizedLeft: cleanLeft,
         normalizedRight: cleanRight,
-        details: `영문-한글 발음 변환 일치 ("${baseLeft}" ↔ "${baseRight}" [발음: ${phoneticLeft || phoneticRight}])`
+        details: `영문-한글 음역 발음 변환 일치 ("${baseLeft}" ↔ "${baseRight}")`
       };
     }
 
@@ -435,8 +1036,9 @@ export function compareNicknames(left?: string, right?: string): NicknameCompari
         return {
           isSame: false,
           isSimilar: true,
-          score: 90,
+          score: 85,
           reason: 'PHONETIC_SIMILAR',
+          matchType: 'fuzzy',
           normalizedLeft: cleanLeft,
           normalizedRight: cleanRight,
           details: `영문-한글 발음 변환 후 유사 ("${phoneticLeft}" ↔ "${phoneticRight}")`
@@ -446,23 +1048,45 @@ export function compareNicknames(left?: string, right?: string): NicknameCompari
   }
 
   // -------------------------------------------------------------
-  // 규칙 1: 편집 거리 <= 1 또는 포함 관계 또는 마지막 글자 반복
+  // 6. 숫자 부분 전체 일치 검사 (90점)
+  // -------------------------------------------------------------
+  const numDigitsLeft = parseKoreanDigitsToNumber(cleanLeft);
+  const numDigitsRight = parseKoreanDigitsToNumber(cleanRight);
+  if (
+    (numDigitsLeft && trailing4Right && numDigitsLeft === trailing4Right) ||
+    (numDigitsRight && trailing4Left && numDigitsRight === trailing4Left)
+  ) {
+    return {
+      isSame: true,
+      isSimilar: true,
+      score: 90,
+      reason: 'NUMERIC_MATCH',
+      matchType: 'numeric',
+      normalizedLeft: cleanLeft,
+      normalizedRight: cleanRight,
+      details: `숫자 식별자 일치 (${numDigitsLeft || numDigitsRight})`
+    };
+  }
+
+  // -------------------------------------------------------------
+  // 7. 규칙 1: 편집 거리 <= 1 또는 포함 관계 또는 마지막 글자 반복 (80점대 fuzzy)
   // "코맹" ↔ "코맹맹"
   // -------------------------------------------------------------
-  // 1. 마지막 글자가 반복 추가·삭제됨 (예: "코맹" + "맹" = "코맹맹")
+  // 1) 마지막 글자가 반복 추가·삭제됨 (예: "코맹" + "맹" = "코맹맹")
   if (checkRepeatedTrailingChars(cleanLeft, cleanRight)) {
     return {
       isSame: false,
       isSimilar: true,
-      score: 90,
+      score: 88,
       reason: 'REPEATED_TRAILING_CHAR',
+      matchType: 'fuzzy',
       normalizedLeft: cleanLeft,
       normalizedRight: cleanRight,
       details: `마지막 글자 반복 추가/삭제 일치 ("${cleanLeft}" ↔ "${cleanRight}")`
     };
   }
 
-  // 2. 한쪽이 다른 쪽에 완전히 포함되고 길이 차이 <= 1
+  // 2) 한쪽이 다른 쪽에 완전히 포함되고 길이 차이 <= 1
   const inclusionDiff1 =
     (cleanLeft.includes(cleanRight) || cleanRight.includes(cleanLeft)) &&
     Math.abs(cleanLeft.length - cleanRight.length) <= 1;
@@ -473,13 +1097,14 @@ export function compareNicknames(left?: string, right?: string): NicknameCompari
       isSimilar: true,
       score: 88,
       reason: 'INCLUSION_DIFF_1',
+      matchType: 'fuzzy',
       normalizedLeft: cleanLeft,
       normalizedRight: cleanRight,
       details: `상호 포함 및 길이 차이 1 이하 ("${cleanLeft}" ↔ "${cleanRight}")`
     };
   }
 
-  // 3. 편집 거리(Levenshtein distance) <= 1
+  // 3) 편집 거리(Levenshtein distance) <= 1
   const dist = levenshteinDistance(cleanLeft, cleanRight);
   if (dist <= 1) {
     return {
@@ -487,13 +1112,14 @@ export function compareNicknames(left?: string, right?: string): NicknameCompari
       isSimilar: true,
       score: 86,
       reason: 'EDIT_DISTANCE_1',
+      matchType: 'fuzzy',
       normalizedLeft: cleanLeft,
       normalizedRight: cleanRight,
       details: `편집 거리 1 이하 ("${cleanLeft}" ↔ "${cleanRight}", distance=${dist})`
     };
   }
 
-  // 4. 일반 유사도 비율 (길이 3 이상에서 72% 이상인 경우)
+  // 4) 일반 유사도 비율 (길이 3 이상에서 72% 이상인 경우)
   const maxLen = Math.max(cleanLeft.length, cleanRight.length);
   if (maxLen >= 3) {
     const ratio = 1 - dist / maxLen;
@@ -503,6 +1129,7 @@ export function compareNicknames(left?: string, right?: string): NicknameCompari
         isSimilar: true,
         score: Math.round(ratio * 90),
         reason: 'SIMILAR_RATIO',
+        matchType: 'fuzzy',
         normalizedLeft: cleanLeft,
         normalizedRight: cleanRight,
         details: `정규화 유사도 충족 (ratio=${(ratio * 100).toFixed(1)}%)`
@@ -515,19 +1142,110 @@ export function compareNicknames(left?: string, right?: string): NicknameCompari
     isSimilar: false,
     score: 0,
     reason: 'NO_MATCH',
+    matchType: 'none',
     normalizedLeft: cleanLeft,
     normalizedRight: cleanRight
   };
 }
 
-/** 동일 닉네임 확정 여부 (완전 일치 또는 뒷번호 식별자 확정) */
+/** 동일 닉네임 확정 여부 (완전 일치, 철자/음역/접두/접미/뒷번호 식별자 확정) */
 export function areNicknamesSame(left?: string, right?: string): boolean {
   const result = compareNicknames(left, right);
   return result.isSame;
 }
 
-/** 유사 닉네임 여부 (규칙 1, 2, 3 포함) */
+/** 유사 닉네임 여부 (규칙 1, 2, 3 및 퍼지 매칭 포함) */
 export function areNicknamesSimilar(left?: string, right?: string): boolean {
   const result = compareNicknames(left, right);
   return result.isSame || result.isSimilar;
+}
+
+/**
+ * 복수 후보 닉네임 목록 중에서 발화 닉네임과 가장 부합하는 닉네임을 판정
+ * - 오탐 방지: 동일한 접두부/접미부를 가진 후보가 복수 존재하면 ambiguous: true 반환 (자동 확정 금지)
+ */
+export function matchNicknameAgainstCandidates(
+  query: string,
+  candidateNicknames: string[]
+): NicknameMatchResult {
+  const rawQuery = String(query || '').trim();
+  if (!rawQuery || !candidateNicknames || candidateNicknames.length === 0) {
+    return {
+      matched: false,
+      ambiguous: false,
+      score: 0,
+      matchType: 'none',
+      reason: '후보군 또는 검색어가 비어 있습니다.'
+    };
+  }
+
+  // 고유 후보군 추출
+  const uniqueCandidates = Array.from(
+    new Set(candidateNicknames.map((c) => String(c || '').trim()).filter(Boolean))
+  );
+  if (uniqueCandidates.length === 0) {
+    return {
+      matched: false,
+      ambiguous: false,
+      score: 0,
+      matchType: 'none',
+      reason: '유효한 후보 닉네임이 없습니다.'
+    };
+  }
+
+  const scoredCandidates = uniqueCandidates.map((candidate) => {
+    const comp = compareNicknames(rawQuery, candidate);
+    return {
+      candidate,
+      comp,
+      score: comp.score,
+      matchType: comp.matchType || 'none',
+      isSame: comp.isSame,
+      isSimilar: comp.isSimilar
+    };
+  });
+
+  // 점수 80점 이상의 유효 매칭 필터링
+  const validMatches = scoredCandidates.filter((item) => item.score >= 80);
+  if (validMatches.length === 0) {
+    return {
+      matched: false,
+      ambiguous: false,
+      score: 0,
+      matchType: 'none',
+      reason: '일치하는 후보를 찾지 못했습니다.'
+    };
+  }
+
+  // 최고 점수순 정렬
+  validMatches.sort((a, b) => b.score - a.score);
+
+  const topScore = validMatches[0].score;
+  const topMatches = validMatches.filter((item) => item.score === topScore);
+
+  // Section 8: 오탐 방지 (동일 조건 복수 후보 존재 시 ambiguous)
+  if (topMatches.length > 1) {
+    const topNames = topMatches.map((m) => m.candidate);
+    return {
+      matched: false,
+      ambiguous: true,
+      score: topScore,
+      matchType: topMatches[0].matchType,
+      candidates: topNames,
+      reason: `동일 조건을 만족하는 복수 후보가 존재하여 자동 확정 금지 (${topNames.join(', ')})`
+    };
+  }
+
+  const best = topMatches[0];
+  const isAutoConfirmed = best.score >= 90 && best.isSame;
+
+  return {
+    matched: isAutoConfirmed,
+    ambiguous: false,
+    score: best.score,
+    matchType: best.matchType,
+    matchedNickname: best.candidate,
+    candidates: [best.candidate],
+    reason: best.comp.details || `닉네임 일치 (${best.matchType})`
+  };
 }
