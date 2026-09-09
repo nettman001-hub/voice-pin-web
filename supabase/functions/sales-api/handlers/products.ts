@@ -59,6 +59,16 @@ export async function handlePrepareProduct(workspaceId: string, actorId: string,
   const draftId = crypto.randomUUID()
   const productId = crypto.randomUUID()
   const expiresAt = new Date(Date.now() + 15 * 60000).toISOString()
+  const uploadPath = `${workspaceId}/products/${productId}.jpg`
+  const { data: signedUpload, error: signedUploadError } = await admin.storage
+    .from('voicecap-private')
+    .createSignedUploadUrl(uploadPath)
+
+  if (signedUploadError || !signedUpload?.signedUrl) {
+    return errorResponse('TEMPORARILY_UNAVAILABLE', '상품 이미지 업로드 주소를 만들지 못했습니다.', 503, {
+      storageError: signedUploadError?.message || 'signed URL missing',
+    }, true)
+  }
 
   await admin.from('product_code_reservations').insert({
     workspace_id: workspaceId,
@@ -75,8 +85,9 @@ export async function handlePrepareProduct(workspaceId: string, actorId: string,
     product_id: productId,
     product_code: productCode,
     name: name || null,
-    unit_price: unitPrice || null,
+    unit_price: unitPrice ?? 0,
     image_kind: effectiveImageKind,
+    upload_path: uploadPath,
     status: 'READY',
     revision: 1,
     actor_id: actorId,
@@ -89,10 +100,10 @@ export async function handlePrepareProduct(workspaceId: string, actorId: string,
     productId,
     productCode,
     imageUpload: {
-      uploadUrl: `https://storage.voicecap.local/upload/drafts/${productCode}.jpg`,
+      uploadUrl: signedUpload.signedUrl,
       method: 'PUT',
       headers: { 'Content-Type': 'image/jpeg' },
-      maxSizeBytes: 2097152,
+      maxSizeBytes: 4194304,
     },
     expiresAt,
   })
@@ -145,7 +156,7 @@ export async function handleUpdateProductDraft(workspaceId: string, body: any) {
 }
 
 export async function handleCommitProduct(workspaceId: string, body: any) {
-  const { draftId, expectedDraftRevision, expectedSessionRevision } = body
+  const { draftId, expectedDraftRevision, expectedSessionRevision, source } = body
   const { data: draft } = await admin
     .from('product_drafts')
     .select('*')
@@ -176,9 +187,18 @@ export async function handleCommitProduct(workspaceId: string, body: any) {
     return errorResponse('REVISION_CONFLICT', '회차 버전 충돌이 발생했습니다.', 409)
   }
 
-  const imagePath = draft.image_kind === 'NUMBER_IMAGE'
-    ? `products/number_image_${draft.product_code}.png`
-    : `products/${draft.product_id}.jpg`
+  const imagePath = draft.upload_path || `${workspaceId}/products/${draft.product_id}.jpg`
+  const { data: sourceDevice } = await admin
+    .from('devices')
+    .select('id')
+    .eq('id', draft.actor_id)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  const productSource = sourceDevice
+    ? 'ANDROID'
+    : source === 'WEB_VOICE'
+      ? 'WEB_VOICE'
+      : 'MANUAL'
 
   const { data: product } = await admin
     .from('products')
@@ -191,6 +211,7 @@ export async function handleCommitProduct(workspaceId: string, body: any) {
       unit_price: draft.unit_price,
       image_kind: draft.image_kind,
       image_path: imagePath,
+      source: productSource,
       revision: 1,
       sales_revision: 0,
     })
@@ -219,7 +240,9 @@ export async function handleCommitProduct(workspaceId: string, body: any) {
       name: product.name,
       unitPrice: product.unit_price,
       imageKind: product.image_kind,
-      imageUrl: `https://storage.voicecap.local/${product.image_path}`,
+      imageUrl: product.image_path,
+      imagePath: product.image_path,
+      source: product.source,
       revision: product.revision,
       salesRevision: product.sales_revision,
     },
@@ -269,6 +292,8 @@ export async function handleActivateProduct(workspaceId: string, body: any) {
       unitPrice: product.unit_price,
       imageKind: product.image_kind,
       imageUrl: product.image_path,
+      imagePath: product.image_path,
+      source: product.source,
       revision: product.revision,
       salesRevision: product.sales_revision,
     },
@@ -292,6 +317,8 @@ export async function handleListSessionProducts(workspaceId: string, body: any) 
       unitPrice: p.unit_price,
       imageKind: p.image_kind,
       imageUrl: p.image_path,
+      imagePath: p.image_path,
+      source: p.source,
       revision: p.revision,
       salesRevision: p.sales_revision,
     })),
@@ -546,6 +573,8 @@ export async function handleCommitProductChange(workspaceId: string, actorId: st
       unitPrice: updatedProduct.unit_price,
       imageKind: updatedProduct.image_kind,
       imageUrl: updatedProduct.image_path,
+      imagePath: updatedProduct.image_path,
+      source: updatedProduct.source,
       revision: updatedProduct.revision,
       salesRevision: updatedProduct.sales_revision,
     },

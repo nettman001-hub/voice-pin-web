@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { LocalSttModel, SttMode } from '../../types/stt';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
+import { useProductSales } from '../../context/ProductSalesContext';
 
 const SILENCE_WARNING_DELAY_MS = 5 * 60 * 1000;
 const SILENCE_STOP_COUNTDOWN_SECONDS = 20;
@@ -80,6 +81,7 @@ export const LiveHomePage: React.FC = () => {
   } = useCommentCapture();
 
   const { sales } = useSales();
+  const { activeSession } = useProductSales();
   const navigate = useNavigate();
   const [selectedCaptureModal, setSelectedCaptureModal] = useState<string | null>(null);
   const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
@@ -163,7 +165,12 @@ export const LiveHomePage: React.FC = () => {
     }
   }, [liveComments]);
 
-  const currentSessionSales = sales.filter((s) => s.sessionId === currentSessionId);
+  // 웹 청취 회차 코드는 사람이 읽는 로컬 ID이고 앱 상품판매 회차는 UUID다.
+  // 둘 다 현재 라이브에 속하므로 같은 자동 적재 목록에 합쳐서 보여준다.
+  const currentSessionSales = sales.filter((sale) => (
+    sale.sessionId === currentSessionId ||
+    (activeSession?.id && sale.sessionId === activeSession.id)
+  ));
   const todayTotalAmount = currentSessionSales
     .filter((s) => s.status !== '보류')
     .reduce((sum, item) => sum + item.amount, 0);
@@ -870,7 +877,16 @@ export const LiveHomePage: React.FC = () => {
                   "구매확정" 멘트를 말씀하시면 자동 등록됩니다.
                 </div>
               ) : (
-                currentSessionSales.map((sale) => (
+                currentSessionSales.map((sale) => {
+                  const productImage = sale.productImageUrl || sale.captureImageUrls?.[0];
+                  const sourceLabel = sale.source === 'ANDROID_COMMENTS'
+                    ? '앱'
+                    : sale.source === 'WEB_VOICE'
+                      ? '음성'
+                      : sale.source === 'MANUAL'
+                        ? '웹'
+                        : '기존';
+                  return (
                   <Link
                     key={sale.id}
                     to={`/sales/${sale.id}`}
@@ -887,6 +903,15 @@ export const LiveHomePage: React.FC = () => {
                         <div className="flex items-center space-x-2 flex-wrap gap-1">
                           <span className="font-bold text-sm text-slate-900 truncate">{sale.buyerNickname}</span>
                           <CustomerStatsBadge nickname={sale.buyerNickname} variant="pill" />
+                          <span className={`text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                            sale.source === 'ANDROID_COMMENTS'
+                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                              : sale.source === 'WEB_VOICE'
+                                ? 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200'
+                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                          }`}>
+                            {sourceLabel}
+                          </span>
                           <span className={`text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold ${
                             sale.status === '보류'
                               ? 'bg-amber-400 text-slate-950'
@@ -925,11 +950,16 @@ export const LiveHomePage: React.FC = () => {
                         <div className="text-base font-black text-brand-600 mt-1">
                           {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}
                         </div>
+                        {(sale.productCode || sale.productName) && (
+                          <div className="text-[11px] font-semibold text-slate-600 mt-1">
+                            상품 {sale.productCode || '번호 없음'}{sale.productName ? ` · ${sale.productName}` : ''}
+                          </div>
+                        )}
                       </div>
 
-                      {sale.captureImageUrls && sale.captureImageUrls.length > 0 && (
-                        <div className="w-12 h-12 sm:w-10 sm:h-10 rounded-xl overflow-hidden border border-slate-200 flex-shrink-0 shadow-sm">
-                          <img src={sale.captureImageUrls[0]} alt="캡처" className="w-full h-full object-cover" />
+                      {productImage && (
+                        <div className="w-14 h-14 sm:w-12 sm:h-12 rounded-xl overflow-hidden border border-slate-200 flex-shrink-0 shadow-sm">
+                          <img src={productImage} alt={`${sale.productCode || sale.buyerNickname} 상품`} className="w-full h-full object-cover" />
                         </div>
                       )}
                     </div>
@@ -938,7 +968,8 @@ export const LiveHomePage: React.FC = () => {
                       "{sale.rawTranscript}"
                     </p>
                   </Link>
-                ))
+                  );
+                })
               )}
             </div>
           </div>

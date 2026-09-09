@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.role.RoleManager;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -21,10 +22,13 @@ import com.voicecap.sms.sales.FakeSalesRepository;
 import com.voicecap.sms.sales.RealSalesRepository;
 import com.voicecap.sms.sales.SalesRepository;
 import com.voicecap.sms.sales.ui.ProductSalesView;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class MainActivity extends Activity {
     private static final int PERMISSION_REQUEST = 901;
     private static final int ROLE_REQUEST = 902;
+    private static final int CAMERA_PERMISSION_REQUEST = 903;
     private static final String STATE_SELECTED_TAB = "state_selected_tab";
 
     private FrameLayout contentContainer;
@@ -35,6 +39,8 @@ public final class MainActivity extends Activity {
     private int currentTab = 0; // 0 = Sales, 1 = SMS Bridge
 
     private SalesRepository salesRepository;
+    private Runnable pendingCameraGranted;
+    private Runnable pendingCameraDenied;
 
     @Override
     public void onCreate(Bundle state) {
@@ -220,6 +226,26 @@ public final class MainActivity extends Activity {
         requestPermissions(new String[]{Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS, Manifest.permission.SEND_SMS, Manifest.permission.RECEIVE_MMS, Manifest.permission.RECEIVE_WAP_PUSH}, PERMISSION_REQUEST);
     }
 
+    public void requestProductCameraPermission(Runnable onGranted, Runnable onDenied) {
+        List<String> missing = new ArrayList<>();
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            missing.add(Manifest.permission.CAMERA);
+        }
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P
+            && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            missing.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        }
+
+        if (missing.isEmpty()) {
+            onGranted.run();
+            return;
+        }
+
+        pendingCameraGranted = onGranted;
+        pendingCameraDenied = onDenied;
+        requestPermissions(missing.toArray(new String[0]), CAMERA_PERMISSION_REQUEST);
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
@@ -231,6 +257,15 @@ public final class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == CAMERA_PERMISSION_REQUEST) {
+            boolean granted = grantResults.length > 0;
+            for (int result : grantResults) granted &= result == PackageManager.PERMISSION_GRANTED;
+            Runnable callback = granted ? pendingCameraGranted : pendingCameraDenied;
+            pendingCameraGranted = null;
+            pendingCameraDenied = null;
+            if (callback != null) callback.run();
+            return;
+        }
         if (requestCode != PERMISSION_REQUEST) return;
         if (SmsRoleUtils.hasSmsPermissions(this)) {
             smsBridgeView.setStatus(R.string.status_sync_ready, SmsBridgeView.TONE_SUCCESS);

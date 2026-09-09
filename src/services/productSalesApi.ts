@@ -127,6 +127,7 @@ export const productSalesApi = {
     draftId: string;
     expectedDraftRevision: number;
     expectedSessionRevision: number;
+    source?: 'WEB_VOICE' | 'MANUAL';
   }) {
     return invokeSalesApi<{ product: Product; session: LiveSession }>('commit-product', params);
   },

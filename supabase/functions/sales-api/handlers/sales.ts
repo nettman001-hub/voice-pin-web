@@ -64,6 +64,13 @@ export async function handleCommitSales(workspaceId: string, actorId: string, bo
   const createdSales: any[] = []
   const createdPrintJobs: any[] = []
   const buyerIds: string[] = []
+  const { data: sourceDevice } = await admin
+    .from('devices')
+    .select('id')
+    .eq('id', actorId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  const saleSource = sourceDevice ? 'ANDROID_COMMENTS' : 'MANUAL'
 
   for (const b of saleBuyers) {
     const qty = Number(b.quantity || 1)
@@ -114,7 +121,7 @@ export async function handleCommitSales(workspaceId: string, actorId: string, bo
         product_code_snapshot: product.product_code,
         product_name_snapshot: product.name,
         product_image_path_snapshot: product.image_path,
-        source: 'ANDROID_COMMENTS',
+        source: saleSource,
         source_comment_ids: b.sourceCommentIds || [],
         operation_id: operationId,
         recognized_at: new Date().toISOString(),
@@ -268,6 +275,8 @@ export async function handleGetProductSales(workspaceId: string, body: any) {
       unitPrice: product.unit_price,
       imageKind: product.image_kind,
       imageUrl: product.image_path,
+      imagePath: product.image_path,
+      source: product.source,
       revision: product.revision,
       salesRevision: product.sales_revision,
     },

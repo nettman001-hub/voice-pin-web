@@ -26,6 +26,8 @@ export async function handleGetBootstrap(workspaceId: string, capabilities: Set<
         unitPrice: prod.unit_price,
         imageKind: prod.image_kind,
         imageUrl: prod.image_path,
+        imagePath: prod.image_path,
+        source: prod.source,
         revision: prod.revision,
         salesRevision: prod.sales_revision,
       }

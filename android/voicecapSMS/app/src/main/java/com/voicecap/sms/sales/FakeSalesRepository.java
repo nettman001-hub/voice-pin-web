@@ -284,4 +284,9 @@ public class FakeSalesRepository implements SalesRepository {
         summary = new SalesSummary(summary.sessionQuantity, 75000L);
         callback.onSuccess(new CommitProductChangeResult(activeProduct, updatedList, summary, new HashMap<>(buyerStats), pJobs));
     }
+
+    @Override
+    public void uploadProductImage(String uploadUrl, byte[] jpegData, Callback<Void> callback) {
+        callback.onSuccess(null);
+    }
 }

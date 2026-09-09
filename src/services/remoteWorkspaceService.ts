@@ -8,18 +8,23 @@ import { AdminSaleItem, SellerSttUsageSummary, SttUsageLogItem, SttUsageRecordPa
 import { isSupabaseConfigured, requireSupabase } from './supabaseClient';
 
 type Row = Record<string, any>;
+const signedImageCache = new Map<string, { url: string; expiresAt: number }>();
 
-const imageUrl = async (value: string) => {
+export const resolvePrivateImageUrl = async (value: string) => {
   if (!value || value.startsWith('http://') || value.startsWith('https://') || value.startsWith('data:')) return value;
+  const cached = signedImageCache.get(value);
+  if (cached && cached.expiresAt > Date.now()) return cached.url;
   const { data, error } = await requireSupabase().storage.from('voicecap-private').createSignedUrl(value, 60 * 30);
   if (error) throw error;
+  signedImageCache.set(value, { url: data.signedUrl, expiresAt: Date.now() + 25 * 60 * 1000 });
   return data.signedUrl;
 };
 
-const imageUrls = async (values: unknown) => Promise.all((Array.isArray(values) ? values : []).map((value) => imageUrl(String(value))));
+const imageUrls = async (values: unknown) => Promise.all((Array.isArray(values) ? values : []).map((value) => resolvePrivateImageUrl(String(value))));
 
 const mapSale = async (row: Row): Promise<SaleRecord> => {
   const storagePaths = Array.isArray(row.capture_image_paths) ? row.capture_image_paths.map(String) : [];
+  const productImagePath = row.product_image_path_snapshot ? String(row.product_image_path_snapshot) : '';
   return {
     id: row.id,
     sessionId: row.session_id,
@@ -28,7 +33,14 @@ const mapSale = async (row: Row): Promise<SaleRecord> => {
     recognizedAt: row.recognized_at,
     rawTranscript: row.raw_transcript,
     status: row.status,
-    productName: row.product_name || undefined,
+    productName: row.product_name_snapshot || row.product_name || undefined,
+    productId: row.product_id || undefined,
+    productCode: row.product_code_snapshot || undefined,
+    productImageUrl: productImagePath ? await resolvePrivateImageUrl(productImagePath) : undefined,
+    productImagePath: productImagePath || undefined,
+    quantity: Number(row.quantity || 1),
+    unitPrice: Number(row.unit_price ?? row.amount ?? 0),
+    source: row.source || 'LEGACY',
     captureImageUrls: await imageUrls(storagePaths),
     note: row.note || undefined,
     printStatus: row.print_status || 'NOT_REQUESTED',
@@ -64,6 +76,14 @@ const toSaleRow = async (workspaceId: string, sale: SaleRecord) => ({
   raw_transcript: sale.rawTranscript,
   status: sale.status,
   product_name: sale.productName || null,
+  product_id: sale.productId || null,
+  quantity: sale.quantity || 1,
+  unit_price: sale.unitPrice ?? sale.amount ?? 0,
+  product_code_snapshot: sale.productCode || null,
+  product_name_snapshot: sale.productName || null,
+  product_image_path_snapshot: sale.productImagePath || null,
+  record_state: 'ACTIVE',
+  source: sale.source || 'LEGACY',
   capture_image_paths: await persistImages(
     workspaceId,
     `sales/${sale.id}`,
@@ -102,7 +122,7 @@ const mapMessage = async (row: Row, workspaceId: string): Promise<SmsMessage> =>
     id: attachment.id,
     mimeType: attachment.mimeType,
     fileName: attachment.fileName,
-    dataUrl: attachment.path ? await imageUrl(attachment.path) : attachment.dataUrl,
+    dataUrl: attachment.path ? await resolvePrivateImageUrl(attachment.path) : attachment.dataUrl,
     path: attachment.path,
   }))),
   createdAt: row.created_at,
@@ -661,4 +681,3 @@ export const remoteWorkspaceService = {
     await this.saveWorkspaceSettings(workspaceId, 'user_preferences', preferences);
   },
 };
-

@@ -34,11 +34,9 @@ const SalesContext = createContext<SalesContextType | undefined>(undefined);
 export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { workspaceId, isRemoteAuth } = useAuth();
   const [sales, setSales] = useState<SaleRecord[]>(() => storageService.getSales());
-  const [remoteReady, setRemoteReady] = useState(false);
 
   useEffect(() => {
     if (!isRemoteAuth || !workspaceId) {
-      setRemoteReady(false);
       setSales(storageService.getSales());
       return;
     }
@@ -50,10 +48,8 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (!active) return;
         setSales(rows);
         storageService.saveSales(rows);
-        setRemoteReady(true);
       } catch (error) {
         console.error('[Sales] remote load failed', error);
-        if (active) setRemoteReady(false);
       }
     };
     void load();
@@ -66,7 +62,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const persist = (sale: SaleRecord) => {
     storageService.updateSale(sale);
-    if (isRemoteAuth && workspaceId && remoteReady) {
+    if (isRemoteAuth && workspaceId) {
       void remoteWorkspaceService.saveSale(workspaceId, sale).catch((error) => console.error('[Sales] remote save failed', error));
     }
   };
@@ -147,7 +143,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       : baseSale;
     setSales((previous) => [newSale, ...previous]);
     storageService.addSale(newSale);
-    if (isRemoteAuth && workspaceId && remoteReady) {
+    if (isRemoteAuth && workspaceId) {
       void remoteWorkspaceService.saveSale(workspaceId, newSale).catch((error) => console.error('[Sales] remote add failed', error));
     }
     if (newSale.printStatus === 'QUEUED') sendToPrinter(newSale);
@@ -175,7 +171,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const deleteSale = (id: string) => {
     setSales((previous) => previous.filter((sale) => sale.id !== id));
     storageService.deleteSale(id);
-    if (isRemoteAuth && workspaceId && remoteReady) {
+    if (isRemoteAuth && workspaceId) {
       void remoteWorkspaceService.deleteSale(workspaceId, id).catch((error) => console.error('[Sales] remote delete failed', error));
     }
   };

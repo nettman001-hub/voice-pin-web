@@ -14,8 +14,7 @@ export const ProductSalesPage: React.FC = () => {
     candidate,
     isLoading,
     loadBootstrap,
-    prepareProduct,
-    commitProduct,
+    registerProduct,
     commitSales,
     cancelCandidate,
     pauseCandidate,
@@ -74,8 +73,13 @@ export const ProductSalesPage: React.FC = () => {
       const name = !isDigitsOnly ? inputCodeOrName.trim() : undefined;
       const price = inputPrice ? parseInt(inputPrice.replace(/,/g, ''), 10) : undefined;
 
-      const prep = await prepareProduct(requestedCode, name, price, settings?.captureProductImageEnabled ? 'PHOTO' : 'NUMBER_IMAGE');
-      await commitProduct(prep.draftId, prep.draftRevision);
+      // 웹 수동 입력에는 카메라 촬영 단계가 없으므로 번호가 표시된 임시이미지를 실제 저장소에 올린다.
+      await registerProduct({
+        requestedProductCode: requestedCode,
+        name,
+        unitPrice: price ?? 0,
+        imageKind: 'NUMBER_IMAGE',
+      });
 
       setIsRegisterOpen(false);
       setInputCodeOrName('');

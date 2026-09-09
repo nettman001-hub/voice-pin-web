@@ -1,5 +1,6 @@
 export type SaleStatus = '자동저장' | '수동수정' | '확정' | '보류';
 export type SalePrintStatus = 'NOT_REQUESTED' | 'QUEUED' | 'PRINTED' | 'FAILED';
+export type SaleSource = 'WEB_VOICE' | 'ANDROID_COMMENTS' | 'MANUAL' | 'LEGACY';
 
 export interface SaleRecord {
   id: string;
@@ -10,6 +11,13 @@ export interface SaleRecord {
   rawTranscript: string;       // 원본 전사 문장
   status: SaleStatus;          // 상태 (자동저장, 수동수정, 확정, 보류)
   productName?: string;        // 판매 상품명 (판매자 직접 입력 또는 음성 추출)
+  productId?: string;          // products.id — 웹/모바일 공통 상품 키
+  productCode?: string;        // 판매 당시 상품번호 스냅샷
+  productImageUrl?: string;    // 화면에 표시할 서명된 상품 이미지 URL
+  productImagePath?: string;   // DB에 보존할 private storage 경로
+  quantity?: number;
+  unitPrice?: number;
+  source?: SaleSource;         // 음성/앱/수동 등록 출처
   captureImageUrls?: string[]; // 연결된 화면 캡처 이미지 URL 목록
   note?: string;               // 메모
   /** 댓글 도우미를 통한 로컬 프린터 출력 상태 */

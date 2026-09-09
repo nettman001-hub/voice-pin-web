@@ -3,7 +3,7 @@ import { LiveSession, SttTranscriptLog, CaptureItem, SaleRecord } from '../types
 import { deepgramService } from '../services/deepgramService';
 import { audioCaptureService } from '../services/audioCaptureService';
 import { screenCaptureService } from '../services/screenCaptureService';
-import { extractSaleFromTranscript } from '../services/salesExtractor';
+import { extractSaleFromTranscript, parseKoreanAmount } from '../services/salesExtractor';
 import { parseVoiceCommand } from '../services/voiceCommandParser';
 import { nicknameVerificationNote, verifyNicknameFromComments } from '../services/commentNicknameVerifier';
 import { storageService, generateSessionId } from '../services/storageService';
@@ -16,6 +16,9 @@ import { LocalSttModel, LocalSttStatusPayload, SttMode } from '../types/stt';
 import { User } from '../types/auth';
 import { isSupabaseConfigured } from '../services/supabaseClient';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
+import { useProductSales } from './ProductSalesContext';
+import { ProductSalesProduct } from '../types/productSales';
+import { createNumberProductImage } from '../services/productImageService';
 
 const SONIOX_SALE_TIMEOUT_MS = 10000;
 const SONIOX_BUFFER_LIMIT = 600;
@@ -44,6 +47,27 @@ const SONIOX_COMMAND_PATTERNS = [
   '화면캡처',
   '캡처'
 ];
+const VOICE_PRODUCT_DRAFT_TIMEOUT_MS = 30_000;
+const NEARBY_CAPTURE_WINDOW_MS = 90_000;
+
+interface VoiceProductDraft {
+  id: string;
+  startedAt: number;
+  requestedProductCode?: string;
+  unitPrice?: number;
+  imageDataUrl?: string;
+  captureFinished: boolean;
+  saving: boolean;
+}
+
+function extractSpokenProductCode(text: string): string | undefined {
+  const match = text.match(/상품\s*번호(?:는|은|가)?\s*([0-9]+)\s*번?/u);
+  return match?.[1];
+}
+
+function randomProductCode(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
 
 export interface MatchedRuleItem {
   text: string;
@@ -88,7 +112,7 @@ interface LiveContextType {
     area?: CaptureAreaConfig,
     triggerWord?: string,
     requiredListeningGeneration?: number,
-    targetSaleId?: string
+    targetSaleId?: string | null
   ) => Promise<string>;
 }
 
@@ -97,6 +121,7 @@ const LiveContext = createContext<LiveContextType | undefined>(undefined);
 export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { addSale, updateSale, sales } = useSales();
   const { isAuthenticated, user, workspaceId } = useAuth();
+  const productSales = useProductSales();
 
   const [isListening, setIsListening] = useState<boolean>(false);
   const [currentSessionId, setCurrentSessionId] = useState<string>(generateSessionId());
@@ -119,6 +144,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sonioxSaleBufferRef = useRef<string>('');
   const sonioxSaleTimeoutRef = useRef<number | null>(null);
   const sonioxCommandTailRef = useRef<string>('');
+  const productSalesRef = useRef(productSales);
+  const voiceProductDraftRef = useRef<VoiceProductDraft | null>(null);
 
   // 관리자 공통 STT 공급자 및 API Key 설정
   const [deepgramApiKey, setDeepgramApiKeyState] = useState<string>('');
@@ -134,6 +161,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     sttModeRef.current = sttMode;
   }, [sttMode]);
+
+  useEffect(() => {
+    productSalesRef.current = productSales;
+  }, [productSales]);
 
   useEffect(() => {
     return localSttService.subscribeStatus((status) => {
@@ -198,6 +229,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (previousAuthIdentityRef.current !== authIdentity) {
       previousAuthIdentityRef.current = authIdentity;
       authBoundaryGenerationRef.current += 1;
+      voiceProductDraftRef.current = null;
     }
     currentUserIdRef.current = user?.id ?? null;
     currentUserRef.current = user ?? null;
@@ -287,7 +319,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     areaConfig?: CaptureAreaConfig,
     triggerWord: string = '화면 캡처',
     requiredListeningGeneration?: number,
-    targetSaleId?: string
+    targetSaleId?: string | null
   ): Promise<string> => {
     const requestedUserId = currentUserIdRef.current;
     const requestedAuthGeneration = authBoundaryGenerationRef.current;
@@ -328,9 +360,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 2. 화면 비디오 스트림 가져오기
     const stream = screenCaptureService.getActiveStream();
-    const targetSale = targetSaleId
-      ? (sales.find((s) => s.id === targetSaleId) || lastSavedSaleRef.current)
-      : lastSavedSaleRef.current;
+    const targetSale = targetSaleId === null
+      ? undefined
+      : targetSaleId
+        ? (sales.find((s) => s.id === targetSaleId) || lastSavedSaleRef.current)
+        : lastSavedSaleRef.current;
 
     const imageUrl = await screenCaptureService.captureArea(stream, configuredArea, {
       nickname: targetSale?.buyerNickname,
@@ -393,6 +427,217 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     return imageUrl;
+  };
+
+  const completeVoiceProductDraft = async (draftId: string) => {
+    const draft = voiceProductDraftRef.current;
+    if (
+      !draft ||
+      draft.id !== draftId ||
+      draft.saving ||
+      !draft.captureFinished ||
+      !draft.requestedProductCode ||
+      draft.unitPrice === undefined
+    ) {
+      return;
+    }
+
+    draft.saving = true;
+    setEditingFieldInfo(`상품 ${draft.requestedProductCode}번을 등록하는 중입니다...`);
+    try {
+      const product = await productSalesRef.current.registerProduct({
+        requestedProductCode: draft.requestedProductCode,
+        unitPrice: draft.unitPrice,
+        imageDataUrl: draft.imageDataUrl,
+        imageKind: draft.imageDataUrl ? 'PHOTO' : 'NUMBER_IMAGE',
+        source: 'WEB_VOICE',
+      });
+      if (voiceProductDraftRef.current?.id === draftId) voiceProductDraftRef.current = null;
+      setEditingFieldInfo(null);
+      setLastMatchedRuleItem({
+        text: `상품번호 ${product.productCode}번 · 가격 ${Number(product.unitPrice || 0).toLocaleString()}원`,
+        matchedKeywords: ['상품등록', '상품번호', '가격'],
+        action: '📦 상품등록 완료 · 음성',
+        timestamp: new Date().toLocaleTimeString('ko-KR'),
+      });
+      playBeep(1318, 180);
+    } catch (error) {
+      draft.saving = false;
+      setEditingFieldInfo(null);
+      setLastMatchedRuleItem({
+        text: `상품번호 ${draft.requestedProductCode}번`,
+        matchedKeywords: ['상품등록'],
+        action: `⚠️ 상품등록 실패: ${error instanceof Error ? error.message : '알 수 없는 오류'}`,
+        timestamp: new Date().toLocaleTimeString('ko-KR'),
+      });
+    }
+  };
+
+  const handleVoiceProductTranscript = (fullText: string, requiredListeningGeneration?: number): string | null => {
+    const hasRegisterCommand = /상품\s*등록/u.test(fullText);
+    let draft = voiceProductDraftRef.current;
+    const now = Date.now();
+
+    if (draft && now - draft.startedAt > VOICE_PRODUCT_DRAFT_TIMEOUT_MS) {
+      voiceProductDraftRef.current = null;
+      draft = null;
+    }
+
+    if (hasRegisterCommand) {
+      const draftId = `voice-product-${crypto.randomUUID()}`;
+      draft = {
+        id: draftId,
+        startedAt: now,
+        captureFinished: false,
+        saving: false,
+      };
+      voiceProductDraftRef.current = draft;
+      setEditingFieldInfo('상품 촬영 중 · "상품번호 12번", "가격은 35,000원"이라고 말씀하세요.');
+
+      void captureCurrentScreen(
+        undefined,
+        '상품등록 음성 촬영',
+        requiredListeningGeneration,
+        null
+      ).then((imageDataUrl) => {
+        const latest = voiceProductDraftRef.current;
+        if (!latest || latest.id !== draftId) return;
+        latest.imageDataUrl = imageDataUrl || undefined;
+        latest.captureFinished = true;
+        void completeVoiceProductDraft(draftId);
+      }).catch(() => {
+        const latest = voiceProductDraftRef.current;
+        if (!latest || latest.id !== draftId) return;
+        latest.captureFinished = true;
+        void completeVoiceProductDraft(draftId);
+      });
+    }
+
+    if (!draft) return null;
+
+    const productCode = extractSpokenProductCode(fullText);
+    if (productCode) draft.requestedProductCode = productCode;
+
+    if (/(가격|단가)/u.test(fullText)) {
+      const parsedPrice = parseKoreanAmount(fullText);
+      if (parsedPrice !== null) draft.unitPrice = parsedPrice;
+      else if (/0\s*원/u.test(fullText)) draft.unitPrice = 0;
+    }
+
+    void completeVoiceProductDraft(draft.id);
+
+    if (hasRegisterCommand) return '📸 상품등록 촬영 · 음성 정보 대기';
+    if (productCode) return `🔢 상품번호 ${productCode}번 인식`;
+    if (draft.unitPrice !== undefined && /(가격|단가)/u.test(fullText)) {
+      return `💰 상품가격 ${draft.unitPrice.toLocaleString()}원 인식`;
+    }
+    return null;
+  };
+
+  const ensureProductForVoiceSale = async (): Promise<{
+    product: ProductSalesProduct | null;
+    fallbackCode?: string;
+    fallbackImageDataUrl?: string;
+  }> => {
+    const currentProduct = productSalesRef.current.activeProduct;
+    if (currentProduct) return { product: currentProduct };
+
+    const draft = voiceProductDraftRef.current;
+    const recentCapture = storageService.getCaptures().find((capture) => {
+      const capturedAt = new Date(capture.capturedAt).getTime();
+      return capture.sessionId === currentSessionIdRef.current
+        && Number.isFinite(capturedAt)
+        && Date.now() - capturedAt <= NEARBY_CAPTURE_WINDOW_MS;
+    });
+    const fallbackImageDataUrl = draft?.imageDataUrl || recentCapture?.imageUrl;
+    const requestedCode = draft?.requestedProductCode || randomProductCode();
+    const unitPrice = draft?.unitPrice ?? 0;
+    const codeWasGenerated = !draft?.requestedProductCode;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const productCode = attempt === 0 ? requestedCode : randomProductCode();
+      try {
+        const product = await productSalesRef.current.registerProduct({
+          requestedProductCode: productCode,
+          unitPrice,
+          imageDataUrl: fallbackImageDataUrl,
+          imageKind: fallbackImageDataUrl ? 'PHOTO' : 'NUMBER_IMAGE',
+          source: 'WEB_VOICE',
+        });
+        voiceProductDraftRef.current = null;
+        return { product };
+      } catch (error) {
+        const code = (error as Error & { code?: string }).code;
+        if (!(codeWasGenerated && code === 'PRODUCT_CODE_EXISTS' && attempt < 2)) {
+          console.error('[Live] 판매용 임시 상품 생성 실패:', error);
+          break;
+        }
+      }
+    }
+
+    return {
+      product: null,
+      fallbackCode: requestedCode,
+      fallbackImageDataUrl: fallbackImageDataUrl || createNumberProductImage(requestedCode),
+    };
+  };
+
+  const persistVoiceSale = async (
+    saleResult: NonNullable<ReturnType<typeof extractSaleFromTranscript>>,
+    fullText: string,
+    hasCaptureInstruction: boolean,
+    requiredListeningGeneration?: number
+  ) => {
+    const recognizedAt = new Date().toISOString();
+    const nicknameVerification = verifyNicknameFromComments({
+      transcript: fullText,
+      spokenNickname: saleResult.buyerNickname,
+      sessionId: currentSessionIdRef.current,
+      recognizedAt,
+      comments: storageService.getCommentRecords()
+    });
+    const hasVerifiedCommentNickname = Boolean(nicknameVerification.verifiedNickname);
+    const isSuffixReference = Boolean(nicknameVerification.suffixDigits);
+    const buyerNickname = hasVerifiedCommentNickname
+      ? nicknameVerification.verifiedNickname!
+      : isSuffixReference
+        ? '미확인(보류)'
+        : saleResult.buyerNickname;
+    const status = hasVerifiedCommentNickname ? saleResult.status : '보류';
+
+    const productLink = await ensureProductForVoiceSale();
+    const product = productLink.product;
+    const sessionId = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
+    const saved = addSale({
+      sessionId,
+      buyerNickname,
+      amount: saleResult.amount,
+      recognizedAt,
+      rawTranscript: fullText,
+      status,
+      note: nicknameVerificationNote(nicknameVerification),
+      productId: product?.id,
+      productCode: product?.productCode || productLink.fallbackCode,
+      productName: product?.name || undefined,
+      productImageUrl: product?.imageUrl || productLink.fallbackImageDataUrl,
+      productImagePath: product?.imagePath,
+      quantity: 1,
+      unitPrice: product?.unitPrice ?? 0,
+      source: 'WEB_VOICE',
+      captureImageUrls: !product && productLink.fallbackImageDataUrl
+        ? [productLink.fallbackImageDataUrl]
+        : undefined,
+    });
+    lastSavedSaleRef.current = saved;
+
+    if (hasCaptureInstruction) {
+      await captureCurrentScreen(
+        undefined,
+        '캡처하세요 (판매 자동 연동)',
+        requiredListeningGeneration,
+        saved.id
+      );
+    }
   };
 
   interface TranscriptProcessingOptions {
@@ -669,7 +914,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const matchedKeywords = activeKeywords.filter((kw) => fullText.includes(kw));
 
     let actionTriggered: SttTranscriptLog['actionTriggered'] = 'NONE';
-    let ruleActionName = '';
+    let ruleActionName = handleVoiceProductTranscript(fullText, requiredListeningGeneration) || '';
 
     // 1. 방송 중 음성 명령 파싱 ("수정 시작" / "닉네임은 xxx" / "수정 완료")
     const command = processingOptions.skipCommands
@@ -730,51 +975,19 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           ));
 
       if (saleResult) {
-        const recognizedAt = new Date().toISOString();
-        const nicknameVerification = verifyNicknameFromComments({
-          transcript: fullText,
-          spokenNickname: saleResult.buyerNickname,
-          sessionId: currentSessionId,
-          recognizedAt,
-          comments: storageService.getCommentRecords()
-        });
-        const hasVerifiedCommentNickname = Boolean(nicknameVerification.verifiedNickname);
-        const isSuffixReference = Boolean(nicknameVerification.suffixDigits);
-        const buyerNickname = hasVerifiedCommentNickname
-          ? nicknameVerification.verifiedNickname!
-          : isSuffixReference
-            ? '미확인(보류)'
-            : saleResult.buyerNickname;
-        const status = hasVerifiedCommentNickname
-          ? saleResult.status
-          : '보류';
-
-        const saved = addSale({
-          sessionId: currentSessionId,
-          buyerNickname,
-          amount: saleResult.amount,
-          recognizedAt,
-          rawTranscript: fullText,
-          status,
-          note: nicknameVerificationNote(nicknameVerification)
-        });
-        lastSavedSaleRef.current = saved;
-
+        actionTriggered = 'SALE_SAVED';
         if (hasCaptureInstruction) {
-          actionTriggered = 'SALE_SAVED';
           ruleActionName = '🛍️ 판매 DB 저장 + 📸 캡처하세요 연동';
-          playBeep(1046, 120);
-          void captureCurrentScreen(
-            undefined,
-            '캡처하세요 (판매 자동 연동)',
-            requiredListeningGeneration,
-            saved.id
-          );
         } else {
-          actionTriggered = 'SALE_SAVED';
           ruleActionName = '🛍️ 판매 DB 자동 저장';
-          playBeep(1046, 120);
         }
+        playBeep(1046, 120);
+        void persistVoiceSale(
+          saleResult,
+          fullText,
+          hasCaptureInstruction,
+          requiredListeningGeneration
+        );
       } else if (
         hasCaptureInstruction ||
         (!processingOptions.skipCapture &&

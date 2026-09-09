@@ -8,8 +8,12 @@ import {
   CommitSaleBuyer,
   ProductSalesResult,
   ProductSalesDraft,
+  ImageKind,
 } from '../types/productSales';
 import { productSalesApi } from '../services/productSalesApi';
+import { resolvePrivateImageUrl } from '../services/remoteWorkspaceService';
+import { createNumberProductImage, uploadProductImageDataUrl } from '../services/productImageService';
+import { useAuth } from './AuthContext';
 import {
   VoiceSaleCandidate,
   VoiceCandidateController,
@@ -33,8 +37,22 @@ interface ProductSalesContextType {
     name?: string,
     unitPrice?: number,
     imageKind?: 'PHOTO' | 'NUMBER_IMAGE'
-  ) => Promise<{ draftId: string; draftRevision: number; productCode: string }>;
-  commitProduct: (draftId: string, draftRevision: number) => Promise<void>;
+  ) => Promise<{
+    draftId: string;
+    draftRevision: number;
+    productId: string;
+    productCode: string;
+    uploadUrl?: string;
+  }>;
+  commitProduct: (draftId: string, draftRevision: number) => Promise<ProductSalesProduct | null>;
+  registerProduct: (params: {
+    requestedProductCode?: string;
+    name?: string;
+    unitPrice?: number;
+    imageDataUrl?: string;
+    imageKind?: ImageKind;
+    source?: 'WEB_VOICE' | 'MANUAL';
+  }) => Promise<ProductSalesProduct>;
   commitSales: (buyers: CommitSaleBuyer[]) => Promise<ProductSalesResult>;
   processVoiceUtterance: (transcript: string, isFinal: boolean) => void;
   cancelCandidate: () => void;
@@ -45,7 +63,18 @@ interface ProductSalesContextType {
 
 const ProductSalesContext = createContext<ProductSalesContextType | null>(null);
 
+async function hydrateProduct(product: ProductSalesProduct | null): Promise<ProductSalesProduct | null> {
+  if (!product) return null;
+  const imagePath = product.imagePath || product.imageUrl || '';
+  return {
+    ...product,
+    imagePath: imagePath || undefined,
+    imageUrl: imagePath ? await resolvePrivateImageUrl(imagePath) : undefined,
+  };
+}
+
 export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAuthenticated, user } = useAuth();
   const [bootstrap, setBootstrap] = useState<ProductSalesBootstrapData | null>(null);
   const [feed, setFeed] = useState<ProductSalesFeedData | null>(null);
   const [candidate, setCandidate] = useState<VoiceSaleCandidate | null>(null);
@@ -53,16 +82,22 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [error, setError] = useState<string | null>(null);
 
   const controllerRef = useRef<VoiceCandidateController | null>(null);
+  const activeSessionRef = useRef<ProductSalesSession | null>(null);
 
   const activeProduct = bootstrap?.activeProduct || null;
   const activeSession = bootstrap?.activeSession || null;
   const settings = bootstrap?.settings || null;
 
+  useEffect(() => {
+    activeSessionRef.current = activeSession;
+  }, [activeSession]);
+
   const loadBootstrap = useCallback(async () => {
     setIsLoading(true);
     try {
       const data = await productSalesApi.getBootstrap();
-      setBootstrap(data);
+      const hydratedProduct = await hydrateProduct(data.activeProduct);
+      setBootstrap({ ...data, activeProduct: hydratedProduct });
       setError(null);
     } catch (err: any) {
       setError(err.message || '부트스트랩 로딩 실패');
@@ -78,15 +113,31 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
         sessionId: activeSession.id,
         limit: 50,
       });
-      setFeed(feedData);
+      const hydratedProduct = await hydrateProduct(feedData.activeProduct);
+      setFeed({ ...feedData, activeProduct: hydratedProduct });
+      setBootstrap((previous) => previous ? {
+        ...previous,
+        activeProduct: hydratedProduct,
+        activeSession: previous.activeSession ? {
+          ...previous.activeSession,
+          activeProductId: hydratedProduct?.id || null,
+          revision: feedData.sessionRevision,
+        } : previous.activeSession,
+      } : previous);
     } catch {
       // Background poll failure silent
     }
   }, [activeSession]);
 
   useEffect(() => {
-    loadBootstrap();
-  }, [loadBootstrap]);
+    if (!isAuthenticated) {
+      setBootstrap(null);
+      setFeed(null);
+      setError(null);
+      return;
+    }
+    void loadBootstrap();
+  }, [isAuthenticated, user?.id, loadBootstrap]);
 
   useEffect(() => {
     if (!activeSession) return;
@@ -99,7 +150,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const handleCommitCandidate = useCallback(
     async (cand: VoiceSaleCandidate) => {
       if (cand.type === 'SALE' && cand.productId) {
-        const operationId = `op_cand_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const operationId = crypto.randomUUID();
         const buyers = [
           {
             buyerId: cand.buyerId || cand.buyerNickname || 'anon',
@@ -133,7 +184,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const updateSettings = useCallback(
     async (newSettings: Partial<ProductSalesSettings>) => {
       if (!settings) return;
-      const operationId = `op_set_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const operationId = crypto.randomUUID();
       const resp = await productSalesApi.updateSettings(operationId, settings.revision, newSettings);
       setBootstrap((prev) => (prev ? { ...prev, settings: resp.settings } : null));
     },
@@ -147,12 +198,13 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
       unitPrice?: number,
       imageKind: 'PHOTO' | 'NUMBER_IMAGE' = 'PHOTO'
     ) => {
-      if (!activeSession) throw new Error('활성 방송 회차가 없습니다.');
-      const operationId = `op_prep_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const session = activeSessionRef.current;
+      if (!session) throw new Error('활성 방송 회차가 없습니다.');
+      const operationId = crypto.randomUUID();
       const resp = await productSalesApi.prepareProduct({
         operationId,
-        sessionId: activeSession.id,
-        expectedSessionRevision: activeSession.revision,
+        sessionId: session.id,
+        expectedSessionRevision: session.revision,
         requestedProductCode,
         name,
         unitPrice,
@@ -162,25 +214,86 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
       return {
         draftId: resp.draftId,
         draftRevision: resp.draftRevision,
+        productId: resp.productId,
         productCode: resp.productCode,
+        uploadUrl: resp.imageUpload?.uploadUrl,
       };
     },
-    [activeSession]
+    []
   );
 
   const commitProduct = useCallback(
     async (draftId: string, draftRevision: number) => {
-      if (!activeSession) return;
-      const operationId = `op_com_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      await productSalesApi.commitProduct({
+      const session = activeSessionRef.current;
+      if (!session) return null;
+      const operationId = crypto.randomUUID();
+      const response = await productSalesApi.commitProduct({
         operationId,
         draftId,
         expectedDraftRevision: draftRevision,
-        expectedSessionRevision: activeSession.revision,
+        expectedSessionRevision: session.revision,
       });
-      await loadBootstrap();
+      const product = await hydrateProduct(response.product);
+      const nextSession = { ...session, ...response.session };
+      activeSessionRef.current = nextSession;
+      setBootstrap((previous) => previous ? {
+        ...previous,
+        activeProduct: product,
+        activeSession: nextSession,
+      } : previous);
+      return product;
     },
-    [activeSession, loadBootstrap]
+    []
+  );
+
+  const registerProduct = useCallback(
+    async (params: {
+      requestedProductCode?: string;
+      name?: string;
+      unitPrice?: number;
+      imageDataUrl?: string;
+      imageKind?: ImageKind;
+      source?: 'WEB_VOICE' | 'MANUAL';
+    }): Promise<ProductSalesProduct> => {
+      const session = activeSessionRef.current;
+      if (!session) throw new Error('활성 방송 회차가 없습니다.');
+
+      const imageKind = params.imageDataUrl ? (params.imageKind || 'PHOTO') : 'NUMBER_IMAGE';
+      const operationId = crypto.randomUUID();
+      const prepared = await productSalesApi.prepareProduct({
+        operationId,
+        sessionId: session.id,
+        expectedSessionRevision: session.revision,
+        requestedProductCode: params.requestedProductCode,
+        name: params.name,
+        unitPrice: params.unitPrice ?? 0,
+        imageKind,
+      });
+
+      const imageDataUrl = params.imageDataUrl || createNumberProductImage(prepared.productCode);
+      if (!prepared.imageUpload?.uploadUrl) throw new Error('상품 이미지 업로드 주소를 만들지 못했습니다.');
+      await uploadProductImageDataUrl(prepared.imageUpload.uploadUrl, imageDataUrl);
+
+      const commitResponse = await productSalesApi.commitProduct({
+        operationId: crypto.randomUUID(),
+        draftId: prepared.draftId,
+        expectedDraftRevision: prepared.draftRevision,
+        expectedSessionRevision: session.revision,
+        source: params.source || 'MANUAL',
+      });
+      const product = await hydrateProduct(commitResponse.product);
+      if (!product) throw new Error('등록된 상품을 불러오지 못했습니다.');
+
+      const nextSession = { ...session, ...commitResponse.session };
+      activeSessionRef.current = nextSession;
+      setBootstrap((previous) => previous ? {
+        ...previous,
+        activeProduct: product,
+        activeSession: nextSession,
+      } : previous);
+      return product;
+    },
+    []
   );
 
   const commitSales = useCallback(
@@ -188,7 +301,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if (!activeSession || !activeProduct) {
         throw new Error('활성 회차 또는 상품이 없습니다.');
       }
-      const operationId = `op_sales_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const operationId = crypto.randomUUID();
       const resp = await productSalesApi.commitSales({
         operationId,
         sessionId: activeSession.id,
@@ -260,6 +373,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
         updateSettings,
         prepareProduct,
         commitProduct,
+        registerProduct,
         commitSales,
         processVoiceUtterance,
         cancelCandidate,

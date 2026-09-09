@@ -1,5 +1,6 @@
 export type IdentityStatus = 'VERIFIED' | 'MANUAL_CONFIRMED' | 'UNRESOLVED';
 export type ImageKind = 'PHOTO' | 'NUMBER_IMAGE';
+export type ProductSource = 'WEB_VOICE' | 'ANDROID' | 'MANUAL';
 export type RecordState = 'ACTIVE' | 'CANCELLED';
 export type PrintJobStatus = 'QUEUED' | 'CLAIMED' | 'SUBMITTING' | 'SUBMITTED' | 'FAILED' | 'UNKNOWN' | 'CANCELLED';
 export type PrintJobKind = 'SALE' | 'CORRECTION' | 'CANCEL' | 'REPRINT';
@@ -41,6 +42,7 @@ export interface Product {
   imageKind: ImageKind;
   imageUrl?: string;
   imagePath?: string;
+  source?: ProductSource;
   revision: number;
   salesRevision: number;
 }

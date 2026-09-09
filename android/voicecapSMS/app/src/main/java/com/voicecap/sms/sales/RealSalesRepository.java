@@ -188,6 +188,58 @@ public class RealSalesRepository implements SalesRepository {
     }
 
     @Override
+    public void uploadProductImage(String uploadUrl, byte[] jpegData, Callback<Void> callback) {
+        executor.execute(() -> {
+            HttpURLConnection conn = null;
+            try {
+                if (uploadUrl == null || uploadUrl.trim().isEmpty()) {
+                    throw new IllegalArgumentException("상품 이미지 업로드 주소가 없습니다.");
+                }
+                if (jpegData == null || jpegData.length == 0) {
+                    throw new IllegalArgumentException("촬영된 상품 이미지가 없습니다.");
+                }
+                if (jpegData.length > 4 * 1024 * 1024) {
+                    throw new IllegalArgumentException("상품 이미지는 4MB 이하여야 합니다.");
+                }
+
+                conn = (HttpURLConnection) new URL(uploadUrl).openConnection();
+                conn.setRequestMethod("PUT");
+                conn.setRequestProperty("Content-Type", "image/jpeg");
+                conn.setRequestProperty("Cache-Control", "max-age=3600");
+                conn.setRequestProperty("x-upsert", "false");
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(20000);
+                conn.setDoOutput(true);
+                conn.setFixedLengthStreamingMode(jpegData.length);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(jpegData);
+                }
+
+                int statusCode = conn.getResponseCode();
+                if (statusCode < 200 || statusCode >= 300) {
+                    InputStream errorStream = conn.getErrorStream();
+                    String detail = "";
+                    if (errorStream != null) {
+                        try (BufferedReader reader = new BufferedReader(new InputStreamReader(errorStream, StandardCharsets.UTF_8))) {
+                            StringBuilder builder = new StringBuilder();
+                            String line;
+                            while ((line = reader.readLine()) != null) builder.append(line);
+                            detail = builder.toString();
+                        }
+                    }
+                    throw new IllegalStateException("상품 이미지 업로드 실패 (" + statusCode + ")" + (detail.isEmpty() ? "" : ": " + detail));
+                }
+                mainHandler.post(() -> callback.onSuccess(null));
+            } catch (Exception e) {
+                SalesError error = new SalesError("IMAGE_UPLOAD_FAILED", e.getMessage() != null ? e.getMessage() : "상품 이미지 업로드 오류", true, null);
+                mainHandler.post(() -> callback.onError(error));
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+        });
+    }
+
+    @Override
     public void updateProductDraft(String operationId, String draftId, int expectedDraftRevision, String imageKind, boolean imageFallbackConfirmed, Callback<DraftData> callback) {
         try {
             JSONObject body = new JSONObject();

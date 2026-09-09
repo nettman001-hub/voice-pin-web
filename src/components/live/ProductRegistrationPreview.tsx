@@ -41,6 +41,11 @@ export const ProductRegistrationPreview: React.FC<ProductRegistrationPreviewProp
               <span className="text-xs font-semibold px-2 py-0.5 rounded bg-brand-100 text-brand-700">
                 {activeProduct?.imageKind === 'NUMBER_IMAGE' ? '번호이미지' : '상품사진'}
               </span>
+              {activeProduct?.source && (
+                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                  {activeProduct.source === 'ANDROID' ? '앱 등록' : activeProduct.source === 'WEB_VOICE' ? '음성 등록' : '웹 등록'}
+                </span>
+              )}
               <h3 className="font-bold text-slate-800">
                 {activeProduct ? activeProduct.productCode : '현재 활성 상품 없음'}
               </h3>
