@@ -349,8 +349,9 @@ export const SalesListPage: React.FC = () => {
                 const isExpanded = expandedBuyers.includes(buyer.buyerNickname);
                 const buyerSaleIds = buyer.records.map((record) => record.id);
                 const buyerThumbnail = buyer.productImageUrls[0]
-                  || buyer.records.find((r) => r.productImageUrl || (r.captureImageUrls && r.captureImageUrls.length > 0))?.productImageUrl
-                  || buyer.captureImageUrls[0];
+                  || buyer.captureImageUrls[0]
+                  || buyer.records.find((r) => r.productImageUrl)?.productImageUrl
+                  || buyer.records.find((r) => r.captureImageUrls && r.captureImageUrls.length > 0)?.captureImageUrls?.[0];
 
                 return (
                   <div

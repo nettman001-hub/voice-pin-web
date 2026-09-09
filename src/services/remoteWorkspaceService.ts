@@ -14,10 +14,18 @@ export const resolvePrivateImageUrl = async (value: string) => {
   if (!value || value.startsWith('http://') || value.startsWith('https://') || value.startsWith('data:')) return value;
   const cached = signedImageCache.get(value);
   if (cached && cached.expiresAt > Date.now()) return cached.url;
-  const { data, error } = await requireSupabase().storage.from('voicecap-private').createSignedUrl(value, 60 * 30);
-  if (error) throw error;
-  signedImageCache.set(value, { url: data.signedUrl, expiresAt: Date.now() + 25 * 60 * 1000 });
-  return data.signedUrl;
+  try {
+    const { data, error } = await requireSupabase().storage.from('voicecap-private').createSignedUrl(value, 60 * 30);
+    if (error || !data?.signedUrl) {
+      console.warn('[Storage] Signed URL 생성 실패:', value, error?.message);
+      return '';
+    }
+    signedImageCache.set(value, { url: data.signedUrl, expiresAt: Date.now() + 25 * 60 * 1000 });
+    return data.signedUrl;
+  } catch (err) {
+    console.warn('[Storage] resolvePrivateImageUrl 오류:', err);
+    return '';
+  }
 };
 
 const imageUrls = async (values: unknown) => Promise.all((Array.isArray(values) ? values : []).map((value) => resolvePrivateImageUrl(String(value))));

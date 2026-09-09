@@ -426,7 +426,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (targetSale) {
       const updatedSale: SaleRecord = {
         ...targetSale,
-        captureImageUrls: [...(targetSale.captureImageUrls || []), imageUrl]
+        captureImageUrls: [...(targetSale.captureImageUrls || []), imageUrl],
+        productImageUrl: targetSale.productImageUrl || imageUrl,
       };
       updateSale(updatedSale);
       lastSavedSaleRef.current = updatedSale;
@@ -614,6 +615,16 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const productLink = await ensureProductForVoiceSale();
     const product = productLink.product;
     const sessionId = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
+
+    // 최근 60초 내 캡처된 화면이 있으면 연결
+    const recentCapture = storageService.getCaptures().find((capture) => {
+      const capturedAt = new Date(capture.capturedAt).getTime();
+      return capture.sessionId === currentSessionIdRef.current
+        && Number.isFinite(capturedAt)
+        && Date.now() - capturedAt <= 60000;
+    });
+    const fallbackImage = productLink.fallbackImageDataUrl || recentCapture?.imageUrl;
+
     const saved = addSale({
       sessionId,
       buyerNickname,
@@ -625,21 +636,21 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       productId: product?.id,
       productCode: product?.productCode || productLink.fallbackCode,
       productName: product?.name || undefined,
-      productImageUrl: product?.imageUrl || productLink.fallbackImageDataUrl,
+      productImageUrl: product?.imageUrl || fallbackImage,
       productImagePath: product?.imagePath,
       quantity: 1,
       unitPrice: product?.unitPrice ?? 0,
       source: 'WEB_VOICE',
-      captureImageUrls: !product && productLink.fallbackImageDataUrl
-        ? [productLink.fallbackImageDataUrl]
-        : undefined,
+      captureImageUrls: fallbackImage ? [fallbackImage] : undefined,
     });
     lastSavedSaleRef.current = saved;
 
-    if (hasCaptureInstruction) {
+    // 화면 공유 스트림이 활성화되어 있거나 '캡처하세요' 발화 시 즉시 화면 캡처 실행하여 판매건에 연동
+    const hasActiveStream = Boolean(screenCaptureService.getActiveStream());
+    if (hasCaptureInstruction || hasActiveStream) {
       await captureCurrentScreen(
         undefined,
-        '캡처하세요 (판매 자동 연동)',
+        hasCaptureInstruction ? '캡처하세요 (판매 자동 연동)' : '판매 자동 화면 캡처',
         requiredListeningGeneration,
         saved.id
       );
@@ -995,8 +1006,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (saleResult) {
         actionTriggered = 'SALE_SAVED';
+        const hasActiveStream = Boolean(screenCaptureService.getActiveStream());
         if (hasCaptureInstruction) {
           ruleActionName = '🛍️ 판매 DB 저장 + 📸 캡처하세요 연동';
+        } else if (hasActiveStream) {
+          ruleActionName = '🛍️ 판매 DB 저장 + 📸 화면 자동 캡처';
         } else {
           ruleActionName = '🛍️ 판매 DB 자동 저장';
         }

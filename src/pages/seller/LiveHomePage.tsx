@@ -920,8 +920,8 @@ export const LiveHomePage: React.FC = () => {
               ) : (
                 currentSessionSales.map((sale) => {
                   const productImage = sale.productImageUrl
-                    || (sale.productCode && sale.productCode === activeProduct?.productCode ? activeProduct?.imageUrl : undefined)
-                    || sale.captureImageUrls?.[0];
+                    || sale.captureImageUrls?.[0]
+                    || (sale.productCode && sale.productCode === activeProduct?.productCode ? activeProduct?.imageUrl : undefined);
                   const sourceLabel = sale.source === 'ANDROID_COMMENTS'
                     ? '앱'
                     : sale.source === 'WEB_VOICE'
