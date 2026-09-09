@@ -132,7 +132,11 @@ export const SalesDetailPage: React.FC = () => {
         </div>
 
         {/* 구매자 누적 거래 및 신용 이력 */}
-        <CustomerStatsBadge nickname={buyerNickname || sale.buyerNickname} variant="detailed" />
+        <CustomerStatsBadge
+          nickname={buyerNickname || sale.buyerNickname}
+          variant="detailed"
+          currentSessionId={sale.sessionId}
+        />
 
         {/* 수정 폼 */}
         <form onSubmit={handleSave} className="space-y-4">
@@ -140,7 +144,11 @@ export const SalesDetailPage: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-1.5 gap-2">
                 <label className="block text-xs font-semibold text-slate-700">구매자 닉네임</label>
-                <CustomerStatsBadge nickname={buyerNickname} variant="pill" />
+                <CustomerStatsBadge
+                  nickname={buyerNickname}
+                  variant="pill"
+                  currentSessionId={sale.sessionId}
+                />
               </div>
               <input
                 type="text"

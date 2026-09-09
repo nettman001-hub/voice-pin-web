@@ -798,7 +798,11 @@ export const LiveHomePage: React.FC = () => {
                         {c.matchedAlertWord}
                       </span>
                     )}
-                    <CustomerStatsBadge nickname={c.nickname} variant="compact" />
+                    <CustomerStatsBadge
+                      nickname={c.nickname}
+                      variant="compact"
+                      currentSessionId={currentSessionId || activeSession?.id}
+                    />
                   </div>
                 ))
               )}
@@ -909,7 +913,11 @@ export const LiveHomePage: React.FC = () => {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center space-x-2 flex-wrap gap-1">
                           <span className="font-bold text-sm text-slate-900 truncate">{sale.buyerNickname}</span>
-                          <CustomerStatsBadge nickname={sale.buyerNickname} variant="pill" />
+                          <CustomerStatsBadge
+                            nickname={sale.buyerNickname}
+                            variant="pill"
+                            currentSessionId={sale.sessionId || currentSessionId || activeSession?.id}
+                          />
                           <span className={`text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold border ${
                             sale.source === 'ANDROID_COMMENTS'
                               ? 'bg-blue-50 text-blue-700 border-blue-200'

@@ -2,12 +2,15 @@ import React, { useMemo } from 'react';
 import { useSales } from '../../context/SalesContext';
 import { useCommerce } from '../../context/CommerceContext';
 import { useLive } from '../../context/LiveContext';
+import { useProductSales } from '../../context/ProductSalesContext';
 import { SaleRecord } from '../../types/live';
+import { CustomerPurchaseClaim, SettlementInvoice, Shipment } from '../../types/commerce';
 
 interface CustomerStatsBadgeProps {
   nickname?: string;
   variant?: 'compact' | 'pill' | 'detailed';
   className?: string;
+  currentSessionId?: string | null;
 }
 
 /** 닉네임 비교용 정규화: 특수문자, 공백, 접미사 '님' 제거 및 소문자화 */
@@ -25,51 +28,84 @@ export interface CustomerStats {
   purchaseCount: number;
   totalRevenue: number;
   defaultCount: number;
+  isFirstTimeBuyer: boolean;
   validSales: SaleRecord[];
 }
 
-export const useCustomerStats = (nickname?: string): CustomerStats => {
-  const { sales } = useSales();
-  const { claims, invoices, shipments, isPaid } = useCommerce();
-  const { currentSessionId } = useLive();
+export interface CalculateCustomerStatsParams {
+  nickname?: string;
+  sales: SaleRecord[];
+  claims?: CustomerPurchaseClaim[];
+  invoices?: SettlementInvoice[];
+  shipments?: Shipment[];
+  isPaid?: (saleIds: string[]) => boolean;
+  currentSessionId?: string | null;
+  activeSessionId?: string | null;
+}
 
-  return useMemo(() => {
-    const normalizedTarget = normalizeBuyerNickname(nickname);
-    if (!normalizedTarget || normalizedTarget === '미확인' || normalizedTarget === '미확인(보류)') {
-      return { purchaseCount: 0, totalRevenue: 0, defaultCount: 0, validSales: [] };
-    }
+/** 고객 거래 통계 순수 계산 함수 (단위 테스트 및 재사용 가능) */
+export const calculateCustomerStats = ({
+  nickname,
+  sales,
+  claims = [],
+  invoices = [],
+  shipments = [],
+  isPaid,
+  currentSessionId,
+  activeSessionId
+}: CalculateCustomerStatsParams): CustomerStats => {
+  const normalizedTarget = normalizeBuyerNickname(nickname);
+  if (!normalizedTarget || normalizedTarget === '미확인' || normalizedTarget === '미확인(보류)') {
+    return { purchaseCount: 0, totalRevenue: 0, defaultCount: 0, isFirstTimeBuyer: false, validSales: [] };
+  }
 
-    // 해당 고객의 모든 주문 건 매칭
-    const customerSales = sales.filter(
-      (s) => normalizeBuyerNickname(s.buyerNickname) === normalizedTarget
-    );
+  // 해당 고객의 모든 주문 건 매칭
+  const customerSales = sales.filter(
+    (s) => normalizeBuyerNickname(s.buyerNickname) === normalizedTarget
+  );
 
-    if (customerSales.length === 0) {
-      return { purchaseCount: 0, totalRevenue: 0, defaultCount: 0, validSales: [] };
-    }
+  if (customerSales.length === 0) {
+    return { purchaseCount: 0, totalRevenue: 0, defaultCount: 0, isFirstTimeBuyer: false, validSales: [] };
+  }
 
-    // 1. 구매횟수: 전체 주문 건수
-    const purchaseCount = customerSales.length;
+  // 1. 구매횟수: 전체 주문 건수
+  const purchaseCount = customerSales.length;
 
-    // 2. 누적 매출: 보류/취소가 아닌 유효 판매의 합계
-    const totalRevenue = customerSales
-      .filter((s) => s.status !== '보류')
-      .reduce((sum, s) => sum + (s.amount || 0), 0);
+  // 2. 누적 매출 및 미이행 건수 계산
+  // * 사용자 명시 규칙: 미이행 횟수는 이번 판매회차에서는 완전히 제외하고, 지난 누적회차(과거 세션)에서만 계산함.
+  let totalRevenue = 0;
+  let defaultCount = 0;
 
-    // 3. 미이행 횟수: 주문 후 문자미수신, 미입금, 반품 등 약속을 지키지 않은 건수
-    let defaultCount = 0;
+  customerSales.forEach((sale) => {
+    // 이번 판매회차(현재 방송 세션) 주문 여부 판정:
+    // 1) 현재 웹 청취 회차 ID(currentSessionId)와 일치
+    // 2) 현재 상품판매 회차 UUID(activeSessionId)와 일치
+    // 3) 주문 인식 시각이 최근 12시간 이내인 경우
+    const isCurrentSessionSale =
+      (Boolean(currentSessionId) && sale.sessionId === currentSessionId) ||
+      (Boolean(activeSessionId) && sale.sessionId === activeSessionId) ||
+      (Boolean(sale.recognizedAt) && Date.now() - new Date(sale.recognizedAt).getTime() < 12 * 60 * 60 * 1000);
 
-    customerSales.forEach((sale) => {
+    const isPastSessionSale = !isCurrentSessionSale;
+
+    // [미이행 횟수] 이번 판매회차는 완전히 제외하고, '지난 누적회차'에서만 계산
+    if (isPastSessionSale) {
       let isDefaulted = false;
 
-      // A. 반품 / 취소 / 보류
-      if (sale.status === '보류') {
+      // A. 과거 주문 취소 / 반품 / 환불 / 노쇼
+      if (
+        (sale.status as string) === '취소' ||
+        (sale.status as string) === '반품' ||
+        (sale.status as string) === '환불'
+      ) {
         isDefaulted = true;
       } else if (
         sale.note &&
         (sale.note.includes('반품') ||
           sale.note.includes('취소') ||
           sale.note.includes('환불') ||
+          sale.note.includes('노쇼') ||
+          sale.note.includes('미입금취소') ||
           sale.note.includes('미입금'))
       ) {
         isDefaulted = true;
@@ -78,46 +114,97 @@ export const useCustomerStats = (nickname?: string): CustomerStats => {
       ) {
         isDefaulted = true;
       } else if (
-        shipments.some((ship) => ship.saleIds.includes(sale.id) && ship.status === 'CANCELLED')
+        shipments.some(
+          (ship) =>
+            ship.saleIds.includes(sale.id) &&
+            (ship.status === 'CANCELLED' || (ship.status as string) === 'RETURNED')
+        )
       ) {
         isDefaulted = true;
-      }
-
-      // B. 과거 회차 주문의 문자미수신 또는 미입금 검사 (현재 라이브 중인 주문은 아직 작성/입금 중일 수 있으므로 제외)
-      if (!isDefaulted && sale.sessionId !== currentSessionId) {
-        // 문자 미수신 검사
-        const matchedClaim = claims.find((c) => c.saleIds.includes(sale.id));
-        if (!matchedClaim || matchedClaim.matchStatus === 'NOT_RECEIVED') {
+      } else {
+        // B. 과거 주문 정산 인보이스 납부기한 만료 및 미입금
+        const overdueInvoice = invoices.find(
+          (inv) =>
+            inv.saleIds.includes(sale.id) &&
+            ((inv.status as string) === 'OVERDUE' ||
+              (inv.status !== 'PAID' &&
+                inv.dueDate &&
+                new Date(inv.dueDate).getTime() < Date.now()))
+        );
+        if (overdueInvoice && isPaid && !isPaid([sale.id])) {
           isDefaulted = true;
-        } else {
-          // 미입금 검사
-          const paid = isPaid([sale.id]);
-          if (!paid) {
-            isDefaulted = true;
-          }
         }
       }
 
       if (isDefaulted) {
         defaultCount += 1;
       }
-    });
+    }
 
-    return {
-      purchaseCount,
-      totalRevenue,
-      defaultCount,
-      validSales: customerSales
-    };
-  }, [nickname, sales, claims, invoices, shipments, isPaid, currentSessionId]);
+    // [누적 매출] 유효 주문만 합산 (취소/반품 및 단순 보류 제외)
+    const isCancelled =
+      (sale.status as string) === '취소' ||
+      (sale.status as string) === '반품' ||
+      (sale.status as string) === '환불' ||
+      Boolean(
+        sale.note &&
+          (sale.note.includes('반품') ||
+            sale.note.includes('취소') ||
+            sale.note.includes('환불') ||
+            sale.note.includes('노쇼') ||
+            sale.note.includes('미입금취소'))
+      );
+
+    if (!isCancelled && sale.status !== '보류') {
+      totalRevenue += sale.amount || 0;
+    }
+  });
+
+  // 첫구매자 판정: 구매횟수가 1회이고 지난 누적회차 미이행이 0회인 경우
+  const isFirstTimeBuyer = purchaseCount === 1 && defaultCount === 0;
+
+  return {
+    purchaseCount,
+    totalRevenue,
+    defaultCount,
+    isFirstTimeBuyer,
+    validSales: customerSales
+  };
+};
+
+export const useCustomerStats = (
+  nickname?: string,
+  overrideCurrentSessionId?: string | null
+): CustomerStats => {
+  const { sales } = useSales();
+  const { claims, invoices, shipments, isPaid } = useCommerce();
+  const { currentSessionId } = useLive();
+  const { activeSession } = useProductSales();
+
+  const effectiveSessionId =
+    overrideCurrentSessionId !== undefined ? overrideCurrentSessionId : currentSessionId;
+
+  return useMemo(() => {
+    return calculateCustomerStats({
+      nickname,
+      sales,
+      claims,
+      invoices,
+      shipments,
+      isPaid,
+      currentSessionId: effectiveSessionId,
+      activeSessionId: activeSession?.id
+    });
+  }, [nickname, sales, claims, invoices, shipments, isPaid, effectiveSessionId, activeSession?.id]);
 };
 
 export const CustomerStatsBadge: React.FC<CustomerStatsBadgeProps> = ({
   nickname,
   variant = 'pill',
-  className = ''
+  className = '',
+  currentSessionId
 }) => {
-  const stats = useCustomerStats(nickname);
+  const stats = useCustomerStats(nickname, currentSessionId);
 
   // 구매 이력이 없으면 표시하지 않음
   if (stats.purchaseCount === 0) {
@@ -131,6 +218,11 @@ export const CustomerStatsBadge: React.FC<CustomerStatsBadgeProps> = ({
         className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-slate-100/90 border border-slate-200/80 text-[10px] font-semibold text-slate-600 whitespace-nowrap flex-shrink-0 ${className}`}
         title={`${nickname} 고객 구매 통계`}
       >
+        {stats.isFirstTimeBuyer && (
+          <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-700 font-extrabold text-[9px] border border-emerald-200">
+            첫구매
+          </span>
+        )}
         <span>
           구매 <strong className="text-slate-800 font-bold">{stats.purchaseCount}회</strong>
         </span>
@@ -140,7 +232,14 @@ export const CustomerStatsBadge: React.FC<CustomerStatsBadgeProps> = ({
         </span>
         <span className="text-slate-300">·</span>
         <span>
-          미이행 <strong className="text-rose-600 font-black">{stats.defaultCount}회</strong>
+          미이행{' '}
+          <strong
+            className={
+              stats.defaultCount > 0 ? 'text-rose-600 font-black' : 'text-slate-500 font-medium'
+            }
+          >
+            {stats.defaultCount}회
+          </strong>
         </span>
       </span>
     );
@@ -152,6 +251,11 @@ export const CustomerStatsBadge: React.FC<CustomerStatsBadgeProps> = ({
       <span
         className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-[10px] font-medium text-slate-700 whitespace-nowrap ${className}`}
       >
+        {stats.isFirstTimeBuyer && (
+          <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 font-extrabold text-[9px]">
+            첫구매
+          </span>
+        )}
         <span>
           구매 <strong className="font-bold text-slate-900">{stats.purchaseCount}회</strong>
         </span>
@@ -160,8 +264,19 @@ export const CustomerStatsBadge: React.FC<CustomerStatsBadgeProps> = ({
           누적 <strong className="font-bold text-slate-900">{stats.totalRevenue.toLocaleString()}원</strong>
         </span>
         <span className="text-slate-300">|</span>
-        <span className="text-rose-600 font-bold">
-          미이행 <strong className="font-black text-rose-600">{stats.defaultCount}회</strong>
+        <span
+          className={
+            stats.defaultCount > 0 ? 'text-rose-600 font-bold' : 'text-slate-500 font-medium'
+          }
+        >
+          미이행{' '}
+          <strong
+            className={
+              stats.defaultCount > 0 ? 'font-black text-rose-600' : 'font-bold text-slate-600'
+            }
+          >
+            {stats.defaultCount}회
+          </strong>
         </span>
       </span>
     );
@@ -179,6 +294,11 @@ export const CustomerStatsBadge: React.FC<CustomerStatsBadgeProps> = ({
         <span className="font-bold text-slate-800">
           {nickname} 고객님의 누적 거래 정보
         </span>
+        {stats.isFirstTimeBuyer && (
+          <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-extrabold text-[10px] border border-emerald-200">
+            첫구매 고객
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
@@ -198,7 +318,13 @@ export const CustomerStatsBadge: React.FC<CustomerStatsBadgeProps> = ({
         <div className="w-[1px] h-3 bg-slate-200" />
         <div className="flex items-center space-x-1">
           <span className="text-slate-500 text-[11px]">미이행 횟수:</span>
-          <span className="font-black text-rose-600 text-xs sm:text-sm bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200/80">
+          <span
+            className={`text-xs sm:text-sm px-1.5 py-0.5 rounded border ${
+              stats.defaultCount > 0
+                ? 'font-black text-rose-600 bg-rose-50 border-rose-200/80'
+                : 'font-bold text-slate-600 bg-slate-100 border-slate-200'
+            }`}
+          >
             {stats.defaultCount}회
           </span>
         </div>
