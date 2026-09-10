@@ -27,3 +27,17 @@ test('인쇄 화면은 보안 정책에 허용되는 외부 스크립트와 스�
   assert.doesNotMatch(html, /<script>(?:.|\n)*<\/script>/);
   assert.doesNotMatch(html, /<style>(?:.|\n)*<\/style>/);
 });
+
+test('라벨 스티커 인쇄 시 한장 건너뜀 및 상단 잘림을 방지하는 안전 스타일이 적용되어 있다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'print.css'), 'utf8');
+  // 1. 상단 잘림 방지: 상단 패딩이 4mm 이상이어야 함
+  assert.match(css, /padding:\s*[4-9](\.\d+)?mm/);
+  // 2. 페이지 오버플로 방지: break-inside / page-break-inside avoid 적용
+  assert.match(css, /page-break-inside:\s*avoid/);
+  assert.match(css, /break-inside:\s*avoid/);
+
+  // 3. main.cjs에서 1장만 인쇄하도록 pageRanges 강제 확인
+  const mainCjs = fs.readFileSync(path.join(__dirname, '..', 'main.cjs'), 'utf8');
+  assert.match(mainCjs, /pageRanges:\s*\[\s*\{\s*from:\s*0,\s*to:\s*0\s*\}\s*\]/);
+});
+

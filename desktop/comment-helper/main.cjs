@@ -642,7 +642,8 @@ async function printJob(job) {
       deviceName: state.print.printerName,
       printBackground: true,
       color: false,
-      margins: { marginType: 'none' }
+      margins: { marginType: 'none' },
+      pageRanges: [{ from: 0, to: 0 }]
     };
     const size = printPageSize(state.print.paperSize);
     if (size && size !== 'A4') {
