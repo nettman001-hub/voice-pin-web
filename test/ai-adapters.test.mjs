@@ -818,8 +818,79 @@ test('SelfHostedAdapter: supports LM_STUDIO provider using OpenAI-compatible /v1
     assert.equal(result.targetSaleId, 'sale_lm_1');
     assert.ok(requestedUrl.includes(':1234/v1/chat/completions'));
     assert.equal(requestBody.model, 'qwen2.5-7b-instruct');
+    // LM Studio 등 오픈소스 자체 호스팅 엔진 호환성을 위해 response_format 미포함 검증
+    assert.equal(requestBody.response_format, undefined);
     assert.equal(result.execution.adapterType, 'SELF_HOSTED');
     assert.equal(result.execution.location, 'EXTERNAL_IP');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('SelfHostedAdapter: handles response_format rejection (HTTP 400) gracefully via fallback retry', async () => {
+  const req = {
+    taskType: 'SYNTHETIC_TEST',
+    workspaceId: 'ws1',
+    sessionId: 'session_01',
+    currentUtterance: 'xx님 구매하신거 가격이 0.9가 아니고 1.2입니다',
+    saleCandidates: [
+      { saleId: 'sale_fb_1', productCode: '1', buyerNickname: 'xx', amount: 9000, unitPrice: 9000, quantity: 1, status: 'PENDING' },
+    ],
+  };
+
+  const originalFetch = globalThis.fetch;
+  let callCount = 0;
+
+  globalThis.fetch = async (url, init) => {
+    callCount++;
+    const body = JSON.parse(init.body);
+    // 첫 호출에 만약 response_format이 있으면 400 에러를 흉내냄
+    if (body.response_format) {
+      return new Response(
+        JSON.stringify({ error: "'response_format.type' must be 'json_schema' or 'text'" }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                resolvable: true,
+                targetSaleId: 'sale_fb_1',
+                action: 'UPDATE_SALE',
+                changes: { amount: { from: 9000, to: 12000, unitPrice: 12000, quantity: 1 } },
+                evidenceIds: ['sale_fb_1'],
+                evidenceSummary: 'Fallback retry 성공',
+                missingInfo: [],
+                conflictReason: null,
+              }),
+            },
+          },
+        ],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  };
+
+  try {
+    const result = await runSelfHostedResolution(req, {
+      slotConfig: {
+        type: 'LOCAL',
+        provider: 'LM_STUDIO',
+        model: 'qwen2.5-7b-instruct',
+        location: 'EXTERNAL_IP',
+        endpointUrl: 'http://203.0.113.100:1234',
+        routingMode: 'SERVER_DIRECT',
+        authType: 'NONE',
+        timeoutSeconds: 10,
+        connectTimeoutSeconds: 3,
+      },
+    });
+
+    assert.equal(result.resolvable, true);
+    assert.equal(result.targetSaleId, 'sale_fb_1');
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -105,7 +105,9 @@ export async function runSelfHostedResolution(
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      response_format: { type: 'json_object' },
+      // LM Studio, vLLM 등 로컬/자체 호스팅 엔진은 'response_format.type' must be 'json_schema' or 'text' 오류를 내거나
+      // response_format: { type: 'json_object' }를 지원하지 않으므로 제외합니다.
+      // systemPrompt의 명확한 JSON 지시와 common.ts의 파서가 완벽히 파싱 및 정규화합니다.
       temperature: 0.1,
     };
   } else {
@@ -153,15 +155,32 @@ export async function runSelfHostedResolution(
         clearTimeout(timer);
         if (!res.ok) {
           const errText = await res.text().catch(() => '');
-          throw new Error(`로컬 LLM 응답 오류 (HTTP ${res.status}): ${errText}`);
+          // 만약 response_format 관련 거부(400)일 경우, response_format 제거 후 1회 재시도
+          if (res.status === 400 && requestBody?.response_format && errText.includes('response_format')) {
+            delete requestBody.response_format;
+            const retryRes = await fetch(endpoint, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(requestBody),
+            });
+            if (retryRes.ok) {
+              rawResponseText = await retryRes.text();
+            } else {
+              const retryErrText = await retryRes.text().catch(() => '');
+              throw new Error(`로컬 LLM 응답 오류 (HTTP ${retryRes.status}): ${retryErrText}`);
+            }
+          } else {
+            throw new Error(`로컬 LLM 응답 오류 (HTTP ${res.status}): ${errText}`);
+          }
+        } else {
+          rawResponseText = await res.text();
         }
-        rawResponseText = await res.text();
       }
     } else {
       // SERVER_DIRECT: 서버에서 직접 외부 IP/도메인 LLM 호출 (safeFetch로 SSRF 및 3xx 리디렉션 차단)
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const res = await safeFetch(
+      let res = await safeFetch(
         endpoint,
         {
           method: 'POST',
@@ -178,9 +197,37 @@ export async function runSelfHostedResolution(
       clearTimeout(timer);
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
-        throw new Error(`외부 서버 LLM 응답 오류 (HTTP ${res.status}): ${errText}`);
+        // 만약 response_format 관련 거부(400)일 경우, response_format 제거 후 1회 재시도
+        if (res.status === 400 && requestBody?.response_format && errText.includes('response_format')) {
+          delete requestBody.response_format;
+          const retryController = new AbortController();
+          const retryTimer = setTimeout(() => retryController.abort(), timeoutMs);
+          const retryRes = await safeFetch(
+            endpoint,
+            {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(requestBody),
+              signal: retryController.signal,
+            },
+            {
+              routingMode: 'SERVER_DIRECT',
+              location: 'EXTERNAL_IP',
+              allowInsecureHttpForExternal,
+            }
+          );
+          clearTimeout(retryTimer);
+          if (!retryRes.ok) {
+            const retryErrText = await retryRes.text().catch(() => '');
+            throw new Error(`외부 서버 LLM 응답 오류 (HTTP ${retryRes.status}): ${retryErrText}`);
+          }
+          rawResponseText = await retryRes.text();
+        } else {
+          throw new Error(`외부 서버 LLM 응답 오류 (HTTP ${res.status}): ${errText}`);
+        }
+      } else {
+        rawResponseText = await res.text();
       }
-      rawResponseText = await res.text();
     }
 
     // 5. 엔진 응답에서 순수 콘텐츠 추출
