@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import {
   ShoppingBag,
   TrendingUp,
@@ -10,6 +11,7 @@ import {
   Database,
   Radio,
   Mic,
+  Sparkles,
   X
 } from 'lucide-react';
 import { remoteWorkspaceService } from '../../services/remoteWorkspaceService';
@@ -206,14 +208,24 @@ export const AdminSalesManagementPage: React.FC = () => {
           </div>
         </div>
 
-        <button
-          onClick={loadData}
-          disabled={isLoading}
-          className="flex items-center space-x-1.5 px-4 py-2.5 rounded-2xl text-xs font-bold bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 transition shadow-sm active:scale-95 disabled:opacity-50"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-brand-500' : 'text-brand-600'}`} />
-          <span>{isLoading ? '동기화 중...' : '새로고침'}</span>
-        </button>
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          <Link
+            to="/admin/ai"
+            className="flex items-center space-x-1.5 px-4 py-2.5 rounded-2xl text-xs font-bold bg-gradient-to-r from-purple-50 to-brand-50 hover:from-purple-100 hover:to-brand-100 text-purple-700 border border-purple-200/80 transition shadow-sm active:scale-95 whitespace-nowrap"
+            title="적재된 판매 내역의 보류 해결 및 음성 정정을 처리하는 2-슬롯 AI 런타임을 설정합니다."
+          >
+            <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+            <span>판매 AI 설정 (보류·정정)</span>
+          </Link>
+          <button
+            onClick={loadData}
+            disabled={isLoading}
+            className="flex items-center space-x-1.5 px-4 py-2.5 rounded-2xl text-xs font-bold bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 transition shadow-sm active:scale-95 disabled:opacity-50 whitespace-nowrap"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-brand-500' : 'text-brand-600'}`} />
+            <span>{isLoading ? '동기화 중...' : '새로고침'}</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">

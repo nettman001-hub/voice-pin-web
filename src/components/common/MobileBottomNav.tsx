@@ -11,7 +11,8 @@ import {
   Shield,
   Users,
   AlertTriangle,
-  BarChart3
+  BarChart3,
+  Sparkles
 } from 'lucide-react';
 
 interface MobileTabItem {
@@ -72,6 +73,11 @@ export const MobileBottomNav: React.FC = () => {
       name: '대시보드',
       path: '/admin',
       icon: Shield
+    },
+    {
+      name: 'AI 설정',
+      path: '/admin/ai',
+      icon: Sparkles
     },
     {
       name: '회원관리',

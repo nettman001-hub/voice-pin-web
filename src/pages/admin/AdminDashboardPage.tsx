@@ -564,6 +564,15 @@ export const AdminDashboardPage: React.FC = () => {
 
           <div className="space-y-2">
             <Link
+              to="/admin/ai"
+              className="p-3.5 rounded-2xl bg-gradient-to-r from-brand-50 to-indigo-50 hover:from-brand-100 hover:to-indigo-100 border border-brand-200/80 flex items-center justify-between text-xs font-bold text-brand-900 transition block shadow-sm"
+            >
+              <span className="flex items-center gap-1.5">
+                <span>✨ 판매 AI 설정 (보류 해결 · 음성 정정)</span>
+              </span>
+              <ArrowRight className="w-4 h-4 text-brand-600" />
+            </Link>
+            <Link
               to="/admin/members"
               className="p-3.5 rounded-2xl bg-slate-50 hover:bg-slate-100 border border-slate-200 flex items-center justify-between text-xs font-bold text-slate-800 transition block"
             >

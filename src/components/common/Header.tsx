@@ -225,6 +225,20 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu, isMobileMenu
                         <Shield className="w-4 h-4 mr-2 text-purple-600" /> 관리자 대시보드
                       </Link>
                       <Link
+                        to="/admin/sales"
+                        onClick={() => setShowUserMenu(false)}
+                        className="flex items-center px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600"
+                      >
+                        <Settings className="w-4 h-4 mr-2 text-brand-600" /> 전체 판매 관제
+                      </Link>
+                      <Link
+                        to="/admin/ai"
+                        onClick={() => setShowUserMenu(false)}
+                        className="flex items-center px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600"
+                      >
+                        <Sparkles className="w-4 h-4 mr-2 text-amber-500" /> 판매 AI 설정 (보류·정정)
+                      </Link>
+                      <Link
                         to="/admin/members"
                         onClick={() => setShowUserMenu(false)}
                         className="flex items-center px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600"
