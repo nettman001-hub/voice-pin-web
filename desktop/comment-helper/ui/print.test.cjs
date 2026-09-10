@@ -4,20 +4,40 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-test('인쇄 화면에 닉네임·금액과 시간이 표시된다', () => {
+test('인쇄 화면에 닉네임, 가격, 회차 3줄이 올바르게 표시된다', () => {
   const elements = {
     '#line1': { textContent: '' },
-    '#line2': { textContent: '' }
+    '#line2': { textContent: '' },
+    '#line3': { textContent: '' }
   };
   const source = fs.readFileSync(path.join(__dirname, 'print.js'), 'utf8');
   vm.runInNewContext(source, {
     document: { querySelector: (selector) => elements[selector] },
     URLSearchParams,
-    window: { location: { search: '?line1=%ED%85%8C%EC%8A%A4%ED%8A%B8%EA%B5%AC%EB%A7%A4%EC%9E%90%2C+15%2C000%EC%9B%90&line2=2026.+9.+1.+%EC%98%A4%ED%9B%84+5%3A30' } }
+    window: { location: { search: '?line1=%ED%85%8C%EC%8A%A4%ED%8A%B8%EA%B5%AC%EB%A7%A4%EC%9E%90&line2=15%2C000%EC%9B%90&line3=1%ED%9A%8C%EC%B0%A8' } }
   });
 
-  assert.equal(elements['#line1'].textContent, '테스트구매자, 15,000원');
-  assert.equal(elements['#line2'].textContent, '2026. 9. 1. 오후 5:30');
+  assert.equal(elements['#line1'].textContent, '테스트구매자');
+  assert.equal(elements['#line2'].textContent, '15,000원');
+  assert.equal(elements['#line3'].textContent, '1회차');
+});
+
+test('판매 속성 전달 시 닉네임, 가격, 회차 3줄로 자동 변환된다', () => {
+  const elements = {
+    '#line1': { textContent: '' },
+    '#line2': { textContent: '' },
+    '#line3': { textContent: '' }
+  };
+  const source = fs.readFileSync(path.join(__dirname, 'print.js'), 'utf8');
+  vm.runInNewContext(source, {
+    document: { querySelector: (selector) => elements[selector] },
+    URLSearchParams,
+    window: { location: { search: '?buyerNickname=%ED%99%8D%EA%B8%B8%EB%8F%99&amount=25000&sessionCode=2' } }
+  });
+
+  assert.equal(elements['#line1'].textContent, '홍길동');
+  assert.equal(elements['#line2'].textContent, '25,000원');
+  assert.equal(elements['#line3'].textContent, '2 회차');
 });
 
 test('인쇄 화면은 보안 정책에 허용되는 외부 스크립트와 스타일을 사용한다', () => {

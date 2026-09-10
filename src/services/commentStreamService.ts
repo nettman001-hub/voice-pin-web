@@ -41,6 +41,7 @@ export interface SalePrintRequest {
   buyerNickname: string;
   amount: number;
   recognizedAt: string;
+  sessionId?: string;
 }
 
 export interface SalePrintResult {

@@ -49,3 +49,6 @@ new-pc-local-secrets.txt
 
 # chrome net-export 진단 로그
 chrome-net-export-log.json
+
+# Local unpacked/patched asar
+*.asar

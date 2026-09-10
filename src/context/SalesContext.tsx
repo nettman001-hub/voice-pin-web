@@ -99,6 +99,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       buyerNickname: sale.buyerNickname,
       amount: sale.amount,
       recognizedAt: sale.recognizedAt,
+      sessionId: sale.sessionId,
     }).then((result) => {
       // 그 사이에 같은 판매가 다시 수정되었다면 오래된 인쇄 응답으로 상태를 덮어쓰지 않는다.
       const latest = storageService.getSales().find((item) => item.id === sale.id);

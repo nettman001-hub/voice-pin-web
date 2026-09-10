@@ -581,10 +581,11 @@ function normalizePrintJob(raw) {
   const buyerNickname = String(raw && raw.buyerNickname || '').trim().replace(/[\r\n]+/g, ' ').slice(0, 80);
   const amount = Math.max(0, Number(raw && raw.amount) || 0);
   const recognizedAt = new Date(raw && raw.recognizedAt || Date.now());
+  const sessionId = String(raw && (raw.sessionId || raw.sessionCode) || '').trim().slice(0, 80);
   if (!saleId || !buyerNickname || !Number.isFinite(amount) || amount <= 0 || Number.isNaN(recognizedAt.getTime())) {
     throw new Error('인쇄할 판매 정보가 올바르지 않습니다.');
   }
-  return { saleId, revision, buyerNickname, amount, recognizedAt, jobId: `${saleId}:${revision}` };
+  return { saleId, revision, buyerNickname, amount, recognizedAt, sessionId, jobId: `${saleId}:${revision}` };
 }
 
 function formatPrintDate(date) {
@@ -608,17 +609,21 @@ async function printJob(job) {
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
   });
   try {
-    const line1 = `${job.buyerNickname}, ${Math.round(job.amount).toLocaleString('ko-KR')}원`;
-    const line2 = formatPrintDate(job.recognizedAt);
+    const line1 = job.buyerNickname;
+    const line2 = `${Math.round(job.amount).toLocaleString('ko-KR')}원`;
+    const line3 = job.sessionId
+      ? (job.sessionId.includes('회차') ? job.sessionId : `${job.sessionId} 회차`)
+      : '1회차';
     await printWindow.loadFile(path.join(__dirname, 'ui', 'print.html'), {
-      query: { line1, line2, paperSize: state.print.paperSize }
+      query: { line1, line2, line3, paperSize: state.print.paperSize }
     });
     const rendered = await printWindow.webContents.executeJavaScript(`
       new Promise((resolve) => {
         const check = () => {
           const l1 = document.querySelector('#line1')?.textContent || '';
           const l2 = document.querySelector('#line2')?.textContent || '';
-          resolve({ line1: l1, line2: l2 });
+          const l3 = document.querySelector('#line3')?.textContent || '';
+          resolve({ line1: l1, line2: l2, line3: l3 });
         };
         if (document.fonts && document.fonts.ready) {
           document.fonts.ready.then(() => setTimeout(check, 250));
@@ -627,7 +632,7 @@ async function printJob(job) {
         }
       })
     `);
-    if (rendered.line1 !== line1 || rendered.line2 !== line2) {
+    if (rendered.line1 !== line1 || rendered.line2 !== line2 || rendered.line3 !== line3) {
       throw new Error('판매 전표 텍스트를 인쇄 화면에 표시하지 못했습니다.');
     }
 
@@ -705,6 +710,7 @@ ipcMain.handle('helper:test-print', () => enqueuePrintJob({
   printRevision: 1,
   buyerNickname: '테스트구매자',
   amount: 15000,
+  sessionId: '1회차',
   recognizedAt: new Date().toISOString()
 }));
 function postServerJson(apiPath, body) {
