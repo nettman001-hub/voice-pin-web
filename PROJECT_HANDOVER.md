@@ -9,7 +9,7 @@
 > **운영 브랜치**: `main` (Vercel 프로덕션 자동 배포 연동)  
 > **작업 브랜치**: `codex/product-sales-single-agent`  
 > **운영 웹 주소**: [https://www.voicecap.shop](https://www.voicecap.shop)  
-> **최신 릴리스**: 데스크톱 도우미 `v1.3.5` / 안드로이드 앱 `v1.3.2`
+> **최신 릴리스**: 데스크톱 도우미 `v1.3.6` / 안드로이드 앱 `v1.3.2`
 
 ---
 
@@ -39,7 +39,7 @@ VoiceCAP은 라이브 커머스 판매자를 위한 **실시간 댓글 수집·�
 | **Vercel 프로젝트** | `voice-pin-web` | 도메인: `www.voicecap.shop`, `voicecap.shop` |
 | **Supabase 프로젝트** | `ymegrhxpbeanvxwdzfym` (sermon-guide-db 공유) | 위치: `https://ymegrhxpbeanvxwdzfym.supabase.co` |
 | **Edge Functions** | `sales-api`, `voicecap-onboard`, `device-pair`, `sms-bridge` | Base URL: `.../functions/v1` |
-| **데스크톱 도우미** | `desktop/comment-helper` (v1.3.5) | Electron 44, Windows x64 NSIS 인스톨러 |
+| **데스크톱 도우미** | `desktop/comment-helper` (v1.3.6) | Electron 44, Windows x64 NSIS 인스톨러 |
 | **안드로이드 앱** | `android/voicecapSMS` (v1.3.2, `shop.voicecap.smsbridge`) | Java 17, compileSdk 35 / targetSdk 36 |
 | **공통 규격** | `contracts/product-sales/v1/` | JSON Schema v1 및 44개 자동 검증 테스트 완비 |
 
@@ -64,7 +64,7 @@ VoiceCAP은 라이브 커머스 판매자를 위한 **실시간 댓글 수집·�
                │ WebSocket (포트 2137)        │ HTTPS (X-Device-Token)        │ HTTPS
                ▼                              ▼                               ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
-│                          🖥️ PC 데스크톱 댓글 도우미 (desktop/comment-helper v1.3.5)          │
+│                          🖥️ PC 데스크톱 댓글 도우미 (desktop/comment-helper v1.3.6)          │
 ├─────────────────────────────────────────────────────────────────────────────────────────────┤
 │ • 틱톡 라이브 웹소켓 실시간 댓글 수집 (tiktok-live-connector + eulerstream_key.txt)         │
 │ • 클라우드 인쇄 큐 폴링 워커 (server/cloudPrintWorker.js / server/printJobStore.js)          │

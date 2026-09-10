@@ -22,9 +22,9 @@ export const DEFAULT_COMMENT_SERVER_URL = 'http://127.0.0.1:2137';
 
 // 댓글 도우미 최신 안정 릴리스 버전 및 다운로드 URL
 // GitHub releases/latest는 Android 등 타 플랫폼 릴리스 등록 시 404가 발생하므로 명시적 안정 릴리스 태그를 지정합니다.
-export const COMMENT_HELPER_VERSION = '1.3.5';
+export const COMMENT_HELPER_VERSION = '1.3.6';
 export const COMMENT_HELPER_DOWNLOAD_URL =
-  'https://github.com/nettman001-hub/voice-pin-web/releases/download/comment-helper-v1.3.5/VoiceCAP-Comment-Helper-Setup.exe';
+  'https://github.com/nettman001-hub/voice-pin-web/releases/download/comment-helper-v1.3.6/VoiceCAP-Comment-Helper-Setup.exe';
 export const COMMENT_HELPER_RELEASES_URL =
   'https://github.com/nettman001-hub/voice-pin-web/releases';
 

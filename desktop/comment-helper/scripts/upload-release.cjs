@@ -39,11 +39,12 @@ async function main() {
   const releaseBody = [
     `### VoiceCAP 댓글 도우미 v${version}`,
     '',
+    '- **라벨 스티커 3줄 출력 적용**: 닉네임, 가격, 회차 3줄 전용 인쇄 양식 및 타이포그래피 최적화',
+    '- **라벨지 1장 건너뜀 및 상단 잘림 방지**: 50x30mm 라벨지 단일 페이지 강제(pageRanges) 및 상단 여백 4.5mm 안전 스타일 적용',
+    '- **판매 회차 연동**: 실제 판매 데이터의 회차(sessionId) 정보와 세 줄 테스트 출력 지원',
     '- **클라우드 댓글 수집 연동**: 플랫폼 댓글 ID, 사용자 ID, 닉네임과 원문을 상품 판매 피드로 안정적으로 전달',
     '- **판매·정정 전표 자동 출력**: 클라우드 인쇄 큐의 lease, spool, acknowledge 흐름과 중복 출력 방지 적용',
-    '- **불확실한 출력 결과 보호**: 프린터 응답이 불명확하면 UNKNOWN으로 보존하고 자동 재출력하지 않도록 처리',
-    '- **Vulkan GPU 오프라인 STT 포함**: DirectX 12/Vulkan 지원 환경의 whisper.cpp 가속 바이너리 패키징',
-    '- **기존 판매 기록 호환**: productId가 없는 이전 판매 데이터와 신규 상품 중심 판매 흐름을 함께 지원'
+    '- **Vulkan GPU 오프라인 STT 포함**: DirectX 12/Vulkan 지원 환경의 whisper.cpp 가속 바이너리 패키징'
   ].join('\n');
 
   const headers = {
