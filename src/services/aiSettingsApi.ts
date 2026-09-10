@@ -62,8 +62,16 @@ export function normalizeAiSettings(raw: any): AiSettings {
     recoveryIntervalSeconds: !isNaN(numInterval) && numInterval >= 5 ? numInterval : 30,
     autoReturnToPrimary: raw.autoReturnToPrimary ?? raw.auto_return_to_primary ?? true,
     cloudMonthlyBudgetKrw: raw.cloudMonthlyBudgetKrw ?? raw.cloud_monthly_budget_krw ?? null,
-    slot1: raw.slot1 || DEFAULT_AI_SETTINGS.slot1,
-    slot2: raw.slot2 || DEFAULT_AI_SETTINGS.slot2,
+    slot1: {
+      ...DEFAULT_AI_SETTINGS.slot1,
+      ...(raw.slot1 || {}),
+      authType: raw.slot1?.authType || DEFAULT_AI_SETTINGS.slot1.authType,
+    },
+    slot2: {
+      ...DEFAULT_AI_SETTINGS.slot2,
+      ...(raw.slot2 || {}),
+      authType: raw.slot2?.authType || DEFAULT_AI_SETTINGS.slot2.authType,
+    },
     updatedAt: raw.updatedAt ?? raw.updated_at,
     updatedBy: raw.updatedBy ?? raw.updated_by,
   };

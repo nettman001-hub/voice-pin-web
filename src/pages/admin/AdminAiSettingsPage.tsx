@@ -1010,13 +1010,19 @@ const SlotCard: React.FC<SlotCardProps> = ({
             } else {
               if (newProvider === 'DEEPSEEK') {
                 onChange('model', 'deepseek-chat');
-                onChange('authType', 'BEARER');
+                if (!config.authType || config.authType === 'NONE') {
+                  onChange('authType', 'BEARER');
+                }
               } else if (newProvider === 'OPENAI') {
                 onChange('model', 'gpt-4o-mini');
-                onChange('authType', 'BEARER');
+                if (!config.authType || config.authType === 'NONE') {
+                  onChange('authType', 'BEARER');
+                }
               } else if (newProvider === 'ANTHROPIC') {
                 onChange('model', 'claude-3-5-haiku-20241022');
-                onChange('authType', 'API_KEY');
+                if (!config.authType || config.authType === 'NONE') {
+                  onChange('authType', 'API_KEY');
+                }
               }
             }
           }}

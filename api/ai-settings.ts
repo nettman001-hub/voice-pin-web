@@ -86,8 +86,8 @@ export default async function handler(req: any, res: any) {
             recovery_interval_seconds: settings.recoveryIntervalSeconds || 30,
             auto_return_to_primary: settings.autoReturnToPrimary,
             cloud_monthly_budget_krw: settings.cloudMonthlyBudgetKrw || null,
-            slot1: settings.slot1 || {},
-            slot2: settings.slot2 || {},
+            slot1: { ...(current?.slot1 || {}), ...(settings.slot1 || {}) },
+            slot2: { ...(current?.slot2 || {}), ...(settings.slot2 || {}) },
             updated_at: new Date().toISOString(),
           };
 

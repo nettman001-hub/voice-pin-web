@@ -10,16 +10,33 @@ function checkIsAdmin(auth: AuthContext): boolean {
   return auth.role === 'ADMIN' || auth.role === 'OWNER' || auth.capabilities.has('ADMIN')
 }
 
-function formatAiSettingResponse(row: any, secretMap?: Map<number, string>, isAdmin = true) {
+function formatAiSettingResponse(row: any, secretMap?: Map<number, { masked: string; type?: string }>, isAdmin = true) {
+  const secret1 = secretMap?.get(1)
+  const secret2 = secretMap?.get(2)
+
+  const resolveAuthType = (slot: any, sec?: { masked: string; type?: string }, defaultType: string = 'NONE') => {
+    // 1. 만약 슬롯 설정 자체에 authType이 지정되어 있다면 우선 적용
+    if (slot?.authType && slot.authType !== 'NONE') {
+      return slot.authType
+    }
+    // 2. 만약 ai_secrets에 등록된 비밀정보 타입이 있다면 해당 타입 동기화
+    if (sec?.type === 'API_KEY') return 'API_KEY'
+    if (sec?.type === 'BEARER_TOKEN') return 'BEARER'
+    if (sec?.type === 'CUSTOM_HEADER') return 'CUSTOM_HEADER'
+    return slot?.authType || defaultType
+  }
+
   const slot1 = {
     ...(row.slot1 || {}),
     hasSecret: secretMap ? secretMap.has(1) : Boolean(row.slot1?.hasSecret),
-    maskedSecret: isAdmin ? (secretMap?.get(1) || row.slot1?.maskedSecret || '') : undefined,
+    maskedSecret: isAdmin ? (secret1?.masked || row.slot1?.maskedSecret || '') : undefined,
+    authType: resolveAuthType(row.slot1, secret1, 'NONE'),
   }
   const slot2 = {
     ...(row.slot2 || {}),
     hasSecret: secretMap ? secretMap.has(2) : Boolean(row.slot2?.hasSecret),
-    maskedSecret: isAdmin ? (secretMap?.get(2) || row.slot2?.maskedSecret || '') : undefined,
+    maskedSecret: isAdmin ? (secret2?.masked || row.slot2?.maskedSecret || '') : undefined,
+    authType: resolveAuthType(row.slot2, secret2, 'API_KEY'),
   }
 
   return {
@@ -76,12 +93,12 @@ export async function handleGetAiSettings(workspaceId: string, actorId: string, 
   // 1-2. 비밀정보 존재 여부 확인 (ai_secrets)
   const { data: secrets } = await admin
     .from('ai_secrets')
-    .select('slot_number, masked_value')
+    .select('slot_number, masked_value, secret_type')
     .eq('setting_id', finalSetting.id)
 
-  const secretMap = new Map<number, string>()
+  const secretMap = new Map<number, { masked: string; type?: string }>()
   for (const s of secrets || []) {
-    secretMap.set(s.slot_number, s.masked_value)
+    secretMap.set(s.slot_number, { masked: s.masked_value, type: s.secret_type })
   }
 
   return successResponse({
@@ -122,6 +139,8 @@ export async function handleSaveAiSettings(workspaceId: string, actorId: string,
   // SSRF 주소 유효성 검사
   const nextSlot1 = { ...(current.slot1 || {}), ...(settings.slot1 || {}) }
   const nextSlot2 = { ...(current.slot2 || {}), ...(settings.slot2 || {}) }
+  if (settings.slot1?.authType) nextSlot1.authType = settings.slot1.authType
+  if (settings.slot2?.authType) nextSlot2.authType = settings.slot2.authType
 
   if (nextSlot1.endpointUrl) {
     const check1 = validateUrlForSsrf(nextSlot1.endpointUrl, nextSlot1.routingMode || 'SERVER_DIRECT')
@@ -155,6 +174,13 @@ export async function handleSaveAiSettings(workspaceId: string, actorId: string,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'setting_id,slot_number' })
     }
+  } else if (nextSlot1.authType) {
+    // 키는 새로 등록하지 않았으나 authType만 변경된 경우 secret_type 동기화
+    const secType = nextSlot1.authType === 'BEARER' ? 'BEARER_TOKEN' : (nextSlot1.authType === 'CUSTOM_HEADER' ? 'CUSTOM_HEADER' : 'API_KEY')
+    await admin.from('ai_secrets')
+      .update({ secret_type: secType, updated_at: new Date().toISOString() })
+      .eq('setting_id', current.id)
+      .eq('slot_number', 1)
   }
 
   // 비밀정보 처리 (slot2)
@@ -175,6 +201,13 @@ export async function handleSaveAiSettings(workspaceId: string, actorId: string,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'setting_id,slot_number' })
     }
+  } else if (nextSlot2.authType) {
+    // 키는 새로 등록하지 않았으나 authType만 변경된 경우 secret_type 동기화
+    const secType = nextSlot2.authType === 'BEARER' ? 'BEARER_TOKEN' : (nextSlot2.authType === 'CUSTOM_HEADER' ? 'CUSTOM_HEADER' : 'API_KEY')
+    await admin.from('ai_secrets')
+      .update({ secret_type: secType, updated_at: new Date().toISOString() })
+      .eq('setting_id', current.id)
+      .eq('slot_number', 2)
   }
 
   // 설정 객체에서 newSecret, clearSecret 임시 필드 제거
@@ -241,15 +274,15 @@ export async function handleSaveAiSettings(workspaceId: string, actorId: string,
     created_by: actorId,
   })
 
-  // 비밀정보 마스킹 상태 반환
+  // 비밀정보 마스킹 및 타입 상태 반환
   const { data: latestSecrets } = await admin
     .from('ai_secrets')
-    .select('slot_number, masked_value')
+    .select('slot_number, masked_value, secret_type')
     .eq('setting_id', current.id)
 
-  const secretMap = new Map<number, string>()
+  const secretMap = new Map<number, { masked: string; type?: string }>()
   for (const s of latestSecrets || []) {
-    secretMap.set(s.slot_number, s.masked_value)
+    secretMap.set(s.slot_number, { masked: s.masked_value, type: s.secret_type })
   }
 
   return successResponse({
@@ -293,7 +326,17 @@ export async function handleApplyAiSettings(workspaceId: string, actorId: string
     return errorResponse('DATABASE_ERROR', updateErr.message, 500)
   }
 
-  return successResponse({ settings: formatAiSettingResponse(updated, undefined, true) })
+  const { data: appSecrets } = await admin
+    .from('ai_secrets')
+    .select('slot_number, masked_value, secret_type')
+    .eq('setting_id', current.id)
+
+  const secretMap = new Map<number, { masked: string; type?: string }>()
+  for (const s of appSecrets || []) {
+    secretMap.set(s.slot_number, { masked: s.masked_value, type: s.secret_type })
+  }
+
+  return successResponse({ settings: formatAiSettingResponse(updated, secretMap, true) })
 }
 
 // 4. 사전 점검 1단계: 연결 시험 API (관리자 전용)
