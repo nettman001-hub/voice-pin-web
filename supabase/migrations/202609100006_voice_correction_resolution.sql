@@ -20,3 +20,12 @@ create table if not exists pending_corrections (
 create index if not exists idx_pending_corrections_ws_session on pending_corrections (workspace_id, session_id);
 create index if not exists idx_pending_corrections_status on pending_corrections (status);
 create index if not exists idx_pending_corrections_target_sale on pending_corrections (target_sale_id);
+
+-- RLS 보안 설정
+alter table public.pending_corrections enable row level security;
+
+drop policy if exists pending_corrections_select_policy on public.pending_corrections;
+create policy pending_corrections_select_policy on public.pending_corrections for select to authenticated using (true);
+
+drop policy if exists pending_corrections_write_policy on public.pending_corrections;
+create policy pending_corrections_write_policy on public.pending_corrections for all to authenticated using (true) with check (true);
