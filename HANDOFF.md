@@ -81,7 +81,7 @@ npm run dev
 
 ### 3.2 필요 도구 설치 (로컬 AI / STT 테스트 환경 시)
 - **Node.js**: v20 이상 권장
-- **댓글 도우미**: [VoiceCAP-Comment-Helper-Setup.exe](https://github.com/nettman001-hub/voice-pin-web/releases/download/comment-helper-v1.3.5/VoiceCAP-Comment-Helper-Setup.exe) 설치 및 실행
+- **댓글 도우미**: [VoiceCAP-Comment-Helper-Setup.exe](https://github.com/nettman001-hub/voice-pin-web/releases/download/comment-helper-v1.3.7/VoiceCAP-Comment-Helper-Setup.exe) 설치 및 실행
 - **Ollama (로컬 LLM 사용 시)**: `ollama run qwen2.5:7b` (기본 포트 11434)
 
 ---
