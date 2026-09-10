@@ -7,7 +7,7 @@ import { AiResolutionRequest } from '../../../../src/types/aiResolution.ts'
 export { validateUrlForSsrf, maskSecretValue }
 
 function checkIsAdmin(auth: AuthContext): boolean {
-  return auth.role === 'ADMIN' || auth.capabilities.has('ADMIN')
+  return auth.role === 'ADMIN' || auth.role === 'OWNER' || auth.capabilities.has('ADMIN')
 }
 
 // 1. AI 설정 조회 (관리자/판매자 공통, 비밀정보는 마스킹)

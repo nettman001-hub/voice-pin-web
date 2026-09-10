@@ -1,4 +1,4 @@
-﻿import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.4'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.4'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -121,7 +121,14 @@ export async function authenticateRequest(request: Request, requestedWorkspaceId
     }
 
     const { data: member, error: memberError } = await query.maybeSingle()
-    if (memberError || !member) return null
+
+    const userAppMeta = (authData.user.app_metadata || {}) as Record<string, unknown>
+    const userMeta = (authData.user.user_metadata || {}) as Record<string, unknown>
+    const isGlobalAdmin = userAppMeta.role === 'ADMIN' || userMeta.role === 'ADMIN'
+    const isOwner = member?.role === 'OWNER'
+    const isAdmin = isGlobalAdmin || isOwner
+
+    if (!member && !isGlobalAdmin) return null
 
     // Authenticated users in workspace have full sales permissions
     const capabilities = new Set<string>([
@@ -133,11 +140,15 @@ export async function authenticateRequest(request: Request, requestedWorkspaceId
       'SMS',
     ])
 
+    if (isAdmin) {
+      capabilities.add('ADMIN')
+    }
+
     return {
-      workspaceId: member.workspace_id,
+      workspaceId: member?.workspace_id || requestedWorkspaceId || '',
       actorId: userId,
       actorType: 'USER',
-      role: member.role,
+      role: isGlobalAdmin ? 'ADMIN' : (member?.role || 'STAFF'),
       capabilities,
     }
   }

@@ -118,18 +118,76 @@ export const AdminAiSettingsPage: React.FC = () => {
   };
 
   const handleSlotChange = (slotNum: 1 | 2, field: keyof AiSlotConfig, value: any) => {
-    setSettings((prev) => ({
-      ...prev,
-      [slotNum === 1 ? 'slot1' : 'slot2']: {
-        ...prev[slotNum === 1 ? 'slot1' : 'slot2'],
-        [field]: value,
-      },
-    }));
+    setSettings((prev) => {
+      const targetKey = slotNum === 1 ? 'slot1' : 'slot2';
+      const prevSlot = prev[targetKey];
+      const updatedSlot = { ...prevSlot, [field]: value };
+
+      // 1. 실행 유형(type) 변경 시 위치 및 라우팅 모드 자동 동기화
+      if (field === 'type') {
+        if (value === 'LOCAL') {
+          if (updatedSlot.location === 'EXTERNAL_IP' && (!updatedSlot.endpointUrl || updatedSlot.endpointUrl.includes('127.0.0.1') || updatedSlot.endpointUrl.includes('localhost'))) {
+            updatedSlot.location = 'SAME_PC';
+            updatedSlot.routingMode = 'PC_HELPER';
+            if (!updatedSlot.endpointUrl) {
+              updatedSlot.endpointUrl = updatedSlot.provider === 'LM_STUDIO' ? 'http://127.0.0.1:1234/v1' : 'http://127.0.0.1:11434';
+            }
+          }
+        } else if (value === 'CLOUD') {
+          updatedSlot.location = 'EXTERNAL_IP';
+          updatedSlot.routingMode = 'SERVER_DIRECT';
+        }
+      }
+
+      // 2. 엔드포인트 URL 변경 시 루프백 vs 외부 IP 자동 감지
+      if (field === 'endpointUrl') {
+        const urlStr = String(value || '').trim().toLowerCase();
+        if (urlStr.includes('127.0.0.1') || urlStr.includes('localhost') || urlStr.includes('::1')) {
+          if (updatedSlot.routingMode === 'SERVER_DIRECT') {
+            updatedSlot.routingMode = 'PC_HELPER';
+            updatedSlot.location = 'SAME_PC';
+          }
+        } else if (urlStr.startsWith('http://') || urlStr.startsWith('https://')) {
+          try {
+            const parsed = new URL(urlStr);
+            const host = parsed.hostname.toLowerCase();
+            if (host !== '127.0.0.1' && host !== 'localhost' && !host.startsWith('192.168.')) {
+              if (updatedSlot.location === 'SAME_PC') {
+                updatedSlot.location = 'EXTERNAL_IP';
+                updatedSlot.routingMode = 'SERVER_DIRECT';
+              }
+            }
+          } catch {}
+        }
+      }
+
+      return {
+        ...prev,
+        [targetKey]: updatedSlot,
+      };
+    });
   };
 
   const handleSave = async (applyImmediately: boolean) => {
     setIsSaving(true);
     try {
+      // 저장 전 주소와 라우팅 모드 불일치 자동 정제 (SSRF 보안 오류 방지)
+      const sanitizeSlot = (slot: AiSlotConfig): AiSlotConfig => {
+        const clean = { ...slot };
+        const urlStr = (clean.endpointUrl || '').trim().toLowerCase();
+        if (urlStr.includes('127.0.0.1') || urlStr.includes('localhost') || urlStr.includes('::1')) {
+          clean.routingMode = 'PC_HELPER';
+          clean.location = 'SAME_PC';
+        } else if (clean.type === 'CLOUD') {
+          clean.routingMode = 'SERVER_DIRECT';
+          clean.location = 'EXTERNAL_IP';
+        }
+        return clean;
+      };
+
+      const cleanSlot1 = sanitizeSlot(settings.slot1);
+      const cleanSlot2 = sanitizeSlot(settings.slot2);
+
       const updated = await aiSettingsApi.saveAiSettings({
         expectedVersion: settings.version,
         applyImmediately,
@@ -145,12 +203,12 @@ export const AdminAiSettingsPage: React.FC = () => {
           autoReturnToPrimary: settings.autoReturnToPrimary,
           cloudMonthlyBudgetKrw: settings.cloudMonthlyBudgetKrw,
           slot1: {
-            ...settings.slot1,
+            ...cleanSlot1,
             newSecret: slot1NewSecret.trim() || undefined,
             clearSecret: slot1ClearSecret,
           },
           slot2: {
-            ...settings.slot2,
+            ...cleanSlot2,
             newSecret: slot2NewSecret.trim() || undefined,
             clearSecret: slot2ClearSecret,
           },

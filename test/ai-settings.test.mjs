@@ -112,12 +112,19 @@ test('AI Settings Priority: swap slot 1 and slot 2 priority smoothly', () => {
   assert.equal(primarySlot, 1, 'Must switch back to Slot 1 as primary');
 });
 
-test('AI Settings RBAC: non-admin request is denied modification', () => {
+test('AI Settings RBAC: admin and owner are permitted, other roles denied', () => {
+  const checkIsAdmin = (auth) => auth.role === 'ADMIN' || auth.role === 'OWNER' || auth.capabilities?.has('ADMIN');
+
   const sellerAuth = { role: 'SELLER', capabilities: new Set(['SALES_READ', 'SALES_WRITE']) };
+  const staffAuth = { role: 'STAFF', capabilities: new Set(['SALES_READ']) };
+  const ownerAuth = { role: 'OWNER', capabilities: new Set(['SALES_READ', 'SALES_WRITE', 'ADMIN']) };
   const adminAuth = { role: 'ADMIN', capabilities: new Set(['ADMIN', 'SALES_READ', 'SALES_WRITE']) };
+  const appMetaAdminAuth = { role: 'STAFF', capabilities: new Set(['ADMIN', 'SALES_READ']) };
 
-  const canSave = (auth) => auth.role === 'ADMIN' || auth.capabilities.has('ADMIN');
-
-  assert.equal(canSave(sellerAuth), false, 'Seller must not be allowed to save AI settings');
-  assert.equal(canSave(adminAuth), true, 'Admin must be allowed to save AI settings');
+  assert.equal(checkIsAdmin(sellerAuth), false, 'Seller must not be allowed to save AI settings');
+  assert.equal(checkIsAdmin(staffAuth), false, 'Staff must not be allowed to save AI settings');
+  assert.equal(checkIsAdmin(ownerAuth), true, 'Owner must be allowed to save AI settings');
+  assert.equal(checkIsAdmin(adminAuth), true, 'Admin must be allowed to save AI settings');
+  assert.equal(checkIsAdmin(appMetaAdminAuth), true, 'User with ADMIN capability from app_metadata must be allowed');
 });
+

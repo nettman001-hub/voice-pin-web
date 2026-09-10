@@ -71,7 +71,22 @@ async function invokeSalesApi<T>(action: string, payload: Record<string, unknown
   });
 
   if (error) {
-    throw new Error(error.message || 'sales-api 호출 중 오류가 발생했습니다.');
+    let serverMessage = error.message;
+    // FunctionsHttpError 인 경우 error.context (Response)에서 서버 반환 JSON 에러 메시지 추출
+    if (error && typeof error === 'object' && 'context' in error) {
+      try {
+        const ctx = (error as any).context;
+        if (ctx && typeof ctx.json === 'function') {
+          const errJson = await ctx.json();
+          if (errJson?.error?.message) {
+            serverMessage = errJson.error.message;
+          }
+        }
+      } catch {
+        // json 파싱 실패 시 fallback
+      }
+    }
+    throw new Error(serverMessage || 'sales-api 호출 중 오류가 발생했습니다.');
   }
 
   if (!data?.ok) {
@@ -92,65 +107,124 @@ export const aiSettingsApi = {
     }
     try {
       const resp = await invokeSalesApi<{ settings: AiSettings }>('get-ai-settings', { workspaceId });
+      saveLocalAiSettings(resp.settings);
       return resp.settings;
     } catch (err) {
+      // Vercel Serverless Function 백업 시도
+      try {
+        const vRes = await fetch('/api/ai-settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'get-ai-settings', workspaceId }),
+        });
+        if (vRes.ok) {
+          const vData = await vRes.json();
+          if (vData?.data?.settings) {
+            saveLocalAiSettings(vData.data.settings);
+            return vData.data.settings;
+          }
+        }
+      } catch {}
       console.warn('[AiSettingsApi] get-ai-settings API 호출 실패, 로컬 캐시 폴백:', err);
       return getLocalAiSettings();
     }
   },
 
   async saveAiSettings(payload: SaveAiSettingsPayload, workspaceId?: string): Promise<AiSettings> {
+    // 1. 입력된 설정값을 브라우저 로컬 저장소에 즉시 선반영하여 페이지 이동 시에도 초기화되지 않도록 보호
+    const current = getLocalAiSettings();
+    const localUpdated: AiSettings = {
+      ...current,
+      ...payload.settings,
+      slot1: {
+        ...current.slot1,
+        ...payload.settings.slot1,
+        hasSecret: Boolean(payload.settings.slot1?.newSecret || current.slot1.hasSecret),
+        maskedSecret: payload.settings.slot1?.newSecret ? 'sk-...saved' : current.slot1.maskedSecret,
+      },
+      slot2: {
+        ...current.slot2,
+        ...payload.settings.slot2,
+        hasSecret: Boolean(payload.settings.slot2?.newSecret || current.slot2.hasSecret),
+        maskedSecret: payload.settings.slot2?.newSecret ? 'sk-...saved' : current.slot2.maskedSecret,
+      },
+      version: current.version + 1,
+      appliedVersion: payload.applyImmediately ? current.version + 1 : current.appliedVersion,
+      isDraft: !payload.applyImmediately,
+      updatedAt: new Date().toISOString(),
+    };
+    saveLocalAiSettings(localUpdated);
+
     if (!isSupabaseConfigured) {
-      const current = getLocalAiSettings();
-      const updated: AiSettings = {
-        ...current,
-        ...payload.settings,
-        slot1: {
-          ...current.slot1,
-          ...payload.settings.slot1,
-          hasSecret: Boolean(payload.settings.slot1?.newSecret || current.slot1.hasSecret),
-          maskedSecret: payload.settings.slot1?.newSecret ? 'sk-...saved' : current.slot1.maskedSecret,
-        },
-        slot2: {
-          ...current.slot2,
-          ...payload.settings.slot2,
-          hasSecret: Boolean(payload.settings.slot2?.newSecret || current.slot2.hasSecret),
-          maskedSecret: payload.settings.slot2?.newSecret ? 'sk-...saved' : current.slot2.maskedSecret,
-        },
-        version: current.version + 1,
-        appliedVersion: payload.applyImmediately ? current.version + 1 : current.appliedVersion,
-        isDraft: !payload.applyImmediately,
-        updatedAt: new Date().toISOString(),
-      };
-      saveLocalAiSettings(updated);
-      return updated;
+      return localUpdated;
     }
 
-    const resp = await invokeSalesApi<{ settings: AiSettings }>('save-ai-settings', {
-      workspaceId,
-      ...payload,
-    });
-    return resp.settings;
+    try {
+      const resp = await invokeSalesApi<{ settings: AiSettings }>('save-ai-settings', {
+        workspaceId,
+        ...payload,
+      });
+      saveLocalAiSettings(resp.settings);
+      return resp.settings;
+    } catch (err: any) {
+      // 2. Vercel Serverless Function 백업 시도
+      try {
+        const vRes = await fetch('/api/ai-settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'save-ai-settings', workspaceId, ...payload }),
+        });
+        if (vRes.ok) {
+          const vData = await vRes.json();
+          if (vData?.data?.settings) {
+            saveLocalAiSettings(vData.data.settings);
+            return vData.data.settings;
+          }
+        }
+      } catch {}
+      // 만약 둘 다 실패하더라도 로컬에는 이미 localUpdated로 안전 저장되어 있음
+      throw err;
+    }
   },
 
   async applyAiSettings(version: number, workspaceId?: string): Promise<AiSettings> {
+    const current = getLocalAiSettings();
+    const localUpdated: AiSettings = {
+      ...current,
+      appliedVersion: version,
+      isDraft: false,
+      updatedAt: new Date().toISOString(),
+    };
+    saveLocalAiSettings(localUpdated);
+
     if (!isSupabaseConfigured) {
-      const current = getLocalAiSettings();
-      const updated: AiSettings = {
-        ...current,
-        appliedVersion: version,
-        isDraft: false,
-        updatedAt: new Date().toISOString(),
-      };
-      saveLocalAiSettings(updated);
-      return updated;
+      return localUpdated;
     }
 
-    const resp = await invokeSalesApi<{ settings: AiSettings }>('apply-ai-settings', {
-      workspaceId,
-      version,
-    });
-    return resp.settings;
+    try {
+      const resp = await invokeSalesApi<{ settings: AiSettings }>('apply-ai-settings', {
+        workspaceId,
+        version,
+      });
+      saveLocalAiSettings(resp.settings);
+      return resp.settings;
+    } catch (err: any) {
+      try {
+        const vRes = await fetch('/api/ai-settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'apply-ai-settings', workspaceId, version }),
+        });
+        if (vRes.ok) {
+          const vData = await vRes.json();
+          if (vData?.data?.settings) {
+            saveLocalAiSettings(vData.data.settings);
+            return vData.data.settings;
+          }
+        }
+      } catch {}
+      throw err;
+    }
   },
 
   async testAiConnection(

@@ -9,7 +9,7 @@ import type { AiSlotConfig } from '../../../../src/types/aiSettings.ts';
 import type { AiSlotHealth } from '../../../../src/types/aiHealth.ts';
 
 function checkIsAdmin(auth: AuthContext): boolean {
-  return auth.role === 'ADMIN' || auth.capabilities.has('ADMIN');
+  return auth.role === 'ADMIN' || auth.role === 'OWNER' || auth.capabilities.has('ADMIN');
 }
 
 /**
