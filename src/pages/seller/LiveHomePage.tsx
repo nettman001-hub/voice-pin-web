@@ -30,6 +30,7 @@ import {
   ShoppingBag
 } from 'lucide-react';
 import { LocalSttModel, SttMode } from '../../types/stt';
+import { COMMENT_HELPER_DOWNLOAD_URL } from '../../types/comment';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
 import { useProductSales } from '../../context/ProductSalesContext';
 import { formatMultiSaleAmount } from '../../services/salesExtractor';
@@ -362,7 +363,7 @@ export const LiveHomePage: React.FC = () => {
               {/* 도우미 미실행 시 다운로드 안내 버튼 */}
               {localSttStatus.state === 'HELPER_OFFLINE' && (
                 <a
-                  href="https://github.com/nettman001-hub/voice-pin-web/releases"
+                  href={COMMENT_HELPER_DOWNLOAD_URL}
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center space-x-1 bg-amber-500 hover:bg-amber-600 text-white font-bold px-2.5 py-1.5 rounded-2xl text-[11px] transition shadow-2xs"
