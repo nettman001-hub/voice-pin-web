@@ -9,7 +9,7 @@
 > **운영 브랜치**: `main` (Vercel 프로덕션 자동 배포 연동)  
 > **작업 브랜치**: `codex/product-sales-single-agent`  
 > **운영 웹 주소**: [https://www.voicecap.shop](https://www.voicecap.shop)  
-> **최신 릴리스**: 데스크톱 도우미 `v1.3.6` / 안드로이드 앱 `v1.3.2`
+> **최신 릴리스**: 데스크톱 도우미 `v1.3.7` / 안드로이드 앱 `v1.3.2`
 
 ---
 

@@ -11,8 +11,8 @@
 
 html, body {
   width: 100%;
-  height: 100%;
-  max-height: 29.5mm;
+  height: auto;
+  max-height: 28mm;
   margin: 0;
   padding: 0;
   background-color: #ffffff !important;
@@ -26,22 +26,25 @@ html, body {
 .container {
   box-sizing: border-box;
   width: 100%;
-  height: 100%;
-  max-height: 29.5mm;
-  padding: 4.5mm 3.5mm 2mm 3.5mm;
+  height: auto;
+  max-height: 25.5mm;
+  padding: 8.5mm 3.5mm 1mm 3.5mm;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
   page-break-inside: avoid;
   page-break-after: avoid;
+  page-break-before: avoid;
   break-inside: avoid;
   break-after: avoid;
+  break-before: avoid;
+  overflow: hidden;
 }
 
 #line1 {
   font-size: 13.5pt;
   font-weight: 900;
-  line-height: 1.25;
+  line-height: 1.2;
   color: #000000 !important;
   word-break: break-all;
   white-space: nowrap;
@@ -88,6 +91,10 @@ html, body {
   text-overflow: ellipsis;
 }
 
+script {
+  display: none !important;
+}
+
 @media print {
   @page {
     margin: 0;
@@ -95,21 +102,24 @@ html, body {
   }
   html, body {
     width: 50mm;
-    height: 29.5mm;
-    max-height: 29.5mm;
+    height: auto;
+    max-height: 28mm;
     background-color: #ffffff !important;
     color: #000000 !important;
     overflow: hidden;
   }
   .container {
     width: 50mm;
-    height: 29.5mm;
-    max-height: 29.5mm;
-    padding: 4.5mm 3.5mm 2mm 3.5mm;
+    height: auto;
+    max-height: 25.5mm;
+    padding: 8.5mm 3.5mm 1mm 3.5mm;
     page-break-inside: avoid;
     page-break-after: avoid;
+    page-break-before: avoid;
     break-inside: avoid;
     break-after: avoid;
+    break-before: avoid;
+    overflow: hidden;
   }
   #line1 {
     color: #000000 !important;

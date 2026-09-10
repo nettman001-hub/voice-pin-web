@@ -220,7 +220,7 @@ testPrintButton.addEventListener('click', async () => {
     setPrintMessage(result.ok ? '테스트 전표를 프린터로 보냈습니다.' : (result.error || '테스트 출력에 실패했습니다.'));
   } finally {
     testPrintButton.disabled = false;
-    testPrintButton.textContent = '두 줄 테스트 출력';
+    testPrintButton.textContent = '세 줄 테스트 출력';
   }
 });
 

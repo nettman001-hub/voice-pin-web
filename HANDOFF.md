@@ -17,7 +17,7 @@
 | **호스팅 환경** | Vercel (`main` 브랜치 푸시 시 자동 배포) |
 | **Supabase Project** | `ymegrhxpbeanvxwdzfym` ([Supabase 대시보드](https://supabase.com/dashboard/project/ymegrhxpbeanvxwdzfym)) |
 | **Supabase Edge Functions** | `sales-api`, `voicecap-onboard`, `device-pair`, `sms-bridge` |
-| **댓글 도우미 (Windows)** | `v1.3.6` ([다운로드 직링크](https://github.com/nettman001-hub/voice-pin-web/releases/download/comment-helper-v1.3.6/VoiceCAP-Comment-Helper-Setup.exe)) |
+| **댓글 도우미 (Windows)** | `v1.3.7` ([다운로드 직링크](https://github.com/nettman001-hub/voice-pin-web/releases/download/comment-helper-v1.3.7/VoiceCAP-Comment-Helper-Setup.exe)) |
 | **Android SMS Bridge** | `v1.3.3` (versionCode `7`, package `shop.voicecap.smsbridge`) |
 | **테스트 상태** | **213 tests passing (0 fail)** (`npm test`) |
 | **빌드 상태** | **Production Build Pass** (`npm run build`) |
