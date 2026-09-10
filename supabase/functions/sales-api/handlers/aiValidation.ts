@@ -73,15 +73,8 @@ export function validateExternalEndpoint(
   const routingMode = options.routingMode || 'SERVER_DIRECT';
   const location = options.location;
 
-  // 2. TLS (HTTPS) 검증: 외부 IP/도메인 서버는 보안을 위해 HTTPS 필수
-  if (location === 'EXTERNAL_IP' && !options.allowInsecureHttpForExternal) {
-    if (parsed.protocol !== 'https:') {
-      return {
-        valid: false,
-        reason: '외부 공인 IP 및 도메인 서버는 TLS(HTTPS) 연결이 필수입니다. 안전한 통신을 위해 https:// 주소를 입력하세요.',
-      };
-    }
-  }
+  // 2. 프로토콜 검증: 외부 공인 IP 및 도메인 서버도 HTTP 및 HTTPS 모두 지원
+  // (사용자 요청에 따라 자체 구축 HTTP LLM 서버 연결 허용)
 
   // 3. 서버 직접 호출(SERVER_DIRECT) 시 내부 메타데이터 및 사설망 보호
   if (routingMode === 'SERVER_DIRECT') {

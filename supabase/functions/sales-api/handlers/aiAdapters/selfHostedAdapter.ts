@@ -91,9 +91,13 @@ export async function runSelfHostedResolution(
   }
 
   let requestBody: any;
-  const isVllm = slotConfig.provider === 'VLLM' || endpoint.includes('/v1');
+  const isOpenAiCompatible =
+    slotConfig.provider === 'LM_STUDIO' ||
+    slotConfig.provider === 'VLLM' ||
+    slotConfig.provider === 'CUSTOM' ||
+    endpoint.includes('/v1');
 
-  if (isVllm) {
+  if (isOpenAiCompatible) {
     if (!endpoint.endsWith('/v1/chat/completions')) {
       endpoint = endpoint.replace(/\/+$/, '') + (endpoint.endsWith('/v1') ? '/chat/completions' : '/v1/chat/completions');
     }

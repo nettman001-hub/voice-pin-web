@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { aiSettingsApi } from '../../services/aiSettingsApi';
 import {
   AiSettings,
@@ -12,7 +12,7 @@ import {
   Tier2ReadinessStatus,
 } from '../../types/aiHealth';
 import { AiRuntimeStatus } from '../../types/aiTask';
-import { maskEndpointUrl } from '../../utils/maskingUtils';
+import { maskEndpointUrl, extractPortFromUrl, setPortInUrl } from '../../utils/maskingUtils';
 import {
   Sparkles,
   Server,
@@ -35,6 +35,7 @@ import {
   Layers,
   Cpu,
   Info,
+  Bot,
 } from 'lucide-react';
 
 export const AdminAiSettingsPage: React.FC = () => {
@@ -511,7 +512,7 @@ export const AdminAiSettingsPage: React.FC = () => {
             <div className="flex items-center justify-between">
               <span className="font-bold text-slate-900 flex items-center gap-1.5">
                 <span className="w-5 h-5 rounded bg-purple-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
-                <span>AI 2번 ({settings.slot2.provider !== 'OLLAMA' ? '클라우드' : '자체 운영'})</span>
+                <span>AI 2번 ({settings.slot2.type === 'LOCAL' ? '자체 운영' : '클라우드'})</span>
               </span>
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                 healthSlot2?.overallStatus === 'AVAILABLE' && !runtimeStatus?.slot2CircuitBreaker?.isOpen
@@ -814,6 +815,62 @@ const SlotCard: React.FC<SlotCardProps> = ({
   onCheck,
   onOpenSyntheticDetail,
 }) => {
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState<boolean>(false);
+  const [modelFetchError, setModelFetchError] = useState<string | null>(null);
+  const [isDirectInput, setIsDirectInput] = useState<boolean>(false);
+  const currentPort = extractPortFromUrl(config.endpointUrl);
+
+  const fetchModels = useCallback(async (silent = false) => {
+    const url = (config.endpointUrl || '').trim();
+    if (!url) {
+      setAvailableModels([]);
+      return;
+    }
+    if (!silent) setIsLoadingModels(true);
+    setModelFetchError(null);
+    try {
+      const res = await aiSettingsApi.listAiModels({
+        slotNumber,
+        provider: config.provider,
+        endpointUrl: url,
+        authType: config.authType,
+        secret: newSecret || undefined,
+        location: config.location,
+      });
+      if (res.ok && res.models && res.models.length > 0) {
+        setAvailableModels(res.models);
+        if (!config.model && res.models[0]) {
+          onChange('model', res.models[0]);
+        }
+      } else {
+        setAvailableModels([]);
+        if (res.message && !silent) {
+          setModelFetchError(res.message);
+        }
+      }
+    } catch (err: any) {
+      setAvailableModels([]);
+      if (!silent) {
+        setModelFetchError(err?.message || '모델 목록을 불러오지 못했습니다.');
+      }
+    } finally {
+      setIsLoadingModels(false);
+    }
+  }, [config.endpointUrl, config.authType, config.provider, config.location, newSecret, slotNumber, config.model, onChange]);
+
+  useEffect(() => {
+    const trimmed = (config.endpointUrl || '').trim();
+    if (!trimmed) {
+      setAvailableModels([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      fetchModels(true);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [config.endpointUrl, config.authType, config.provider, newSecret, fetchModels]);
+
   return (
     <div
       className={`bg-white rounded-3xl border shadow-sm p-6 space-y-5 transition relative ${
@@ -878,43 +935,41 @@ const SlotCard: React.FC<SlotCardProps> = ({
         </div>
       </div>
 
-      {/* Provider & Model Inputs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-        <div>
-          <label className="block font-bold text-slate-700 mb-1">공급자 / 실행 엔진</label>
-          <select
-            value={config.provider}
-            onChange={(e) => onChange('provider', e.target.value)}
-            className="w-full px-3 py-2 border border-slate-200 rounded-xl font-bold text-slate-800 bg-white"
-          >
-            {config.type === 'LOCAL' ? (
-              <>
-                <option value="OLLAMA">Ollama (권장 로컬 엔진)</option>
-                <option value="VLLM">vLLM (OpenAI 호환)</option>
-                <option value="CUSTOM">커스텀 자체 운영 서버</option>
-              </>
-            ) : (
-              <>
-                <option value="OPENAI">OpenAI (GPT-4o, GPT-4o-mini)</option>
-                <option value="ANTHROPIC">Anthropic (Claude 3.5 Sonnet / Haiku)</option>
-                <option value="GOOGLE">Google Gemini (Gemini 1.5 Flash)</option>
-                <option value="DEEPSEEK">DeepSeek (Chat / Reasoner)</option>
-                <option value="CUSTOM">커스텀 클라우드 (OpenAI 호환)</option>
-              </>
-            )}
-          </select>
-        </div>
-
-        <div>
-          <label className="block font-bold text-slate-700 mb-1">모델명 (Model Tag)</label>
-          <input
-            type="text"
-            value={config.model}
-            onChange={(e) => onChange('model', e.target.value)}
-            placeholder={config.type === 'LOCAL' ? '예: qwen2.5:7b, llama3.1:8b' : '예: gpt-4o-mini'}
-            className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono text-slate-800 bg-white"
-          />
-        </div>
+      {/* Provider Selector */}
+      <div>
+        <label className="block text-xs font-bold text-slate-700 mb-1">공급자 / 실행 엔진</label>
+        <select
+          value={config.provider}
+          onChange={(e) => {
+            const newProvider = e.target.value as any;
+            onChange('provider', newProvider);
+            if (config.type === 'LOCAL') {
+              if (newProvider === 'LM_STUDIO' && (!config.endpointUrl || config.endpointUrl.includes('11434'))) {
+                onChange('endpointUrl', 'http://127.0.0.1:1234');
+              } else if (newProvider === 'OLLAMA' && (!config.endpointUrl || config.endpointUrl.includes('1234'))) {
+                onChange('endpointUrl', 'http://127.0.0.1:11434');
+              }
+            }
+          }}
+          className="w-full px-3 py-2 border border-slate-200 rounded-xl font-bold text-slate-800 bg-white text-xs"
+        >
+          {config.type === 'LOCAL' ? (
+            <>
+              <option value="OLLAMA">Ollama (권장 로컬 엔진)</option>
+              <option value="LM_STUDIO">LM Studio (OpenAI 호환)</option>
+              <option value="VLLM">vLLM (OpenAI 호환)</option>
+              <option value="CUSTOM">커스텀 자체 운영 서버</option>
+            </>
+          ) : (
+            <>
+              <option value="OPENAI">OpenAI (GPT-4o, GPT-4o-mini)</option>
+              <option value="ANTHROPIC">Anthropic (Claude 3.5 Sonnet / Haiku)</option>
+              <option value="GOOGLE">Google Gemini (Gemini 1.5 Flash)</option>
+              <option value="DEEPSEEK">DeepSeek (Chat / Reasoner)</option>
+              <option value="CUSTOM">커스텀 클라우드 (OpenAI 호환)</option>
+            </>
+          )}
+        </select>
       </div>
 
       {/* Local LLM Location & Routing Mode */}
@@ -939,7 +994,7 @@ const SlotCard: React.FC<SlotCardProps> = ({
                 onChange('location', 'SAME_PC');
                 onChange('routingMode', 'PC_HELPER');
                 if (!config.endpointUrl || config.endpointUrl.includes('api.openai.com')) {
-                  onChange('endpointUrl', 'http://127.0.0.1:11434');
+                  onChange('endpointUrl', config.provider === 'LM_STUDIO' ? 'http://127.0.0.1:1234' : 'http://127.0.0.1:11434');
                 }
               }}
               className={`p-2.5 rounded-xl border text-center transition ${
@@ -985,18 +1040,81 @@ const SlotCard: React.FC<SlotCardProps> = ({
             </button>
           </div>
 
-          <div>
-            <label className="block font-bold text-slate-700 mb-1">엔드포인트 전체 주소</label>
-            <input
-              type="text"
-              value={config.endpointUrl}
-              onChange={(e) => onChange('endpointUrl', e.target.value)}
-              placeholder="예: https://my-llm.example.com:8443 또는 http://127.0.0.1:11434"
-              className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono text-slate-800 bg-white"
-            />
+          <div className="space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+              <div className="sm:col-span-3">
+                <label className="block font-bold text-slate-700 mb-1">엔드포인트 전체 주소</label>
+                <input
+                  type="text"
+                  value={config.endpointUrl}
+                  onChange={(e) => {
+                    const newUrl = e.target.value;
+                    onChange('endpointUrl', newUrl);
+                    const p = extractPortFromUrl(newUrl);
+                    onChange('port', p ? parseInt(p, 10) : undefined);
+                  }}
+                  placeholder={
+                    config.provider === 'LM_STUDIO'
+                      ? '예: http://127.0.0.1:1234 또는 http://my-llm.example.com:1234'
+                      : '예: http://127.0.0.1:11434 또는 http://my-llm.example.com:8443'
+                  }
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono text-slate-800 bg-white"
+                />
+              </div>
+
+              <div className="sm:col-span-1">
+                <label className="block font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>포트 번호</span>
+                  <span className="text-[10px] font-normal text-slate-400">Port</span>
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={currentPort}
+                  onChange={(e) => {
+                    const rawPort = e.target.value.replace(/\D/g, '').slice(0, 5);
+                    const updatedUrl = setPortInUrl(config.endpointUrl, rawPort);
+                    onChange('endpointUrl', updatedUrl);
+                    onChange('port', rawPort ? parseInt(rawPort, 10) : undefined);
+                  }}
+                  placeholder={config.provider === 'LM_STUDIO' ? '1234' : '11434'}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono text-slate-800 bg-white font-bold text-center"
+                />
+              </div>
+            </div>
+
+            {/* 빠른 포트 선택 프리셋 버튼 */}
+            <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+              <span className="text-[10px] text-slate-400 font-medium mr-0.5">포트 빠른 설정:</span>
+              {[
+                { label: '1234 (LM Studio)', port: '1234' },
+                { label: '11434 (Ollama)', port: '11434' },
+                { label: '8000 (vLLM)', port: '8000' },
+                { label: '8080 (웹)', port: '8080' },
+              ].map((preset) => (
+                <button
+                  key={preset.port}
+                  type="button"
+                  onClick={() => {
+                    const updatedUrl = setPortInUrl(config.endpointUrl, preset.port);
+                    onChange('endpointUrl', updatedUrl);
+                    onChange('port', parseInt(preset.port, 10));
+                  }}
+                  className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono transition ${
+                    currentPort === preset.port
+                      ? 'bg-brand-50 border-brand-400 text-brand-700 font-bold'
+                      : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
             {config.location === 'EXTERNAL_IP' && (
               <p className="text-[10px] text-amber-700 mt-1">
-                * 외부 공인 IP 서버는 HTTPS 연결이 필수이며, PC 도우미가 꺼져 있어도 서버에서 직접 호출됩니다.
+                * 외부 공인 IP 서버는 HTTP 및 HTTPS 연결을 지원하며, PC 도우미가 꺼져 있어도 서버에서 직접 호출됩니다.
               </p>
             )}
           </div>
@@ -1108,6 +1226,123 @@ const SlotCard: React.FC<SlotCardProps> = ({
               </div>
             )}
           </div>
+        )}
+      </div>
+
+      {/* Model Selector / Tag Section (Moved below Endpoint and Auth) */}
+      <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2.5 text-xs">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <label className="font-bold text-slate-800 flex items-center gap-1.5">
+              <Bot className="w-3.5 h-3.5 text-brand-600" />
+              <span>모델명 (Model Tag)</span>
+            </label>
+            {isLoadingModels ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                목록 조회 중...
+              </span>
+            ) : availableModels.length > 0 ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <CheckCircle2 className="w-3 h-3" />
+                {availableModels.length}개 감지됨
+              </span>
+            ) : null}
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={isLoadingModels || !config.endpointUrl}
+              onClick={() => fetchModels(false)}
+              className="p-1 px-2 text-[11px] bg-white border border-slate-200 hover:bg-slate-100 rounded-lg text-slate-600 transition flex items-center gap-1 disabled:opacity-40"
+              title="연결 가능한 모델 목록 새로고침"
+            >
+              <RefreshCw className={`w-3 h-3 ${isLoadingModels ? 'animate-spin text-brand-600' : ''}`} />
+              <span>목록 조회</span>
+            </button>
+            {availableModels.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setIsDirectInput(!isDirectInput)}
+                className="text-[11px] text-brand-600 hover:text-brand-700 underline font-medium ml-1"
+              >
+                {isDirectInput ? '목록에서 선택' : '직접 입력'}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* If we have available models and not in direct input mode */}
+        {availableModels.length > 0 && !isDirectInput ? (
+          <div className="space-y-1.5">
+            <select
+              value={config.model || availableModels[0] || ''}
+              onChange={(e) => {
+                if (e.target.value === '__DIRECT__') {
+                  setIsDirectInput(true);
+                } else {
+                  onChange('model', e.target.value);
+                }
+              }}
+              className="w-full px-3 py-2 border border-brand-300 rounded-xl font-mono text-xs font-bold text-slate-900 bg-white focus:outline-brand-500 shadow-sm"
+            >
+              {config.model && !availableModels.includes(config.model) && (
+                <option value={config.model}>
+                  {config.model} (현재 설정값)
+                </option>
+              )}
+              {availableModels.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+              <option value="__DIRECT__">✏️ 직접 입력 (목록에 없는 경우)...</option>
+            </select>
+            <p className="text-[10px] text-slate-500">
+              엔드포인트({config.endpointUrl || '지정 주소'})에서 감지된 모델 목록입니다.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <input
+              type="text"
+              value={config.model}
+              onChange={(e) => onChange('model', e.target.value)}
+              placeholder={
+                config.provider === 'LM_STUDIO'
+                  ? '예: qwen2.5-7b-instruct, mistral-7b-instruct'
+                  : config.type === 'LOCAL'
+                  ? '예: qwen2.5:7b, llama3.1:8b'
+                  : '예: gpt-4o-mini, claude-3-5-sonnet'
+              }
+              className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono text-slate-800 bg-white"
+            />
+            <div className="flex items-center justify-between text-[10px] text-slate-400">
+              <span>
+                {availableModels.length > 0
+                  ? '직접 입력 모드입니다.'
+                  : config.endpointUrl
+                  ? '엔드포인트 및 인증 방식이 올바르면 모델 목록이 자동으로 조회됩니다.'
+                  : '엔드포인트 주소를 입력하면 연결 가능한 모델이 자동 조회됩니다.'}
+              </span>
+              {availableModels.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsDirectInput(false)}
+                  className="text-brand-600 hover:underline font-bold"
+                >
+                  감지된 목록({availableModels.length}개)에서 선택하기
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {modelFetchError && (
+          <p className="text-[10px] text-rose-500">
+            * {modelFetchError} (직접 모델명을 입력하여 진행할 수 있습니다)
+          </p>
         )}
       </div>
 

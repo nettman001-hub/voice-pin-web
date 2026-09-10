@@ -1,8 +1,27 @@
 export type AiType = 'LOCAL' | 'CLOUD';
-export type AiProvider = 'OLLAMA' | 'VLLM' | 'OPENAI' | 'ANTHROPIC' | 'GOOGLE' | 'DEEPSEEK' | 'CUSTOM';
+export type AiProvider = 'OLLAMA' | 'VLLM' | 'LM_STUDIO' | 'OPENAI' | 'ANTHROPIC' | 'GOOGLE' | 'DEEPSEEK' | 'CUSTOM';
 export type AiLocation = 'SAME_PC' | 'LAN' | 'EXTERNAL_IP';
 export type RoutingMode = 'SERVER_DIRECT' | 'PC_HELPER';
 export type AiAuthType = 'NONE' | 'BEARER' | 'API_KEY' | 'CUSTOM_HEADER';
+
+export interface ListAiModelsPayload {
+  slotNumber?: 1 | 2;
+  endpointUrl: string;
+  provider?: AiProvider;
+  authType?: AiAuthType;
+  secret?: string;
+  customHeaderName?: string;
+  routingMode?: RoutingMode;
+  location?: AiLocation;
+  [key: string]: unknown;
+}
+
+export interface ListAiModelsResponse {
+  ok: boolean;
+  models: string[];
+  message?: string;
+  source?: 'ENDPOINT_V1_MODELS' | 'ENDPOINT_TAGS' | 'DIRECT_FETCH' | 'FALLBACK';
+}
 
 export interface AiSlotConfig {
   type: AiType;
@@ -10,6 +29,7 @@ export interface AiSlotConfig {
   model: string;
   location: AiLocation;
   endpointUrl: string;
+  port?: number;
   routingMode: RoutingMode;
   authType: AiAuthType;
   timeoutSeconds: number;

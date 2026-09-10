@@ -279,15 +279,14 @@ test('Pre-Deploy [1.2]: 클라우드(2번) -> 로컬(1번) 우선순위 역전 �
 // ---------------------------------------------------------------------------
 // 2. 외부 IP 직접 호출, PC 도우미 경유, 도우미 종료, 인증/TLS, 타임아웃
 // ---------------------------------------------------------------------------
-test('Pre-Deploy [2.1]: 외부 IP 직접 호출 보안 검증 (HTTPS 강제, 포트 및 주소 유효성)', () => {
-  // HTTP 외부 IP 차단
+test('Pre-Deploy [2.1]: 외부 IP 직접 호출 보안 검증 (HTTP/HTTPS 허용, 포트 및 주소 유효성)', () => {
+  // HTTP 외부 IP 허용
   const httpRes = validateExternalEndpoint({
     endpointUrl: 'http://203.0.113.50:11434',
     location: 'EXTERNAL_IP',
     routingMode: 'SERVER_DIRECT',
   });
-  assert.equal(httpRes.valid, false);
-  assert.match(httpRes.reason, /TLS\(HTTPS\)/);
+  assert.equal(httpRes.valid, true);
 
   // 허용되지 않은 위험 포트(SSH 22, Redis 6379 등) 차단
   const dangerousPortRes = validateExternalEndpoint({

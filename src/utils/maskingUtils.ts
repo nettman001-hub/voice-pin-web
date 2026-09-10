@@ -57,3 +57,54 @@ export function maskSecretKey(secret?: string): string {
   const suffix = trimmed.slice(-4);
   return `${prefix}...${suffix}`;
 }
+
+/**
+ * 접속 엔드포인트 URL에서 포트 번호 추출 (없을 경우 빈 문자열 반환)
+ */
+export function extractPortFromUrl(url: string): string {
+  if (!url) return '';
+  try {
+    const raw = url.trim();
+    const hasScheme = raw.includes('://');
+    const u = new URL(hasScheme ? raw : `http://${raw}`);
+    if (u.port) return u.port;
+    const match = raw.match(/:(\d+)(?:\/|$)/);
+    return match ? match[1] : '';
+  } catch {
+    const match = url.match(/:(\d+)(?:\/|$)/);
+    return match ? match[1] : '';
+  }
+}
+
+/**
+ * 엔드포인트 URL의 포트 번호를 지정한 포트로 교체 또는 추가
+ */
+export function setPortInUrl(url: string, newPort: string): string {
+  const cleanPort = (newPort || '').trim().replace(/\D/g, '');
+  const raw = (url || '').trim();
+  if (!raw) {
+    return cleanPort ? `http://127.0.0.1:${cleanPort}` : '';
+  }
+
+  try {
+    const hasScheme = raw.includes('://');
+    const scheme = hasScheme ? raw.split('://')[0] + '://' : 'http://';
+    const rest = hasScheme ? raw.slice(scheme.length) : raw;
+
+    const slashIdx = rest.indexOf('/');
+    const hostPort = slashIdx >= 0 ? rest.slice(0, slashIdx) : rest;
+    const path = slashIdx >= 0 ? rest.slice(slashIdx) : '';
+
+    let host = hostPort;
+    if (hostPort.includes(':')) {
+      const colonIdx = hostPort.lastIndexOf(':');
+      host = hostPort.slice(0, colonIdx);
+    }
+
+    const newHostPort = cleanPort ? `${host}:${cleanPort}` : host;
+    return `${scheme}${newHostPort}${path}`;
+  } catch {
+    return raw;
+  }
+}
+

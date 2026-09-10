@@ -517,3 +517,94 @@ export async function handleTestAiSynthetic(workspaceId: string, actorId: string
 
   return successResponse({ result })
 }
+
+// 6. 모델 목록 자동 조회 API (엔드포인트 및 인증 기반 /v1/models 또는 /api/tags 호출)
+export async function handleListAiModels(workspaceId: string, actorId: string, auth: AuthContext, body: any) {
+  if (!checkIsAdmin(auth)) {
+    return errorResponse('FORBIDDEN', '관리자만 모델 목록 조회를 실행할 수 있습니다.', 403)
+  }
+
+  const { endpointUrl, provider, authType, secret, customHeaderName, routingMode, location } = body || {}
+  const trimmedEndpoint = String(endpointUrl || '').trim()
+
+  if (!trimmedEndpoint) {
+    return successResponse({ ok: false, models: [], message: '엔드포인트 주소를 입력해 주세요.' })
+  }
+
+  // SSRF 검증 (외부 IP의 HTTP 허용)
+  const ssrfCheck = validateUrlForSsrf(trimmedEndpoint, routingMode || 'SERVER_DIRECT')
+  if (!ssrfCheck.valid) {
+    return successResponse({ ok: false, models: [], message: ssrfCheck.reason })
+  }
+
+  const headers: Record<string, string> = { 'Accept': 'application/json' }
+  if (secret) {
+    if (authType === 'BEARER') headers['Authorization'] = `Bearer ${secret}`
+    else if (authType === 'API_KEY') headers['x-api-key'] = secret
+    else if (authType === 'CUSTOM_HEADER' && customHeaderName) headers[customHeaderName] = secret
+  }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 4500)
+
+  const clean = trimmedEndpoint.replace(/\/+$/, '')
+  let models: string[] = []
+
+  try {
+    // 1. Ollama (/api/tags) 우선 시도 (OLLAMA 공급자 또는 11434 포트)
+    if (provider === 'OLLAMA' || clean.endsWith(':11434')) {
+      const tagsUrl = `${clean}/api/tags`
+      const res = await fetch(tagsUrl, { method: 'GET', headers, signal: controller.signal }).catch(() => null)
+      if (res && res.ok) {
+        const data = await res.json().catch(() => null)
+        if (data && Array.isArray(data.models)) {
+          models = data.models.map((m: any) => m.name || m.model || '').filter(Boolean)
+          clearTimeout(timer)
+          return successResponse({ ok: true, models, source: 'ENDPOINT_TAGS' })
+        }
+      }
+    }
+
+    // 2. OpenAI / LM Studio / vLLM (/v1/models 또는 /models) 시도
+    const v1Url = clean.endsWith('/v1')
+      ? `${clean}/models`
+      : (clean.includes('/v1') ? `${clean.replace(/\/chat\/completions$/, '')}/models` : `${clean}/v1/models`)
+
+    const res = await fetch(v1Url, { method: 'GET', headers, signal: controller.signal }).catch(() => null)
+    if (res && res.ok) {
+      const data = await res.json().catch(() => null)
+      if (data && Array.isArray(data.data)) {
+        models = data.data.map((m: any) => m.id || m.name || '').filter(Boolean)
+        clearTimeout(timer)
+        return successResponse({ ok: true, models, source: 'ENDPOINT_V1_MODELS' })
+      }
+    }
+
+    // 3. Fallback: tags 한번 더 확인
+    const fallbackTagsUrl = `${clean}/api/tags`
+    const tagRes = await fetch(fallbackTagsUrl, { method: 'GET', headers, signal: controller.signal }).catch(() => null)
+    if (tagRes && tagRes.ok) {
+      const tagData = await tagRes.json().catch(() => null)
+      if (tagData && Array.isArray(tagData.models)) {
+        models = tagData.models.map((m: any) => m.name || m.model || '').filter(Boolean)
+        clearTimeout(timer)
+        return successResponse({ ok: true, models, source: 'ENDPOINT_TAGS' })
+      }
+    }
+  } catch (err: any) {
+    clearTimeout(timer)
+    return successResponse({
+      ok: false,
+      models: [],
+      message: `모델 목록 조회 실패: ${err.name === 'AbortError' ? '연결 시간 초과' : (err.message || '네트워크 오류')}`,
+    })
+  } finally {
+    clearTimeout(timer)
+  }
+
+  return successResponse({
+    ok: models.length > 0,
+    models,
+    message: models.length === 0 ? '해당 주소에서 사용 가능한 모델 목록을 찾지 못했습니다.' : undefined,
+  })
+}

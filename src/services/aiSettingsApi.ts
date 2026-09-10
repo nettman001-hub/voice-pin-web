@@ -5,6 +5,8 @@ import {
   AiConnectionTestResult,
   AiSlotConfig,
   DEFAULT_AI_SETTINGS,
+  ListAiModelsPayload,
+  ListAiModelsResponse,
 } from '../types/aiSettings';
 import { AiResolutionResult, AiResolutionRequest } from '../types/aiResolution';
 import { AiSlotHealth, CheckAiHealthPayload, AiHealthSummaryResponse } from '../types/aiHealth';
@@ -177,6 +179,88 @@ export const aiSettingsApi = {
       newSecret,
     });
     return resp.testResult;
+  },
+
+  async listAiModels(payload: ListAiModelsPayload): Promise<ListAiModelsResponse> {
+    const trimmed = (payload.endpointUrl || '').trim();
+    if (!trimmed) {
+      return { ok: false, models: [], message: '엔드포인트 주소를 입력해 주세요.' };
+    }
+
+    // 1. 브라우저 직접 fetch 시도 (로컬 개발 환경 또는 직접 도달 가능한 경우)
+    try {
+      const clean = trimmed.replace(/\/+$/, '');
+      const isOllama = payload.provider === 'OLLAMA' || clean.endsWith(':11434');
+
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      if (payload.secret) {
+        if (payload.authType === 'BEARER') headers['Authorization'] = `Bearer ${payload.secret}`;
+        else if (payload.authType === 'API_KEY') headers['x-api-key'] = payload.secret;
+        else if (payload.authType === 'CUSTOM_HEADER' && payload.customHeaderName) headers[payload.customHeaderName] = payload.secret;
+      }
+
+      if (isOllama) {
+        const directController = new AbortController();
+        const t = setTimeout(() => directController.abort(), 2000);
+        const r = await fetch(`${clean}/api/tags`, { method: 'GET', headers, signal: directController.signal }).catch(() => null);
+        clearTimeout(t);
+        if (r && r.ok) {
+          const d = await r.json().catch(() => null);
+          if (d && Array.isArray(d.models)) {
+            const models = d.models.map((m: any) => m.name || m.model || '').filter(Boolean);
+            if (models.length > 0) {
+              return { ok: true, models, source: 'DIRECT_FETCH' };
+            }
+          }
+        }
+      } else {
+        const v1Url = clean.endsWith('/v1')
+          ? `${clean}/models`
+          : (clean.includes('/v1') ? `${clean.replace(/\/chat\/completions$/, '')}/models` : `${clean}/v1/models`);
+        const directController = new AbortController();
+        const t = setTimeout(() => directController.abort(), 2000);
+        const r = await fetch(v1Url, { method: 'GET', headers, signal: directController.signal }).catch(() => null);
+        clearTimeout(t);
+        if (r && r.ok) {
+          const d = await r.json().catch(() => null);
+          if (d && Array.isArray(d.data)) {
+            const models = d.data.map((m: any) => m.id || m.name || '').filter(Boolean);
+            if (models.length > 0) {
+              return { ok: true, models, source: 'DIRECT_FETCH' };
+            }
+          }
+        }
+      }
+    } catch {
+      // Direct fetch failed, fallback to backend proxy
+    }
+
+    // 2. 백엔드 Edge Function 프록시 호출
+    if (!isSupabaseConfigured) {
+      return {
+        ok: true,
+        models: payload.provider === 'LM_STUDIO'
+          ? ['qwen2.5-7b-instruct', 'llama-3.1-8b-instruct', 'mistral-7b-instruct-v0.3']
+          : (payload.provider === 'OLLAMA' ? ['qwen2.5:7b', 'llama3.1:8b', 'gemma2:9b'] : ['default']),
+        source: 'FALLBACK',
+      };
+    }
+
+    try {
+      const resp = await invokeSalesApi<{ ok: boolean; models: string[]; message?: string; source?: any }>('list-ai-models', payload);
+      return {
+        ok: resp.ok,
+        models: resp.models || [],
+        message: resp.message,
+        source: resp.source,
+      };
+    } catch (err: any) {
+      return {
+        ok: false,
+        models: [],
+        message: err.message || '모델 목록 조회 중 오류가 발생했습니다.',
+      };
+    }
   },
 
   async testAiSynthetic(

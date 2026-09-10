@@ -57,6 +57,7 @@ import {
   handleApplyAiSettings,
   handleTestAiConnection,
   handleTestAiSynthetic,
+  handleListAiModels,
 } from './handlers/aiSettings.ts'
 
 import {
@@ -232,6 +233,8 @@ serve(async (req: Request) => {
         return await handleCheckAiHealth(workspaceId, actorId, auth, body)
       case 'get-ai-health':
         return await handleGetAiHealth(workspaceId, actorId, auth, body)
+      case 'list-ai-models':
+        return await handleListAiModels(workspaceId, actorId, auth, body)
 
       // AI Tasks & Failover Queue (작업 대기열 및 1번->2번 자동 전환)
       case 'create-ai-task':

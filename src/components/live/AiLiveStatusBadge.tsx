@@ -70,7 +70,7 @@ export const AiLiveStatusBadge: React.FC = () => {
     const loc = slot?.location || slotConfig?.location || 'SAME_PC';
     const provider = slotConfig?.provider || 'OLLAMA';
 
-    if (provider !== 'OLLAMA') {
+    if (provider !== 'OLLAMA' && provider !== 'LM_STUDIO' && provider !== 'VLLM') {
       return '클라우드';
     }
     if (loc === 'SAME_PC') return '로컬';

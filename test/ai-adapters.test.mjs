@@ -18,16 +18,19 @@ import {
 import {
   executeAiResolution,
 } from '../supabase/functions/sales-api/handlers/aiAdapters/index.ts';
+import {
+  extractPortFromUrl,
+  setPortInUrl,
+} from '../src/utils/maskingUtils.ts';
 
 // 1. 보안 검증 테스트 (TLS, 포트, 사설망, 경로 순회, 리디렉션)
-test('Security: validateExternalEndpoint enforces HTTPS for EXTERNAL_IP servers', () => {
-  const insecure = validateExternalEndpoint({
+test('Security: validateExternalEndpoint allows HTTP and HTTPS for EXTERNAL_IP servers', () => {
+  const httpUrl = validateExternalEndpoint({
     endpointUrl: 'http://my-llm.example.com:11434',
     location: 'EXTERNAL_IP',
     routingMode: 'SERVER_DIRECT',
   });
-  assert.equal(insecure.valid, false);
-  assert.match(insecure.reason || '', /TLS\(HTTPS\)/);
+  assert.equal(httpUrl.valid, true);
 
   const secure = validateExternalEndpoint({
     endpointUrl: 'https://my-llm.example.com:11434',
@@ -750,3 +753,89 @@ test('Unified Schema Integrity: executeAiResolution outputs identical structured
   assert.equal(localRes.execution.adapterType, 'SELF_HOSTED');
   assert.equal(cloudRes.execution.adapterType, 'CLOUD');
 });
+
+test('SelfHostedAdapter: supports LM_STUDIO provider using OpenAI-compatible /v1/chat/completions', async () => {
+  const req = {
+    taskType: 'SYNTHETIC_TEST',
+    workspaceId: 'ws1',
+    sessionId: 'session_01',
+    currentUtterance: 'xx님 구매하신거 가격이 0.9가 아니고 1.2입니다',
+    saleCandidates: [
+      { saleId: 'sale_lm_1', productCode: '1', buyerNickname: 'xx', amount: 9000, unitPrice: 9000, quantity: 1, status: 'PENDING' },
+    ],
+  };
+
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = '';
+  let requestBody = null;
+
+  globalThis.fetch = async (url, init) => {
+    requestedUrl = url.toString();
+    requestBody = JSON.parse(init.body);
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                resolvable: true,
+                targetSaleId: 'sale_lm_1',
+                action: 'UPDATE_SALE',
+                changes: { amount: { from: 9000, to: 12000, unitPrice: 12000, quantity: 1 } },
+                evidenceIds: ['sale_lm_1'],
+                evidenceSummary: 'LM Studio OpenAI 호환 엔드포인트 정정 완료',
+                missingInfo: [],
+                conflictReason: null,
+              }),
+            },
+          },
+        ],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  };
+
+  try {
+    const result = await runSelfHostedResolution(req, {
+      slotConfig: {
+        type: 'LOCAL',
+        provider: 'LM_STUDIO',
+        model: 'qwen2.5-7b-instruct',
+        location: 'EXTERNAL_IP',
+        endpointUrl: 'http://203.0.113.100:1234',
+        routingMode: 'SERVER_DIRECT',
+        authType: 'NONE',
+        timeoutSeconds: 10,
+        connectTimeoutSeconds: 3,
+      },
+    });
+
+    assert.equal(result.resolvable, true);
+    assert.equal(result.targetSaleId, 'sale_lm_1');
+    assert.ok(requestedUrl.includes(':1234/v1/chat/completions'));
+    assert.equal(requestBody.model, 'qwen2.5-7b-instruct');
+    assert.equal(result.execution.adapterType, 'SELF_HOSTED');
+    assert.equal(result.execution.location, 'EXTERNAL_IP');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Port Utils: extractPortFromUrl and setPortInUrl handle self-hosted endpoints correctly', () => {
+  // Extract port
+  assert.equal(extractPortFromUrl('http://127.0.0.1:1234'), '1234');
+  assert.equal(extractPortFromUrl('http://192.168.1.100:11434/v1'), '11434');
+  assert.equal(extractPortFromUrl('https://my-llm.domain.com:8443/api'), '8443');
+  assert.equal(extractPortFromUrl('http://my-llm.domain.com'), '');
+  assert.equal(extractPortFromUrl(''), '');
+
+  // Set / modify port
+  assert.equal(setPortInUrl('http://127.0.0.1:11434', '1234'), 'http://127.0.0.1:1234');
+  assert.equal(setPortInUrl('http://127.0.0.1:1234', '12345'), 'http://127.0.0.1:12345');
+  assert.equal(setPortInUrl('http://192.168.1.100:11434/v1', '8000'), 'http://192.168.1.100:8000/v1');
+  assert.equal(setPortInUrl('https://my-llm.domain.com/v1', '8443'), 'https://my-llm.domain.com:8443/v1');
+  assert.equal(setPortInUrl('', '1234'), 'http://127.0.0.1:1234');
+  assert.equal(setPortInUrl('http://127.0.0.1:1234', ''), 'http://127.0.0.1');
+});
+
+
