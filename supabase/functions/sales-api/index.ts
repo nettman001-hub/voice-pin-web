@@ -1,4 +1,4 @@
-﻿import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
+import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import {
   corsHeaders,
   authenticateRequest,
@@ -50,6 +50,39 @@ import {
   handleRequestReprint,
   handleGetPrintStatus,
 } from './handlers/print.ts'
+
+import {
+  handleGetAiSettings,
+  handleSaveAiSettings,
+  handleApplyAiSettings,
+  handleTestAiConnection,
+  handleTestAiSynthetic,
+} from './handlers/aiSettings.ts'
+
+import {
+  handleCheckAiHealth,
+  handleGetAiHealth,
+} from './handlers/aiHealth.ts'
+
+import {
+  handleCreateAiTask,
+  handleProcessAiTask,
+  handleGetAiTasks,
+  handleGetAiRuntimeStatus,
+} from './handlers/aiTasks.ts'
+
+import {
+  handleResolvePendingSale,
+  handleBatchConfirmPendingSales,
+  handleTriggerPendingAiResolution,
+} from './handlers/pendingSales.ts'
+
+import {
+  handleProcessVoiceCorrection,
+  handleApplyVoiceCorrection,
+  handleLinkFollowUpCorrection,
+  handleRollbackVoiceCorrection,
+} from './handlers/voiceCorrections.ts'
 
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -183,6 +216,57 @@ serve(async (req: Request) => {
       case 'get-print-status':
         requireCapability('SALES_READ')
         return await handleGetPrintStatus(workspaceId, body)
+
+      // AI Settings (보류·음성 정정 AI)
+      case 'get-ai-settings':
+        return await handleGetAiSettings(workspaceId, actorId, auth, body)
+      case 'save-ai-settings':
+        return await handleSaveAiSettings(workspaceId, actorId, auth, body)
+      case 'apply-ai-settings':
+        return await handleApplyAiSettings(workspaceId, actorId, auth, body)
+      case 'test-ai-connection':
+        return await handleTestAiConnection(workspaceId, actorId, auth, body)
+      case 'test-ai-synthetic':
+        return await handleTestAiSynthetic(workspaceId, actorId, auth, body)
+      case 'check-ai-health':
+        return await handleCheckAiHealth(workspaceId, actorId, auth, body)
+      case 'get-ai-health':
+        return await handleGetAiHealth(workspaceId, actorId, auth, body)
+
+      // AI Tasks & Failover Queue (작업 대기열 및 1번->2번 자동 전환)
+      case 'create-ai-task':
+        return await handleCreateAiTask(workspaceId, actorId, auth, body)
+      case 'process-ai-task':
+        return await handleProcessAiTask(workspaceId, actorId, auth, body)
+      case 'get-ai-tasks':
+        return await handleGetAiTasks(workspaceId, actorId, auth, body)
+      case 'get-ai-runtime-status':
+        return await handleGetAiRuntimeStatus(workspaceId, actorId, auth, body)
+
+      // Pending Sales Resolution (자동 적재 판매 보류 해결)
+      case 'resolve-pending-sale':
+        requireCapability('SALES_WRITE')
+        return await handleResolvePendingSale(workspaceId, actorId, auth, body)
+      case 'batch-confirm-pending-sales':
+        requireCapability('SALES_WRITE')
+        return await handleBatchConfirmPendingSales(workspaceId, actorId, auth, body)
+      case 'trigger-pending-ai':
+        requireCapability('SALES_WRITE')
+        return await handleTriggerPendingAiResolution(workspaceId, actorId, auth, body)
+
+      // Voice Correction & Pending Correction (음성 정정 및 정정 보류)
+      case 'process-voice-correction':
+        requireCapability('SALES_WRITE')
+        return await handleProcessVoiceCorrection(workspaceId, actorId, auth, body)
+      case 'apply-voice-correction':
+        requireCapability('SALES_WRITE')
+        return await handleApplyVoiceCorrection(workspaceId, actorId, auth, body)
+      case 'link-follow-up-correction':
+        requireCapability('SALES_WRITE')
+        return await handleLinkFollowUpCorrection(workspaceId, actorId, auth, body)
+      case 'rollback-voice-correction':
+        requireCapability('SALES_WRITE')
+        return await handleRollbackVoiceCorrection(workspaceId, actorId, auth, body)
 
       default:
         return errorResponse('VALIDATION_ERROR', `지원하지 않는 action입니다: ${action}`, 400)

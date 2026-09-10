@@ -1249,3 +1249,5 @@ export function matchNicknameAgainstCandidates(
     reason: best.comp.details || `닉네임 일치 (${best.matchType})`
   };
 }
+
+export const findMatchingNickname = matchNicknameAgainstCandidates;

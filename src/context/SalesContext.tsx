@@ -1,10 +1,12 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { SaleRecord, SaleStatus } from '../types/live';
-import { storageService } from '../services/storageService';
+import { storageService, getNextProductCodeForSession } from '../services/storageService';
 import { exportSalesToCsv } from '../services/csvExporter';
 import { useAuth } from './AuthContext';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
 import { commentStreamService } from '../services/commentStreamService';
+import type { BatchConfirmResult, SaleHistoryRecord } from '../types/pendingSale';
+import { aiSettingsApi } from '../services/aiSettingsApi';
 
 interface SettlementSummary {
   totalCount: number;
@@ -19,7 +21,7 @@ interface SalesContextType {
   updateSale: (sale: SaleRecord) => void;
   retrySalePrint: (id: string) => void;
   deleteSale: (id: string) => void;
-  confirmBatchSales: (saleIds: string[]) => void;
+  confirmBatchSales: (saleIds: string[]) => BatchConfirmResult;
   exportCsv: (filteredRecords?: SaleRecord[], filename?: string) => boolean;
   getSalesBySession: (sessionId: string) => SaleRecord[];
   getSettlementSummary: (period: 'TODAY' | 'WEEK' | 'MONTH' | 'CUSTOM', customRange?: { start: string; end: string }) => {
@@ -132,8 +134,11 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const addSale = (saleData: Omit<SaleRecord, 'id'>): SaleRecord => {
+    const productCode = saleData.productCode
+      || getNextProductCodeForSession(saleData.sessionId, sales);
     const baseSale: SaleRecord = {
       ...saleData,
+      productCode,
       id: `s-${crypto.randomUUID()}`,
       printStatus: saleData.printStatus || 'NOT_REQUESTED',
       printRevision: saleData.printRevision || 0,
@@ -176,10 +181,85 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  const confirmBatchSales = (saleIds: string[]) => {
-    storageService.getSales()
-      .filter((sale) => saleIds.includes(sale.id))
-      .forEach((sale) => updateSale({ ...sale, status: '확정' as SaleStatus }));
+  const confirmBatchSales = (saleIds: string[]): BatchConfirmResult => {
+    const allSales = storageService.getSales();
+    const targetSales = allSales.filter((sale) => saleIds.includes(sale.id));
+    const confirmedSaleIds: string[] = [];
+    const skippedSales: BatchConfirmResult['skippedSales'] = [];
+
+    targetSales.forEach((sale) => {
+      const reasons = sale.pendingReasons || [];
+      const unresolved = reasons.filter((r) => !r.resolved);
+
+      const nickname = (sale.buyerNickname || '').trim();
+      const hasValidNickname = Boolean(nickname) && nickname !== '미확인(보류)' && nickname !== '미확인';
+      const hasValidAmount = Number(sale.amount || 0) > 0;
+      const hasProduct = Boolean(sale.productCode || sale.productId || sale.productName);
+
+      const validationErrors: string[] = [];
+      if (!hasValidNickname) validationErrors.push('구매자 닉네임 미확인');
+      if (!hasValidAmount) validationErrors.push('판매 금액 0원 또는 미입력');
+      if (!hasProduct) validationErrors.push('연결 상품 정보 누락');
+      if (unresolved.length > 0) {
+        validationErrors.push(...unresolved.map((r) => r.message));
+      }
+
+      if (validationErrors.length > 0) {
+        // 미확인 값이 남아 있으므로 보류 상태 유지 (PLAN.md 1-A)
+        skippedSales.push({
+          saleId: sale.id,
+          buyerNickname: sale.buyerNickname,
+          amount: sale.amount,
+          remainingReasons: validationErrors,
+        });
+        return;
+      }
+
+      const nextRevision = (sale.revision || 1) + 1;
+      const historyItem: SaleHistoryRecord = {
+        revision: nextRevision,
+        changedAt: new Date().toISOString(),
+        changedBy: 'SELLER',
+        changeType: 'BATCH_CONFIRM',
+        before: {
+          buyerNickname: sale.buyerNickname,
+          amount: sale.amount,
+          status: sale.status,
+          pendingReasons: sale.pendingReasons,
+        },
+        after: {
+          buyerNickname: sale.buyerNickname,
+          amount: sale.amount,
+          status: '확정',
+          pendingReasons: sale.pendingReasons,
+        },
+        summary: '방송 후 보류 건 일괄 검증 통과 확정',
+      };
+
+      updateSale({
+        ...sale,
+        status: '확정',
+        revision: nextRevision,
+        history: [...(sale.history || []), historyItem],
+      });
+      confirmedSaleIds.push(sale.id);
+    });
+
+    const result: BatchConfirmResult = {
+      totalRequested: saleIds.length,
+      confirmedCount: confirmedSaleIds.length,
+      confirmedSaleIds,
+      skippedCount: skippedSales.length,
+      skippedSales,
+    };
+
+    if (isRemoteAuth && workspaceId && confirmedSaleIds.length > 0) {
+      void aiSettingsApi.batchConfirmPendingSales(confirmedSaleIds, workspaceId).catch((err) => {
+        console.error('[SalesContext] remote batch confirm failed', err);
+      });
+    }
+
+    return result;
   };
 
   const exportCsv = (filteredRecords?: SaleRecord[], filename?: string) => exportSalesToCsv(filteredRecords || sales.filter((sale) => sale.status === '확정'), filename);

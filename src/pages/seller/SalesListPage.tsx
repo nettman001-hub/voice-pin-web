@@ -193,10 +193,17 @@ export const SalesListPage: React.FC = () => {
 
       {/* 회차 선택 탭 & 회차 요약 카드 */}
       <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-slate-100">
-          <span className="text-xs font-bold text-slate-700 flex items-center flex-shrink-0">
-            <Layers className="w-3.5 h-3.5 mr-1.5 text-brand-600" /> 회차 선택:
-          </span>
+        <div className="flex items-center justify-start flex-wrap gap-2 sm:gap-2.5 pb-2 border-b border-slate-100">
+          <div className="flex items-center flex-shrink-0 mr-1">
+            <span className="text-xs font-bold text-slate-700 flex items-center">
+              <Layers className="w-3.5 h-3.5 mr-1.5 text-brand-600" /> 회차 선택:
+            </span>
+            {sessionFilter !== 'ALL' && (
+              <span className="ml-2 px-2 py-0.5 rounded-lg bg-brand-50 text-brand-700 font-mono text-xs font-bold border border-brand-200">
+                {sessionFilter}
+              </span>
+            )}
+          </div>
 
           <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-1 max-w-full">
             <button

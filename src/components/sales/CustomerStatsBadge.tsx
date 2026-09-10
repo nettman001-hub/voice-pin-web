@@ -21,6 +21,7 @@ export const normalizeBuyerNickname = (name?: string): string => {
 
 export interface CustomerStats {
   purchaseCount: number;
+  totalPurchaseCount?: number;
   totalRevenue: number;
   defaultCount: number;
   isFirstTimeBuyer: boolean;
@@ -63,11 +64,27 @@ export const calculateCustomerStats = ({
   });
 
   if (customerSales.length === 0) {
-    return { purchaseCount: 0, totalRevenue: 0, defaultCount: 0, isFirstTimeBuyer: false, validSales: [] };
+    return { purchaseCount: 0, totalPurchaseCount: 0, totalRevenue: 0, defaultCount: 0, isFirstTimeBuyer: false, validSales: [] };
   }
 
-  // 1. 구매횟수: 전체 주문 건수
-  const purchaseCount = customerSales.length;
+  // 1) 이번 판매회차(현재 방송 세션) 주문 여부 판정 함수:
+  // - currentSessionId 또는 activeSessionId가 주어지면 해당 세션 ID 일치 여부로 판정
+  // - 둘 다 없는 경우에만 최근 12시간 이내 주문을 현재 세션으로 간주
+  const isCurrentSessionSale = (s: SaleRecord) => {
+    if (currentSessionId || activeSessionId) {
+      return (
+        (Boolean(currentSessionId) && s.sessionId === currentSessionId) ||
+        (Boolean(activeSessionId) && s.sessionId === activeSessionId)
+      );
+    }
+    return Boolean(s.recognizedAt) && Date.now() - new Date(s.recognizedAt).getTime() < 12 * 60 * 60 * 1000;
+  };
+
+  const pastSales = customerSales.filter((s) => !isCurrentSessionSale(s));
+
+  // 1. 구매횟수: 이번 회차 이전(과거 회차)에 구매한 횟수
+  const purchaseCount = pastSales.length;
+  const totalPurchaseCount = customerSales.length;
 
   // 2. 누적 매출 및 미이행 건수 계산
   // * 사용자 명시 규칙: 미이행 횟수는 이번 판매회차에서는 완전히 제외하고, 지난 누적회차(과거 세션)에서만 계산함.
@@ -75,16 +92,7 @@ export const calculateCustomerStats = ({
   let defaultCount = 0;
 
   customerSales.forEach((sale) => {
-    // 이번 판매회차(현재 방송 세션) 주문 여부 판정:
-    // 1) 현재 웹 청취 회차 ID(currentSessionId)와 일치
-    // 2) 현재 상품판매 회차 UUID(activeSessionId)와 일치
-    // 3) 주문 인식 시각이 최근 12시간 이내인 경우
-    const isCurrentSessionSale =
-      (Boolean(currentSessionId) && sale.sessionId === currentSessionId) ||
-      (Boolean(activeSessionId) && sale.sessionId === activeSessionId) ||
-      (Boolean(sale.recognizedAt) && Date.now() - new Date(sale.recognizedAt).getTime() < 12 * 60 * 60 * 1000);
-
-    const isPastSessionSale = !isCurrentSessionSale;
+    const isPastSessionSale = !isCurrentSessionSale(sale);
 
     // [미이행 횟수] 이번 판매회차는 완전히 제외하고, '지난 누적회차'에서만 계산
     if (isPastSessionSale) {
@@ -158,11 +166,12 @@ export const calculateCustomerStats = ({
     }
   });
 
-  // 첫구매자 판정: 구매횟수가 1회이고 지난 누적회차 미이행이 0회인 경우
-  const isFirstTimeBuyer = purchaseCount === 1 && defaultCount === 0;
+  // 첫구매자 판정: 지난 회차에 구매한 것이 없고(pastSales.length === 0), 이번 회차에 주문이 존재할 때
+  const isFirstTimeBuyer = pastSales.length === 0 && customerSales.length > 0;
 
   return {
     purchaseCount,
+    totalPurchaseCount,
     totalRevenue,
     defaultCount,
     isFirstTimeBuyer,
@@ -204,8 +213,8 @@ export const CustomerStatsBadge: React.FC<CustomerStatsBadgeProps> = ({
 }) => {
   const stats = useCustomerStats(nickname, currentSessionId);
 
-  // 구매 이력이 없으면 표시하지 않음
-  if (stats.purchaseCount === 0) {
+  // 구매 이력이 전혀 없으면 표시하지 않음 (이전 구매 0회라도 이번 회차 첫구매 이력이 있으면 표시)
+  if (stats.validSales.length === 0) {
     return null;
   }
 
@@ -301,7 +310,7 @@ export const CustomerStatsBadge: React.FC<CustomerStatsBadgeProps> = ({
 
       <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
         <div className="flex items-center space-x-1">
-          <span className="text-slate-500 text-[11px]">총 구매횟수:</span>
+          <span className="text-slate-500 text-[11px]">이전 구매횟수:</span>
           <span className="font-extrabold text-slate-900 text-xs sm:text-sm">
             {stats.purchaseCount}회
           </span>

@@ -12,7 +12,7 @@ export async function ensureActiveSession(workspaceId: string) {
   if (existing) return existing
 
   const koreaNow = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString()
-  const displayCode = `${koreaNow.slice(0, 10).replace(/-/g, '')}_${koreaNow.slice(11, 13)}`
+  const displayCode = `${koreaNow.slice(0, 10).replace(/-/g, '')}_${koreaNow.slice(11, 16).replace(':', '')}`
   const { data: created, error } = await admin
     .from('live_sessions')
     .insert({
@@ -149,7 +149,9 @@ export async function handleUpdateSettings(workspaceId: string, body: any) {
 
 export async function handleStartSession(workspaceId: string, body: any) {
   const { displayName } = body
-  const code = displayName || `${new Date().toISOString().slice(0, 10)} 라이브 1회차`
+  const koreaNow = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString()
+  const defaultCode = `${koreaNow.slice(0, 10).replace(/-/g, '')}_${koreaNow.slice(11, 16).replace(':', '')}`
+  const code = displayName || defaultCode
 
   await admin
     .from('live_sessions')

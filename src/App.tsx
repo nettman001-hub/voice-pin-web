@@ -46,6 +46,7 @@ import { AdminSalesManagementPage } from './pages/admin/AdminSalesManagementPage
 import { MemberManagementPage } from './pages/admin/MemberManagementPage';
 import { ReportManagementPage } from './pages/admin/ReportManagementPage';
 import { AdminStatsPage } from './pages/admin/AdminStatsPage';
+import { AdminAiSettingsPage } from './pages/admin/AdminAiSettingsPage';
 
 const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated } = useAuth();
@@ -182,6 +183,7 @@ export const App: React.FC = () => {
                       <Route path="/admin/members" element={<MemberManagementPage />} />
                       <Route path="/admin/reports" element={<ReportManagementPage />} />
                       <Route path="/admin/stats" element={<AdminStatsPage />} />
+                      <Route path="/admin/ai" element={<AdminAiSettingsPage />} />
                     </Route>
                   </Route>
 

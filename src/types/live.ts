@@ -6,6 +6,7 @@ export interface SaleRecord {
   id: string;
   sessionId: string;           // 방송 회차 ID (예: 20260824_02)
   buyerNickname: string;       // 구매자 닉네임
+  buyerId?: string;            // 구매자 고유 ID (등록 구매자 연결 시)
   amount: number;              // 판매 금액 (원)
   recognizedAt: string;        // 인식 일시 (ISO string)
   rawTranscript: string;       // 원본 전사 문장
@@ -26,6 +27,16 @@ export interface SaleRecord {
   printRevision?: number;
   printedAt?: string;
   printError?: string;
+  /** 판매 데이터 정합성 버전 (충돌 감지용) */
+  revision?: number;
+  /** 구조화된 보류 사유 목록 (복수 사유 지원) */
+  pendingReasons?: import('./pendingSale.ts').StructuredPendingReason[];
+  /** 분석 시점의 불변 근거 스냅샷 */
+  evidenceSnapshot?: import('./pendingSale.ts').PendingEvidenceSnapshot;
+  /** AI 검증 및 보완 메타데이터 */
+  aiVerification?: import('./pendingSale.ts').AiVerificationMeta;
+  /** 변경 및 확정 이력 로그 */
+  history?: import('./pendingSale.ts').SaleHistoryRecord[];
 }
 
 export interface CaptureItem {
@@ -56,7 +67,20 @@ export interface SttTranscriptLog {
   isFinal: boolean;
   confidence: number;
   matchedKeywords?: string[];
-  actionTriggered?: 'SALE_SAVED' | 'SCREEN_CAPTURED' | 'VOICE_EDIT_START' | 'VOICE_EDIT_DONE' | 'NONE';
+  actionTriggered?:
+    | 'SALE_SAVED'
+    | 'SCREEN_CAPTURED'
+    | 'VOICE_EDIT_START'
+    | 'VOICE_EDIT_DONE'
+    | 'CORRECTION_APPLIED'
+    | 'CORRECTION_IGNORED'
+    | 'CORRECTION_CANCELLED'
+    | 'CORRECTION_RESTORED'
+    | 'CORRECTION_CONFLICT'
+    | 'CORRECTION_INCOMPLETE'
+    | 'CORRECTION_PENDING'
+    | 'CORRECTION_UNMATCHED'
+    | 'NONE';
 }
 
 export type VoiceEditState = 'IDLE' | 'LISTENING_FIELD' | 'CONFIRMING';

@@ -13,15 +13,59 @@ export interface CaptureAreaSnapshot {
   savedAt: string;
 }
 
-// 기본 방송 회차 생성 (YYYYMMDD_HH 형식)
+// 기본 방송 회차 생성 (날짜와 시간이 앞에 나오는 번호 YYYYMMDD_HHmm 형식)
 export function generateSessionId(): string {
   const now = new Date();
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
   const h = String(now.getHours()).padStart(2, '0');
-  return `${y}${m}${d}_${h}`;
+  const min = String(now.getMinutes()).padStart(2, '0');
+  return `${y}${m}${d}_${h}${min}`;
 }
+
+// 해당 회차의 판매 시작 시 1번부터 자동으로 상품번호 부여
+export function getNextProductCodeForSession(
+  sessionId?: string | null,
+  existingSales?: SaleRecord[],
+  activeProductCode?: string | null,
+  existingProducts?: Array<{ productCode?: string }>
+): string {
+  const sales = existingSales || storageService.getSales();
+  const sessionSales = sessionId ? sales.filter((s) => s.sessionId === sessionId) : sales;
+
+  const numbers = new Set<number>();
+  sessionSales.forEach((s) => {
+    const c = String(s.productCode || '').trim();
+    if (/^\d+$/.test(c)) {
+      const n = parseInt(c, 10);
+      if (n > 0) numbers.add(n);
+    }
+  });
+
+  if (activeProductCode && /^\d+$/.test(activeProductCode.trim())) {
+    const n = parseInt(activeProductCode.trim(), 10);
+    if (n > 0) numbers.add(n);
+  }
+
+  if (existingProducts) {
+    existingProducts.forEach((p) => {
+      const c = String(p.productCode || '').trim();
+      if (/^\d+$/.test(c)) {
+        const n = parseInt(c, 10);
+        if (n > 0) numbers.add(n);
+      }
+    });
+  }
+
+  if (numbers.size === 0) {
+    return '1';
+  }
+
+  const maxNum = Math.max(...Array.from(numbers));
+  return String(maxNum + 1);
+}
+
 
 // 초기 기본 인식 단어 규칙
 export const DEFAULT_RULES: RecognitionWordRule[] = [

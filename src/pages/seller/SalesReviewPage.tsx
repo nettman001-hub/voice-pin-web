@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
 import { useLive } from '../../context/LiveContext';
 import { SaleRecord } from '../../types/live';
+import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
 import {
   CheckSquare,
   AlertCircle,
@@ -59,9 +60,13 @@ export const SalesReviewPage: React.FC = () => {
 
   const handleBulkConfirm = () => {
     const pendingIds = pendingSales.map((s) => s.id);
-    confirmBatchSales(pendingIds);
-    setToastMsg('모든 보류 건이 일괄 확정 처리되었습니다! 🎉');
-    setTimeout(() => setToastMsg(null), 3000);
+    const result = confirmBatchSales(pendingIds);
+    if (result.skippedCount > 0) {
+      setToastMsg(`총 ${result.confirmedCount}건 일괄 확정 완료! (미확인 정보 잔여 ${result.skippedCount}건은 안전을 위해 보류 유지)`);
+    } else {
+      setToastMsg(`보류 ${result.confirmedCount}건이 모두 검증 통과하여 일괄 확정되었습니다! 🎉`);
+    }
+    setTimeout(() => setToastMsg(null), 3500);
   };
 
   return (
@@ -170,6 +175,36 @@ export const SalesReviewPage: React.FC = () => {
                     <p className="text-xs text-slate-800 font-medium break-words">
                       "{sale.rawTranscript}"
                     </p>
+
+                    {/* 구조화된 보류 사유 배지 */}
+                    {isPending && sale.pendingReasons && sale.pendingReasons.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {sale.pendingReasons.map((r, idx) => (
+                          <span
+                            key={idx}
+                            className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
+                              r.resolved
+                                ? 'bg-emerald-100 text-emerald-800 line-through opacity-60'
+                                : 'bg-rose-100 text-rose-800 border border-rose-200'
+                            }`}
+                            title={r.message}
+                          >
+                            {r.code === 'MISSING_NICKNAME' && '👤 닉네임 미확인'}
+                            {r.code === 'TRAILING_DIGITS_ONLY' && '🔢 끝번호만 인식'}
+                            {r.code === 'MISSING_AMOUNT' && '💰 금액 누락'}
+                            {r.code === 'SPLIT_UTTERANCE' && '✂️ 분리 발화'}
+                            {r.code === 'DELAYED_COMMENT' && '⏳ 댓글 대기'}
+                            {r.code === 'MULTIPLE_CANDIDATES_CONFLICT' && '⚠️ 복수 후보 충돌'}
+                            {r.resolved && ' (해결됨)'}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* AI 작업 이력 배지, Diff 및 근거보기/후보적용/되돌리기 액션 */}
+                    <div className="pt-2">
+                      <SaleAiActionButtons sale={sale} />
+                    </div>
                   </div>
 
                   {/* 인라인 수정 인풋들 (모바일 반응형 flex) */}

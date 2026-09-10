@@ -6,6 +6,10 @@ import { useLive } from '../../context/LiveContext';
 import { User } from '../../types/auth';
 import { remoteWorkspaceService } from '../../services/remoteWorkspaceService';
 import { ReportItem } from '../../types/admin';
+import { aiSettingsApi } from '../../services/aiSettingsApi';
+import { maskEndpointUrl } from '../../utils/maskingUtils';
+import { AiRuntimeStatus } from '../../types/aiTask';
+import { AiHealthSummaryResponse } from '../../types/aiHealth';
 import {
   Users,
   AlertTriangle,
@@ -41,6 +45,8 @@ export const AdminDashboardPage: React.FC = () => {
   const [showSonioxKey, setShowSonioxKey] = useState(false);
   const [adminTotalRevenue, setAdminTotalRevenue] = useState<number | null>(null);
   const [adminTotalSalesCount, setAdminTotalSalesCount] = useState<number>(0);
+  const [aiRuntimeStatus, setAiRuntimeStatus] = useState<AiRuntimeStatus | null>(null);
+  const [aiHealthSummary, setAiHealthSummary] = useState<AiHealthSummaryResponse | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -53,6 +59,16 @@ export const AdminDashboardPage: React.FC = () => {
     }).catch((err) => {
       console.warn('[AdminDashboard] 전체 판매 내역 조회 실패:', err);
     });
+
+    void Promise.all([
+      aiSettingsApi.getAiRuntimeStatus().catch(() => null),
+      aiSettingsApi.getAiHealth().catch(() => null),
+    ]).then(([rt, hl]) => {
+      if (!active) return;
+      if (rt?.runtimeStatus) setAiRuntimeStatus(rt.runtimeStatus);
+      if (hl) setAiHealthSummary(hl);
+    });
+
     return () => { active = false; };
   }, []);
 
@@ -132,6 +148,99 @@ export const AdminDashboardPage: React.FC = () => {
           <span>{toastMsg}</span>
         </div>
       )}
+
+      {/* 관리자 전용 판매 AI (보류 해결 · 음성 정정) 관제 배너 */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-5 sm:p-6 shadow-md space-y-4 border border-indigo-800/40">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-brand-500/20 text-brand-400 border border-brand-500/30 flex items-center justify-center flex-shrink-0">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-black tracking-tight text-white">판매 AI 런타임 관제 (보류 해결 · 음성 정정)</h3>
+                <span className="px-2 py-0.5 rounded-full bg-brand-500/20 text-brand-300 text-[10px] font-bold border border-brand-500/30">
+                  2-슬롯 Failover
+                </span>
+                {aiRuntimeStatus?.activeSlot && (
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30">
+                    현재 활성: AI {aiRuntimeStatus.activeSlot}번
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
+                자체 운영 LLM(로컬 PC·내부망·외부 공인 IP) 및 클라우드 AI의 2개 슬롯 우선순위 교체, 비밀정보 격리, 연결 사전 점검 및 장애 대체 정책을 관리합니다.
+              </p>
+            </div>
+          </div>
+
+          <Link
+            to="/admin/ai"
+            className="px-4 py-2.5 bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold rounded-xl transition shadow-lg shadow-brand-500/20 flex items-center gap-1.5 whitespace-nowrap self-stretch md:self-auto justify-center"
+          >
+            <span>AI 설정 및 점검 바로가기</span>
+            <ArrowRight className="w-4 h-4" />
+          </Link>
+        </div>
+
+        {/* 2-슬롯 실시간 상태 카드 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-indigo-900/60 text-xs">
+          {/* 슬롯 1 미니 카드 */}
+          <div className="p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700/80 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-200 flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-md bg-brand-500/20 text-brand-300 text-[10px] font-black flex items-center justify-center">1</span>
+                <span>AI 1번 ({aiHealthSummary?.slot1?.location === 'SAME_PC' ? '로컬' : aiHealthSummary?.slot1?.location === 'LAN' ? '자체 운영(내부망)' : aiHealthSummary?.slot1?.location ? '자체 운영(외부 서버)' : '로컬'})</span>
+              </span>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                aiHealthSummary?.slot1?.overallStatus === 'AVAILABLE' && !aiRuntimeStatus?.slot1CircuitBreaker?.isOpen
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                  : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+              }`}>
+                {aiRuntimeStatus?.slot1CircuitBreaker?.isOpen ? '서킷 차단(장애)' : aiHealthSummary?.slot1?.overallStatus || '준비됨'}
+              </span>
+            </div>
+            <div className="flex justify-between text-[11px] text-slate-400">
+              <span>모델: <strong className="text-slate-200 font-mono">{aiHealthSummary?.slot1?.model || 'qwen2.5:7b'}</strong></span>
+              <span>지연: <strong className="text-slate-200 font-mono">{aiHealthSummary?.slot1?.tier1?.latencyMs || 0}ms</strong></span>
+            </div>
+            <div className="text-[10px] text-slate-400 font-mono truncate" title={aiHealthSummary?.slot1?.endpointUrl}>
+              주소: {maskEndpointUrl(aiHealthSummary?.slot1?.endpointUrl || 'http://127.0.0.1:11434')} ({aiHealthSummary?.slot1?.routingMode === 'PC_HELPER' ? 'PC 도우미 경유' : '서버 직접 호출'})
+            </div>
+          </div>
+
+          {/* 슬롯 2 미니 카드 */}
+          <div className="p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700/80 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-200 flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-md bg-purple-500/20 text-purple-300 text-[10px] font-black flex items-center justify-center">2</span>
+                <span>AI 2번 (대체 클라우드)</span>
+              </span>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                aiHealthSummary?.slot2?.overallStatus === 'AVAILABLE' && !aiRuntimeStatus?.slot2CircuitBreaker?.isOpen
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                  : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+              }`}>
+                {aiRuntimeStatus?.slot2CircuitBreaker?.isOpen ? '서킷 차단(장애)' : aiHealthSummary?.slot2?.overallStatus || '준비됨'}
+              </span>
+            </div>
+            <div className="flex justify-between text-[11px] text-slate-400">
+              <span>모델: <strong className="text-slate-200 font-mono">{aiHealthSummary?.slot2?.model || 'gpt-4o-mini'}</strong></span>
+              <span>지연: <strong className="text-slate-200 font-mono">{aiHealthSummary?.slot2?.tier1?.latencyMs || 0}ms</strong></span>
+            </div>
+            <div className="text-[10px] text-slate-400 font-mono truncate" title={aiHealthSummary?.slot2?.endpointUrl}>
+              주소: {maskEndpointUrl(aiHealthSummary?.slot2?.endpointUrl || 'https://api.openai.com')} ({aiHealthSummary?.slot2?.routingMode === 'PC_HELPER' ? 'PC 도우미 경유' : '서버 직접 호출'})
+            </div>
+          </div>
+        </div>
+
+        {aiRuntimeStatus?.lastSwitchReason && (
+          <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] flex items-center gap-2">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+            <span>최근 자동 전환 이력: <strong>{aiRuntimeStatus.lastSwitchReason}</strong> (시각: {aiRuntimeStatus.lastSwitchedAt ? new Date(aiRuntimeStatus.lastSwitchedAt).toLocaleTimeString() : '최근'})</span>
+          </div>
+        )}
+      </div>
 
       {/* 관리자 전용 기본 STT 공급자 선택 및 Soniox API Key 관리 */}
       <div className="bg-gradient-to-br from-white via-cyan-50/20 to-sky-50/40 border-2 border-cyan-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-5">

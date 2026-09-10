@@ -6,7 +6,7 @@ import { screenCaptureService } from '../services/screenCaptureService';
 import { extractSaleFromTranscript, parseKoreanAmount } from '../services/salesExtractor';
 import { parseVoiceCommand } from '../services/voiceCommandParser';
 import { nicknameVerificationNote, verifyNicknameFromComments } from '../services/commentNicknameVerifier';
-import { storageService, generateSessionId } from '../services/storageService';
+import { storageService, generateSessionId, getNextProductCodeForSession } from '../services/storageService';
 import { useSales } from './SalesContext';
 import { useAuth } from './AuthContext';
 import { CaptureAreaConfig } from '../types/rules';
@@ -20,6 +20,16 @@ import { useProductSales } from './ProductSalesContext';
 import { ProductSalesProduct } from '../types/productSales';
 import { createNumberProductImage } from '../services/productImageService';
 import { InterimStreamChunker } from '../services/captionStreamService';
+import { buildPendingReasons, buildEvidenceSnapshot } from '../services/pendingSalesService';
+import {
+  parseVoiceCorrection,
+  findTargetSaleForCorrection,
+  linkFollowUpToPendingCorrection,
+  applyCorrectionToSale,
+  rollbackCorrection,
+} from '../services/voiceCorrectionService';
+import type { PendingCorrectionRequest } from '../types/voiceCorrection';
+import { aiSettingsApi } from '../services/aiSettingsApi';
 
 const SONIOX_SALE_TIMEOUT_MS = 10000;
 const SONIOX_BUFFER_LIMIT = 600;
@@ -61,14 +71,14 @@ interface VoiceProductDraft {
   saving: boolean;
 }
 
-function extractSpokenProductCode(text: string): string | undefined {
-  const match = text.match(/상품\s*번호(?:는|은|가)?\s*([0-9]+)\s*번?/u);
+export function extractSpokenProductCode(text: string): string | undefined {
+  const match =
+    text.match(/상품\s*번호(?:는|은|가)?\s*([0-9]+)\s*번?/u) ||
+    text.match(/상품\s*([0-9]+)\s*번/u) ||
+    text.match(/([0-9]+)\s*번\s*상품/u);
   return match?.[1];
 }
 
-function randomProductCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
-}
 
 export interface MatchedRuleItem {
   text: string;
@@ -123,7 +133,7 @@ const LiveContext = createContext<LiveContextType | undefined>(undefined);
 
 export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { addSale, updateSale, sales } = useSales();
-  const { isAuthenticated, user, workspaceId } = useAuth();
+  const { isAuthenticated, user, workspaceId, isRemoteAuth } = useAuth();
   const productSales = useProductSales();
 
   const [isListening, setIsListening] = useState<boolean>(false);
@@ -205,6 +215,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isListeningRef = useRef<boolean>(false);
   const isVoiceEditingRef = useRef<boolean>(false);
   const lastSavedSaleRef = useRef<SaleRecord | null>(null);
+  const activePendingCorrectionRef = useRef<PendingCorrectionRequest | null>(null);
   const activeAudioSourceModeRef = useRef<'TAB_AUDIO' | 'MIC'>('TAB_AUDIO');
   const previousAuthenticatedRef = useRef<boolean>(isAuthenticated);
   const previousShareAudioRef = useRef<boolean>(screenConnection.hasAudio);
@@ -443,11 +454,18 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       draft.id !== draftId ||
       draft.saving ||
       !draft.captureFinished ||
-      !draft.requestedProductCode ||
       draft.unitPrice === undefined
     ) {
       return;
     }
+
+    const targetSessionId = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
+    const finalProductCode = draft.requestedProductCode || getNextProductCodeForSession(
+      targetSessionId,
+      sales,
+      productSalesRef.current.activeProduct?.productCode
+    );
+    draft.requestedProductCode = finalProductCode;
 
     draft.saving = true;
     setEditingFieldInfo(`상품 ${draft.requestedProductCode}번을 등록하는 중입니다...`);
@@ -492,14 +510,21 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (hasRegisterCommand) {
       const draftId = `voice-product-${crypto.randomUUID()}`;
+      const targetSessionId = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
+      const defaultAutoCode = getNextProductCodeForSession(
+        targetSessionId,
+        sales,
+        productSalesRef.current.activeProduct?.productCode
+      );
       draft = {
         id: draftId,
         startedAt: now,
+        requestedProductCode: defaultAutoCode,
         captureFinished: false,
         saving: false,
       };
       voiceProductDraftRef.current = draft;
-      setEditingFieldInfo('상품 촬영 중 · "상품번호 12번", "가격은 35,000원"이라고 말씀하세요.');
+      setEditingFieldInfo(`상품 촬영 중 · "상품번호 ${defaultAutoCode}번", "가격은 35,000원"이라고 말씀하세요.`);
 
       void captureCurrentScreen(
         undefined,
@@ -549,6 +574,13 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const currentProduct = productSalesRef.current.activeProduct;
     if (currentProduct) return { product: currentProduct };
 
+    const targetSessionId = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
+    const autoCode = getNextProductCodeForSession(
+      targetSessionId,
+      sales,
+      productSalesRef.current.activeProduct?.productCode
+    );
+
     const draft = voiceProductDraftRef.current;
     const recentCapture = storageService.getCaptures().find((capture) => {
       const capturedAt = new Date(capture.capturedAt).getTime();
@@ -557,12 +589,16 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         && Date.now() - capturedAt <= NEARBY_CAPTURE_WINDOW_MS;
     });
     const fallbackImageDataUrl = draft?.imageDataUrl || recentCapture?.imageUrl;
-    const requestedCode = draft?.requestedProductCode || randomProductCode();
+    const requestedCode = draft?.requestedProductCode || autoCode;
     const unitPrice = draft?.unitPrice ?? 0;
     const codeWasGenerated = !draft?.requestedProductCode;
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const productCode = attempt === 0 ? requestedCode : randomProductCode();
+      const numericBase = parseInt(requestedCode, 10);
+      const productCode = attempt === 0
+        ? requestedCode
+        : (!isNaN(numericBase) ? String(numericBase + attempt) : `${requestedCode}_${attempt}`);
+
       try {
         const product = await productSalesRef.current.registerProduct({
           requestedProductCode: productCode,
@@ -615,6 +651,12 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const productLink = await ensureProductForVoiceSale();
     const product = productLink.product;
     const sessionId = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
+    const fallbackAutoCode = getNextProductCodeForSession(
+      sessionId,
+      sales,
+      productSalesRef.current.activeProduct?.productCode
+    );
+    const resolvedProductCode = product?.productCode || productLink.fallbackCode || fallbackAutoCode;
 
     // 최근 60초 내 캡처된 화면이 있으면 연결
     const recentCapture = storageService.getCaptures().find((capture) => {
@@ -625,6 +667,34 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
     const fallbackImage = productLink.fallbackImageDataUrl || recentCapture?.imageUrl;
 
+    const pendingReasons = status === '보류'
+      ? buildPendingReasons(
+          { rawTranscript: fullText, buyerNickname, amount: saleResult.amount },
+          {
+            comments: storageService.getCommentRecords(),
+            activeProduct: product ? { unitPrice: product.unitPrice ?? undefined, productCode: resolvedProductCode } : undefined,
+          }
+        )
+      : [];
+
+    const evidenceSnapshot = buildEvidenceSnapshot(
+      {
+        rawTranscript: fullText,
+        recognizedAt,
+        buyerNickname,
+        amount: saleResult.amount,
+        productCode: resolvedProductCode,
+        productName: product?.name || undefined,
+        unitPrice: product?.unitPrice ?? 0,
+        quantity: 1,
+        captureImageUrls: fallbackImage ? [fallbackImage] : undefined,
+      },
+      {
+        relevantCommentIds: nicknameVerification.commentId ? [nicknameVerification.commentId] : [],
+        snapshotVersion: 1,
+      }
+    );
+
     const saved = addSale({
       sessionId,
       buyerNickname,
@@ -634,7 +704,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       status,
       note: nicknameVerificationNote(nicknameVerification),
       productId: product?.id,
-      productCode: product?.productCode || productLink.fallbackCode,
+      productCode: resolvedProductCode,
       productName: product?.name || undefined,
       productImageUrl: product?.imageUrl || fallbackImage,
       productImagePath: product?.imagePath,
@@ -642,6 +712,9 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unitPrice: product?.unitPrice ?? 0,
       source: 'WEB_VOICE',
       captureImageUrls: fallbackImage ? [fallbackImage] : undefined,
+      revision: 1,
+      pendingReasons: pendingReasons.length > 0 ? pendingReasons : undefined,
+      evidenceSnapshot,
     });
     lastSavedSaleRef.current = saved;
 
@@ -987,10 +1060,140 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       lastSavedSaleRef.current = null;
       ruleActionName = '🗑️ 최근 항목 삭제';
     } else {
-      // 2. 판매 멘트 감지 ("구매확정 됐습니다...")
-      const saleResult = processingOptions.skipSale
-        ? null
-        : extractSaleFromTranscript(fullText, activeKeywords);
+      // 1-A. 음성 정정 의도 우선 판별 (PLAN.md 1-B: 일반 판매 추출보다 음성 정정 의도를 먼저 판단)
+      const correctionIntent = parseVoiceCorrection(fullText);
+
+      // 1-B. 활성 정정 보류 요청이 있을 때 후속 발화("12번이요") 연결 검사
+      if (activePendingCorrectionRef.current && !correctionIntent.isNegativeCommand && !correctionIntent.isQuestion) {
+        const linkRes = linkFollowUpToPendingCorrection(
+          activePendingCorrectionRef.current,
+          fullText,
+          sales
+        );
+
+        if (linkRes.resolvedSaleId) {
+          const target = sales.find((s) => s.id === linkRes.resolvedSaleId);
+          if (target) {
+            const applyRes = applyCorrectionToSale(
+              target,
+              activePendingCorrectionRef.current.parsedCorrection,
+              { expectedRevision: target.revision }
+            );
+            updateSale(applyRes.updatedSale);
+            if (isRemoteAuth && workspaceId) {
+              void aiSettingsApi.applyVoiceCorrection(
+                target.id,
+                activePendingCorrectionRef.current.parsedCorrection,
+                { expectedRevision: target.revision, pendingCorrectionId: activePendingCorrectionRef.current.id, workspaceId }
+              );
+            }
+            activePendingCorrectionRef.current = null;
+            actionTriggered = 'CORRECTION_APPLIED';
+            ruleActionName = `✅ 후속 연결 정정 완료 (${applyRes.updatedSale.productCode}번)`;
+            playBeep(1200, 250);
+            return;
+          }
+        }
+      }
+
+      if (correctionIntent.isNegativeCommand || correctionIntent.isQuestion) {
+        // "1.2로 변경하지 마세요" 및 질문은 수정 명령으로 실행하지 않음
+        actionTriggered = 'CORRECTION_IGNORED';
+        ruleActionName = correctionIntent.isNegativeCommand
+          ? '⚠️ 정정 미실행 (부정 명령)'
+          : '⚠️ 정정 미실행 (질문 형태)';
+        playBeep(440, 150);
+      } else if (correctionIntent.isCancellation) {
+        // "방금 수정한 거 취소" (판매 삭제와 구분)
+        if (activePendingCorrectionRef.current) {
+          activePendingCorrectionRef.current = null;
+          actionTriggered = 'CORRECTION_CANCELLED';
+          ruleActionName = '↩️ 미적용 정정 대기 취소';
+          playBeep(880, 200);
+        } else {
+          const target = [...sales].reverse().find((s) =>
+            s.history?.some((h) => h.changeType === 'VOICE_CORRECTION')
+          );
+          if (target) {
+            const rollbackRes = rollbackCorrection(target);
+            if (rollbackRes.success && rollbackRes.rolledBackSale) {
+              updateSale(rollbackRes.rolledBackSale);
+              if (isRemoteAuth && workspaceId) {
+                void aiSettingsApi.rollbackVoiceCorrection({
+                  saleId: target.id,
+                  workspaceId,
+                });
+              }
+              actionTriggered = 'CORRECTION_RESTORED';
+              ruleActionName = '↩️ 이전 판매값으로 복원';
+              playBeep(880, 200);
+            } else {
+              actionTriggered = 'CORRECTION_CONFLICT';
+              ruleActionName = `⚠️ 복원 충돌: ${rollbackRes.conflictReason || '확인 필요'}`;
+              playBeep(440, 300);
+            }
+          } else {
+            ruleActionName = '⚠️ 복원할 이전 정정 이력이 없습니다';
+            playBeep(440, 200);
+          }
+        }
+      } else if (correctionIntent.isIncomplete) {
+        // "0.9가 아니고..." 새 값이 완성될 때까지 초안 대기
+        actionTriggered = 'CORRECTION_INCOMPLETE';
+        ruleActionName = '⏳ 정정 값 대기 중...';
+        playBeep(660, 150);
+      } else if (correctionIntent.isCorrection) {
+        // 정정 대상 탐색 (상품번호, 기존 구매자, 기존 금액 등)
+        const targetResult = findTargetSaleForCorrection(correctionIntent, sales);
+
+        if (targetResult.targetSaleId) {
+          const target = sales.find((s) => s.id === targetResult.targetSaleId);
+          if (target) {
+            const applyRes = applyCorrectionToSale(target, correctionIntent, {
+              expectedRevision: target.revision,
+            });
+            updateSale(applyRes.updatedSale);
+            if (isRemoteAuth && workspaceId) {
+              void aiSettingsApi.applyVoiceCorrection(target.id, correctionIntent, {
+                expectedRevision: target.revision,
+                workspaceId,
+              });
+            }
+            actionTriggered = 'CORRECTION_APPLIED';
+            ruleActionName = '✏️ 음성 정정 완료';
+            playBeep(1200, 250);
+          }
+        } else if (targetResult.candidates.length > 1) {
+          // 복수 후보 존재 시 별도 정정 보류 요청 생성 (마지막 판매 임의 선택 금지)
+          const pendingReq: PendingCorrectionRequest = {
+            id: `pc-${crypto.randomUUID()}`,
+            workspaceId: workspaceId || 'local',
+            sessionId: currentSessionIdRef.current || 'default',
+            status: 'PENDING',
+            targetSaleId: null,
+            candidateSaleIds: targetResult.candidates.map((c) => c.id),
+            originalUtterance: fullText,
+            followUpUtterances: [],
+            parsedCorrection: correctionIntent,
+            missingInfo: targetResult.missingInfo,
+            conflictReason: '동일 조건 복수 판매 후보 존재 (상품번호 확인 필요)',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          activePendingCorrectionRef.current = pendingReq;
+          actionTriggered = 'CORRECTION_PENDING';
+          ruleActionName = '⚠️ 정정 보류 (상품번호를 말씀하세요)';
+          playBeep(660, 250);
+        } else {
+          actionTriggered = 'CORRECTION_UNMATCHED';
+          ruleActionName = '⚠️ 정정 대상 판매 미확인';
+          playBeep(440, 200);
+        }
+      } else {
+        // 2. 판매 멘트 감지 ("구매확정 됐습니다...")
+        const saleResult = processingOptions.skipSale
+          ? null
+          : extractSaleFromTranscript(fullText, activeKeywords);
 
       // 캡처 조건: '캡처하세요' 멘트가 반드시 포함되어 있어야 함
       // (띄어쓰기 유연성 및 단어 규칙 관리 등록 반영)
@@ -1036,6 +1239,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         );
       }
     }
+  }
 
     // 규칙 지정된 문장이 감지된 경우 아랫부분에 출력할 항목 업데이트
     if (matchedKeywords.length > 0 || ruleActionName) {

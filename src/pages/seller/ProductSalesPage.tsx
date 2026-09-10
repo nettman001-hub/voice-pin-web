@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useProductSales } from '../../context/ProductSalesContext';
+import { getNextProductCodeForSession } from '../../services/storageService';
 import { ProductRegistrationPreview } from '../../components/live/ProductRegistrationPreview';
 import { Package, Plus, Settings as SettingsIcon, Check, RefreshCw, ShoppingCart } from 'lucide-react';
 import { CommitSaleBuyer, LiveComment } from '../../types/productSales';
@@ -64,18 +65,27 @@ export const ProductSalesPage: React.FC = () => {
     });
   };
 
+  const nextAutoCode = getNextProductCodeForSession(
+    activeSession?.id,
+    undefined,
+    activeProduct?.productCode
+  );
+
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       setIsSubmitting(true);
-      const isDigitsOnly = /^\d+$/.test(inputCodeOrName.trim());
-      const requestedCode = isDigitsOnly ? inputCodeOrName.trim() : undefined;
-      const name = !isDigitsOnly ? inputCodeOrName.trim() : undefined;
+      const trimmed = inputCodeOrName.trim();
+      const isDigitsOnly = /^\d+$/.test(trimmed);
+      const requestedCode = isDigitsOnly && trimmed.length > 0
+        ? trimmed
+        : (!trimmed ? nextAutoCode : undefined);
+      const name = !isDigitsOnly && trimmed.length > 0 ? trimmed : undefined;
       const price = inputPrice ? parseInt(inputPrice.replace(/,/g, ''), 10) : undefined;
 
       // 웹 수동 입력에는 카메라 촬영 단계가 없으므로 번호가 표시된 임시이미지를 실제 저장소에 올린다.
       await registerProduct({
-        requestedProductCode: requestedCode,
+        requestedProductCode: requestedCode || nextAutoCode,
         name,
         unitPrice: price ?? 0,
         imageKind: 'NUMBER_IMAGE',
@@ -172,11 +182,12 @@ export const ProductSalesPage: React.FC = () => {
                   type="text"
                   value={inputCodeOrName}
                   onChange={(e) => setInputCodeOrName(e.target.value)}
-                  placeholder="예: 0007 또는 실크 스카프"
+                  placeholder={`예: ${nextAutoCode} (미입력 시 ${nextAutoCode}번 자동 부여)`}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-brand-500"
-                  required
                 />
-                <p className="text-xs text-slate-400 mt-1">숫자만 입력 시 선행 0이 유지됩니다 (예: 0007)</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  미입력 시 현재 회차 다음 상품번호({nextAutoCode}번)가 자동으로 부여됩니다. 숫자만 입력 시 선행 0이 유지됩니다 (예: 0007).
+                </p>
               </div>
 
               <div>

@@ -4,6 +4,7 @@ import { useSales } from '../../context/SalesContext';
 import { SaleStatus } from '../../types/live';
 import { BuyerReconciliationPanel } from '../../components/sales/BuyerReconciliationPanel';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
+import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
 import {
   ShoppingBag,
   ArrowLeft,
@@ -155,6 +156,11 @@ export const SalesDetailPage: React.FC = () => {
             <span>인식 시각: {new Date(sale.recognizedAt).toLocaleString('ko-KR')}</span>
             <span>•</span>
             <span>방송 회차: {sale.sessionId}</span>
+          </div>
+
+          {/* AI 보완·음성 정정 이력 배지, Diff 및 근거보기/되돌리기 버튼 */}
+          <div className="mt-3 pt-3 border-t border-slate-200">
+            <SaleAiActionButtons sale={sale} />
           </div>
         </div>
 

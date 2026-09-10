@@ -29,21 +29,29 @@ export const calculateCustomerStats = ({
   });
 
   if (customerSales.length === 0) {
-    return { purchaseCount: 0, totalRevenue: 0, defaultCount: 0, isFirstTimeBuyer: false, validSales: [] };
+    return { purchaseCount: 0, totalPurchaseCount: 0, totalRevenue: 0, defaultCount: 0, isFirstTimeBuyer: false, validSales: [] };
   }
 
-  const purchaseCount = customerSales.length;
+  const isCurrentSessionSale = (s) => {
+    if (currentSessionId || activeSessionId) {
+      return (
+        (Boolean(currentSessionId) && s.sessionId === currentSessionId) ||
+        (Boolean(activeSessionId) && s.sessionId === activeSessionId)
+      );
+    }
+    return Boolean(s.recognizedAt) && Date.now() - new Date(s.recognizedAt).getTime() < 12 * 60 * 60 * 1000;
+  };
+
+  const pastSales = customerSales.filter((s) => !isCurrentSessionSale(s));
+
+  // 1. 구매횟수: 이번 회차 이전(과거 회차)에 구매한 횟수
+  const purchaseCount = pastSales.length;
+  const totalPurchaseCount = customerSales.length;
   let totalRevenue = 0;
   let defaultCount = 0;
 
   customerSales.forEach((sale) => {
-    // 이번 판매회차(현재 방송 세션) 주문 여부 판정:
-    const isCurrentSessionSale =
-      (Boolean(currentSessionId) && sale.sessionId === currentSessionId) ||
-      (Boolean(activeSessionId) && sale.sessionId === activeSessionId) ||
-      (sale.recognizedAt && Date.now() - new Date(sale.recognizedAt).getTime() < 12 * 60 * 60 * 1000);
-
-    const isPastSessionSale = !isCurrentSessionSale;
+    const isPastSessionSale = !isCurrentSessionSale(sale);
 
     // [미이행 횟수] 이번 판매회차는 완전히 제외하고, '지난 누적회차'에서만 계산
     if (isPastSessionSale) {
@@ -109,10 +117,12 @@ export const calculateCustomerStats = ({
     }
   });
 
-  const isFirstTimeBuyer = purchaseCount === 1 && defaultCount === 0;
+  // 첫구매자 판정: 지난 회차에 구매한 것이 없고(pastSales.length === 0), 이번 회차에 주문이 존재할 때
+  const isFirstTimeBuyer = pastSales.length === 0 && customerSales.length > 0;
 
   return {
     purchaseCount,
+    totalPurchaseCount,
     totalRevenue,
     defaultCount,
     isFirstTimeBuyer,
@@ -150,7 +160,8 @@ test('첫구매자(또로롱) - 현재 방송 세션(activeSessionId)의 정상 
     activeSessionId: 'session-uuid-1234'   // activeSession UUID와 일치하므로 현재 라이브 주문
   });
 
-  assert.equal(stats.purchaseCount, 1, '구매횟수는 1회');
+  assert.equal(stats.purchaseCount, 0, '이번 회차 이전 구매횟수는 0회');
+  assert.equal(stats.isFirstTimeBuyer, true, '첫구매자여야 함');
   assert.equal(stats.totalRevenue, 35000, '누적금액은 35000원');
   assert.equal(stats.defaultCount, 0, '첫구매자의 현재 세션 주문은 미이행 0회여야 함');
 });
@@ -178,7 +189,8 @@ test('첫구매자(또로롱) - 웹 청취 세션(currentSessionId) 주문도 �
     activeSessionId: null
   });
 
-  assert.equal(stats.purchaseCount, 1, '구매횟수는 1회');
+  assert.equal(stats.purchaseCount, 0, '이번 회차 이전 구매횟수는 0회');
+  assert.equal(stats.isFirstTimeBuyer, true, '첫구매자여야 함');
   assert.equal(stats.totalRevenue, 45000, '누적금액은 45000원');
   assert.equal(stats.defaultCount, 0, '미이행 0회');
 });
@@ -207,7 +219,8 @@ test('첫구매자(또로롱) - 보류(status: "보류") 상태라도 단순 미
     activeSessionId: 'session-uuid-1234'
   });
 
-  assert.equal(stats.purchaseCount, 1, '구매횟수는 1회');
+  assert.equal(stats.purchaseCount, 0, '이번 회차 이전 구매횟수는 0회');
+  assert.equal(stats.isFirstTimeBuyer, true, '첫구매자여야 함');
   assert.equal(stats.defaultCount, 0, '단순 보류 주문은 미이행으로 판정하지 않음');
 });
 
@@ -253,7 +266,8 @@ test('과거 주문 중 명시적 취소/반품/환불/노쇼는 미이행 횟�
     activeSessionId: null
   });
 
-  assert.equal(stats.purchaseCount, 3, '총 3회 구매 시도');
+  assert.equal(stats.purchaseCount, 2, '과거 2회 구매 시도');
+  assert.equal(stats.isFirstTimeBuyer, false, '과거 구매 이력이 있으므로 첫구매 아님');
   assert.equal(stats.defaultCount, 2, '취소 1건 + 노쇼 1건 = 미이행 2회');
   assert.equal(stats.totalRevenue, 20000, '취소 건 제외 유효 매출 20000원');
 });
@@ -338,7 +352,8 @@ test('사용자 명시 규칙: 이번 판매회차의 주문 변경/취소/보�
     activeSessionId: null
   });
 
-  assert.equal(stats.purchaseCount, 3, '총 구매횟수는 과거 2건 + 이번 회차 1건 = 3회');
+  assert.equal(stats.purchaseCount, 2, '이번 회차 이전 구매횟수는 과거 2건 = 2회');
+  assert.equal(stats.totalPurchaseCount, 3, '총 주문건수는 과거 2건 + 이번 회차 1건 = 3회');
   assert.equal(stats.defaultCount, 0, '이번 판매회차는 미이행 횟수에서 제외되고 지난 회차에도 미이행이 없으므로 0회');
   assert.equal(stats.totalRevenue, 80000, '누적 매출은 과거 유효 주문 80000원');
 });
@@ -391,5 +406,61 @@ test('닉네임 보강 규칙 1, 2, 3이 적용된 고객 통계 연동 검증',
   });
   assert.equal(statsComaeng.purchaseCount, 1, '코맹맹은 코맹과 반복글자/편집거리1 매칭되어 1건 집계되어야 함');
   assert.equal(statsComaeng.totalRevenue, 20000);
+});
+
+test('라이브 청취 홈 규칙: 이번 회차 이전 구매 횟수(구매횟수) 및 지난 회차 구매가 없는 첫구매 판정 검증', () => {
+  // 1) 신규 고객이 이번 회차에서 처음 구매한 경우 -> 구매 0회, 첫구매 true
+  const singleLiveOrder = [
+    {
+      id: 'live-1',
+      sessionId: 'session-20260910_1600',
+      buyerNickname: '샛별이',
+      amount: 25000,
+      status: '확정'
+    }
+  ];
+  const stats1 = calculateCustomerStats({
+    nickname: '샛별이',
+    sales: singleLiveOrder,
+    currentSessionId: 'session-20260910_1600'
+  });
+  assert.equal(stats1.purchaseCount, 0, '이번 회차 이전 구매 횟수는 0회여야 함');
+  assert.equal(stats1.isFirstTimeBuyer, true, '지난 회차 구매가 없으므로 첫구매여야 함');
+
+  // 2) 신규 고객이 이번 회차에서 2건째 추가 구매(다건)한 경우에도 -> 여전히 구매 0회, 첫구매 true 유지
+  const multiLiveOrders = [
+    ...singleLiveOrder,
+    {
+      id: 'live-2',
+      sessionId: 'session-20260910_1600',
+      buyerNickname: '샛별이',
+      amount: 30000,
+      status: '확정'
+    }
+  ];
+  const stats2 = calculateCustomerStats({
+    nickname: '샛별이',
+    sales: multiLiveOrders,
+    currentSessionId: 'session-20260910_1600'
+  });
+  assert.equal(stats2.purchaseCount, 0, '이번 회차 이전 구매 횟수는 0회여야 함');
+  assert.equal(stats2.isFirstTimeBuyer, true, '이번 회차에서 다건 구매하더라도 지난 회차 구매가 없으면 첫구매여야 함');
+  assert.equal(stats2.totalPurchaseCount, 2, '전체 주문은 2건');
+
+  // 3) 과거 회차에 3건 구매 이력이 있고 이번 회차에 1건 구매한 경우 -> 구매 3회, 첫구매 false
+  const returningOrders = [
+    { id: 'past-1', sessionId: 'past-1', buyerNickname: '단골고객', amount: 10000, status: '확정' },
+    { id: 'past-2', sessionId: 'past-2', buyerNickname: '단골고객', amount: 20000, status: '확정' },
+    { id: 'past-3', sessionId: 'past-3', buyerNickname: '단골고객', amount: 30000, status: '확정' },
+    { id: 'today-1', sessionId: 'today-live', buyerNickname: '단골고객', amount: 40000, status: '확정' }
+  ];
+  const stats3 = calculateCustomerStats({
+    nickname: '단골고객',
+    sales: returningOrders,
+    currentSessionId: 'today-live'
+  });
+  assert.equal(stats3.purchaseCount, 3, '이번 회차 이전 구매 횟수는 3회여야 함');
+  assert.equal(stats3.isFirstTimeBuyer, false, '지난 회차 구매가 있으므로 첫구매가 아니어야 함');
+  assert.equal(stats3.totalPurchaseCount, 4, '전체 주문은 4건');
 });
 

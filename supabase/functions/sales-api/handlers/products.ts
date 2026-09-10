@@ -37,6 +37,7 @@ export async function handlePrepareProduct(workspaceId: string, actorId: string,
       .select('product_code')
       .eq('workspace_id', workspaceId)
       .eq('product_code', productCode)
+      .gt('expires_at', new Date().toISOString())
       .maybeSingle()
 
     if (reserved) {
@@ -45,12 +46,17 @@ export async function handlePrepareProduct(workspaceId: string, actorId: string,
       })
     }
 
-    const { data: existingProduct } = await admin
+    let existingProductQuery = admin
       .from('products')
       .select('product_code')
       .eq('workspace_id', workspaceId)
       .eq('product_code', productCode)
-      .maybeSingle()
+
+    if (sessionId) {
+      existingProductQuery = existingProductQuery.eq('session_id', sessionId)
+    }
+
+    const { data: existingProduct } = await existingProductQuery.maybeSingle()
 
     if (existingProduct) {
       return errorResponse('PRODUCT_CODE_EXISTS', '이미 사용 중이거나 예약된 상품번호입니다.', 409, {
@@ -58,9 +64,39 @@ export async function handlePrepareProduct(workspaceId: string, actorId: string,
       })
     }
   } else {
-    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-    const rnd = Math.floor(100000 + Math.random() * 900000)
-    productCode = `P-${dateStr}-${rnd}`
+    // 해당 회차의 판매 시작 시 1번부터 순차적으로 자동 부여
+    let nextNum = 1
+    if (sessionId) {
+      const { data: sessionProducts } = await admin
+        .from('products')
+        .select('product_code')
+        .eq('workspace_id', workspaceId)
+        .eq('session_id', sessionId)
+
+      const usedNumbers = new Set<number>()
+      for (const p of sessionProducts || []) {
+        if (/^\d+$/.test(p.product_code)) {
+          usedNumbers.add(parseInt(p.product_code, 10))
+        }
+      }
+
+      const { data: reservedList } = await admin
+        .from('product_code_reservations')
+        .select('product_code')
+        .eq('workspace_id', workspaceId)
+        .gt('expires_at', new Date().toISOString())
+
+      for (const r of reservedList || []) {
+        if (/^\d+$/.test(r.product_code)) {
+          usedNumbers.add(parseInt(r.product_code, 10))
+        }
+      }
+
+      while (usedNumbers.has(nextNum)) {
+        nextNum += 1
+      }
+    }
+    productCode = String(nextNum)
   }
 
   const draftId = crypto.randomUUID()

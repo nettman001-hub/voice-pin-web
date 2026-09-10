@@ -34,6 +34,8 @@ import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
 import { useProductSales } from '../../context/ProductSalesContext';
 import { formatMultiSaleAmount } from '../../services/salesExtractor';
 import { areNicknamesSimilar } from '../../services/nicknameMatcher';
+import { AiLiveStatusBadge } from '../../components/live/AiLiveStatusBadge';
+import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
 
 const SILENCE_WARNING_DELAY_MS = 5 * 60 * 1000;
 const SILENCE_STOP_COUNTDOWN_SECONDS = 20;
@@ -233,13 +235,14 @@ export const LiveHomePage: React.FC = () => {
             <Radio className={`w-6 h-6 sm:w-8 sm:h-8 ${isListening ? 'animate-spin' : ''}`} />
           </div>
           <div>
-            <div className="flex items-center space-x-2 flex-wrap gap-1">
+            <div className="flex items-center space-x-2 flex-wrap gap-1.5">
               <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">라이브 청취 홈</h1>
               <span className={`px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-bold ${
                 isListening ? 'bg-rose-50 text-rose-600 border border-rose-200' : 'bg-slate-100 text-slate-600'
               }`}>
                 {isListening ? 'ON AIR' : '대기 중'}
               </span>
+              <AiLiveStatusBadge />
             </div>
             <p className="text-[11px] sm:text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-1.5 sm:gap-2">
               <span>회차: <strong className="text-slate-900 font-mono">{currentSessionId}</strong></span>
@@ -1047,6 +1050,11 @@ export const LiveHomePage: React.FC = () => {
                         <p className="text-[11px] text-slate-500 mt-1.5 truncate">
                           "{sale.rawTranscript}"
                         </p>
+
+                        {/* AI 작업 이력 배지, 전후 Diff 및 근거보기/후보적용/되돌리기 버튼 */}
+                        <div className="mt-2 pt-2 border-t border-slate-200/50">
+                          <SaleAiActionButtons sale={sale} />
+                        </div>
                       </div>
                     </div>
                   </Link>
