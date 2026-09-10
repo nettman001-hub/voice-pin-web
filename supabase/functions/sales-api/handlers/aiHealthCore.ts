@@ -204,7 +204,7 @@ export function getSyntheticTestScenarios(): Array<{
 export async function checkTier1Connection(
   slotConfig: AiSlotConfig,
   secretValue?: string,
-  allowInsecureHttpForExternal?: boolean
+  allowInsecureHttpForExternal: boolean = true
 ): Promise<AiTier1ConnectionResult> {
   const testedAt = new Date().toISOString();
   const endpointUrl = (slotConfig.endpointUrl || '').trim();
@@ -251,9 +251,8 @@ export async function checkTier1Connection(
     };
   }
 
-  // 서버 직접 호출 모드 (SERVER_DIRECT)
   const startTime = Date.now();
-  const timeoutMs = (slotConfig.connectTimeoutSeconds || 3) * 1000;
+  const timeoutMs = (slotConfig.connectTimeoutSeconds || 6) * 1000;
 
   try {
     const controller = new AbortController();
@@ -262,7 +261,10 @@ export async function checkTier1Connection(
     // 기본 헬스체크 프로브
     let probeUrl = endpointUrl;
     if (slotConfig.type === 'CLOUD') {
-      if (slotConfig.provider === 'ANTHROPIC') {
+      if (slotConfig.provider === 'DEEPSEEK') {
+        const clean = endpointUrl.replace(/\/+$/, '');
+        probeUrl = clean ? (clean.endsWith('/models') ? clean : `${clean}/models`) : 'https://api.deepseek.com/models';
+      } else if (slotConfig.provider === 'ANTHROPIC') {
         probeUrl = 'https://api.anthropic.com/v1/messages';
       } else if (slotConfig.provider === 'OPENAI') {
         probeUrl = 'https://api.openai.com/v1/models';

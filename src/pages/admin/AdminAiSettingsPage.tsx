@@ -949,6 +949,17 @@ const SlotCard: React.FC<SlotCardProps> = ({
               } else if (newProvider === 'OLLAMA' && (!config.endpointUrl || config.endpointUrl.includes('1234') || config.endpointUrl.includes('1235'))) {
                 onChange('endpointUrl', 'http://127.0.0.1:11434');
               }
+            } else {
+              if (newProvider === 'DEEPSEEK') {
+                onChange('model', 'deepseek-chat');
+                onChange('authType', 'BEARER');
+              } else if (newProvider === 'OPENAI') {
+                onChange('model', 'gpt-4o-mini');
+                onChange('authType', 'BEARER');
+              } else if (newProvider === 'ANTHROPIC') {
+                onChange('model', 'claude-3-5-haiku-20241022');
+                onChange('authType', 'API_KEY');
+              }
             }
           }}
           className="w-full px-3 py-2 border border-slate-200 rounded-xl font-bold text-slate-800 bg-white text-xs"
@@ -1122,14 +1133,35 @@ const SlotCard: React.FC<SlotCardProps> = ({
         </div>
       ) : (
         <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2 text-xs">
-          <label className="block font-bold text-slate-700">커스텀 엔드포인트 URL (선택사항)</label>
+          <div className="flex items-center justify-between">
+            <label className="block font-bold text-slate-700">커스텀 엔드포인트 URL (선택사항)</label>
+            {config.provider === 'DEEPSEEK' && (
+              <a
+                href="https://api-docs.deepseek.com/"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] text-brand-600 hover:underline font-bold flex items-center gap-1"
+              >
+                DeepSeek API 문서 ↗
+              </a>
+            )}
+          </div>
           <input
             type="text"
             value={config.endpointUrl}
             onChange={(e) => onChange('endpointUrl', e.target.value)}
-            placeholder="기본 공식 API 주소 사용 시 비워두세요"
+            placeholder={
+              config.provider === 'DEEPSEEK'
+                ? '기본값: https://api.deepseek.com (공식 OpenAI 호환)'
+                : '기본 공식 API 주소 사용 시 비워두세요'
+            }
             className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono text-slate-800 bg-white"
           />
+          {config.provider === 'DEEPSEEK' && (
+            <p className="text-[10px] text-slate-500">
+              * DeepSeek 공식 API는 OpenAI 완전 호환 규격(Base URL: <code className="font-mono text-brand-700">https://api.deepseek.com</code>)입니다.
+            </p>
+          )}
         </div>
       )}
 
@@ -1311,14 +1343,40 @@ const SlotCard: React.FC<SlotCardProps> = ({
               value={config.model}
               onChange={(e) => onChange('model', e.target.value)}
               placeholder={
-                config.provider === 'LM_STUDIO'
+                config.provider === 'DEEPSEEK'
+                  ? 'deepseek-chat 또는 deepseek-reasoner'
+                  : config.provider === 'LM_STUDIO'
                   ? '예: qwen2.5-7b-instruct, mistral-7b-instruct'
                   : config.type === 'LOCAL'
                   ? '예: qwen2.5:7b, llama3.1:8b'
                   : '예: gpt-4o-mini, claude-3-5-sonnet'
               }
-              className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono text-slate-800 bg-white"
+              className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono text-slate-800 bg-white font-bold"
             />
+
+            {/* DeepSeek 전용 모델 빠른 프리셋 버튼 */}
+            {config.provider === 'DEEPSEEK' && (
+              <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                <span className="text-[10px] text-slate-400 font-medium mr-0.5">DeepSeek 모델:</span>
+                {[
+                  { id: 'deepseek-chat', label: 'deepseek-chat (V3 강력추천)', desc: '초고속 범용' },
+                  { id: 'deepseek-reasoner', label: 'deepseek-reasoner (R1 추론)', desc: '심층 사고' },
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => onChange('model', m.id)}
+                    className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono transition ${
+                      config.model === m.id
+                        ? 'bg-brand-50 border-brand-400 text-brand-700 font-bold'
+                        : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="flex items-center justify-between text-[10px] text-slate-400">
               <span>
                 {availableModels.length > 0
@@ -1404,10 +1462,16 @@ const SlotCard: React.FC<SlotCardProps> = ({
                 className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                   health?.tier1?.ok
                     ? 'bg-emerald-100 text-emerald-800'
+                    : health?.tier1?.status && health.tier1.status !== 'UNCONFIGURED'
+                    ? 'bg-rose-100 text-rose-800'
                     : 'bg-slate-200 text-slate-600'
                 }`}
               >
-                {health?.tier1?.ok ? `정상 (${health.tier1.latencyMs || 0}ms)` : health?.tier1?.status || '미실행'}
+                {health?.tier1?.ok
+                  ? `정상 (${health.tier1.latencyMs || 0}ms)`
+                  : health?.tier1?.status
+                  ? `실패 (${health.tier1.status})`
+                  : '미실행'}
               </span>
             </div>
           </div>

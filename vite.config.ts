@@ -45,6 +45,37 @@ export default defineConfig({
             res.end(JSON.stringify({ ok: false, models: [], message: e?.message }));
           }
         });
+
+        server.middlewares.use('/api/ai-health', async (req, res) => {
+          try {
+            let body = {};
+            if (req.method === 'POST') {
+              const buffers: any[] = [];
+              for await (const chunk of req) buffers.push(chunk);
+              const data = Buffer.concat(buffers).toString();
+              try { body = JSON.parse(data); } catch {}
+            }
+            const { default: handler } = await import('./api/ai-health.ts');
+            const mockRes = {
+              statusCode: 200,
+              headers: {} as Record<string, string>,
+              setHeader(k: string, v: string) { this.headers[k] = v; return this; },
+              status(code: number) { this.statusCode = code; return this; },
+              json(data: any) {
+                res.statusCode = this.statusCode;
+                res.setHeader('Content-Type', 'application/json');
+                Object.entries(this.headers).forEach(([k, v]) => res.setHeader(k, v));
+                res.end(JSON.stringify(data));
+              },
+              end() { res.end(); }
+            };
+            await handler({ ...req, body }, mockRes);
+          } catch (e: any) {
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ ok: false, message: e?.message }));
+          }
+        });
       },
     },
   ],

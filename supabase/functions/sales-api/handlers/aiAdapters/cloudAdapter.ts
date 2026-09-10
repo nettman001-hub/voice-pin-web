@@ -24,7 +24,7 @@ export async function runCloudResolution(
   const { slotConfig, secretApiKey } = options;
   const startTime = Date.now();
   const provider = slotConfig.provider || 'OPENAI';
-  const model = slotConfig.model || (provider === 'ANTHROPIC' ? 'claude-3-5-haiku-20241022' : 'gpt-4o-mini');
+  const model = slotConfig.model || (provider === 'ANTHROPIC' ? 'claude-3-5-haiku-20241022' : provider === 'DEEPSEEK' ? 'deepseek-chat' : 'gpt-4o-mini');
   const timeoutMs = (slotConfig.timeoutSeconds || 15) * 1000;
 
   // 1. API 키 필수 검증
@@ -96,17 +96,38 @@ export async function runCloudResolution(
       } else {
         url = 'https://api.openai.com/v1/chat/completions';
       }
+    } else if (provider === 'DEEPSEEK') {
+      const cleanUrl = url.replace(/\/+$/, '');
+      if (cleanUrl === 'https://api.deepseek.com' || cleanUrl === 'https://api.deepseek.com/v1') {
+        url = `${cleanUrl}/chat/completions`;
+      }
     }
+
     headers['Authorization'] = `Bearer ${secretApiKey.trim()}`;
-    requestBody = {
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.1,
-    };
+
+    // DeepSeek 공식 문서 (https://api-docs.deepseek.com/):
+    // deepseek-reasoner(R1) 모델은 temperature, top_p, response_format 파라미터를 지원하지 않습니다 (전송 시 HTTP 400 반환).
+    const isDeepSeekReasoner = provider === 'DEEPSEEK' && model.includes('reasoner');
+
+    if (isDeepSeekReasoner) {
+      requestBody = {
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+      };
+    } else {
+      requestBody = {
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.1,
+      };
+    }
   }
 
   let rawResponseText = '';

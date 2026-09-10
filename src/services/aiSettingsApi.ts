@@ -159,6 +159,42 @@ export const aiSettingsApi = {
     newSecret?: string,
     workspaceId?: string
   ): Promise<AiConnectionTestResult> {
+    // 1. Vercel Serverless Function (/api/ai-health TIER1) 우선 호출
+    try {
+      const vController = new AbortController();
+      const vTimer = setTimeout(() => vController.abort(), 8000);
+      const vRes = await fetch('/api/ai-health', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          slotNumber,
+          tier: 'TIER1',
+          tempSlotConfig,
+          newSecret,
+          workspaceId,
+        }),
+        signal: vController.signal,
+      }).catch(() => null);
+      clearTimeout(vTimer);
+
+      if (vRes && vRes.ok) {
+        const d = await vRes.json().catch(() => null);
+        if (d && d.ok && d.health?.tier1) {
+          const t1 = d.health.tier1;
+          return {
+            ok: t1.ok,
+            slotNumber,
+            status: t1.status,
+            latencyMs: t1.latencyMs,
+            message: t1.message,
+            testedAt: t1.testedAt || new Date().toISOString(),
+          };
+        }
+      }
+    } catch {
+      // fallback
+    }
+
     if (!isSupabaseConfigured) {
       // 로컬 개발 모드 시뮬레이션
       const start = Date.now();
@@ -338,6 +374,52 @@ export const aiSettingsApi = {
   async checkAiHealth(
     payload: CheckAiHealthPayload = {}
   ): Promise<{ health: AiSlotHealth | { slot1: AiSlotHealth; slot2: AiSlotHealth }; checkedAt: string }> {
+    // 1. Vercel Serverless Function (/api/ai-health) 최우선 호출
+    // 브라우저 Mixed Content (HTTPS -> HTTP), CORS, 구버전 Edge Function 미배포 문제 우회
+    try {
+      const vController = new AbortController();
+      const vTimer = setTimeout(() => vController.abort(), 12000);
+      const vRes = await fetch('/api/ai-health', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload),
+        signal: vController.signal,
+      }).catch(() => null);
+      clearTimeout(vTimer);
+
+      if (vRes && vRes.ok) {
+        const d = await vRes.json().catch(() => null);
+        if (d && d.ok && d.health) {
+          return { health: d.health, checkedAt: d.checkedAt || new Date().toISOString() };
+        }
+      }
+    } catch {
+      // Vercel proxy failed or offline, fallback
+    }
+
+    // 2. PC 도우미 로컬 포트 (127.0.0.1:2137/api/ai-health) 시도
+    try {
+      const hController = new AbortController();
+      const hTimer = setTimeout(() => hController.abort(), 3000);
+      const hRes = await fetch('http://127.0.0.1:2137/api/ai-health', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload),
+        signal: hController.signal,
+      }).catch(() => null);
+      clearTimeout(hTimer);
+
+      if (hRes && hRes.ok) {
+        const d = await hRes.json().catch(() => null);
+        if (d && d.ok && d.health) {
+          return { health: d.health, checkedAt: d.checkedAt || new Date().toISOString() };
+        }
+      }
+    } catch {
+      // Local helper offline
+    }
+
+    // 3. Supabase 미설정 시 로컬 모의 응답
     if (!isSupabaseConfigured) {
       const now = new Date().toISOString();
       const mockSlot = (num: 1 | 2): AiSlotHealth => ({
@@ -365,6 +447,7 @@ export const aiSettingsApi = {
       return { health: { slot1: mockSlot(1), slot2: mockSlot(2) }, checkedAt: now };
     }
 
+    // 4. Supabase Edge Function 폴백
     return await invokeSalesApi<{
       health: AiSlotHealth | { slot1: AiSlotHealth; slot2: AiSlotHealth };
       checkedAt: string;

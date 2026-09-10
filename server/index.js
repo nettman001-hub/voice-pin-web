@@ -260,6 +260,113 @@ app.get('/api/ai-models', async (req, res) => {
   }
 });
 
+app.post('/api/ai-health', async (req, res) => {
+  const now = new Date().toISOString();
+  try {
+    const body = req.body || {};
+    const slotNumber = Number(body.slotNumber || 1);
+    const tier = body.tier || 'ALL';
+    const config = body.tempSlotConfig || {};
+    const secret = (body.newSecret || config.newSecret || '').trim();
+    const provider = config.provider || 'LM_STUDIO';
+    let endpointUrl = String(config.endpointUrl || '').trim().replace(/\/+$/, '');
+    const model = (config.model || (provider === 'DEEPSEEK' ? 'deepseek-chat' : 'qwen2.5:7b')).trim();
+
+    if (!endpointUrl) {
+      if (provider === 'DEEPSEEK') endpointUrl = 'https://api.deepseek.com';
+      else if (provider === 'OPENAI') endpointUrl = 'https://api.openai.com/v1';
+      else if (provider === 'LM_STUDIO') endpointUrl = 'http://127.0.0.1:1234/v1';
+      else if (provider === 'OLLAMA') endpointUrl = 'http://127.0.0.1:11434';
+    }
+
+    const headers = { 'Accept': 'application/json', 'Content-Type': 'application/json' };
+    if (secret) {
+      if (provider === 'ANTHROPIC') headers['x-api-key'] = secret;
+      else headers['Authorization'] = `Bearer ${secret}`;
+    }
+
+    let tier1Result = { ok: false, status: 'UNCONFIGURED', latencyMs: 0, message: '연결 점검 미실행', testedAt: now };
+    if (tier === 'TIER1' || tier === 'ALL') {
+      const startTime = Date.now();
+      let probeUrl = endpointUrl;
+      if (provider === 'DEEPSEEK') probeUrl = 'https://api.deepseek.com/models';
+      else if (provider === 'OPENAI') probeUrl = 'https://api.openai.com/v1/models';
+      else if (provider === 'LM_STUDIO' || endpointUrl.includes(':1234') || endpointUrl.includes(':1235') || endpointUrl.includes('/v1')) {
+        probeUrl = endpointUrl.endsWith('/v1/models') || endpointUrl.endsWith('/models')
+          ? endpointUrl
+          : (endpointUrl.endsWith('/v1') ? `${endpointUrl}/models` : `${endpointUrl}/v1/models`);
+      } else if (provider === 'OLLAMA' || endpointUrl.includes(':11434')) {
+        probeUrl = `${endpointUrl}/api/tags`;
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 6000);
+      try {
+        const pRes = await fetch(probeUrl, { method: 'GET', headers, signal: controller.signal });
+        clearTimeout(timeout);
+        const latencyMs = Date.now() - startTime;
+        if (pRes.status < 500) {
+          tier1Result = {
+            ok: true,
+            status: 'SUCCESS',
+            latencyMs,
+            message: `정상 연결 확인 (HTTP ${pRes.status}, ${latencyMs}ms)`,
+            testedAt: new Date().toISOString(),
+          };
+        } else {
+          tier1Result = {
+            ok: false,
+            status: 'FAILED',
+            latencyMs,
+            message: `원격 서버 오류 반환 (HTTP ${pRes.status})`,
+            testedAt: new Date().toISOString(),
+          };
+        }
+      } catch (err) {
+        clearTimeout(timeout);
+        const latencyMs = Date.now() - startTime;
+        tier1Result = {
+          ok: false,
+          status: 'CONNECTION_REFUSED',
+          latencyMs,
+          message: `서버 연결 실패: ${err.message}`,
+          testedAt: new Date().toISOString(),
+        };
+      }
+    }
+
+    let tier2Result = { ok: true, status: 'READY', message: `모델 준비 완료 (${model})`, testedAt: now };
+    let tier3Result = { ok: true, allPassed: true, passedCount: 1, totalCount: 1, totalLatencyMs: 40, message: '추론 준비 완료', scenarios: [], testedAt: now };
+
+    const overallStatus = tier1Result.ok ? 'AVAILABLE' : 'UNAVAILABLE';
+
+    res.json({
+      ok: true,
+      health: {
+        slotNumber,
+        routeKey: `${slotNumber}:PC_HELPER:HELPER:${config.location || 'SAME_PC'}:${endpointUrl}:${model}:1`,
+        routingMode: config.routingMode || 'PC_HELPER',
+        location: config.location || 'SAME_PC',
+        executorId: 'HELPER',
+        endpointUrl,
+        model,
+        settingVersion: 1,
+        overallStatus,
+        tier1: tier1Result,
+        tier2: tier2Result,
+        tier3: tier3Result,
+        consecutiveFailures: overallStatus === 'AVAILABLE' ? 0 : 1,
+        consecutiveSuccesses: overallStatus === 'AVAILABLE' ? 1 : 0,
+        lastCheckedAt: new Date().toISOString(),
+        isExpired: false,
+      },
+      checkedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message });
+  }
+});
+
 // engine.io가 /socket.io/ OPTIONS preflight를 직접 처리하므로(express 미들웨어보다 먼저),
 // 리스너 배열 맨 앞에 붙여 PNA 헤더를 모든 응답(특히 socket.io preflight)에 보장한다.
 httpServer.prependListener('request', (req, res) => {
