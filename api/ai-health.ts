@@ -1,6 +1,12 @@
+import { createClient } from '@supabase/supabase-js';
+
 // Vercel Serverless Function: AI 3단계 가용성 진단 프록시 API
 // 브라우저의 Mixed Content (HTTPS -> HTTP) 및 CORS, 원격 서버(Supabase)의 SSRF 차단 문제를 완전히 우회하여
 // Vercel 백엔드에서 자체 운영 LLM(LM Studio, Ollama 등) 및 클라우드 LLM(DeepSeek, OpenAI 등)을 직접 진단합니다.
+
+const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://ymegrhxpbeanvxwdzfym.supabase.co';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || '';
+const supabase = supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 function cleanEndpoint(url?: string): string {
   if (!url) return '';
@@ -41,7 +47,43 @@ export default async function handler(req: any, res: any) {
     const slotNumber = Number(body.slotNumber || 1);
     const tier = (body.tier || 'ALL') as 'TIER1' | 'TIER2' | 'TIER3' | 'ALL';
     const config = body.tempSlotConfig || {};
-    const secret = (body.newSecret || config.newSecret || '').trim();
+    let secret = (body.newSecret || config.newSecret || '').trim();
+
+    // 만약 전달받은 newSecret이 없고 Supabase가 연결되어 있다면 DB 격리 보관소(ai_secrets)에서 보관된 키 조회
+    if (!secret && supabase) {
+      try {
+        const { data: settingRow } = await supabase
+          .from('ai_settings')
+          .select('id, slot1, slot2')
+          .eq('scope', 'GLOBAL')
+          .maybeSingle();
+
+        if (settingRow?.id) {
+          const { data: secRow } = await supabase
+            .from('ai_secrets')
+            .select('secret_value, secret_type')
+            .eq('setting_id', settingRow.id)
+            .eq('slot_number', slotNumber)
+            .maybeSingle();
+
+          if (secRow?.secret_value) {
+            secret = String(secRow.secret_value).trim();
+          }
+
+          // config가 비어있다면 DB에 저장된 슬롯 설정값 자동 보완
+          const dbSlot = slotNumber === 2 ? settingRow.slot2 : settingRow.slot1;
+          if (dbSlot) {
+            if (!config.provider && dbSlot.provider) config.provider = dbSlot.provider;
+            if (!config.endpointUrl && dbSlot.endpointUrl) config.endpointUrl = dbSlot.endpointUrl;
+            if (!config.model && dbSlot.model) config.model = dbSlot.model;
+            if (!config.type && dbSlot.type) config.type = dbSlot.type;
+            if (!config.authType && dbSlot.authType) config.authType = dbSlot.authType;
+          }
+        }
+      } catch (dbErr) {
+        console.warn('[api/ai-health] Failed to fetch secret from ai_secrets:', dbErr);
+      }
+    }
 
     const provider = config.provider || 'LM_STUDIO';
     const type = config.type || (provider === 'DEEPSEEK' || provider === 'OPENAI' || provider === 'ANTHROPIC' ? 'CLOUD' : 'LOCAL');
@@ -68,6 +110,7 @@ export default async function handler(req: any, res: any) {
         headers['anthropic-version'] = '2023-06-01';
       } else {
         headers['Authorization'] = `Bearer ${secret}`;
+        headers['x-api-key'] = secret; // OpenAI/DeepSeek 호환을 위해 둘 다 제공하여 어떤 헤더 규격이든 100% 통과
       }
     }
 

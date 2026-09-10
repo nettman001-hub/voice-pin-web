@@ -489,8 +489,22 @@ export const aiSettingsApi = {
   async checkAiHealth(
     payload: CheckAiHealthPayload = {}
   ): Promise<{ health: AiSlotHealth | { slot1: AiSlotHealth; slot2: AiSlotHealth }; checkedAt: string }> {
-    // 1. Vercel Serverless Function (/api/ai-health) 최우선 호출
-    // 브라우저 Mixed Content (HTTPS -> HTTP), CORS, 구버전 Edge Function 미배포 문제 우회
+    // 1. Supabase가 설정되어 있다면, DB 비밀정보(ai_secrets) 격리 보관소에 안전하게 접근 가능한 Supabase Edge Function 최우선 호출!
+    if (isSupabaseConfigured) {
+      try {
+        const resp = await invokeSalesApi<{
+          health: AiSlotHealth | { slot1: AiSlotHealth; slot2: AiSlotHealth };
+          checkedAt: string;
+        }>('check-ai-health', payload as Record<string, unknown>);
+        if (resp && resp.health) {
+          return resp;
+        }
+      } catch (edgeErr) {
+        console.warn('[AiSettingsApi] Edge Function check-ai-health 실패, Vercel 프록시로 폴백 시도:', edgeErr);
+      }
+    }
+
+    // 2. Vercel Serverless Function (/api/ai-health) 폴백 호출
     try {
       const vController = new AbortController();
       const vTimer = setTimeout(() => vController.abort(), 12000);

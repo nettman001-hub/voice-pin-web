@@ -174,7 +174,8 @@ export const AdminAiSettingsPage: React.FC = () => {
       // 저장 전 주소와 라우팅 모드 불일치 자동 정제 (SSRF 보안 오류 방지)
       const sanitizeSlot = (slot: AiSlotConfig): AiSlotConfig => {
         const clean = { ...slot };
-        const urlStr = (clean.endpointUrl || '').trim().toLowerCase();
+        clean.endpointUrl = (clean.endpointUrl || '').trim();
+        const urlStr = clean.endpointUrl.toLowerCase();
         if (urlStr.includes('127.0.0.1') || urlStr.includes('localhost') || urlStr.includes('::1')) {
           clean.routingMode = 'PC_HELPER';
           clean.location = 'SAME_PC';

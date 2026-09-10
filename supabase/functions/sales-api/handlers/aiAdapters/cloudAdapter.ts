@@ -104,6 +104,7 @@ export async function runCloudResolution(
     }
 
     headers['Authorization'] = `Bearer ${secretApiKey.trim()}`;
+    headers['x-api-key'] = secretApiKey.trim();
 
     // DeepSeek 공식 문서 (https://api-docs.deepseek.com/):
     // deepseek-reasoner(R1) 모델은 temperature, top_p, response_format 파라미터를 지원하지 않습니다 (전송 시 HTTP 400 반환).
