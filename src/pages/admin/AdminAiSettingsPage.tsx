@@ -881,6 +881,13 @@ const SlotCard: React.FC<SlotCardProps> = ({
   const currentPort = extractPortFromUrl(config.endpointUrl);
 
   const fetchModels = useCallback(async (silent = false) => {
+    // 클라우드 LLM의 경우 엔드포인트 모델 목록 조회를 실행하지 않음
+    if (config.type === 'CLOUD') {
+      setAvailableModels([]);
+      setModelFetchError(null);
+      return;
+    }
+
     const url = (config.endpointUrl || '').trim();
     if (!url) {
       setAvailableModels([]);
@@ -916,9 +923,14 @@ const SlotCard: React.FC<SlotCardProps> = ({
     } finally {
       setIsLoadingModels(false);
     }
-  }, [config.endpointUrl, config.authType, config.provider, config.location, config.routingMode, newSecret, slotNumber, config.model, onChange]);
+  }, [config.type, config.endpointUrl, config.authType, config.provider, config.location, config.routingMode, newSecret, slotNumber, config.model, onChange]);
 
   useEffect(() => {
+    if (config.type === 'CLOUD') {
+      setAvailableModels([]);
+      setModelFetchError(null);
+      return;
+    }
     const trimmed = (config.endpointUrl || '').trim();
     if (!trimmed) {
       setAvailableModels([]);
@@ -928,7 +940,7 @@ const SlotCard: React.FC<SlotCardProps> = ({
       fetchModels(true);
     }, 600);
     return () => clearTimeout(timer);
-  }, [config.endpointUrl, config.authType, config.provider, config.routingMode, newSecret, fetchModels]);
+  }, [config.type, config.endpointUrl, config.authType, config.provider, config.routingMode, newSecret, fetchModels]);
 
   return (
     <div
@@ -1335,44 +1347,51 @@ const SlotCard: React.FC<SlotCardProps> = ({
               <Bot className="w-3.5 h-3.5 text-brand-600" />
               <span>모델명 (Model Tag)</span>
             </label>
-            {isLoadingModels ? (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                <RefreshCw className="w-3 h-3 animate-spin" />
-                목록 조회 중...
-              </span>
-            ) : availableModels.length > 0 ? (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                <CheckCircle2 className="w-3 h-3" />
-                {availableModels.length}개 감지됨
-              </span>
-            ) : null}
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              disabled={isLoadingModels || !config.endpointUrl}
-              onClick={() => fetchModels(false)}
-              className="p-1 px-2 text-[11px] bg-white border border-slate-200 hover:bg-slate-100 rounded-lg text-slate-600 transition flex items-center gap-1 disabled:opacity-40"
-              title="연결 가능한 모델 목록 새로고침"
-            >
-              <RefreshCw className={`w-3 h-3 ${isLoadingModels ? 'animate-spin text-brand-600' : ''}`} />
-              <span>목록 조회</span>
-            </button>
-            {availableModels.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setIsDirectInput(!isDirectInput)}
-                className="text-[11px] text-brand-600 hover:text-brand-700 underline font-medium ml-1"
-              >
-                {isDirectInput ? '목록에서 선택' : '직접 입력'}
-              </button>
+            {config.type === 'LOCAL' && (
+              <>
+                {isLoadingModels ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                    목록 조회 중...
+                  </span>
+                ) : availableModels.length > 0 ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <CheckCircle2 className="w-3 h-3" />
+                    {availableModels.length}개 감지됨
+                  </span>
+                ) : null}
+              </>
             )}
           </div>
+
+          {/* 클라우드 LLM인 경우 모델명 목록조회 버튼 제외, 자체 운영(LOCAL)인 경우만 제공 */}
+          {config.type === 'LOCAL' && (
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={isLoadingModels || !config.endpointUrl}
+                onClick={() => fetchModels(false)}
+                className="p-1 px-2 text-[11px] bg-white border border-slate-200 hover:bg-slate-100 rounded-lg text-slate-600 transition flex items-center gap-1 disabled:opacity-40"
+                title="연결 가능한 모델 목록 새로고침"
+              >
+                <RefreshCw className={`w-3 h-3 ${isLoadingModels ? 'animate-spin text-brand-600' : ''}`} />
+                <span>목록 조회</span>
+              </button>
+              {availableModels.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsDirectInput(!isDirectInput)}
+                  className="text-[11px] text-brand-600 hover:text-brand-700 underline font-medium ml-1"
+                >
+                  {isDirectInput ? '목록에서 선택' : '직접 입력'}
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* If we have available models and not in direct input mode */}
-        {availableModels.length > 0 && !isDirectInput ? (
+        {/* If we have available models and not in direct input mode (자체 운영 LOCAL 전용) */}
+        {config.type === 'LOCAL' && availableModels.length > 0 && !isDirectInput ? (
           <div className="space-y-1.5">
             <select
               value={config.model || availableModels[0] || ''}
@@ -1442,15 +1461,66 @@ const SlotCard: React.FC<SlotCardProps> = ({
                 ))}
               </div>
             )}
+
+            {/* OpenAI 전용 모델 빠른 프리셋 버튼 */}
+            {config.provider === 'OPENAI' && (
+              <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                <span className="text-[10px] text-slate-400 font-medium mr-0.5">OpenAI 모델:</span>
+                {[
+                  { id: 'gpt-4o-mini', label: 'gpt-4o-mini (가성비·고속)' },
+                  { id: 'gpt-4o', label: 'gpt-4o (최고 성능)' },
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => onChange('model', m.id)}
+                    className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono transition ${
+                      config.model === m.id
+                        ? 'bg-brand-50 border-brand-400 text-brand-700 font-bold'
+                        : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Anthropic 전용 모델 빠른 프리셋 버튼 */}
+            {config.provider === 'ANTHROPIC' && (
+              <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                <span className="text-[10px] text-slate-400 font-medium mr-0.5">Claude 모델:</span>
+                {[
+                  { id: 'claude-3-5-haiku-20241022', label: 'claude-3-5-haiku (초고속)' },
+                  { id: 'claude-3-5-sonnet-20241022', label: 'claude-3-5-sonnet (최고 품질)' },
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => onChange('model', m.id)}
+                    className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono transition ${
+                      config.model === m.id
+                        ? 'bg-brand-50 border-brand-400 text-brand-700 font-bold'
+                        : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="flex items-center justify-between text-[10px] text-slate-400">
               <span>
-                {availableModels.length > 0
+                {config.type === 'CLOUD'
+                  ? '제공사 규격에 맞는 모델명을 입력하거나 위 추천 버튼을 클릭하세요.'
+                  : availableModels.length > 0
                   ? '직접 입력 모드입니다.'
                   : config.endpointUrl
                   ? '엔드포인트 및 인증 방식이 올바르면 모델 목록이 자동으로 조회됩니다.'
                   : '엔드포인트 주소를 입력하면 연결 가능한 모델이 자동 조회됩니다.'}
               </span>
-              {availableModels.length > 0 && (
+              {config.type === 'LOCAL' && availableModels.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setIsDirectInput(false)}
@@ -1463,7 +1533,7 @@ const SlotCard: React.FC<SlotCardProps> = ({
           </div>
         )}
 
-        {modelFetchError && (
+        {config.type === 'LOCAL' && modelFetchError && (
           <p className="text-[10px] text-rose-500">
             * {modelFetchError} (직접 모델명을 입력하여 진행할 수 있습니다)
           </p>
