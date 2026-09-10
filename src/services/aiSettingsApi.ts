@@ -188,9 +188,41 @@ export const aiSettingsApi = {
       return { ok: false, models: [], message: '엔드포인트 주소를 입력해 주세요.' };
     }
 
-    // 1. 브라우저 직접 fetch 시도 (로컬 개발 환경 또는 직접 도달 가능한 경우)
+    const clean = trimmed.replace(/\/+$/, '');
+
+    // 1. Vercel Serverless Proxy / Vite Dev Proxy (/api/ai-models) 우선 호출
+    // 브라우저의 Mixed Content (HTTPS -> HTTP) 및 CORS 차단을 완벽히 우회하여
+    // 외부 공인 IP/도메인 LLM 서버에 안전하게 도달합니다.
     try {
-      const clean = trimmed.replace(/\/+$/, '');
+      const vercelController = new AbortController();
+      const vercelTimer = setTimeout(() => vercelController.abort(), 6000);
+      const queryParams = new URLSearchParams({
+        endpointUrl: clean,
+        provider: payload.provider || '',
+      });
+      if (payload.authType) queryParams.set('authType', payload.authType);
+      if (payload.secret) queryParams.set('secret', payload.secret);
+      if (payload.customHeaderName) queryParams.set('customHeaderName', payload.customHeaderName);
+
+      const vRes = await fetch(`/api/ai-models?${queryParams.toString()}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: vercelController.signal,
+      }).catch(() => null);
+      clearTimeout(vercelTimer);
+
+      if (vRes && vRes.ok) {
+        const d = await vRes.json().catch(() => null);
+        if (d && Array.isArray(d.models) && d.models.length > 0) {
+          return { ok: true, models: d.models, source: 'VERCEL_PROXY' };
+        }
+      }
+    } catch {
+      // Proxy failed or offline, proceed to fallback
+    }
+
+    // 2. 브라우저 직접 fetch 시도 (로컬 개발 환경 또는 직접 도달 가능한 경우)
+    try {
       const isOllama = payload.provider === 'OLLAMA' || clean.endsWith(':11434');
       const isLmStudio = payload.provider === 'LM_STUDIO' || clean.includes(':1234') || clean.includes(':1235');
 
@@ -237,32 +269,28 @@ export const aiSettingsApi = {
       // Direct fetch failed, fallback to backend proxy
     }
 
-    // 2. 백엔드 Edge Function 프록시 호출
-    if (!isSupabaseConfigured) {
-      return {
-        ok: true,
-        models: payload.provider === 'LM_STUDIO'
-          ? ['qwen2.5-7b-instruct', 'llama-3.1-8b-instruct', 'mistral-7b-instruct-v0.3']
-          : (payload.provider === 'OLLAMA' ? ['qwen2.5:7b', 'llama3.1:8b', 'gemma2:9b'] : ['default']),
-        source: 'FALLBACK',
-      };
+    // 3. 백엔드 Supabase Edge Function 프록시 호출
+    if (isSupabaseConfigured) {
+      try {
+        const resp = await invokeSalesApi<{ ok: boolean; models: string[]; message?: string; source?: any }>('list-ai-models', payload);
+        if (resp && resp.ok && resp.models && resp.models.length > 0) {
+          return {
+            ok: resp.ok,
+            models: resp.models,
+            message: resp.message,
+            source: resp.source,
+          };
+        }
+      } catch (err: any) {
+        // Continue to fallback message
+      }
     }
 
-    try {
-      const resp = await invokeSalesApi<{ ok: boolean; models: string[]; message?: string; source?: any }>('list-ai-models', payload);
-      return {
-        ok: resp.ok,
-        models: resp.models || [],
-        message: resp.message,
-        source: resp.source,
-      };
-    } catch (err: any) {
-      return {
-        ok: false,
-        models: [],
-        message: err.message || '모델 목록 조회 중 오류가 발생했습니다.',
-      };
-    }
+    return {
+      ok: false,
+      models: [],
+      message: '해당 엔드포인트에서 모델 목록을 가져오지 못했습니다. 엔드포인트 주소와 서버 실행 상태를 확인해 주세요.',
+    };
   },
 
   async testAiSynthetic(

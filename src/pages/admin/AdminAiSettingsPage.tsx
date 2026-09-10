@@ -841,20 +841,19 @@ const SlotCard: React.FC<SlotCardProps> = ({
       });
       if (res.ok && res.models && res.models.length > 0) {
         setAvailableModels(res.models);
-        if (!config.model && res.models[0]) {
+        setModelFetchError(null);
+        if ((!config.model || !res.models.includes(config.model)) && res.models[0]) {
           onChange('model', res.models[0]);
         }
       } else {
         setAvailableModels([]);
-        if (res.message && !silent) {
+        if (res.message) {
           setModelFetchError(res.message);
         }
       }
     } catch (err: any) {
       setAvailableModels([]);
-      if (!silent) {
-        setModelFetchError(err?.message || '모델 목록을 불러오지 못했습니다.');
-      }
+      setModelFetchError(err?.message || '모델 목록을 불러오지 못했습니다.');
     } finally {
       setIsLoadingModels(false);
     }

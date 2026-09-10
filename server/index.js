@@ -218,6 +218,48 @@ app.post('/api/stt/detect', (_req, res) => {
   res.json({ ok: true, ...result });
 });
 
+app.get('/api/ai-models', async (req, res) => {
+  try {
+    const rawUrl = req.query.endpointUrl;
+    if (!rawUrl) {
+      return res.status(400).json({ ok: false, models: [], message: 'endpointUrl 필요' });
+    }
+    const clean = String(rawUrl).trim().replace(/\/+$/, '');
+    let modelsUrl = clean.endsWith('/v1/models') || clean.endsWith('/models')
+      ? clean
+      : (clean.endsWith('/chat/completions')
+        ? clean.replace(/\/chat\/completions$/, '/models')
+        : (clean.endsWith('/v1') ? `${clean}/models` : `${clean}/v1/models`));
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const r = await fetch(modelsUrl, { headers: { Accept: 'application/json' }, signal: controller.signal }).catch(() => null);
+    clearTimeout(timeout);
+
+    let models = [];
+    if (r && r.ok) {
+      const data = await r.json().catch(() => null);
+      const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : (Array.isArray(data?.models) ? data.models : []));
+      models = list.map((m) => (typeof m === 'string' ? m : (m?.id || m?.name || m?.model || ''))).filter(Boolean);
+    }
+
+    if (models.length === 0) {
+      const tagsUrl = `${clean}/api/tags`;
+      const tRes = await fetch(tagsUrl, { headers: { Accept: 'application/json' } }).catch(() => null);
+      if (tRes && tRes.ok) {
+        const tData = await tRes.json().catch(() => null);
+        if (Array.isArray(tData?.models)) {
+          models = tData.models.map((m) => (typeof m === 'string' ? m : (m?.name || m?.model || ''))).filter(Boolean);
+        }
+      }
+    }
+
+    res.json({ ok: models.length > 0, models, source: 'HELPER_PROXY' });
+  } catch (err) {
+    res.status(500).json({ ok: false, models: [], message: err.message });
+  }
+});
+
 // engine.io가 /socket.io/ OPTIONS preflight를 직접 처리하므로(express 미들웨어보다 먼저),
 // 리스너 배열 맨 앞에 붙여 PNA 헤더를 모든 응답(특히 socket.io preflight)에 보장한다.
 httpServer.prependListener('request', (req, res) => {

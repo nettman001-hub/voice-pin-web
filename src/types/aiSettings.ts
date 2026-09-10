@@ -20,7 +20,7 @@ export interface ListAiModelsResponse {
   ok: boolean;
   models: string[];
   message?: string;
-  source?: 'ENDPOINT_V1_MODELS' | 'ENDPOINT_TAGS' | 'DIRECT_FETCH' | 'FALLBACK';
+  source?: 'ENDPOINT_V1_MODELS' | 'ENDPOINT_TAGS' | 'DIRECT_FETCH' | 'FALLBACK' | 'VERCEL_PROXY' | 'HELPER_PROXY';
 }
 
 export interface AiSlotConfig {
