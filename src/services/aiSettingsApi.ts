@@ -43,10 +43,36 @@ interface CommonApiResponse<T> {
 
 const LOCAL_STORAGE_KEY = 'voicecap_ai_settings';
 
+export function normalizeAiSettings(raw: any): AiSettings {
+  if (!raw || typeof raw !== 'object') return DEFAULT_AI_SETTINGS;
+  const intervalSec = raw.recoveryIntervalSeconds ?? raw.recovery_interval_seconds;
+  const numInterval = typeof intervalSec === 'number' ? intervalSec : parseInt(intervalSec, 10);
+
+  return {
+    id: raw.id,
+    scope: raw.scope || 'GLOBAL',
+    workspaceId: raw.workspaceId ?? raw.workspace_id,
+    version: typeof raw.version === 'number' ? raw.version : 1,
+    appliedVersion: raw.appliedVersion ?? raw.applied_version ?? 1,
+    isDraft: raw.isDraft ?? raw.is_draft ?? false,
+    enabledPendingResolution: raw.enabledPendingResolution ?? raw.enabled_pending_resolution ?? true,
+    enabledVoiceCorrection: raw.enabledVoiceCorrection ?? raw.enabled_voice_correction ?? true,
+    primarySlot: (raw.primarySlot ?? raw.primary_slot) === 2 ? 2 : 1,
+    autoFallbackEnabled: raw.autoFallbackEnabled ?? raw.auto_fallback_enabled ?? true,
+    recoveryIntervalSeconds: !isNaN(numInterval) && numInterval >= 5 ? numInterval : 30,
+    autoReturnToPrimary: raw.autoReturnToPrimary ?? raw.auto_return_to_primary ?? true,
+    cloudMonthlyBudgetKrw: raw.cloudMonthlyBudgetKrw ?? raw.cloud_monthly_budget_krw ?? null,
+    slot1: raw.slot1 || DEFAULT_AI_SETTINGS.slot1,
+    slot2: raw.slot2 || DEFAULT_AI_SETTINGS.slot2,
+    updatedAt: raw.updatedAt ?? raw.updated_at,
+    updatedBy: raw.updatedBy ?? raw.updated_by,
+  };
+}
+
 function getLocalAiSettings(): AiSettings {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) return normalizeAiSettings(JSON.parse(raw));
   } catch (err) {
     console.warn('[AiSettingsApi] localStorage parse error:', err);
   }
@@ -55,7 +81,8 @@ function getLocalAiSettings(): AiSettings {
 
 function saveLocalAiSettings(settings: AiSettings): void {
   try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(settings));
+    const normalized = normalizeAiSettings(settings);
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(normalized));
   } catch (err) {
     console.warn('[AiSettingsApi] localStorage save error:', err);
   }
@@ -107,8 +134,9 @@ export const aiSettingsApi = {
     }
     try {
       const resp = await invokeSalesApi<{ settings: AiSettings }>('get-ai-settings', { workspaceId });
-      saveLocalAiSettings(resp.settings);
-      return resp.settings;
+      const normalized = normalizeAiSettings(resp.settings);
+      saveLocalAiSettings(normalized);
+      return normalized;
     } catch (err) {
       // Vercel Serverless Function 백업 시도
       try {
@@ -120,8 +148,9 @@ export const aiSettingsApi = {
         if (vRes.ok) {
           const vData = await vRes.json();
           if (vData?.data?.settings) {
-            saveLocalAiSettings(vData.data.settings);
-            return vData.data.settings;
+            const normalized = normalizeAiSettings(vData.data.settings);
+            saveLocalAiSettings(normalized);
+            return normalized;
           }
         }
       } catch {}
@@ -133,7 +162,7 @@ export const aiSettingsApi = {
   async saveAiSettings(payload: SaveAiSettingsPayload, workspaceId?: string): Promise<AiSettings> {
     // 1. 입력된 설정값을 브라우저 로컬 저장소에 즉시 선반영하여 페이지 이동 시에도 초기화되지 않도록 보호
     const current = getLocalAiSettings();
-    const localUpdated: AiSettings = {
+    const localUpdated: AiSettings = normalizeAiSettings({
       ...current,
       ...payload.settings,
       slot1: {
@@ -152,7 +181,7 @@ export const aiSettingsApi = {
       appliedVersion: payload.applyImmediately ? current.version + 1 : current.appliedVersion,
       isDraft: !payload.applyImmediately,
       updatedAt: new Date().toISOString(),
-    };
+    });
     saveLocalAiSettings(localUpdated);
 
     if (!isSupabaseConfigured) {
@@ -164,8 +193,9 @@ export const aiSettingsApi = {
         workspaceId,
         ...payload,
       });
-      saveLocalAiSettings(resp.settings);
-      return resp.settings;
+      const normalized = normalizeAiSettings(resp.settings);
+      saveLocalAiSettings(normalized);
+      return normalized;
     } catch (err: any) {
       // 2. Vercel Serverless Function 백업 시도
       try {
@@ -177,8 +207,9 @@ export const aiSettingsApi = {
         if (vRes.ok) {
           const vData = await vRes.json();
           if (vData?.data?.settings) {
-            saveLocalAiSettings(vData.data.settings);
-            return vData.data.settings;
+            const normalized = normalizeAiSettings(vData.data.settings);
+            saveLocalAiSettings(normalized);
+            return normalized;
           }
         }
       } catch {}
@@ -189,12 +220,12 @@ export const aiSettingsApi = {
 
   async applyAiSettings(version: number, workspaceId?: string): Promise<AiSettings> {
     const current = getLocalAiSettings();
-    const localUpdated: AiSettings = {
+    const localUpdated: AiSettings = normalizeAiSettings({
       ...current,
       appliedVersion: version,
       isDraft: false,
       updatedAt: new Date().toISOString(),
-    };
+    });
     saveLocalAiSettings(localUpdated);
 
     if (!isSupabaseConfigured) {
@@ -206,8 +237,9 @@ export const aiSettingsApi = {
         workspaceId,
         version,
       });
-      saveLocalAiSettings(resp.settings);
-      return resp.settings;
+      const normalized = normalizeAiSettings(resp.settings);
+      saveLocalAiSettings(normalized);
+      return normalized;
     } catch (err: any) {
       try {
         const vRes = await fetch('/api/ai-settings', {
@@ -218,8 +250,9 @@ export const aiSettingsApi = {
         if (vRes.ok) {
           const vData = await vRes.json();
           if (vData?.data?.settings) {
-            saveLocalAiSettings(vData.data.settings);
-            return vData.data.settings;
+            const normalized = normalizeAiSettings(vData.data.settings);
+            saveLocalAiSettings(normalized);
+            return normalized;
           }
         }
       } catch {}

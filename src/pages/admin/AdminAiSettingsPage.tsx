@@ -488,15 +488,15 @@ export const AdminAiSettingsPage: React.FC = () => {
           <div className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/50 space-y-1.5">
             <div className="text-xs font-bold text-slate-900 flex items-center justify-between">
               <span>복구 점검 간격</span>
-              <span className="text-brand-600 font-mono font-black">{settings.recoveryIntervalSeconds}초</span>
+              <span className="text-brand-600 font-mono font-black">{settings.recoveryIntervalSeconds ?? 30}초</span>
             </div>
             <input
               type="range"
               min={10}
               max={180}
               step={5}
-              value={settings.recoveryIntervalSeconds}
-              onChange={(e) => setSettings({ ...settings, recoveryIntervalSeconds: parseInt(e.target.value, 10) })}
+              value={settings.recoveryIntervalSeconds ?? 30}
+              onChange={(e) => setSettings({ ...settings, recoveryIntervalSeconds: parseInt(e.target.value, 10) || 30 })}
               className="w-full accent-brand-600"
             />
             <div className="flex justify-between text-[10px] text-slate-400">

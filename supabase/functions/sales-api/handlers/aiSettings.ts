@@ -10,6 +10,39 @@ function checkIsAdmin(auth: AuthContext): boolean {
   return auth.role === 'ADMIN' || auth.role === 'OWNER' || auth.capabilities.has('ADMIN')
 }
 
+function formatAiSettingResponse(row: any, secretMap?: Map<number, string>, isAdmin = true) {
+  const slot1 = {
+    ...(row.slot1 || {}),
+    hasSecret: secretMap ? secretMap.has(1) : Boolean(row.slot1?.hasSecret),
+    maskedSecret: isAdmin ? (secretMap?.get(1) || row.slot1?.maskedSecret || '') : undefined,
+  }
+  const slot2 = {
+    ...(row.slot2 || {}),
+    hasSecret: secretMap ? secretMap.has(2) : Boolean(row.slot2?.hasSecret),
+    maskedSecret: isAdmin ? (secretMap?.get(2) || row.slot2?.maskedSecret || '') : undefined,
+  }
+
+  return {
+    id: row.id,
+    scope: row.scope,
+    workspaceId: row.workspace_id || row.workspaceId,
+    version: row.version,
+    appliedVersion: row.applied_version ?? row.appliedVersion,
+    isDraft: row.is_draft ?? row.isDraft,
+    enabledPendingResolution: row.enabled_pending_resolution ?? row.enabledPendingResolution ?? true,
+    enabledVoiceCorrection: row.enabled_voice_correction ?? row.enabledVoiceCorrection ?? true,
+    primarySlot: row.primary_slot ?? row.primarySlot ?? 1,
+    autoFallbackEnabled: row.auto_fallback_enabled ?? row.autoFallbackEnabled ?? true,
+    recoveryIntervalSeconds: row.recovery_interval_seconds ?? row.recoveryIntervalSeconds ?? 30,
+    autoReturnToPrimary: row.auto_return_to_primary ?? row.autoReturnToPrimary ?? true,
+    cloudMonthlyBudgetKrw: row.cloud_monthly_budget_krw ?? row.cloudMonthlyBudgetKrw ?? null,
+    slot1,
+    slot2,
+    updatedAt: row.updated_at || row.updatedAt,
+    updatedBy: row.updated_by || row.updatedBy,
+  }
+}
+
 // 1. AI 설정 조회 (관리자/판매자 공통, 비밀정보는 마스킹)
 export async function handleGetAiSettings(workspaceId: string, actorId: string, auth: AuthContext, body: any) {
   const isAdmin = checkIsAdmin(auth)
@@ -51,38 +84,8 @@ export async function handleGetAiSettings(workspaceId: string, actorId: string, 
     secretMap.set(s.slot_number, s.masked_value)
   }
 
-  const slot1 = {
-    ...(finalSetting.slot1 || {}),
-    hasSecret: secretMap.has(1),
-    maskedSecret: isAdmin ? (secretMap.get(1) || '') : undefined,
-  }
-
-  const slot2 = {
-    ...(finalSetting.slot2 || {}),
-    hasSecret: secretMap.has(2),
-    maskedSecret: isAdmin ? (secretMap.get(2) || '') : undefined,
-  }
-
   return successResponse({
-    settings: {
-      id: finalSetting.id,
-      scope: finalSetting.scope,
-      workspaceId: finalSetting.workspace_id,
-      version: finalSetting.version,
-      appliedVersion: finalSetting.applied_version,
-      isDraft: finalSetting.is_draft,
-      enabledPendingResolution: finalSetting.enabled_pending_resolution,
-      enabledVoiceCorrection: finalSetting.enabled_voice_correction,
-      primarySlot: finalSetting.primary_slot,
-      autoFallbackEnabled: finalSetting.auto_fallback_enabled,
-      recoveryIntervalSeconds: finalSetting.recovery_interval_seconds,
-      autoReturnToPrimary: finalSetting.auto_return_to_primary,
-      cloudMonthlyBudgetKrw: finalSetting.cloud_monthly_budget_krw,
-      slot1,
-      slot2,
-      updatedAt: finalSetting.updated_at,
-      updatedBy: finalSetting.updated_by,
-    },
+    settings: formatAiSettingResponse(finalSetting, secretMap, isAdmin),
   })
 }
 
@@ -250,19 +253,7 @@ export async function handleSaveAiSettings(workspaceId: string, actorId: string,
   }
 
   return successResponse({
-    settings: {
-      ...updated,
-      slot1: {
-        ...updated.slot1,
-        hasSecret: secretMap.has(1),
-        maskedSecret: secretMap.get(1) || '',
-      },
-      slot2: {
-        ...updated.slot2,
-        hasSecret: secretMap.has(2),
-        maskedSecret: secretMap.get(2) || '',
-      },
-    },
+    settings: formatAiSettingResponse(updated, secretMap, true),
   })
 }
 
@@ -302,7 +293,7 @@ export async function handleApplyAiSettings(workspaceId: string, actorId: string
     return errorResponse('DATABASE_ERROR', updateErr.message, 500)
   }
 
-  return successResponse({ settings: updated })
+  return successResponse({ settings: formatAiSettingResponse(updated, undefined, true) })
 }
 
 // 4. 사전 점검 1단계: 연결 시험 API (관리자 전용)

@@ -1,4 +1,4 @@
-﻿// Vercel Serverless Function: AI 설정 조회/저장 프록시 및 백업 엔드포인트
+// Vercel Serverless Function: AI 설정 조회/저장 프록시 및 백업 엔드포인트
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://ymegrhxpbeanvxwdzfym.supabase.co';
@@ -40,7 +40,7 @@ export default async function handler(req: any, res: any) {
                 enabledVoiceCorrection: data.enabled_voice_correction,
                 primarySlot: data.primary_slot,
                 autoFallbackEnabled: data.auto_fallback_enabled,
-                recoveryIntervalSeconds: data.recovery_interval_seconds,
+                recoveryIntervalSeconds: data.recovery_interval_seconds ?? 30,
                 autoReturnToPrimary: data.auto_return_to_primary,
                 cloudMonthlyBudgetKrw: data.cloud_monthly_budget_krw,
                 slot1: data.slot1,
