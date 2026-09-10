@@ -85,11 +85,13 @@ alter table public.ai_settings_history enable row level security;
 -- ai_secrets는 RLS 정책을 생성하지 않음으로써 service_role(Edge Function)만 접근 가능하도록 엄격히 격리
 
 -- ai_settings: 인증된 사용자는 조회 가능 (단, 비밀정보는 이 테이블에 없음)
+drop policy if exists ai_settings_select_policy on public.ai_settings;
 create policy ai_settings_select_policy on public.ai_settings
   for select to authenticated
   using (true);
 
 -- ai_settings: 관리자(app_metadata role = ADMIN)만 변경 가능
+drop policy if exists ai_settings_admin_write_policy on public.ai_settings;
 create policy ai_settings_admin_write_policy on public.ai_settings
   for all to authenticated
   using (
@@ -100,11 +102,13 @@ create policy ai_settings_admin_write_policy on public.ai_settings
   );
 
 -- ai_settings_history: 인증된 사용자는 조회 가능
+drop policy if exists ai_settings_history_select_policy on public.ai_settings_history;
 create policy ai_settings_history_select_policy on public.ai_settings_history
   for select to authenticated
   using (true);
 
 -- ai_settings_history: 관리자만 기록 가능
+drop policy if exists ai_settings_history_insert_policy on public.ai_settings_history;
 create policy ai_settings_history_insert_policy on public.ai_settings_history
   for insert to authenticated
   with check (

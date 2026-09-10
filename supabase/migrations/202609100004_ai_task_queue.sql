@@ -72,11 +72,17 @@ alter table public.ai_tasks enable row level security;
 alter table public.ai_task_attempts enable row level security;
 alter table public.ai_circuit_breaker enable row level security;
 
+drop policy if exists ai_tasks_select_policy on public.ai_tasks;
 create policy ai_tasks_select_policy on public.ai_tasks for select to authenticated using (true);
+drop policy if exists ai_tasks_write_policy on public.ai_tasks;
 create policy ai_tasks_write_policy on public.ai_tasks for all to authenticated using (true) with check (true);
 
+drop policy if exists ai_attempts_select_policy on public.ai_task_attempts;
 create policy ai_attempts_select_policy on public.ai_task_attempts for select to authenticated using (true);
+drop policy if exists ai_attempts_write_policy on public.ai_task_attempts;
 create policy ai_attempts_write_policy on public.ai_task_attempts for all to authenticated using (true) with check (true);
 
+drop policy if exists ai_cb_select_policy on public.ai_circuit_breaker;
 create policy ai_cb_select_policy on public.ai_circuit_breaker for select to authenticated using (true);
+drop policy if exists ai_cb_write_policy on public.ai_circuit_breaker;
 create policy ai_cb_write_policy on public.ai_circuit_breaker for all to authenticated using (true) with check (true);

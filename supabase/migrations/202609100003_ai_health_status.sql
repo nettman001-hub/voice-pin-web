@@ -49,11 +49,13 @@ create index if not exists ai_health_status_route_idx on public.ai_health_status
 alter table public.ai_health_status enable row level security;
 
 -- 인증된 사용자 및 작업공간 구성원은 상태 조회 가능
+drop policy if exists ai_health_status_select_policy on public.ai_health_status;
 create policy ai_health_status_select_policy on public.ai_health_status
   for select to authenticated
   using (true);
 
 -- 관리자(ADMIN) 또는 서버 service_role만 상태 갱신/삽입 가능
+drop policy if exists ai_health_status_write_policy on public.ai_health_status;
 create policy ai_health_status_write_policy on public.ai_health_status
   for all to authenticated
   using (
