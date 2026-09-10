@@ -837,6 +837,7 @@ const SlotCard: React.FC<SlotCardProps> = ({
         authType: config.authType,
         secret: newSecret || undefined,
         location: config.location,
+        routingMode: config.routingMode,
       });
       if (res.ok && res.models && res.models.length > 0) {
         setAvailableModels(res.models);
@@ -857,7 +858,7 @@ const SlotCard: React.FC<SlotCardProps> = ({
     } finally {
       setIsLoadingModels(false);
     }
-  }, [config.endpointUrl, config.authType, config.provider, config.location, newSecret, slotNumber, config.model, onChange]);
+  }, [config.endpointUrl, config.authType, config.provider, config.location, config.routingMode, newSecret, slotNumber, config.model, onChange]);
 
   useEffect(() => {
     const trimmed = (config.endpointUrl || '').trim();
@@ -869,7 +870,7 @@ const SlotCard: React.FC<SlotCardProps> = ({
       fetchModels(true);
     }, 600);
     return () => clearTimeout(timer);
-  }, [config.endpointUrl, config.authType, config.provider, newSecret, fetchModels]);
+  }, [config.endpointUrl, config.authType, config.provider, config.routingMode, newSecret, fetchModels]);
 
   return (
     <div
@@ -945,8 +946,8 @@ const SlotCard: React.FC<SlotCardProps> = ({
             onChange('provider', newProvider);
             if (config.type === 'LOCAL') {
               if (newProvider === 'LM_STUDIO' && (!config.endpointUrl || config.endpointUrl.includes('11434'))) {
-                onChange('endpointUrl', 'http://127.0.0.1:1234');
-              } else if (newProvider === 'OLLAMA' && (!config.endpointUrl || config.endpointUrl.includes('1234'))) {
+                onChange('endpointUrl', 'http://127.0.0.1:1234/v1');
+              } else if (newProvider === 'OLLAMA' && (!config.endpointUrl || config.endpointUrl.includes('1234') || config.endpointUrl.includes('1235'))) {
                 onChange('endpointUrl', 'http://127.0.0.1:11434');
               }
             }
@@ -994,7 +995,7 @@ const SlotCard: React.FC<SlotCardProps> = ({
                 onChange('location', 'SAME_PC');
                 onChange('routingMode', 'PC_HELPER');
                 if (!config.endpointUrl || config.endpointUrl.includes('api.openai.com')) {
-                  onChange('endpointUrl', config.provider === 'LM_STUDIO' ? 'http://127.0.0.1:1234' : 'http://127.0.0.1:11434');
+                  onChange('endpointUrl', config.provider === 'LM_STUDIO' ? 'http://127.0.0.1:1234/v1' : 'http://127.0.0.1:11434');
                 }
               }}
               className={`p-2.5 rounded-xl border text-center transition ${
@@ -1055,7 +1056,7 @@ const SlotCard: React.FC<SlotCardProps> = ({
                   }}
                   placeholder={
                     config.provider === 'LM_STUDIO'
-                      ? '예: http://127.0.0.1:1234 또는 http://my-llm.example.com:1234'
+                      ? '예: http://nettman.iptime.org:1235/v1 또는 http://127.0.0.1:1234/v1'
                       : '예: http://127.0.0.1:11434 또는 http://my-llm.example.com:8443'
                   }
                   className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono text-slate-800 bg-white"
@@ -1088,7 +1089,8 @@ const SlotCard: React.FC<SlotCardProps> = ({
             <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
               <span className="text-[10px] text-slate-400 font-medium mr-0.5">포트 빠른 설정:</span>
               {[
-                { label: '1234 (LM Studio)', port: '1234' },
+                { label: '1235 (LM Studio 외부)', port: '1235' },
+                { label: '1234 (LM Studio 로컬)', port: '1234' },
                 { label: '11434 (Ollama)', port: '11434' },
                 { label: '8000 (vLLM)', port: '8000' },
                 { label: '8080 (웹)', port: '8080' },

@@ -5,7 +5,7 @@ import type {
 } from '../../../../../src/types/aiResolution.ts';
 import type { AiSlotConfig } from '../../../../../src/types/aiSettings.ts';
 import { validateExternalEndpoint, safeFetch } from '../aiValidation.ts';
-import { buildResolutionPrompt, parseAndNormalizeAiOutput } from './common.ts';
+import { buildResolutionPrompt, parseAndNormalizeAiOutput, buildOpenAiChatUrl } from './common.ts';
 
 export type HelperDispatcherFn = (
   endpointUrl: string,
@@ -98,9 +98,7 @@ export async function runSelfHostedResolution(
     endpoint.includes('/v1');
 
   if (isOpenAiCompatible) {
-    if (!endpoint.endsWith('/v1/chat/completions')) {
-      endpoint = endpoint.replace(/\/+$/, '') + (endpoint.endsWith('/v1') ? '/chat/completions' : '/v1/chat/completions');
-    }
+    endpoint = buildOpenAiChatUrl(endpoint);
     requestBody = {
       model: slotConfig.model || 'default',
       messages: [

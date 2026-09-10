@@ -1,6 +1,7 @@
 import { admin, successResponse, errorResponse, AuthContext } from '../../_shared/productSales.ts'
 import { validateUrlForSsrf, maskSecretValue } from './aiValidation.ts'
 import { executeAiResolution } from './aiAdapters/index.ts'
+import { buildOpenAiModelsUrl } from './aiAdapters/common.ts'
 import { AiResolutionRequest } from '../../../../src/types/aiResolution.ts'
 
 export { validateUrlForSsrf, maskSecretValue }
@@ -531,8 +532,9 @@ export async function handleListAiModels(workspaceId: string, actorId: string, a
     return successResponse({ ok: false, models: [], message: '엔드포인트 주소를 입력해 주세요.' })
   }
 
-  // SSRF 검증 (외부 IP의 HTTP 허용)
-  const ssrfCheck = validateUrlForSsrf(trimmedEndpoint, routingMode || 'SERVER_DIRECT')
+  // SSRF 검증 (외부 IP의 HTTP 허용, PC 도우미 경유 모드 지원)
+  const effectiveRouting = routingMode || (location === 'SAME_PC' ? 'PC_HELPER' : 'SERVER_DIRECT')
+  const ssrfCheck = validateUrlForSsrf(trimmedEndpoint, effectiveRouting)
   if (!ssrfCheck.valid) {
     return successResponse({ ok: false, models: [], message: ssrfCheck.reason })
   }
@@ -551,44 +553,49 @@ export async function handleListAiModels(workspaceId: string, actorId: string, a
   let models: string[] = []
 
   try {
-    // 1. Ollama (/api/tags) 우선 시도 (OLLAMA 공급자 또는 11434 포트)
-    if (provider === 'OLLAMA' || clean.endsWith(':11434')) {
-      const tagsUrl = `${clean}/api/tags`
-      const res = await fetch(tagsUrl, { method: 'GET', headers, signal: controller.signal }).catch(() => null)
+    // 1. LM Studio, vLLM, /v1 포함 경로, 또는 Ollama가 아닌 경우: OpenAI 호환 /v1/models 우선 조회
+    if (provider === 'LM_STUDIO' || provider === 'VLLM' || clean.includes('/v1') || (!clean.endsWith(':11434') && provider !== 'OLLAMA')) {
+      const v1Url = buildOpenAiModelsUrl(clean)
+      const res = await fetch(v1Url, { method: 'GET', headers, signal: controller.signal }).catch(() => null)
       if (res && res.ok) {
         const data = await res.json().catch(() => null)
-        if (data && Array.isArray(data.models)) {
-          models = data.models.map((m: any) => m.name || m.model || '').filter(Boolean)
+        const list = Array.isArray(data) ? data : (data && Array.isArray(data.data) ? data.data : (data && Array.isArray(data.models) ? data.models : []))
+        if (list.length > 0) {
+          models = list.map((m: any) => (typeof m === 'string' ? m : (m.id || m.name || m.model || ''))).filter(Boolean)
+          if (models.length > 0) {
+            clearTimeout(timer)
+            return successResponse({ ok: true, models, source: 'ENDPOINT_V1_MODELS' })
+          }
+        }
+      }
+    }
+
+    // 2. Ollama (/api/tags) 조회
+    const tagsUrl = `${clean}/api/tags`
+    const res = await fetch(tagsUrl, { method: 'GET', headers, signal: controller.signal }).catch(() => null)
+    if (res && res.ok) {
+      const data = await res.json().catch(() => null)
+      if (data && Array.isArray(data.models)) {
+        models = data.models.map((m: any) => m.name || m.model || '').filter(Boolean)
+        if (models.length > 0) {
           clearTimeout(timer)
           return successResponse({ ok: true, models, source: 'ENDPOINT_TAGS' })
         }
       }
     }
 
-    // 2. OpenAI / LM Studio / vLLM (/v1/models 또는 /models) 시도
-    const v1Url = clean.endsWith('/v1')
-      ? `${clean}/models`
-      : (clean.includes('/v1') ? `${clean.replace(/\/chat\/completions$/, '')}/models` : `${clean}/v1/models`)
-
-    const res = await fetch(v1Url, { method: 'GET', headers, signal: controller.signal }).catch(() => null)
-    if (res && res.ok) {
-      const data = await res.json().catch(() => null)
-      if (data && Array.isArray(data.data)) {
-        models = data.data.map((m: any) => m.id || m.name || '').filter(Boolean)
-        clearTimeout(timer)
-        return successResponse({ ok: true, models, source: 'ENDPOINT_V1_MODELS' })
-      }
-    }
-
-    // 3. Fallback: tags 한번 더 확인
-    const fallbackTagsUrl = `${clean}/api/tags`
-    const tagRes = await fetch(fallbackTagsUrl, { method: 'GET', headers, signal: controller.signal }).catch(() => null)
-    if (tagRes && tagRes.ok) {
-      const tagData = await tagRes.json().catch(() => null)
-      if (tagData && Array.isArray(tagData.models)) {
-        models = tagData.models.map((m: any) => m.name || m.model || '').filter(Boolean)
-        clearTimeout(timer)
-        return successResponse({ ok: true, models, source: 'ENDPOINT_TAGS' })
+    // 3. 만약 1번에서 안 걸렸던 경우 /v1/models 최종 시도
+    const finalV1Url = buildOpenAiModelsUrl(clean)
+    const finalRes = await fetch(finalV1Url, { method: 'GET', headers, signal: controller.signal }).catch(() => null)
+    if (finalRes && finalRes.ok) {
+      const data = await finalRes.json().catch(() => null)
+      const list = Array.isArray(data) ? data : (data && Array.isArray(data.data) ? data.data : (data && Array.isArray(data.models) ? data.models : []))
+      if (list.length > 0) {
+        models = list.map((m: any) => (typeof m === 'string' ? m : (m.id || m.name || m.model || ''))).filter(Boolean)
+        if (models.length > 0) {
+          clearTimeout(timer)
+          return successResponse({ ok: true, models, source: 'ENDPOINT_V1_MODELS' })
+        }
       }
     }
   } catch (err: any) {

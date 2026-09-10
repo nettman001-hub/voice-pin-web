@@ -8,6 +8,8 @@ import {
   parseKoreanSpokenPrice,
   buildResolutionPrompt,
   parseAndNormalizeAiOutput,
+  buildOpenAiModelsUrl as backendBuildOpenAiModelsUrl,
+  buildOpenAiChatUrl as backendBuildOpenAiChatUrl,
 } from '../supabase/functions/sales-api/handlers/aiAdapters/common.ts';
 import {
   runSelfHostedResolution,
@@ -21,6 +23,8 @@ import {
 import {
   extractPortFromUrl,
   setPortInUrl,
+  buildOpenAiModelsUrl,
+  buildOpenAiChatUrl,
 } from '../src/utils/maskingUtils.ts';
 
 // 1. 보안 검증 테스트 (TLS, 포트, 사설망, 경로 순회, 리디렉션)
@@ -836,6 +840,58 @@ test('Port Utils: extractPortFromUrl and setPortInUrl handle self-hosted endpoin
   assert.equal(setPortInUrl('https://my-llm.domain.com/v1', '8443'), 'https://my-llm.domain.com:8443/v1');
   assert.equal(setPortInUrl('', '1234'), 'http://127.0.0.1:1234');
   assert.equal(setPortInUrl('http://127.0.0.1:1234', ''), 'http://127.0.0.1');
+  assert.equal(setPortInUrl('http://nettman.iptime.org:1234/v1', '1235'), 'http://nettman.iptime.org:1235/v1');
+});
+
+test('LM Studio & OpenAI: buildOpenAiModelsUrl and buildOpenAiChatUrl normalize endpoints correctly', () => {
+  const cases = [
+    // 1. User provided exact case: http://nettman.iptime.org:1235/v1
+    {
+      input: 'http://nettman.iptime.org:1235/v1',
+      expectedModels: 'http://nettman.iptime.org:1235/v1/models',
+      expectedChat: 'http://nettman.iptime.org:1235/v1/chat/completions',
+    },
+    // 2. Base host:port without /v1
+    {
+      input: 'http://nettman.iptime.org:1235',
+      expectedModels: 'http://nettman.iptime.org:1235/v1/models',
+      expectedChat: 'http://nettman.iptime.org:1235/v1/chat/completions',
+    },
+    // 3. Trailing slash
+    {
+      input: 'http://nettman.iptime.org:1235/v1/',
+      expectedModels: 'http://nettman.iptime.org:1235/v1/models',
+      expectedChat: 'http://nettman.iptime.org:1235/v1/chat/completions',
+    },
+    // 4. Already has /v1/models
+    {
+      input: 'http://nettman.iptime.org:1235/v1/models',
+      expectedModels: 'http://nettman.iptime.org:1235/v1/models',
+      expectedChat: 'http://nettman.iptime.org:1235/v1/chat/completions',
+    },
+    // 5. Already has /v1/chat/completions
+    {
+      input: 'http://nettman.iptime.org:1235/v1/chat/completions',
+      expectedModels: 'http://nettman.iptime.org:1235/v1/models',
+      expectedChat: 'http://nettman.iptime.org:1235/v1/chat/completions',
+    },
+    // 6. Localhost 1234
+    {
+      input: 'http://127.0.0.1:1234/v1',
+      expectedModels: 'http://127.0.0.1:1234/v1/models',
+      expectedChat: 'http://127.0.0.1:1234/v1/chat/completions',
+    },
+  ];
+
+  for (const c of cases) {
+    // Test frontend utils
+    assert.equal(buildOpenAiModelsUrl(c.input), c.expectedModels, `Frontend models url mismatch for ${c.input}`);
+    assert.equal(buildOpenAiChatUrl(c.input), c.expectedChat, `Frontend chat url mismatch for ${c.input}`);
+
+    // Test backend utils
+    assert.equal(backendBuildOpenAiModelsUrl(c.input), c.expectedModels, `Backend models url mismatch for ${c.input}`);
+    assert.equal(backendBuildOpenAiChatUrl(c.input), c.expectedChat, `Backend chat url mismatch for ${c.input}`);
+  }
 });
 
 

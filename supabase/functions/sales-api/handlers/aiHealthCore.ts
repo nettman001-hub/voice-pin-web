@@ -11,6 +11,7 @@ import type { AiSlotConfig } from '../../../../src/types/aiSettings.ts';
 import type { AiResolutionRequest } from '../../../../src/types/aiResolution.ts';
 import { validateExternalEndpoint, safeFetch } from './aiValidation.ts';
 import { executeAiResolution, type HelperDispatcherFn } from './aiAdapters/index.ts';
+import { buildOpenAiModelsUrl } from './aiAdapters/common.ts';
 
 export const HEALTH_CHECK_EXPIRY_MS = 45 * 1000; // 45초 경과 시 상태 만료 (PLAN.md line 200)
 
@@ -266,9 +267,8 @@ export async function checkTier1Connection(
       } else if (slotConfig.provider === 'OPENAI') {
         probeUrl = 'https://api.openai.com/v1/models';
       }
-    } else if (slotConfig.provider === 'LM_STUDIO' || slotConfig.provider === 'VLLM') {
-      const cleanEndpoint = endpointUrl.replace(/\/+$/, '');
-      probeUrl = cleanEndpoint.endsWith('/v1') ? `${cleanEndpoint}/models` : (cleanEndpoint.includes('/v1') ? cleanEndpoint : `${cleanEndpoint}/v1/models`);
+    } else if (slotConfig.provider === 'LM_STUDIO' || slotConfig.provider === 'VLLM' || endpointUrl.includes('/v1')) {
+      probeUrl = buildOpenAiModelsUrl(endpointUrl);
     }
 
     const headers: Record<string, string> = { 'Accept': 'application/json' };
@@ -361,12 +361,51 @@ export async function checkTier2ModelReadiness(
     };
   }
 
-  // 자체 운영 LLM: Ollama 관리 API (/api/tags, /api/ps) 시도
+  // 자체 운영 LLM: LM Studio / vLLM / OpenAI 호환인 경우 /v1/models 우선 조회
   const endpoint = (slotConfig.endpointUrl || '').trim().replace(/\/+$/, '');
-  const tagsUrl = `${endpoint}/api/tags`;
-  const psUrl = `${endpoint}/api/ps`;
+  const isLmStudioOrVllm = slotConfig.provider === 'LM_STUDIO' || slotConfig.provider === 'VLLM' || endpoint.includes('/v1');
 
   try {
+    if (isLmStudioOrVllm) {
+      const v1Url = buildOpenAiModelsUrl(endpoint);
+      const v1Controller = new AbortController();
+      const v1Timer = setTimeout(() => v1Controller.abort(), 3000);
+      const v1Headers: Record<string, string> = { 'Accept': 'application/json' };
+      if (secretValue) {
+        if (slotConfig.authType === 'BEARER') v1Headers['Authorization'] = `Bearer ${secretValue}`;
+        else if (slotConfig.authType === 'API_KEY') v1Headers['x-api-key'] = secretValue;
+      }
+      const v1Res = await safeFetch(v1Url, { signal: v1Controller.signal, headers: v1Headers }, {
+        routingMode: slotConfig.routingMode,
+        location: slotConfig.location,
+        allowInsecureHttpForExternal,
+      }).catch(() => null);
+      clearTimeout(v1Timer);
+
+      if (v1Res && v1Res.ok) {
+        const v1ModelsData = await v1Res.json().catch(() => null);
+        const list = Array.isArray(v1ModelsData) ? v1ModelsData : (v1ModelsData && Array.isArray(v1ModelsData.data) ? v1ModelsData.data : (v1ModelsData && Array.isArray(v1ModelsData.models) ? v1ModelsData.models : []));
+        if (list.length > 0) {
+          const installedList: string[] = list.map((m: any) => (typeof m === 'string' ? m : (m.id || m.name || ''))).filter(Boolean);
+          const isInstalled = !targetModel || installedList.some((name) =>
+            name === targetModel || name.includes(targetModel) || targetModel.includes(name)
+          );
+          return {
+            ok: isInstalled,
+            status: isInstalled ? 'READY' : 'NOT_INSTALLED',
+            installedModels: installedList,
+            message: isInstalled
+              ? `모델 '${targetModel || installedList[0]}' 로딩 확인 및 사용 가능`
+              : `모델 '${targetModel}'이(가) 모델 목록에 없습니다.`,
+            testedAt,
+          };
+        }
+      }
+    }
+
+    // Ollama 관리 API (/api/tags, /api/ps) 시도
+    const tagsUrl = `${endpoint}/api/tags`;
+    const psUrl = `${endpoint}/api/ps`;
     let tagsData: any = null;
     let psData: any = null;
 
@@ -413,7 +452,7 @@ export async function checkTier2ModelReadiness(
     // 만약 tags API가 없거나 에러가 났다면: LM Studio / vLLM / OpenAI 호환 (/v1/models) 시도
     if (!tagsData || !Array.isArray(tagsData.models)) {
       let v1ModelsData: any = null;
-      const v1Url = endpoint.endsWith('/v1') ? `${endpoint}/models` : (endpoint.includes('/v1') ? endpoint : `${endpoint}/v1/models`);
+      const v1Url = buildOpenAiModelsUrl(endpoint);
 
       const v1Controller = new AbortController();
       const v1Timer = setTimeout(() => v1Controller.abort(), 3000);

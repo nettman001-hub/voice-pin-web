@@ -212,3 +212,44 @@ export function parseAndNormalizeAiOutput(
     },
   };
 }
+
+/**
+ * LM Studio / OpenAI 호환 모델 목록 조회 URL 생성
+ * 예: http://nettman.iptime.org:1235/v1 -> http://nettman.iptime.org:1235/v1/models
+ *     http://nettman.iptime.org:1235    -> http://nettman.iptime.org:1235/v1/models
+ */
+export function buildOpenAiModelsUrl(endpointUrl: string): string {
+  const clean = (endpointUrl || '').trim().replace(/\/+$/, '');
+  if (!clean) return '';
+  if (clean.endsWith('/v1/models') || clean.endsWith('/models')) {
+    return clean;
+  }
+  if (clean.endsWith('/chat/completions')) {
+    return clean.replace(/\/chat\/completions$/, '/models');
+  }
+  if (clean.endsWith('/v1')) {
+    return `${clean}/models`;
+  }
+  return `${clean}/v1/models`;
+}
+
+/**
+ * LM Studio / OpenAI 호환 채팅 추론 URL 생성
+ * 예: http://nettman.iptime.org:1235/v1 -> http://nettman.iptime.org:1235/v1/chat/completions
+ *     http://nettman.iptime.org:1235    -> http://nettman.iptime.org:1235/v1/chat/completions
+ */
+export function buildOpenAiChatUrl(endpointUrl: string): string {
+  const clean = (endpointUrl || '').trim().replace(/\/+$/, '');
+  if (!clean) return '';
+  if (clean.endsWith('/v1/chat/completions') || clean.endsWith('/chat/completions')) {
+    return clean;
+  }
+  if (clean.endsWith('/models')) {
+    return clean.replace(/\/models$/, '/chat/completions');
+  }
+  if (clean.endsWith('/v1')) {
+    return `${clean}/chat/completions`;
+  }
+  return `${clean}/v1/chat/completions`;
+}
+

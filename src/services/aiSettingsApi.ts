@@ -1,4 +1,5 @@
 import { isSupabaseConfigured, requireSupabase } from './supabaseClient';
+import { buildOpenAiModelsUrl } from '../utils/maskingUtils';
 import {
   AiSettings,
   SaveAiSettingsPayload,
@@ -191,12 +192,30 @@ export const aiSettingsApi = {
     try {
       const clean = trimmed.replace(/\/+$/, '');
       const isOllama = payload.provider === 'OLLAMA' || clean.endsWith(':11434');
+      const isLmStudio = payload.provider === 'LM_STUDIO' || clean.includes(':1234') || clean.includes(':1235');
 
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (payload.secret) {
         if (payload.authType === 'BEARER') headers['Authorization'] = `Bearer ${payload.secret}`;
         else if (payload.authType === 'API_KEY') headers['x-api-key'] = payload.secret;
         else if (payload.authType === 'CUSTOM_HEADER' && payload.customHeaderName) headers[payload.customHeaderName] = payload.secret;
+      }
+
+      // LM Studio / OpenAI 규격 우선 조회
+      if (isLmStudio || !isOllama) {
+        const v1Url = buildOpenAiModelsUrl(clean);
+        const directController = new AbortController();
+        const t = setTimeout(() => directController.abort(), 2000);
+        const r = await fetch(v1Url, { method: 'GET', headers, signal: directController.signal }).catch(() => null);
+        clearTimeout(t);
+        if (r && r.ok) {
+          const d = await r.json().catch(() => null);
+          const rawList = Array.isArray(d?.data) ? d.data : (Array.isArray(d?.models) ? d.models : (Array.isArray(d) ? d : []));
+          const models = rawList.map((m: any) => (typeof m === 'string' ? m : (m?.id || m?.name || m?.model || ''))).filter(Boolean);
+          if (models.length > 0) {
+            return { ok: true, models, source: 'DIRECT_FETCH' };
+          }
+        }
       }
 
       if (isOllama) {
@@ -208,23 +227,6 @@ export const aiSettingsApi = {
           const d = await r.json().catch(() => null);
           if (d && Array.isArray(d.models)) {
             const models = d.models.map((m: any) => m.name || m.model || '').filter(Boolean);
-            if (models.length > 0) {
-              return { ok: true, models, source: 'DIRECT_FETCH' };
-            }
-          }
-        }
-      } else {
-        const v1Url = clean.endsWith('/v1')
-          ? `${clean}/models`
-          : (clean.includes('/v1') ? `${clean.replace(/\/chat\/completions$/, '')}/models` : `${clean}/v1/models`);
-        const directController = new AbortController();
-        const t = setTimeout(() => directController.abort(), 2000);
-        const r = await fetch(v1Url, { method: 'GET', headers, signal: directController.signal }).catch(() => null);
-        clearTimeout(t);
-        if (r && r.ok) {
-          const d = await r.json().catch(() => null);
-          if (d && Array.isArray(d.data)) {
-            const models = d.data.map((m: any) => m.id || m.name || '').filter(Boolean);
             if (models.length > 0) {
               return { ok: true, models, source: 'DIRECT_FETCH' };
             }
