@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VoiceCAP 판매 적재 & AI 파이프라인 시각화</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --card-border: #334155;
+      --accent: #3b82f6;
+      --accent-glow: rgba(59, 130, 246, 0.2);
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --purple: #8b5cf6;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+    }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    .flow-line {
+      stroke-dasharray: 6;
+      animation: flowAnimation 1.5s linear infinite;
+    }
+    @keyframes flowAnimation {
+      from { stroke-dashoffset: 24; }
+      to { stroke-dashoffset: 0; }
+    }
+    .glass-card {
+      background: rgba(30, 41, 59, 0.7);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .glass-card:hover {
+      border-color: rgba(59, 130, 246, 0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 12px 24px -10px var(--accent-glow);
+    }
+    .badge-pulse {
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+  </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+  <div class="max-w-7xl mx-auto space-y-8">
+    
+    <!-- Top Header & Actions -->
+    <header class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-800">
+      <div>
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 mb-2">
+          <span class="w-2 h-2 rounded-full bg-blue-400 badge-pulse"></span>
+          VoiceCAP Architecture Infographic
+        </div>
+        <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-white flex items-center gap-3">
+          판매 적재 & AI 개입 파이프라인 시각화
+        </h1>
+        <p class="text-sm text-slate-400 mt-1">
+          음성 발화(STT) ➜ 규칙 우선 해결(Rule-First) ➜ 2중 슬롯 AI 장애대응 ➜ 서버 교차 검증 ➜ 감열식 영수증 인쇄
+        </p>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button onclick="window.print()" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition flex items-center gap-1.5 shadow-sm">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+          PDF / 인쇄 출력
+        </button>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <div class="flex flex-wrap gap-2 p-1.5 bg-slate-900/80 rounded-xl border border-slate-800">
+      <button onclick="switchTab('tab-pipeline')" id="btn-tab-pipeline" class="tab-btn px-4 py-2.5 rounded-lg text-xs md:text-sm font-semibold transition bg-blue-600 text-white shadow">
+        1. 전체 처리 파이프라인 (Overview Flow)
+      </button>
+      <button onclick="switchTab('tab-reasons')" id="btn-tab-reasons" class="tab-btn px-4 py-2.5 rounded-lg text-xs md:text-sm font-semibold transition text-slate-400 hover:text-slate-200">
+        2. 6대 보류 사유 & 규칙 우선 (Rule vs AI)
+      </button>
+      <button onclick="switchTab('tab-failover')" id="btn-tab-failover" class="tab-btn px-4 py-2.5 rounded-lg text-xs md:text-sm font-semibold transition text-slate-400 hover:text-slate-200">
+        3. 이중 슬롯 & 서킷 브레이커 (Failover)
+      </button>
+      <button onclick="switchTab('tab-safety')" id="btn-tab-safety" class="tab-btn px-4 py-2.5 rounded-lg text-xs md:text-sm font-semibold transition text-slate-400 hover:text-slate-200">
+        4. AI 환각 방어 & 5단계 안전 가드
+      </button>
+      <button onclick="switchTab('tab-simulator')" id="btn-tab-simulator" class="tab-btn px-4 py-2.5 rounded-lg text-xs md:text-sm font-semibold transition text-slate-400 hover:text-slate-200">
+        5. 실시간 발화 시뮬레이터 (Interactive)
+      </button>
+    </div>
+
+    <!-- TAB 1: OVERVIEW PIPELINE FLOW -->
+    <div id="tab-pipeline" class="tab-content space-y-6">
+      <div class="glass-card rounded-2xl p-6 border border-slate-800">
+        <h2 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
+          <span class="w-6 h-6 rounded-md bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs">1</span>
+          단일 판매 적재 라이프사이클 (End-to-End Visual Map)
+        </h2>
+        <p class="text-xs text-slate-400 mb-6">
+          음성 발화가 들어왔을 때 규칙과 AI가 어떻게 분담하고 데이터베이스에 최종 확정되는지 보여줍니다.
+        </p>
+
+        <!-- SVG Architecture Diagram -->
+        <div class="overflow-x-auto pb-4">
+          <svg class="w-full min-w-[900px] h-[360px]" viewBox="0 0 960 340">
+            <!-- Background Grid subtle -->
+            <defs>
+              <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.3"/>
+                <stop offset="100%" stop-color="#1d4ed8" stop-opacity="0.1"/>
+              </linearGradient>
+              <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.3"/>
+                <stop offset="100%" stop-color="#6d28d9" stop-opacity="0.1"/>
+              </linearGradient>
+              <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#10b981" stop-opacity="0.3"/>
+                <stop offset="100%" stop-color="#047857" stop-opacity="0.1"/>
+              </linearGradient>
+              <linearGradient id="amberGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.3"/>
+                <stop offset="100%" stop-color="#b45309" stop-opacity="0.1"/>
+              </linearGradient>
+              <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1 L 8 5 L 0 9 z" fill="#64748b" />
+              </marker>
+              <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1 L 8 5 L 0 9 z" fill="#10b981" />
+              </marker>
+              <marker id="arrow-blue" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1 L 8 5 L 0 9 z" fill="#3b82f6" />
+              </marker>
+            </defs>
+
+            <!-- Step 1: Voice Input -->
+            <g transform="translate(20, 110)">
+              <rect width="130" height="90" rx="12" fill="url(#blueGrad)" stroke="#3b82f6" stroke-width="1.5"/>
+              <text x="65" y="32" fill="#93c5fd" font-size="11" font-weight="bold" text-anchor="middle">STEP 1. 발화 인식</text>
+              <text x="65" y="52" fill="#ffffff" font-size="13" font-weight="bold" text-anchor="middle">음성 STT 수집</text>
+              <text x="65" y="72" fill="#94a3b8" font-size="10" text-anchor="middle">Whisper / Deepgram</text>
+            </g>
+
+            <!-- Connector 1 -->
+            <path d="M 150 155 L 180 155" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+            <!-- Step 2: Intent & Pending check -->
+            <g transform="translate(190, 100)">
+              <polygon points="65,0 130,55 65,110 0,55" fill="url(#amberGrad)" stroke="#f59e0b" stroke-width="1.5"/>
+              <text x="65" y="48" fill="#fde68a" font-size="11" font-weight="bold" text-anchor="middle">STEP 2. 진단</text>
+              <text x="65" y="66" fill="#ffffff" font-size="12" font-weight="bold" text-anchor="middle">보류 사유 식별</text>
+            </g>
+
+            <!-- Direct Fast Path: No Pending -->
+            <path d="M 255 100 Q 255 40 470 40 L 750 40 Q 800 40 800 100" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="4" marker-end="url(#arrow-green)"/>
+            <text x="520" y="30" fill="#34d399" font-size="11" font-weight="bold" text-anchor="middle">사유 없음 ➜ 0초 즉시 확정 패스 (Fast-Track)</text>
+
+            <!-- Connector 2: Has Pending -->
+            <path d="M 320 155 L 360 155" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+            <!-- Step 3: Rule Evaluation -->
+            <g transform="translate(370, 110)">
+              <rect width="140" height="90" rx="12" fill="#1e293b" stroke="#64748b" stroke-width="1.5"/>
+              <text x="70" y="30" fill="#cbd5e1" font-size="11" font-weight="bold" text-anchor="middle">STEP 3. 규칙 우선</text>
+              <text x="70" y="52" fill="#ffffff" font-size="13" font-weight="bold" text-anchor="middle">Rule-First 대조</text>
+              <text x="70" y="72" fill="#94a3b8" font-size="10" text-anchor="middle">끝번호 4자리 / 단가연결</text>
+            </g>
+
+            <!-- Rule Resolved branch -->
+            <path d="M 440 200 L 440 280 L 780 280 L 780 215" fill="none" stroke="#10b981" stroke-width="2" marker-end="url(#arrow-green)"/>
+            <text x="590" y="272" fill="#34d399" font-size="10" font-weight="bold" text-anchor="middle">규칙으로 해결 완료 (AI 호출 차단 ➜ 0원 비용 절감)</text>
+
+            <!-- Rule Failed ➜ AI Task Connector -->
+            <path d="M 510 155 L 545 155" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+            <!-- Step 4: AI Queue & Orchestration -->
+            <g transform="translate(555, 100)">
+              <rect width="160" height="110" rx="14" fill="url(#purpleGrad)" stroke="#8b5cf6" stroke-width="2"/>
+              <rect x="10" y="10" width="140" height="20" rx="6" fill="#6d28d9"/>
+              <text x="80" y="24" fill="#ede9fe" font-size="10" font-weight="bold" text-anchor="middle">STEP 4. AI 작업 대기열</text>
+              <text x="80" y="52" fill="#ffffff" font-size="13" font-weight="bold" text-anchor="middle">비동기 AI 추론</text>
+              <text x="80" y="70" fill="#c4b5fd" font-size="10" text-anchor="middle">슬롯1 (로컬) ➜ 슬롯2 (클라우드)</text>
+              <text x="80" y="88" fill="#a78bfa" font-size="9" text-anchor="middle">근거 스냅샷 동결 & 해시</text>
+            </g>
+
+            <!-- Connector to Final DB -->
+            <path d="M 715 155 L 750 155" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+            <!-- Step 5: Final Validation & Print -->
+            <g transform="translate(760, 105)">
+              <rect width="180" height="100" rx="14" fill="url(#greenGrad)" stroke="#10b981" stroke-width="2"/>
+              <text x="90" y="28" fill="#a7f3d0" font-size="11" font-weight="bold" text-anchor="middle">STEP 5. 서버 검증 & 적재</text>
+              <text x="90" y="50" fill="#ffffff" font-size="13" font-weight="bold" text-anchor="middle">판매 확정 (Revision+1)</text>
+              <text x="90" y="68" fill="#6ee7b7" font-size="10" text-anchor="middle">댓글/구매자 환각 교차검증</text>
+              <text x="90" y="86" fill="#34d399" font-size="10" font-weight="bold" text-anchor="middle">🖨️ 감열식 영수증 자동 인쇄</text>
+            </g>
+          </svg>
+        </div>
+
+        <!-- 3 핵심 포인트 배너 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+          <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex gap-3">
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold text-sm shrink-0">1</div>
+            <div>
+              <h3 class="text-sm font-bold text-slate-200">초저지연 Fast-Track</h3>
+              <p class="text-xs text-slate-400 mt-1">완전한 발화는 2초 카운트다운 후 즉시 자동저장되어 0.1초 만에 영수증 프린터로 전송됩니다.</p>
+            </div>
+          </div>
+          <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex gap-3">
+            <div class="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center font-bold text-sm shrink-0">2</div>
+            <div>
+              <h3 class="text-sm font-bold text-slate-200">비용 0원 규칙 우선</h3>
+              <p class="text-xs text-slate-400 mt-1">단순 끝번호 일치나 상품 단가 누락은 사전에 정의된 결정론적 규칙으로 먼저 해결하여 AI 호출 비용을 아낍니다.</p>
+            </div>
+          </div>
+          <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex gap-3">
+            <div class="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center font-bold text-sm shrink-0">3</div>
+            <div>
+              <h3 class="text-sm font-bold text-slate-200">불변 근거와 감사 추적</h3>
+              <p class="text-xs text-slate-400 mt-1">AI가 해결한 모든 판매는 원본 발화, 댓글 스냅샷, 바뀐 이유가 <code class="text-purple-300">history</code>에 영구 기록됩니다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: 6 REASONS MATRIX -->
+    <div id="tab-reasons" class="tab-content hidden space-y-6">
+      <div class="glass-card rounded-2xl p-6 border border-slate-800">
+        <h2 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
+          <span class="w-6 h-6 rounded-md bg-amber-500/20 text-amber-400 flex items-center justify-center text-xs">2</span>
+          6대 판매 보류 사유 및 해결 전략 매트릭스
+        </h2>
+        <p class="text-xs text-slate-400 mb-6">
+          판매 발화에서 데이터가 불완전할 때 시스템이 감지하는 6가지 표준 코드와 규칙 및 AI의 역할 분담입니다.
+        </p>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Card 1 -->
+          <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 transition space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded bg-red-500/10 text-red-400 text-xs font-mono font-bold border border-red-500/20">MISSING_NICKNAME</span>
+              <span class="text-xs text-slate-500">우선순위 High</span>
+            </div>
+            <h4 class="text-sm font-bold text-slate-200">구매자 닉네임 미추출 / 미확인</h4>
+            <p class="text-xs text-slate-400">발화에서 "구매자", "이분", "손님" 등으로 말하거나 닉네임이 STT에서 누락된 경우.</p>
+            <div class="pt-2 border-t border-slate-800/80 text-xs space-y-1">
+              <div class="flex gap-2"><span class="text-slate-500 w-14 shrink-0">규칙 처리:</span><span class="text-slate-300">직전 단일 댓글 작성자 대조</span></div>
+              <div class="flex gap-2"><span class="text-purple-400 w-14 shrink-0 font-medium">AI 역할:</span><span class="text-purple-200">최근 10개 댓글의 문맥("저요", "구매") 분석 후 후보 추천</span></div>
+            </div>
+          </div>
+
+          <!-- Card 2 -->
+          <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 transition space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded bg-amber-500/10 text-amber-400 text-xs font-mono font-bold border border-amber-500/20">TRAILING_DIGITS_ONLY</span>
+              <span class="text-xs text-slate-500">규칙 최우선</span>
+            </div>
+            <h4 class="text-sm font-bold text-slate-200">전화번호 끝 4자리만 감지</h4>
+            <p class="text-xs text-slate-400">"뒷번호 7890님 낙찰이요"처럼 4자리 숫자 식별자만 발화된 경우.</p>
+            <div class="pt-2 border-t border-slate-800/80 text-xs space-y-1">
+              <div class="flex gap-2"><span class="text-emerald-400 w-14 shrink-0 font-bold">규칙 해결:</span><span class="text-emerald-200 font-medium">댓글/구매자 중 유일하게 일치하는 1명 즉시 매칭 (AI 불필요)</span></div>
+              <div class="flex gap-2"><span class="text-purple-400 w-14 shrink-0 font-medium">AI 역할:</span><span class="text-purple-200">동일 번호가 2명 이상일 때 발화 시각과 댓글 시점 차이 분석</span></div>
+            </div>
+          </div>
+
+          <!-- Card 3 -->
+          <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 transition space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded bg-blue-500/10 text-blue-400 text-xs font-mono font-bold border border-blue-500/20">MISSING_AMOUNT</span>
+              <span class="text-xs text-slate-500">자동 연결</span>
+            </div>
+            <h4 class="text-sm font-bold text-slate-200">판매 금액 누락 또는 0원</h4>
+            <p class="text-xs text-slate-400">금액 언급 없이 "12번 홍길동님 완료"라고만 발화하여 단가가 비어있는 경우.</p>
+            <div class="pt-2 border-t border-slate-800/80 text-xs space-y-1">
+              <div class="flex gap-2"><span class="text-emerald-400 w-14 shrink-0 font-bold">규칙 해결:</span><span class="text-emerald-200 font-medium">현재 방송에 활성화된 상품 단가(unitPrice) 자동 승계</span></div>
+              <div class="flex gap-2"><span class="text-purple-400 w-14 shrink-0 font-medium">AI 역할:</span><span class="text-purple-200">"1.2" 같은 소숫점 구어체를 12,000원으로 정확 파싱</span></div>
+            </div>
+          </div>
+
+          <!-- Card 4 -->
+          <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 transition space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded bg-purple-500/10 text-purple-400 text-xs font-mono font-bold border border-purple-500/20">SPLIT_UTTERANCE</span>
+              <span class="text-xs text-slate-500">후속 발화 결합</span>
+            </div>
+            <h4 class="text-sm font-bold text-slate-200">분리 발화 (문장 끊김)</h4>
+            <p class="text-xs text-slate-400">"홍길동님..." 하고 잠시 쉬었다가 "15,000원에 드릴게요"라고 두 문장으로 쪼개진 경우.</p>
+            <div class="pt-2 border-t border-slate-800/80 text-xs space-y-1">
+              <div class="flex gap-2"><span class="text-slate-500 w-14 shrink-0">규칙 처리:</span><span class="text-slate-300">후속 발화 연결 시 금액 누락 사유와 함께 동시 해제</span></div>
+              <div class="flex gap-2"><span class="text-purple-400 w-14 shrink-0 font-medium">AI 역할:</span><span class="text-purple-200">조각난 두 발화의 의미적 연결 및 하나의 판매 데이터로 합성</span></div>
+            </div>
+          </div>
+
+          <!-- Card 5 -->
+          <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 transition space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded bg-cyan-500/10 text-cyan-400 text-xs font-mono font-bold border border-cyan-500/20">DELAYED_COMMENT</span>
+              <span class="text-xs text-slate-500">대기 후 자동 해제</span>
+            </div>
+            <h4 class="text-sm font-bold text-slate-200">댓글 지연 (네트워크 딜레이)</h4>
+            <p class="text-xs text-slate-400">진행자는 화면을 보고 불렀으나, 방송 플랫폼의 댓글 웹소켓이 1~2초 늦게 도착한 경우.</p>
+            <div class="pt-2 border-t border-slate-800/80 text-xs space-y-1">
+              <div class="flex gap-2"><span class="text-slate-500 w-14 shrink-0">규칙 처리:</span><span class="text-slate-300">신규 댓글 유입 시 자동 백그라운드 재대조 트리거</span></div>
+              <div class="flex gap-2"><span class="text-purple-400 w-14 shrink-0 font-medium">AI 역할:</span><span class="text-purple-200">오타가 포함된 닉네임("미니미" vs "minimi") 유사도 매칭</span></div>
+            </div>
+          </div>
+
+          <!-- Card 6 -->
+          <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 transition space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="px-2.5 py-1 rounded bg-rose-500/10 text-rose-400 text-xs font-mono font-bold border border-rose-500/20">MULTIPLE_CANDIDATES</span>
+              <span class="text-xs text-slate-500">엄격 가드</span>
+            </div>
+            <h4 class="text-sm font-bold text-slate-200">복수 후보 충돌 (임의 선택 금지)</h4>
+            <p class="text-xs text-slate-400">"철수님"을 불렀으나 댓글 창에 "김철수", "이철수" 두 명이 동시에 존재하는 경우.</p>
+            <div class="pt-2 border-t border-slate-800/80 text-xs space-y-1">
+              <div class="flex gap-2"><span class="text-rose-400 w-14 shrink-0 font-bold">임의 확정 금지:</span><span class="text-rose-200 font-medium">AI나 시스템이 절대 임의로 찍지 않고 보류 유지</span></div>
+              <div class="flex gap-2"><span class="text-purple-400 w-14 shrink-0 font-medium">해결 방식:</span><span class="text-purple-200">판매자 화면에 [후보 2명 선택 모달] 띄워 1클릭 확정 유도</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: FAILOVER & CIRCUIT BREAKER -->
+    <div id="tab-failover" class="tab-content hidden space-y-6">
+      <div class="glass-card rounded-2xl p-6 border border-slate-800">
+        <h2 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
+          <span class="w-6 h-6 rounded-md bg-purple-500/20 text-purple-400 flex items-center justify-center text-xs">3</span>
+          이중 슬롯 자동 장애 전환 (Failover) & 서킷 브레이커
+        </h2>
+        <p class="text-xs text-slate-400 mb-6">
+          로컬 PC 도우미(Ollama/자체 서버)가 죽거나 응답하지 않아도 클라우드 LLM으로 0초 만에 우회 실행합니다.
+        </p>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <!-- Left: Slot Flow Diagram -->
+          <div class="p-5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-4">
+            <h3 class="text-sm font-bold text-slate-200 flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+              슬롯 1 ➜ 슬롯 2 자동 전환 메커니즘
+            </h3>
+
+            <div class="space-y-3">
+              <!-- Slot 1 -->
+              <div class="p-3.5 rounded-lg bg-slate-800/80 border border-blue-500/40 relative">
+                <div class="flex justify-between items-center mb-1">
+                  <span class="text-xs font-bold text-blue-400">슬롯 1 (Primary) : 로컬 / 사내 LLM</span>
+                  <span class="text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-300 font-mono">기본 호출</span>
+                </div>
+                <p class="text-xs text-slate-300 font-medium">Ollama (Qwen2.5:7b) / 사내 도우미 경유</p>
+                <p class="text-[11px] text-slate-400 mt-1">포트 11434 / 2137 ➜ 비용 0원, 데이터 외부 미유출</p>
+              </div>
+
+              <!-- Failure Trigger Arrow -->
+              <div class="flex items-center justify-center gap-2 text-xs font-mono text-amber-400 py-0.5">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+                <span>타임아웃 / PC도우미 종료 / VRAM 부족 발생 시</span>
+              </div>
+
+              <!-- Slot 2 -->
+              <div class="p-3.5 rounded-lg bg-slate-800/80 border border-purple-500/40 relative">
+                <div class="flex justify-between items-center mb-1">
+                  <span class="text-xs font-bold text-purple-400">슬롯 2 (Secondary) : 클라우드 LLM</span>
+                  <span class="text-[10px] px-2 py-0.5 rounded bg-purple-500/10 text-purple-300 font-mono">Failover</span>
+                </div>
+                <p class="text-xs text-slate-300 font-medium">OpenAI (gpt-4o-mini) / Google (Gemini 1.5 Flash)</p>
+                <p class="text-[11px] text-slate-400 mt-1">서버 전용 Secret 보관 (브라우저에 API 키 미노출)</p>
+              </div>
+            </div>
+
+            <div class="p-3 rounded-lg bg-blue-950/30 border border-blue-800/40 text-xs text-blue-300">
+              💡 <strong>전환 시 안전 가드:</strong> 슬롯 1에서 지연되었던 응답이 뒤늦게 도착하더라도 이미 발급된 시도 ID(<code class="text-blue-200">attemptId</code>)가 만료(EXPIRED)되어 판매 데이터를 오염시키지 못합니다.
+            </div>
+          </div>
+
+          <!-- Right: Circuit Breaker & Concurrency -->
+          <div class="space-y-4">
+            <div class="p-5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-3">
+              <h3 class="text-sm font-bold text-slate-200 flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                서킷 브레이커 (Circuit Breaker) 상태 규칙
+              </h3>
+              <div class="space-y-2 text-xs">
+                <div class="flex items-center justify-between p-2.5 rounded-lg bg-slate-800/50">
+                  <span class="text-slate-300 font-medium">연속 실패 한계 (Fail Threshold)</span>
+                  <span class="text-amber-400 font-mono font-bold">3회 연속 실패 시 차단</span>
+                </div>
+                <div class="flex items-center justify-between p-2.5 rounded-lg bg-slate-800/50">
+                  <span class="text-slate-300 font-medium">쿨다운 지속 시간 (Cooldown)</span>
+                  <span class="text-blue-400 font-mono font-bold">60초간 호출 중단 및 우회</span>
+                </div>
+                <div class="flex items-center justify-between p-2.5 rounded-lg bg-slate-800/50">
+                  <span class="text-slate-300 font-medium">자동 복구 조건 (Recovery)</span>
+                  <span class="text-emerald-400 font-mono font-bold">2회 연속 성공 시 CLOSED 복귀</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="p-5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+              <h3 class="text-sm font-bold text-slate-200 flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                동시성 잠금 (Optimistic Revision Lock)
+              </h3>
+              <p class="text-xs text-slate-400 leading-relaxed">
+                AI가 추론하는 동안(약 1~2초) 판매자가 웹 대시보드에서 해당 판매를 수동으로 수정하거나 확정하면 판매의 <code class="text-emerald-300">revision</code>이 증가합니다 (v1 ➜ v2). 뒤늦게 도착한 AI 응답(v1 기준)은 <code class="text-rose-400">REVISION_CONFLICT</code> 에러를 뿜으며 즉시 폐기되어 수동 작업을 절대 덮어쓰지 않습니다.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: SAFETY GUARDS & HALLUCINATION DEFENSE -->
+    <div id="tab-safety" class="tab-content hidden space-y-6">
+      <div class="glass-card rounded-2xl p-6 border border-slate-800">
+        <h2 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
+          <span class="w-6 h-6 rounded-md bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs">4</span>
+          AI 환각(Hallucination) 방지 & 5단계 방어선
+        </h2>
+        <p class="text-xs text-slate-400 mb-6">
+          LLM의 허위 닉네임 생성이나 엉뚱한 금액 추천을 서버가 어떻게 100% 필터링하는지 설명합니다.
+        </p>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="p-4 rounded-xl bg-slate-900/80 border border-emerald-500/30 space-y-2">
+            <div class="text-xs font-mono font-bold text-emerald-400">방어선 1</div>
+            <h4 class="text-sm font-bold text-slate-200">실존 댓글 / 구매자 교차 대조</h4>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              AI가 "구매자는 @super_star님입니다"라고 제시하더라도, 해당 방송 회차의 실제 댓글 테이블(<code class="text-slate-300">comments</code>)이나 구매자 명단(<code class="text-slate-300">buyers</code>)에 일치하는 닉네임이 없으면 서버에서 즉시 <strong class="text-rose-400">422 AI_VALIDATION_FAILED</strong>로 기각합니다.
+            </p>
+          </div>
+
+          <div class="p-4 rounded-xl bg-slate-900/80 border border-emerald-500/30 space-y-2">
+            <div class="text-xs font-mono font-bold text-emerald-400">방어선 2</div>
+            <h4 class="text-sm font-bold text-slate-200">등록 상품 유효성 검증</h4>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              AI가 임의로 존재하지 않는 상품 코드(예: "99번")를 추천하는 경우, 현재 방송 세션의 등록 상품 목록에 존재하는지 엄격히 확인합니다. 일치하는 상품이 없으면 적용을 거부하고 보류 상태를 유지합니다.
+            </p>
+          </div>
+
+          <div class="p-4 rounded-xl bg-slate-900/80 border border-emerald-500/30 space-y-2">
+            <div class="text-xs font-mono font-bold text-emerald-400">방어선 3</div>
+            <h4 class="text-sm font-bold text-slate-200">결제 완료(PAID) 자동 정정 차단</h4>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              판매자가 음성으로 정정 발화를 하더라도, 이미 고객이 결제를 완료한 판매 건은 자동 복원이나 변경을 엄격히 차단하여 정산 불일치 및 회계 사고를 사전에 차단합니다.
+            </p>
+          </div>
+        </div>
+
+        <!-- History Snapshot Inspection Box -->
+        <div class="mt-6 p-4 rounded-xl bg-slate-950 border border-slate-800">
+          <h4 class="text-xs font-bold text-slate-300 mb-3 flex items-center justify-between">
+            <span>실제 DB 적재 JSON 스키마 미리보기 (sales.history & evidence_snapshot)</span>
+            <span class="text-[11px] font-mono text-blue-400">PostgreSQL JSONB</span>
+          </h4>
+          <pre class="text-[11px] font-mono text-slate-300 overflow-x-auto bg-slate-900 p-3 rounded-lg border border-slate-800">
+{
+  "sale_id": "sale-1726058912-4821",
+  "status": "자동저장",
+  "revision": 2,
+  "buyer_nickname": "민수_1234",
+  "amount": 12000,
+  "ai_verification": {
+    "verified": true,
+    "adapterType": "SELF_HOSTED",
+    "verifiedAt": "2026-09-12T05:10:00Z",
+    "evidenceSummary": "뒷번호 1234 발화 및 0.9->1.2 단가 정정 문맥 파악 완료",
+    "checksPassed": ["NICKNAME_EXISTS_IN_COMMENTS", "VALID_REGISTERED_PRODUCT"]
+  },
+  "history": [
+    {
+      "revision": 2,
+      "changeType": "AI_RESOLVE",
+      "changedBy": "AI",
+      "summary": "AI 추론 및 서버 교차 검증 통과로 보류 해제"
+    }
+  ]
+}</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 5: INTERACTIVE SIMULATOR -->
+    <div id="tab-simulator" class="tab-content hidden space-y-6">
+      <div class="glass-card rounded-2xl p-6 border border-slate-800">
+        <h2 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
+          <span class="w-6 h-6 rounded-md bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs">5</span>
+          실전 발화 시나리오 대화형 시뮬레이터
+        </h2>
+        <p class="text-xs text-slate-400 mb-6">
+          시나리오를 선택하여 발화가 시스템에서 어떻게 분석되고 최종 판매로 적재되는지 단계별로 확인해보세요.
+        </p>
+
+        <!-- Scenario Selector Buttons -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+          <button onclick="runScenario(1)" id="scen-btn-1" class="p-3 text-left rounded-xl bg-slate-800/80 border border-blue-500/50 hover:bg-slate-800 transition">
+            <div class="text-xs font-bold text-blue-400">시나리오 A (정정 발화)</div>
+            <div class="text-xs text-slate-200 mt-1">"가격이 0.9가 아니고 1.2입니다"</div>
+          </button>
+          <button onclick="runScenario(2)" id="scen-btn-2" class="p-3 text-left rounded-xl bg-slate-800/40 border border-slate-800 hover:bg-slate-800 transition">
+            <div class="text-xs font-bold text-amber-400">시나리오 B (끝번호 4자리)</div>
+            <div class="text-xs text-slate-200 mt-1">"뒷번호 5678님 2개 낙찰"</div>
+          </button>
+          <button onclick="runScenario(3)" id="scen-btn-3" class="p-3 text-left rounded-xl bg-slate-800/40 border border-slate-800 hover:bg-slate-800 transition">
+            <div class="text-xs font-bold text-rose-400">시나리오 C (부정 명령 방어)</div>
+            <div class="text-xs text-slate-200 mt-1">"1.2로 변경하지 마세요"</div>
+          </button>
+        </div>
+
+        <!-- Simulation Result Card -->
+        <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div>
+              <span class="text-xs text-slate-500">테스트 발화:</span>
+              <h3 id="sim-utterance" class="text-base font-bold text-white mt-0.5">"가격이 0.9가 아니고 1.2입니다"</h3>
+            </div>
+            <span id="sim-status-badge" class="px-3 py-1 rounded-full text-xs font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30">
+              정정 적용 성공
+            </span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div class="space-y-2">
+              <h5 class="font-bold text-slate-400">1. 분석 파이프라인 판단</h5>
+              <div id="sim-analysis" class="p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono text-slate-300 space-y-1">
+                <div>• 의도: VOICE_CORRECTION (음성 정정)</div>
+                <div>• 기존 값: 9,000원 (from: 0.9)</div>
+                <div>• 변경 값: 12,000원 (to: 1.2)</div>
+                <div>• 범위: THIS_SALE_ONLY (방금 건만)</div>
+              </div>
+            </div>
+
+            <div class="space-y-2">
+              <h5 class="font-bold text-slate-400">2. 데이터베이스 & 출력 결과</h5>
+              <div id="sim-db-result" class="p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono text-slate-300 space-y-1">
+                <div>• 대상 판매: 동일 saleId 유지 (v1 ➜ v2)</div>
+                <div>• 단가: 9,000원 ➜ 12,000원 정정</div>
+                <div>• 영수증: [정정] 전표 1회 자동 발행</div>
+                <div>• 회계 이력: CORRECTION 감사 로그 적재</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="text-center text-xs text-slate-500 pt-6 border-t border-slate-800">
+      VoiceCAP Architectural Visualizer • Source Code: <a href="file:///c:/dev/voice-pin-web" class="text-blue-400 hover:underline">voice-pin-web</a> • 220 Automated Tests Passed
+    </footer>
+  </div>
+
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('bg-blue-600', 'text-white', 'shadow');
+        btn.classList.add('text-slate-400');
+      });
+
+      const selectedContent = document.getElementById(tabId);
+      if (selectedContent) selectedContent.classList.remove('hidden');
+
+      const activeBtn = document.getElementById('btn-' + tabId);
+      if (activeBtn) {
+        activeBtn.classList.remove('text-slate-400');
+        activeBtn.classList.add('bg-blue-600', 'text-white', 'shadow');
+      }
+    }
+
+    function runScenario(num) {
+      // Reset button styles
+      [1, 2, 3].forEach(n => {
+        const b = document.getElementById('scen-btn-' + n);
+        b.className = 'p-3 text-left rounded-xl bg-slate-800/40 border border-slate-800 hover:bg-slate-800 transition';
+      });
+
+      const activeBtn = document.getElementById('scen-btn-' + num);
+      activeBtn.className = 'p-3 text-left rounded-xl bg-slate-800/80 border border-blue-500/50 hover:bg-slate-800 transition';
+
+      const utteranceEl = document.getElementById('sim-utterance');
+      const badgeEl = document.getElementById('sim-status-badge');
+      const analysisEl = document.getElementById('sim-analysis');
+      const dbResultEl = document.getElementById('sim-db-result');
+
+      if (num === 1) {
+        utteranceEl.innerText = '"가격이 0.9가 아니고 1.2입니다"';
+        badgeEl.className = 'px-3 py-1 rounded-full text-xs font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30';
+        badgeEl.innerText = '정정 적용 성공';
+        analysisEl.innerHTML = `
+          <div>• 의도: VOICE_CORRECTION (단가 정정)</div>
+          <div>• 기존 값: 9,000원 (0.9 파싱)</div>
+          <div>• 변경 값: 12,000원 (1.2 파싱)</div>
+          <div>• 부정/질문 필터링: 통과 (실행 명령)</div>
+        `;
+        dbResultEl.innerHTML = `
+          <div>• 상태: 동일 saleId 유지 (revision 1 ➜ 2)</div>
+          <div>• 판매 단가: 12,000원으로 인플레이스 갱신</div>
+          <div>• 영수증: [정정] 전표 인쇄 작업(QUEUED) 발행</div>
+          <div>• 처리 소요: 0.05초 (결정론적 규칙)</div>
+        `;
+      } else if (num === 2) {
+        utteranceEl.innerText = '"뒷번호 5678님 2개 낙찰"';
+        badgeEl.className = 'px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30';
+        badgeEl.innerText = '규칙 우선 해결 완료';
+        analysisEl.innerHTML = `
+          <div>• 보류 사유: TRAILING_DIGITS_ONLY 감지</div>
+          <div>• 4자리 식별자: "5678" 추출</div>
+          <div>• 댓글 검색: @buyer5678 님 유일 일치 확인</div>
+          <div>• AI 호출 여부: 불필요 (Rule 해결)</div>
+        `;
+        dbResultEl.innerHTML = `
+          <div>• 구매자: @buyer5678 자동 연결</div>
+          <div>• 수량: 2개, 금액: 상품단가 × 2 계산</div>
+          <div>• 판매 상태: '보류' ➜ '자동저장' 즉시 승격</div>
+          <div>• 영수증: 정규 라벨 자동 인쇄</div>
+        `;
+      } else if (num === 3) {
+        utteranceEl.innerText = '"1.2로 변경하지 마세요"';
+        badgeEl.className = 'px-3 py-1 rounded-full text-xs font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30';
+        badgeEl.innerText = '명령 실행 차단 (안전 보호)';
+        analysisEl.innerHTML = `
+          <div>• 부정 명령 감지: "변경하지 마세요" 패턴 일치</div>
+          <div>• isNegativeCommand: true</div>
+          <div>• AI 및 정정 파이프라인: 즉시 차단</div>
+          <div>• 잘못된 수정 오염 방지: 완료</div>
+        `;
+        dbResultEl.innerHTML = `
+          <div>• 기존 판매 데이터: 100% 변경 없이 보존</div>
+          <div>• 영수증: 불필요한 수정 전표 발행 없음</div>
+          <div>• DB 변경: 없음 (No-Op)</div>
+          <div>• 안전 감사: 정상 거부 로그 기록</div>
+        `;
+      }
+    }
+  </script>
+</body>
+</html>
