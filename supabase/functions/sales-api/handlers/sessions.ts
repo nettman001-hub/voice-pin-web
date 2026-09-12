@@ -123,9 +123,28 @@ export async function handleUpdateSettings(workspaceId: string, body: any) {
 
 export async function handleStartSession(workspaceId: string, body: any) {
   const { displayName } = body
-  const koreaNow = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString()
-  const defaultCode = `${koreaNow.slice(0, 10).replace(/-/g, '')}_${koreaNow.slice(11, 16).replace(':', '')}`
-  const code = displayName || defaultCode
+  const koreaDate = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const prefix = `${koreaDate} 라이브 `
+
+  // 날짜별 회차 번호를 이어서 생성한다. UUID나 분 단위 타임스탬프를 표시값으로 쓰지 않아
+  // 판매·댓글·정산 화면 어디에서나 사람이 같은 회차를 쉽게 식별할 수 있다.
+  const { data: sameDaySessions, error: sessionQueryError } = await admin
+    .from('live_sessions')
+    .select('display_code')
+    .eq('workspace_id', workspaceId)
+    .like('display_code', `${prefix}%회차`)
+
+  if (sessionQueryError) {
+    return errorResponse('TEMPORARILY_UNAVAILABLE', sessionQueryError.message, 500)
+  }
+
+  const highestSequence = (sameDaySessions || []).reduce((highest, session) => {
+    const match = String(session.display_code || '').match(/^\d{4}-\d{2}-\d{2} 라이브 (\d+)회차$/)
+    const sequence = match ? Number(match[1]) : 0
+    return Number.isSafeInteger(sequence) ? Math.max(highest, sequence) : highest
+  }, 0)
+  const defaultCode = `${prefix}${highestSequence + 1}회차`
+  const code = typeof displayName === 'string' && displayName.trim() ? displayName.trim() : defaultCode
 
   await admin
     .from('live_sessions')

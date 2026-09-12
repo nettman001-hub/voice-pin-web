@@ -13,15 +13,14 @@ export interface CaptureAreaSnapshot {
   savedAt: string;
 }
 
-// 기본 방송 회차 생성 (날짜와 시간이 앞에 나오는 번호 YYYYMMDD_HHmm 형식)
+// 서버 회차가 아직 준비되지 않았을 때만 쓰는 읽기 쉬운 임시 표시값.
+// 실제 방송 회차 번호는 sales-api가 날짜별 "라이브 N회차" 형식으로 발급한다.
 export function generateSessionId(): string {
   const now = new Date();
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
-  const h = String(now.getHours()).padStart(2, '0');
-  const min = String(now.getMinutes()).padStart(2, '0');
-  return `${y}${m}${d}_${h}${min}`;
+  return `${y}-${m}-${d} 임시 회차`;
 }
 
 // 해당 회차의 판매 시작 시 1번부터 자동으로 상품번호 부여
