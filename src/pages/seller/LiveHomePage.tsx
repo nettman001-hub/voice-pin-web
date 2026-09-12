@@ -872,6 +872,15 @@ export const LiveHomePage: React.FC = () => {
               </p>
             )}
 
+            {isCommentCaptureActive && !commentConfig.tiktokUsername && (
+              <div className="mb-3 px-3.5 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between">
+                <span>⚠️ 수집 대상 틱톡 ID가 설정되지 않았습니다.</span>
+                <Link to="/recognition-rules" className="font-bold underline text-amber-800 hover:text-amber-950 ml-2">
+                  ID 설정하러 가기
+                </Link>
+              </div>
+            )}
+
             <div ref={commentFeedRef} className="max-h-[220px] min-h-[60px] overflow-y-auto space-y-1.5 pr-1">
               {liveComments.length === 0 ? (
                 <div className="py-6 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-2xl">

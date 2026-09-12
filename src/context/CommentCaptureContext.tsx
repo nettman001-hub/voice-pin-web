@@ -87,6 +87,12 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
               ? cloudConfig.alertWords
               : DEFAULT_COMMENT_CAPTURE_CONFIG.alertWords
           };
+          // 로컬 스토리지에 이미 유효한 틱톡 ID가 등록되어 있었는데 클라우드 값이 비어있다면, 로컬 틱톡 ID를 보존하고 클라우드에 즉시 동기화
+          const localConfig = storageService.getCommentCaptureConfig();
+          if (localConfig.tiktokUsername && !merged.tiktokUsername) {
+            merged.tiktokUsername = localConfig.tiktokUsername;
+            void remoteWorkspaceService.saveCommentCaptureConfig(workspaceId, merged);
+          }
           setConfig(merged);
           storageService.saveCommentCaptureConfig(merged);
         } else {
@@ -116,10 +122,14 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
   const saveConfig = useCallback(
     (next: CommentCaptureConfig) => {
-      setConfig(next);
-      storageService.saveCommentCaptureConfig(next);
+      const clean: CommentCaptureConfig = {
+        ...next,
+        tiktokUsername: (next.tiktokUsername || '').replace(/^@/, '').trim()
+      };
+      setConfig(clean);
+      storageService.saveCommentCaptureConfig(clean);
       if (workspaceId) {
-        void remoteWorkspaceService.saveCommentCaptureConfig(workspaceId, next);
+        void remoteWorkspaceService.saveCommentCaptureConfig(workspaceId, clean);
       }
     },
     [workspaceId]

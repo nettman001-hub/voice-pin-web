@@ -109,7 +109,9 @@ export const RecognitionRulesPage: React.FC = () => {
   }, [captureAreaConfig]);
 
   useEffect(() => {
-    setCommentUsername(commentConfig.tiktokUsername);
+    if (commentConfig.tiktokUsername) {
+      setCommentUsername(commentConfig.tiktokUsername);
+    }
     setCommentAlertWords(commentConfig.alertWords.join(', '));
     setCommentAlertDuration(String(commentConfig.alertDurationSec));
     setCommentAlertCommand(commentConfig.alertVoiceCommand);
@@ -372,8 +374,42 @@ export const RecognitionRulesPage: React.FC = () => {
     setCaptureAreaConfig(updated);
   };
 
+  const handleSaveCommentSettings = (options?: { customUsername?: string; notify?: boolean }) => {
+    const rawUsername = options?.customUsername !== undefined ? options.customUsername : commentUsername;
+    const username = rawUsername.trim().replace(/^@/, '');
+    const duration = Math.max(3, parseInt(commentAlertDuration, 10) || 15);
+    const words = commentAlertWords.split(',').map((w) => w.trim()).filter(Boolean);
+    const commands = Array.from(new Set(
+      commentAlertCommand.split(',').map((command) => command.trim()).filter(Boolean)
+    ));
+    const command = commands.length > 0 ? commands.join(', ') : '닫아';
+    saveCommentConfig({
+      tiktokUsername: username,
+      serverUrl: DEFAULT_COMMENT_SERVER_URL,
+      alertWords: words,
+      alertDurationSec: duration,
+      alertVoiceCommand: command
+    });
+    setCommentUsername(username);
+    setCommentAlertDuration(String(duration));
+    setCommentAlertCommand(command);
+    if (options?.notify) {
+      showNotice(
+        `댓글 수집 설정이 클라우드에 영구 저장되었습니다. (@${username || '미설정'} · 알림 단어 ${words.length}개 · 알림 ${duration}초)`,
+        '💬 댓글 수집 설정 저장 완료',
+        'success'
+      );
+    }
+  };
+
   const handleSaveCaptureArea = () => {
     setCaptureAreaConfig(currentArea);
+
+    // 윈도우 영역 설정 저장 시 현재 입력된 틱톡 ID 및 댓글 설정도 함께 클라우드에 영구 저장
+    const cleanUser = commentUsername.trim().replace(/^@/, '');
+    if (cleanUser !== commentConfig.tiktokUsername) {
+      handleSaveCommentSettings({ customUsername: cleanUser, notify: false });
+    }
 
     const video = previewVideoRef.current;
     if (previewStream && isScreenConnected && video?.videoWidth && video.videoHeight) {
@@ -817,17 +853,52 @@ export const RecognitionRulesPage: React.FC = () => {
         {/* 세부 설정 폼 */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
           <div className="space-y-1.5">
-            <label className="font-bold text-slate-700 flex items-center space-x-1">
-              <MessageSquareText className="w-3.5 h-3.5 text-cyan-600" />
-              <span>수집 대상 틱톡 ID (@ 제외)</span>
-            </label>
-            <input
-              type="text"
-              value={commentUsername}
-              onChange={(e) => setCommentUsername(e.target.value.replace(/^@/, '').trim())}
-              placeholder="예: my_shop_official"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 font-mono text-slate-900 focus:outline-none focus:border-brand-500"
-            />
+            <div className="flex items-center justify-between">
+              <label className="font-bold text-slate-700 flex items-center space-x-1">
+                <MessageSquareText className="w-3.5 h-3.5 text-cyan-600" />
+                <span>수집 대상 틱톡 ID (@ 제외)</span>
+              </label>
+              {commentConfig.tiktokUsername ? (
+                <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  클라우드 저장됨: @{commentConfig.tiktokUsername}
+                </span>
+              ) : (
+                <span className="text-[10px] text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                  미설정
+                </span>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={commentUsername}
+                onChange={(e) => setCommentUsername(e.target.value.replace(/^@/, '').trim())}
+                onBlur={() => {
+                  const clean = commentUsername.trim().replace(/^@/, '');
+                  if (clean !== commentConfig.tiktokUsername) {
+                    handleSaveCommentSettings({ customUsername: clean, notify: false });
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSaveCommentSettings({ customUsername: commentUsername, notify: true });
+                  }
+                }}
+                placeholder="예: my_shop_official"
+                className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-200 font-mono text-slate-900 focus:outline-none focus:border-brand-500"
+              />
+              <button
+                type="button"
+                onClick={() => handleSaveCommentSettings({ customUsername: commentUsername, notify: true })}
+                className="px-3.5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-sm transition active:scale-95 flex-shrink-0"
+              >
+                ID 저장
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              입력 후 [ID 저장] 버튼을 누르거나 Enter를 치면 다른 기기에서도 로그인 시 그대로 유지되도록 클라우드에 즉시 저장됩니다.
+            </p>
           </div>
 
           <div className="space-y-1.5">
@@ -869,26 +940,8 @@ export const RecognitionRulesPage: React.FC = () => {
 
         <div className="flex justify-end">
           <button
-            onClick={() => {
-              const username = commentUsername.trim().replace(/^@/, '');
-              const duration = Math.max(3, parseInt(commentAlertDuration, 10) || 15);
-              const words = commentAlertWords.split(',').map((w) => w.trim()).filter(Boolean);
-              const commands = Array.from(new Set(
-                commentAlertCommand.split(',').map((command) => command.trim()).filter(Boolean)
-              ));
-              const command = commands.length > 0 ? commands.join(', ') : '닫아';
-              saveCommentConfig({
-                tiktokUsername: username,
-                serverUrl: DEFAULT_COMMENT_SERVER_URL,
-                alertWords: words,
-                alertDurationSec: duration,
-                alertVoiceCommand: command
-              });
-              setCommentUsername(username);
-              setCommentAlertDuration(String(duration));
-              setCommentAlertCommand(command);
-              showNotice(`댓글 수집 설정이 저장되었습니다. (@${username || '미설정'} · 알림 단어 ${words.length}개 · 알림 ${duration}초)`, '💬 댓글 수집 설정 저장', 'success');
-            }}
+            type="button"
+            onClick={() => handleSaveCommentSettings({ notify: true })}
             className="px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-500/20 transition"
           >
             댓글 수집 설정 저장하기

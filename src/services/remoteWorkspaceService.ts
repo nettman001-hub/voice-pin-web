@@ -674,11 +674,12 @@ export const remoteWorkspaceService = {
     await this.saveWorkspaceSettings(workspaceId, 'voice_training', { sentences });
   },
 
-  // 추천 개인 설정: STT 모드 및 로컬 모델
+  // 추천 개인 설정: STT 모드 및 로컬 모델, 틱톡 사용자명
   async loadUserPreferences(workspaceId: string): Promise<{
     sttMode?: SttMode;
     localSttModel?: LocalSttModel;
     sttConfidence?: number;
+    tiktokUsername?: string;
   } | null> {
     return this.fetchWorkspaceSettings(workspaceId, 'user_preferences');
   },
@@ -686,16 +687,42 @@ export const remoteWorkspaceService = {
     sttMode?: SttMode;
     localSttModel?: LocalSttModel;
     sttConfidence?: number;
+    tiktokUsername?: string;
   }): Promise<void> {
     await this.saveWorkspaceSettings(workspaceId, 'user_preferences', preferences);
   },
 
   // 댓글 수집 설정 (알림 단어, 틱톡 사용자명, 표시 시간 등)
   async loadCommentCaptureConfig(workspaceId: string): Promise<Partial<CommentCaptureConfig> | null> {
-    return this.fetchWorkspaceSettings<Partial<CommentCaptureConfig>>(workspaceId, 'comment_capture_config');
+    const config = await this.fetchWorkspaceSettings<Partial<CommentCaptureConfig>>(workspaceId, 'comment_capture_config');
+    // 혹시 comment_capture_config에 tiktokUsername이 비어있다면 user_preferences 백업에서 복원
+    if (!config?.tiktokUsername) {
+      try {
+        const prefs = await this.loadUserPreferences(workspaceId);
+        if (prefs?.tiktokUsername) {
+          return {
+            ...(config || {}),
+            tiktokUsername: prefs.tiktokUsername
+          };
+        }
+      } catch {}
+    }
+    return config;
   },
   async saveCommentCaptureConfig(workspaceId: string, config: CommentCaptureConfig): Promise<void> {
     await this.saveWorkspaceSettings(workspaceId, 'comment_capture_config', config);
+    // 틱톡 ID가 지정되어 있다면 user_preferences에도 이중 백업하여 타 기기 로그인 시에도 절대 유실되지 않도록 보장
+    if (config.tiktokUsername) {
+      try {
+        const currentPrefs = (await this.loadUserPreferences(workspaceId)) || {};
+        await this.saveUserPreferences(workspaceId, {
+          ...currentPrefs,
+          tiktokUsername: config.tiktokUsername
+        });
+      } catch (err) {
+        console.warn('[RemoteWorkspace] 틱톡 ID 백업 저장 실패:', err);
+      }
+    }
   },
 
   // 캡처 영역 설정 (프리셋, 해상도 비율 등)
