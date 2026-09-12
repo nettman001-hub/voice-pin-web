@@ -111,7 +111,6 @@ export const LiveHomePage: React.FC = () => {
   const hasAdminSttKey = Boolean(selectedSttApiKey);
   const [keyInput, setKeyInput] = useState<string>(selectedSttApiKey || '');
   const [audioSourceMode, setAudioSourceMode] = useState<'TAB_AUDIO' | 'MIC'>('TAB_AUDIO');
-  const flowContainerRef = React.useRef<HTMLDivElement | null>(null);
   const commentFeedRef = React.useRef<HTMLDivElement | null>(null);
   const silenceWarningTimerRef = React.useRef<number | null>(null);
 
@@ -164,12 +163,6 @@ export const LiveHomePage: React.FC = () => {
 
     return () => window.clearTimeout(countdownTimer);
   }, [isListening, silenceCountdown, stopCommentCapture, stopListening]);
-
-  React.useEffect(() => {
-    if (flowContainerRef.current) {
-      flowContainerRef.current.scrollTop = flowContainerRef.current.scrollHeight;
-    }
-  }, [liveTranscriptFlow, currentInterimTranscript]);
 
   // 댓글 피드: 아래쪽이 최신글이 되도록 새 댓글이 오면 자동 스크롤한다.
   React.useEffect(() => {
@@ -655,183 +648,6 @@ export const LiveHomePage: React.FC = () => {
             </div>
 
             <AudioVisualizer waveform={waveform} audioLevel={audioLevel} isActive={isListening} />
-
-            {/* 실시간 STT 변환 자막 박스 (상/하단 2단 분할 - 밝은색 화이트 테마) */}
-            <div className="rounded-2xl border border-slate-200 overflow-hidden bg-white shadow-sm">
-              {/* [상단] 실시간 전체 인식 자막 스트림 (밝은색 배경) */}
-              <div className="p-3.5 sm:p-4 bg-slate-50/60 border-b border-slate-200">
-                <div className="flex items-center justify-between mb-2 flex-wrap gap-1">
-                  <div className="text-[11px] font-bold text-brand-700 uppercase tracking-wider flex items-center">
-                    <span className={`w-2 h-2 rounded-full mr-1.5 ${isListening ? 'bg-emerald-500 animate-ping' : 'bg-slate-400'}`}></span>
-                    <span>1. 실시간 전체 자막 스트림</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5 flex-wrap gap-1">
-                    <button
-                      onClick={() => injectTestMent('구매확정! 닉네임 러블리샵님 금액 35,000원입니다.')}
-                      className="px-2 py-0.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-[10px] border border-emerald-200 transition"
-                      title="실제 발화 멘트 주입 테스트"
-                    >
-                      ⚡ 3.5만 구매확정
-                    </button>
-                    <button
-                      onClick={() => injectTestMent('화면 캡처하세요.')}
-                      className="px-2 py-0.5 rounded-lg bg-cyan-50 hover:bg-cyan-100 text-cyan-700 font-bold text-[10px] border border-cyan-200 transition"
-                      title="캡처 명령 테스트 ('캡처하세요')"
-                    >
-                      📸 캡처하세요
-                    </button>
-                    <button
-                      onClick={() => injectTestMent('안녕하세요 오늘 라이브 방송 찾아와 주신 모든 분들 환영합니다. 이번 특가 상품은 고급 린넨 원피스이며 지금 바로 구매확정 닉네임 꽃길님 삼만오천원에 등록됩니다.')}
-                      className="px-2 py-0.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-[10px] border border-purple-200 transition"
-                      title="긴 발화 2줄 분할 자막 테스트"
-                    >
-                      ✂️ 긴멘트 2줄분할
-                    </button>
-                  </div>
-                </div>
-
-                <div
-                  ref={flowContainerRef}
-                  className="max-h-[120px] sm:max-h-[140px] min-h-[60px] overflow-y-auto space-y-1.5 pr-1 font-sans text-xs text-slate-800 flex flex-col justify-end scroll-smooth"
-                >
-                  {liveTranscriptFlow.length === 0 && !currentInterimTranscript ? (
-                    <div className="text-slate-400 text-xs italic py-2">
-                      {isListening ? '마이크로 말씀하시는 모든 발화가 실시간으로 흘러갑니다...' : '상단의 [라이브 청취 시작]을 누르면 실시간 자막이 표시됩니다.'}
-                    </div>
-                  ) : (
-                    <>
-                      {liveTranscriptFlow.slice(-10).map((flow) => (
-                        <div key={flow.id} className="leading-relaxed flex items-baseline space-x-2 text-slate-700 font-medium">
-                          <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">{flow.timestamp}</span>
-                          <span className="break-words line-clamp-2 whitespace-pre-line">{flow.text}</span>
-                        </div>
-                      ))}
-                      {currentInterimTranscript && (
-                        <div className="leading-relaxed flex items-baseline space-x-2 text-brand-600 font-bold animate-pulse">
-                          <span className="text-[10px] text-brand-400 font-mono flex-shrink-0">듣는 중...</span>
-                          <span className="break-words line-clamp-2 whitespace-pre-line">{currentInterimTranscript}</span>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* [하단] 규칙 지정된 문장 & 액션 하이라이트 박스 (밝은색 배경) */}
-              <div className="p-3.5 sm:p-4 bg-amber-50/40 border-t border-amber-100">
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="text-[11px] font-bold text-amber-800 uppercase tracking-wider flex items-center space-x-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                    <span>2. 규칙 감지 핵심 발화 & 액션</span>
-                  </div>
-                  {lastMatchedRuleItem && (
-                    <span className="text-[10px] text-slate-400 font-mono">{lastMatchedRuleItem.timestamp}</span>
-                  )}
-                </div>
-
-                {lastMatchedRuleItem ? (
-                  <div className="p-3 rounded-xl bg-white border border-amber-200 shadow-sm space-y-2">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center space-x-1.5 flex-wrap gap-1">
-                        {lastMatchedRuleItem.matchedKeywords.map((kw, idx) => (
-                          <span key={idx} className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-bold text-[10px] border border-amber-300">
-                            #{kw}
-                          </span>
-                        ))}
-                      </div>
-                      <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-[10px] font-bold">
-                        {lastMatchedRuleItem.action}
-                      </span>
-                    </div>
-                    <p className="text-xs sm:text-sm font-black text-slate-900 tracking-tight leading-snug break-words">
-                      "{lastMatchedRuleItem.text}"
-                    </p>
-                  </div>
-                ) : (
-                  <div className="py-2.5 px-3 rounded-xl bg-white border border-slate-200 text-xs text-slate-400 italic">
-                    "구매확정, 금액, 닉네임, 캡처, 수정" 등 규칙 지정 단어가 포함된 문장이 감지되면 이곳에 하이라이트됩니다.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* 최근 전사 로그 */}
-          <div className="order-3 bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-3 sm:mb-4 flex-wrap gap-2">
-              <div className="flex items-center space-x-2 flex-wrap">
-                <Clock className="w-4 h-4 text-brand-600 shrink-0" />
-                <h3 className="text-xs sm:text-sm font-bold text-slate-900">
-                  최근 실시간 전사 로그
-                </h3>
-                <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-                  화면 {transcriptLogs.length}건 / 오늘 누적 {totalSessionTranscriptCount || transcriptLogs.length}건
-                </span>
-              </div>
-              <div className="flex items-center space-x-1.5">
-                <button
-                  onClick={() => downloadSessionTranscripts('txt')}
-                  disabled={(totalSessionTranscriptCount || transcriptLogs.length) === 0}
-                  className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] sm:text-[11px] font-bold border border-slate-300 transition flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
-                  title="오늘 방송 전체 음성 전사 로그를 텍스트(.txt) 파일로 다운로드"
-                >
-                  <Download className="w-3 h-3" />
-                  <span>TXT 저장</span>
-                </button>
-                <button
-                  onClick={() => downloadSessionTranscripts('csv')}
-                  disabled={(totalSessionTranscriptCount || transcriptLogs.length) === 0}
-                  className="px-2.5 py-1 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] sm:text-[11px] font-bold border border-emerald-200 transition flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
-                  title="오늘 방송 전체 음성 전사 로그를 엑셀(.csv) 파일로 다운로드 (한글 엑셀 호환)"
-                >
-                  <FileSpreadsheet className="w-3 h-3" />
-                  <span>엑셀(CSV) 저장</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-2 max-h-[250px] sm:max-h-[300px] overflow-y-auto pr-1">
-              {transcriptLogs.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-400">
-                  아직 전사된 발화 로그가 없습니다.
-                </div>
-              ) : (
-                transcriptLogs.map((log) => (
-                  <div
-                    key={log.id}
-                    className={`p-3 rounded-2xl border text-xs transition ${
-                      log.actionTriggered === 'SALE_SAVED'
-                        ? 'bg-brand-50 border-brand-200 text-brand-900'
-                        : log.actionTriggered === 'SCREEN_CAPTURED'
-                        ? 'bg-cyan-50 border-cyan-200 text-cyan-900'
-                        : log.actionTriggered === 'VOICE_EDIT_START' || log.actionTriggered === 'VOICE_EDIT_DONE'
-                        ? 'bg-amber-50 border-amber-200 text-amber-900'
-                        : 'bg-slate-50 border-slate-200 text-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] text-slate-400 font-mono">{log.timestamp}</span>
-                      {log.actionTriggered === 'SALE_SAVED' && (
-                        <span className="text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700">
-                          🛍️ 판매 자동 저장
-                        </span>
-                      )}
-                      {log.actionTriggered === 'SCREEN_CAPTURED' && (
-                        <span className="text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700">
-                          📸 댓글창 캡처
-                        </span>
-                      )}
-                      {log.actionTriggered === 'VOICE_EDIT_START' && (
-                        <span className="text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
-                          ✏️ 수정 모드 진입
-                        </span>
-                      )}
-                    </div>
-                    <p className="font-semibold text-slate-900 break-words">{log.text}</p>
-                  </div>
-                ))
-              )}
-            </div>
           </div>
 
           {/* 실시간 댓글 캡처 피드 (아래쪽이 최신글) */}
@@ -921,8 +737,125 @@ export const LiveHomePage: React.FC = () => {
             </div>
           </div>
 
+          {/* 규칙 감지 핵심 발화 & 액션 (실시간 댓글 캡처 바로 아래) */}
+          <div className="order-3 bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Sparkles className="w-4 h-4 text-amber-500" />
+                <h3 className="text-xs sm:text-sm font-bold text-slate-900">
+                  규칙 감지 핵심 발화 & 액션
+                </h3>
+              </div>
+              {lastMatchedRuleItem && (
+                <span className="text-[10px] sm:text-xs text-slate-400 font-mono">{lastMatchedRuleItem.timestamp}</span>
+              )}
+            </div>
+
+            {lastMatchedRuleItem ? (
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-50/50 border border-amber-200 shadow-sm space-y-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center space-x-1.5 flex-wrap gap-1">
+                    {lastMatchedRuleItem.matchedKeywords.map((kw, idx) => (
+                      <span key={idx} className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-bold text-[10px] sm:text-xs border border-amber-300">
+                        #{kw}
+                      </span>
+                    ))}
+                  </div>
+                  <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-[10px] sm:text-xs font-bold">
+                    {lastMatchedRuleItem.action}
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm font-black text-slate-900 tracking-tight leading-snug break-words">
+                  "{lastMatchedRuleItem.text}"
+                </p>
+              </div>
+            ) : (
+              <div className="py-4 px-3 text-center rounded-2xl border border-dashed border-slate-200 text-xs text-slate-400 italic">
+                "구매확정, 금액, 닉네임, 캡처, 수정" 등 규칙 지정 단어가 포함된 문장이 감지되면 이곳에 하이라이트됩니다.
+              </div>
+            )}
+          </div>
+
+          {/* 최근 전사 로그 */}
+          <div className="order-4 bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-3 sm:mb-4 flex-wrap gap-2">
+              <div className="flex items-center space-x-2 flex-wrap">
+                <Clock className="w-4 h-4 text-brand-600 shrink-0" />
+                <h3 className="text-xs sm:text-sm font-bold text-slate-900">
+                  최근 실시간 전사 로그
+                </h3>
+                <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                  화면 {transcriptLogs.length}건 / 오늘 누적 {totalSessionTranscriptCount || transcriptLogs.length}건
+                </span>
+              </div>
+              <div className="flex items-center space-x-1.5">
+                <button
+                  onClick={() => downloadSessionTranscripts('txt')}
+                  disabled={(totalSessionTranscriptCount || transcriptLogs.length) === 0}
+                  className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] sm:text-[11px] font-bold border border-slate-300 transition flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+                  title="오늘 방송 전체 음성 전사 로그를 텍스트(.txt) 파일로 다운로드"
+                >
+                  <Download className="w-3 h-3" />
+                  <span>TXT 저장</span>
+                </button>
+                <button
+                  onClick={() => downloadSessionTranscripts('csv')}
+                  disabled={(totalSessionTranscriptCount || transcriptLogs.length) === 0}
+                  className="px-2.5 py-1 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] sm:text-[11px] font-bold border border-emerald-200 transition flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+                  title="오늘 방송 전체 음성 전사 로그를 엑셀(.csv) 파일로 다운로드 (한글 엑셀 호환)"
+                >
+                  <FileSpreadsheet className="w-3 h-3" />
+                  <span>엑셀(CSV) 저장</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2 max-h-[250px] sm:max-h-[300px] overflow-y-auto pr-1">
+              {transcriptLogs.length === 0 ? (
+                <div className="py-8 text-center text-xs text-slate-400">
+                  아직 전사된 발화 로그가 없습니다.
+                </div>
+              ) : (
+                transcriptLogs.map((log) => (
+                  <div
+                    key={log.id}
+                    className={`p-3 rounded-2xl border text-xs transition ${
+                      log.actionTriggered === 'SALE_SAVED'
+                        ? 'bg-brand-50 border-brand-200 text-brand-900'
+                        : log.actionTriggered === 'SCREEN_CAPTURED'
+                        ? 'bg-cyan-50 border-cyan-200 text-cyan-900'
+                        : log.actionTriggered === 'VOICE_EDIT_START' || log.actionTriggered === 'VOICE_EDIT_DONE'
+                        ? 'bg-amber-50 border-amber-200 text-amber-900'
+                        : 'bg-slate-50 border-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] text-slate-400 font-mono">{log.timestamp}</span>
+                      {log.actionTriggered === 'SALE_SAVED' && (
+                        <span className="text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700">
+                          🛍️ 판매 자동 저장
+                        </span>
+                      )}
+                      {log.actionTriggered === 'SCREEN_CAPTURED' && (
+                        <span className="text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700">
+                          📸 댓글창 캡처
+                        </span>
+                      )}
+                      {log.actionTriggered === 'VOICE_EDIT_START' && (
+                        <span className="text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                          ✏️ 수정 모드 진입
+                        </span>
+                      )}
+                    </div>
+                    <p className="font-semibold text-slate-900 break-words">{log.text}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
           {/* 테스트 멘트 주입 툴바 (모바일 가로 스크롤 지원) */}
-          <div className="order-4 bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 text-xs shadow-sm space-y-2">
+          <div className="order-5 bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 text-xs shadow-sm space-y-2">
             <p className="font-bold text-slate-700 flex items-center">
               <Sparkles className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
               <span>빠른 시연 & 테스트 멘트 주입 버튼</span>
@@ -939,6 +872,12 @@ export const LiveHomePage: React.FC = () => {
                 className="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
               >
                 + "민트초코 19,900원 + 캡처하세요"
+              </button>
+              <button
+                onClick={() => injectTestMent('화면 캡처하세요.')}
+                className="px-3 py-1.5 rounded-xl bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border border-cyan-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
+              >
+                + "화면 캡처하세요"
               </button>
               <button
                 onClick={() => injectTestMent('수정 시작')}
