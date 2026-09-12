@@ -158,11 +158,24 @@ app.use((req, res, next) => {
   next();
 });
 
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (ALLOWED_ORIGINS.has(origin)) return true;
+  try {
+    const url = new URL(origin);
+    if (url.hostname === '127.0.0.1' || url.hostname === 'localhost') {
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
 app.use(
   cors({
     origin(origin, cb) {
-      if (!origin || ALLOWED_ORIGINS.has(origin)) return cb(null, true);
-      return cb(new Error(`허용되지 않은 오리진: ${origin}`));
+      if (isAllowedOrigin(origin)) return cb(null, true);
+      log(`[CORS] 허용되지 않은 오리진 요청 차단: ${origin}`);
+      return cb(null, false);
     }
   })
 );
@@ -188,8 +201,8 @@ const httpServer = http.createServer(app);
 const io = new Server(httpServer, {
   cors: {
     origin: (origin, cb) => {
-      if (!origin || ALLOWED_ORIGINS.has(origin)) return cb(null, true);
-      return cb(new Error(`허용되지 않은 오리진: ${origin}`));
+      if (isAllowedOrigin(origin)) return cb(null, true);
+      return cb(null, false);
     },
     // 크롬의 WebSocket PNA preflight가 요청할 수 있는 메서드 전부 허용
     methods: ['GET', 'POST', 'OPTIONS', 'CONNECT']
@@ -665,6 +678,9 @@ httpServer.listen(PORT, HOST, () => {
   log(`VoiceCAP 댓글 수집 서버 기동: http://${HOST}:${PORT}`);
   log(`허용 오리진: ${[...ALLOWED_ORIGINS].join(', ')}`);
   log(`voicecapSMS 브리지: ${SMS_BRIDGE_API_KEY ? 'API 키 인증 사용' : 'API 키 없음 (로컬 개발 전용)'}`);
+  if (process.parentPort) {
+    process.parentPort.postMessage({ type: 'server:ready', port: PORT, host: HOST });
+  }
 });
 
 process.on('SIGINT', shutdown);

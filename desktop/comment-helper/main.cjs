@@ -135,7 +135,11 @@ function startServer() {
         'https://www.voicecap.shop',
         'https://voice-pin-web.vercel.app',
         'http://localhost:5173',
-        'http://127.0.0.1:5173'
+        'http://localhost:3000',
+        'http://localhost:2137',
+        'http://127.0.0.1:5173',
+        'http://127.0.0.1:3000',
+        'http://127.0.0.1:2137'
       ].join(',')
     }
   });
@@ -144,7 +148,13 @@ function startServer() {
   serverProcess.stderr?.on('data', (chunk) => writeLog('server-error', chunk.toString('utf8')));
   serverProcess.on('message', (message) => {
     const payload = message && message.data ? message.data : message;
-    if (!payload || payload.type !== 'print:sale') return;
+    if (!payload) return;
+    if (payload.type === 'server:ready') {
+      writeLog('helper', `내장 서버 준비 완료 알림 수신 (포트 ${payload.port}), 앱 로드 시작`);
+      loadAppUrl();
+      return;
+    }
+    if (payload.type !== 'print:sale') return;
     writeLog('print', `도우미 인쇄 요청 수신: ${JSON.stringify(payload)}`);
     void enqueuePrintJob(payload.payload).then((result) => {
       writeLog('print', `도우미 인쇄 처리 완료: ${JSON.stringify(result)}`);
@@ -426,6 +436,16 @@ function createWindow() {
   });
   mainWindow.webContents.on('console-message', (_event, details) => {
     if (details.level === 'error') writeLog('ui-error', details.message);
+  });
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F12') {
+      mainWindow.webContents.toggleDevTools();
+      event.preventDefault();
+    }
+    if (input.control && (input.key === 'r' || input.key === 'R')) {
+      mainWindow.reload();
+      event.preventDefault();
+    }
   });
   mainWindow.once('ready-to-show', () => {
     if (!process.argv.includes('--hidden')) mainWindow.show();
