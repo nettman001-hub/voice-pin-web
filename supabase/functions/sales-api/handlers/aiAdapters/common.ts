@@ -63,6 +63,8 @@ export function buildResolutionPrompt(req: AiResolutionRequest): { systemPrompt:
    - 대상 구매자의 판매 후보가 2건 이상이고 발화에서 특정 상품번호나 시간 근거가 없으면, 임의로 선택하지 말고 targetSaleId: null, resolvable: false, conflictReason: "복수 판매 후보 존재 (지칭 근거 필요)", missingInfo: ["상품번호 누락"]으로 처리하십시오.
 6. 없는 정보 생성 금지:
    - 발화나 댓글에 없는 닉네임이나 가격을 지어내지 마십시오. 근거가 부족하면 resolvable: false로 응답하십시오.
+7. 후속 발화(followingUtterances) 문맥 분석:
+   - 후속 발화가 함께 제공된 경우, 이전/현재 발화에서 끊기거나 미완성된 내용(금액 누락, 상품번호 추가, 닉네임 추가 등)을 보완하는 결정적 단서로 결합하여 분석하십시오.
 
 반드시 다음 JSON 형식으로만 응답하십시오:
 {
@@ -80,9 +82,12 @@ export function buildResolutionPrompt(req: AiResolutionRequest): { systemPrompt:
   "conflictReason": "충돌 사유(있을 경우만)" | null
 }`;
 
+  const normalizedFollowing = req.followingUtterances || (req.followingUtterance ? [{ text: req.followingUtterance }] : []);
+
   const userPrompt = JSON.stringify({
     currentUtterance: req.currentUtterance,
     priorUtterances: req.priorUtterances || [],
+    followingUtterances: normalizedFollowing,
     relevantComments: (req.relevantComments || []).slice(0, 10),
     saleCandidates: req.saleCandidates || [],
     activeProduct: req.activeProduct || null,

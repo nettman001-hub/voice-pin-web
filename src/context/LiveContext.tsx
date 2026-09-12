@@ -20,7 +20,7 @@ import { useProductSales } from './ProductSalesContext';
 import { ProductSalesProduct } from '../types/productSales';
 import { createNumberProductImage } from '../services/productImageService';
 import { InterimStreamChunker } from '../services/captionStreamService';
-import { buildPendingReasons, buildEvidenceSnapshot } from '../services/pendingSalesService';
+import { buildPendingReasons, buildEvidenceSnapshot, evaluatePendingRules } from '../services/pendingSalesService';
 import {
   parseVoiceCorrection,
   findTargetSaleForCorrection,
@@ -1242,6 +1242,48 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           '음성인식 자동캡처',
           requiredListeningGeneration
         );
+      } else if (
+        lastSavedSaleRef.current &&
+        lastSavedSaleRef.current.status === '보류' &&
+        Date.now() - new Date(lastSavedSaleRef.current.recognizedAt).getTime() <= 20000 &&
+        fullText.trim().length > 0
+      ) {
+        // 4. 직전 보류 판매에 대한 후속 발화(followingUtterance) 연결
+        const pendingSale = lastSavedSaleRef.current;
+        const currentReasons = pendingSale.pendingReasons || [];
+        const ruleEval = evaluatePendingRules(currentReasons, {
+          sale: pendingSale,
+          comments: storageService.getCommentRecords(),
+          buyers: [],
+          activeProduct: productSalesRef.current.activeProduct ? {
+            unitPrice: productSalesRef.current.activeProduct.unitPrice ?? undefined,
+            productCode: productSalesRef.current.activeProduct.productCode,
+          } : undefined,
+          followUpUtterance: fullText,
+        });
+
+        if (ruleEval.resolvedReasonCodes.length > 0) {
+          const updated = {
+            ...pendingSale,
+            ...ruleEval.changes,
+            status: ruleEval.allResolved ? '자동저장' : '보류',
+            pendingReasons: ruleEval.updatedReasons,
+            revision: (pendingSale.revision || 1) + 1,
+          };
+          updateSale(updated as SaleRecord);
+          lastSavedSaleRef.current = updated as SaleRecord;
+          actionTriggered = 'SALE_SAVED';
+          ruleActionName = '🔗 후속 발화 연결 보류 해결';
+          playBeep(1200, 200);
+        } else if (isRemoteAuth && workspaceId) {
+          // 규칙으로 미해결 시 후속 발화(followingUtterance)를 첨부하여 AI 분석 요청
+          void aiSettingsApi.triggerPendingAiResolution(pendingSale.id, {
+            followingUtterance: fullText,
+            followUpUtterance: fullText,
+            workspaceId,
+          });
+          ruleActionName = '🤖 AI 후속 발화 분석 전달';
+        }
       }
     }
   }

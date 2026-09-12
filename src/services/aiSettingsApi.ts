@@ -836,6 +836,8 @@ export const aiSettingsApi = {
     saleId: string,
     options: {
       followUpUtterance?: string;
+      followingUtterance?: string;
+      followingUtterances?: Array<{ text: string; timestamp?: string }>;
       forceReanalyze?: boolean;
       workspaceId?: string;
     } = {}

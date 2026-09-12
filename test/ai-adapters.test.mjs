@@ -965,4 +965,49 @@ test('LM Studio & OpenAI: buildOpenAiModelsUrl and buildOpenAiChatUrl normalize 
   }
 });
 
+// 8. 후속 발화(followingUtterances) 문맥 확장 테스트
+test('followingUtterances: buildResolutionPrompt incorporates following utterances into userPrompt and systemPrompt', () => {
+  const req = {
+    taskId: 'task_followup_01',
+    taskType: 'PENDING_RESOLUTION',
+    workspaceId: 'ws_test',
+    sessionId: 'session_test',
+    currentUtterance: '홍길동님 주문 접수',
+    priorUtterances: [
+      { text: '오늘 특가 상품입니다', timestamp: '2026-09-12T20:00:00Z' }
+    ],
+    followingUtterances: [
+      { text: '15,000원에 12번 상품 드릴게요', timestamp: '2026-09-12T20:00:03Z' }
+    ],
+    relevantComments: [
+      { commentId: 'c1', nickname: '홍길동', text: '구매요' }
+    ],
+  };
+
+  const { systemPrompt, userPrompt } = buildResolutionPrompt(req);
+
+  assert.match(systemPrompt, /후속 발화\(followingUtterances\) 문맥 분석/);
+  const parsedUserPrompt = JSON.parse(userPrompt);
+  assert.equal(parsedUserPrompt.currentUtterance, '홍길동님 주문 접수');
+  assert.equal(parsedUserPrompt.priorUtterances.length, 1);
+  assert.equal(parsedUserPrompt.followingUtterances.length, 1);
+  assert.equal(parsedUserPrompt.followingUtterances[0].text, '15,000원에 12번 상품 드릴게요');
+});
+
+test('followingUtterances: buildResolutionPrompt normalizes single followingUtterance string into array', () => {
+  const req = {
+    taskId: 'task_followup_02',
+    taskType: 'PENDING_RESOLUTION',
+    workspaceId: 'ws_test',
+    sessionId: 'session_test',
+    currentUtterance: '구매자 미확인 1.2',
+    followingUtterance: '아까 뒷번호 4567님이요',
+  };
+
+  const { userPrompt } = buildResolutionPrompt(req);
+  const parsedUserPrompt = JSON.parse(userPrompt);
+  assert.equal(parsedUserPrompt.followingUtterances.length, 1);
+  assert.equal(parsedUserPrompt.followingUtterances[0].text, '아까 뒷번호 4567님이요');
+});
+
 

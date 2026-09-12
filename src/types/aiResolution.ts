@@ -38,6 +38,8 @@ export interface AiResolutionRequest {
   sessionId: string;
   currentUtterance: string;
   priorUtterances?: AiUtteranceContext[];
+  followingUtterances?: AiUtteranceContext[];
+  followingUtterance?: string;
   relevantComments?: AiCommentContext[];
   saleCandidates?: AiSaleCandidate[];
   activeProduct?: {

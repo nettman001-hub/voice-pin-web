@@ -397,7 +397,13 @@ export async function handleTriggerPendingAiResolution(
   auth: AuthContext,
   body: any
 ) {
-  const { saleId, followUpUtterance, forceReanalyze = false } = body || {};
+  const {
+    saleId,
+    followUpUtterance,
+    followingUtterance,
+    followingUtterances,
+    forceReanalyze = false,
+  } = body || {};
 
   if (!saleId) {
     return errorResponse('VALIDATION_ERROR', 'saleId가 필요합니다.', 400);
@@ -474,7 +480,8 @@ export async function handleTriggerPendingAiResolution(
   }
 
   // 4. [Step 2] 규칙으로 해결되지 않은 경우 -> AI 작업 대기열 연동
-  const currentSnapshotVersion = (sale.evidence_snapshot?.snapshotVersion || 1) + (followUpUtterance ? 1 : 0);
+  const hasContextAddition = Boolean(followUpUtterance || followingUtterance || (followingUtterances && followingUtterances.length > 0));
+  const currentSnapshotVersion = (sale.evidence_snapshot?.snapshotVersion || 1) + (hasContextAddition ? 1 : 0);
   const evidenceSnapshot = buildEvidenceSnapshot(sale, {
     relevantCommentIds: (comments || []).slice(0, 10).map((c) => c.id),
     snapshotVersion: currentSnapshotVersion,
@@ -498,6 +505,8 @@ export async function handleTriggerPendingAiResolution(
     });
   }
 
+  const normalizedFollowing = followingUtterances || (followingUtterance ? [{ text: followingUtterance, timestamp: new Date().toISOString() }] : []);
+
   // AI 분석 요청 생성
   const aiPayload = {
     workspaceId,
@@ -515,6 +524,7 @@ export async function handleTriggerPendingAiResolution(
       taskType: 'PENDING_RESOLUTION' as const,
       currentUtterance: followUpUtterance || sale.raw_transcript,
       priorUtterances: sale.raw_transcript ? [{ text: sale.raw_transcript, timestamp: sale.recognized_at }] : [],
+      followingUtterances: normalizedFollowing,
       relevantComments: (comments || []).slice(0, 10).map((c) => ({
         commentId: c.id,
         nickname: c.nickname,
