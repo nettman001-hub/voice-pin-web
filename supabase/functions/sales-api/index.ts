@@ -32,6 +32,8 @@ import {
 import {
   handleIngestComments,
   handleGetSalesFeed,
+  handleListLiveComments,
+  handleDeleteLiveComments,
   handleSearchBuyers,
   handleConfirmBuyer,
 } from './handlers/comments.ts'
@@ -180,6 +182,12 @@ serve(async (req: Request) => {
       case 'get-sales-feed':
         requireCapability('SALES_READ')
         return await handleGetSalesFeed(workspaceId, body)
+      case 'list-live-comments':
+        requireCapability('SALES_READ')
+        return await handleListLiveComments(workspaceId, body)
+      case 'delete-live-comments':
+        requireCapability('SALES_WRITE')
+        return await handleDeleteLiveComments(workspaceId, body)
       case 'search-buyers':
         requireCapability('SALES_READ')
         return await handleSearchBuyers(workspaceId, body)

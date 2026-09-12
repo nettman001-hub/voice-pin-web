@@ -105,10 +105,18 @@ export async function handleResolvePendingSale(
     }
 
     const { data: comments } = await admin
-      .from('comments')
-      .select('id, nickname, text')
+      .from('live_comments')
+      .select('id, nickname_snapshot, content')
       .eq('workspace_id', workspaceId)
+      .eq('session_id', sale.session_id)
+      .order('captured_at', { ascending: false })
       .limit(50);
+
+    const normalizedComments = (comments || []).map((comment) => ({
+      id: comment.id,
+      nickname: comment.nickname_snapshot,
+      text: comment.content,
+    }));
 
     const { data: buyers } = await admin
       .from('buyers')
@@ -122,7 +130,7 @@ export async function handleResolvePendingSale(
       .eq('workspace_id', workspaceId);
 
     const validation = validateAiResolutionForSale(aiResult, sale, {
-      sessionComments: comments || [],
+      sessionComments: normalizedComments,
       registeredBuyers: buyers || [],
       sessionProducts: products || [],
     });
@@ -432,11 +440,19 @@ export async function handleTriggerPendingAiResolution(
   const sessionId = sale.session_id;
 
   const { data: comments } = await admin
-    .from('comments')
-    .select('id, nickname, text, created_at')
+    .from('live_comments')
+    .select('id, nickname_snapshot, content, captured_at')
     .eq('workspace_id', workspaceId)
-    .order('created_at', { ascending: false })
+    .eq('session_id', sessionId)
+    .order('captured_at', { ascending: false })
     .limit(50);
+
+  const normalizedComments = (comments || []).map((comment) => ({
+    id: comment.id,
+    nickname: comment.nickname_snapshot,
+    text: comment.content,
+    created_at: comment.captured_at,
+  }));
 
   const { data: buyers } = await admin
     .from('buyers')
@@ -453,14 +469,14 @@ export async function handleTriggerPendingAiResolution(
   let currentReasons: StructuredPendingReason[] = Array.isArray(sale.pending_reasons) && sale.pending_reasons.length > 0
     ? sale.pending_reasons
     : buildPendingReasons(sale, {
-        comments: comments || [],
+        comments: normalizedComments,
         activeProduct: products?.[0] ? { unitPrice: products[0].unit_price, productCode: products[0].product_code } : undefined,
       });
 
   // 3. [Step 1] 기존 규칙 우선 파이프라인 실행
   const ruleResult = evaluatePendingRules(currentReasons, {
     sale,
-    comments: comments || [],
+    comments: normalizedComments,
     buyers: buyers || [],
     activeProduct: products?.find((p) => p.id === sale.product_id || p.product_code === sale.product_code_snapshot),
     sessionProducts: products || [],
@@ -483,7 +499,7 @@ export async function handleTriggerPendingAiResolution(
   const hasContextAddition = Boolean(followUpUtterance || followingUtterance || (followingUtterances && followingUtterances.length > 0));
   const currentSnapshotVersion = (sale.evidence_snapshot?.snapshotVersion || 1) + (hasContextAddition ? 1 : 0);
   const evidenceSnapshot = buildEvidenceSnapshot(sale, {
-    relevantCommentIds: (comments || []).slice(0, 10).map((c) => c.id),
+    relevantCommentIds: normalizedComments.slice(0, 10).map((c) => c.id),
     snapshotVersion: currentSnapshotVersion,
   });
 
@@ -525,7 +541,7 @@ export async function handleTriggerPendingAiResolution(
       currentUtterance: followUpUtterance || sale.raw_transcript,
       priorUtterances: sale.raw_transcript ? [{ text: sale.raw_transcript, timestamp: sale.recognized_at }] : [],
       followingUtterances: normalizedFollowing,
-      relevantComments: (comments || []).slice(0, 10).map((c) => ({
+      relevantComments: normalizedComments.slice(0, 10).map((c) => ({
         commentId: c.id,
         nickname: c.nickname,
         text: c.text,

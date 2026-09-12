@@ -4,6 +4,7 @@ import { useAuth } from './AuthContext';
 import { useLive } from './LiveContext';
 import { storageService } from '../services/storageService';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
+import { useProductSales } from './ProductSalesContext';
 import {
   commentDedupeKey,
   commentStreamService,
@@ -40,6 +41,7 @@ const CommentCaptureContext = createContext<CommentCaptureContextType | undefine
 export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { workspaceId } = useAuth();
   const { isListening, currentSessionId, transcriptLogs } = useLive();
+  const { activeSession, feed } = useProductSales();
 
   // 안전을 위해 브라우저를 새로 열거나 새로고침할 때마다 댓글 수집은 꺼진 상태로 시작한다.
   // 판매자가 현재 방송에서 직접 시작 버튼을 눌렀을 때만 활성화한다.
@@ -64,6 +66,12 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   useEffect(() => {
     sessionIdRef.current = currentSessionId;
   }, [currentSessionId]);
+
+  // 댓글 도우미는 회차 ID를 받아야 live_comments 단일 원본에 적재할 수 있다.
+  // 도우미의 인증 정보는 설치 설정에 남아 있고 브라우저에는 전달하지 않는다.
+  useEffect(() => {
+    commentStreamService.configureCloudPublishing({ sessionId: activeSession?.id || null });
+  }, [activeSession?.id, serverStatus]);
 
   useEffect(() => {
     isActiveRef.current = isActive;
@@ -196,9 +204,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         ...(matchedWord ? { matchedAlertWord: matchedWord } : {})
       };
 
-      storageService.addCommentRecords([record]);
       setNewCount((prev) => prev + 1);
-      setLiveComments((prev) => [...prev, record].slice(-100));
 
       if (matchedWord) {
         showAlert(
@@ -260,21 +266,25 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     }
   }, [isActive, isListening, serverStatus]);
 
-  // 회차 시작/변경 시 중복 키 적재 및 현재 회차 피드 복원
+  // cloud live_comments가 댓글의 단일 원본이다. 로컬 저장소는 설정만 보관한다.
   useEffect(() => {
-    seenKeysRef.current = new Set(
-      storageService.getCommentRecords().map((r) => commentDedupeKey(r.nickname, r.content))
-    );
-
-    const sessionRecords = storageService
-      .getCommentRecords()
-      .filter((r) => r.sessionId === currentSessionId)
+    const sessionRecords = (feed?.comments || [])
+      .filter((comment) => comment.sessionId === currentSessionId)
+      .map((comment): CommentRecord => ({
+        id: comment.id,
+        sessionId: comment.sessionId,
+        nickname: comment.nicknameSnapshot,
+        content: comment.content,
+        capturedAt: comment.capturedAt,
+      }))
       .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime())
       .slice(-100);
-    setLiveComments(sessionRecords);
 
-    setNewCount(0);
-  }, [isActive, isListening, currentSessionId]);
+    seenKeysRef.current = new Set(
+      sessionRecords.map((record) => commentDedupeKey(record.nickname, record.content))
+    );
+    setLiveComments(sessionRecords);
+  }, [feed?.comments, currentSessionId]);
 
   // 언마운트 시 정리
   useEffect(

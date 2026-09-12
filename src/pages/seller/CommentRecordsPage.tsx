@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useCommentCapture } from '../../context/CommentCaptureContext';
-import { storageService } from '../../services/storageService';
+import { productSalesApi } from '../../services/productSalesApi';
 import { CommentRecord } from '../../types/comment';
 import {
   MessageSquareText,
@@ -9,12 +9,14 @@ import {
   Download,
   ArrowRight,
   BellRing,
-  Search
+  Search,
+  RefreshCw
 } from 'lucide-react';
 
 export const CommentRecordsPage: React.FC = () => {
   const { isActive, isRunning } = useCommentCapture();
-  const [recordsVersion, setRecordsVersion] = useState(0);
+  const [allRecords, setAllRecords] = useState<CommentRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   // 필터 상태: 회차 + 기간
   const [sessionFilter, setSessionFilter] = useState<string>('ALL');
@@ -23,8 +25,27 @@ export const CommentRecordsPage: React.FC = () => {
   const [searchText, setSearchText] = useState<string>('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  const allRecords = useMemo(() => storageService.getCommentRecords(), [recordsVersion]);
-  const refresh = () => setRecordsVersion((v) => v + 1);
+  const refresh = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const { comments } = await productSalesApi.listLiveComments({ limit: 5000 });
+      setAllRecords(comments.map((comment) => ({
+        id: comment.id,
+        sessionId: comment.sessionId,
+        nickname: comment.nicknameSnapshot,
+        content: comment.content,
+        capturedAt: comment.capturedAt,
+      })));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '클라우드 댓글 기록을 불러오지 못했습니다.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   const sessionOptions = useMemo(() => {
     const sessions = Array.from(new Set(allRecords.map((r) => r.sessionId)));
@@ -53,29 +74,34 @@ export const CommentRecordsPage: React.FC = () => {
       .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime());
   }, [allRecords, sessionFilter, fromDate, toDate, searchText]);
 
+  const deleteRecords = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    try {
+      await productSalesApi.deleteLiveComments(ids);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+      await refresh();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '클라우드 댓글 기록을 삭제하지 못했습니다.');
+    }
+  };
+
   const handleDeleteOne = (id: string) => {
-    storageService.deleteCommentRecord(id);
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-    refresh();
+    void deleteRecords([id]);
   };
 
   const handleDeleteSelected = () => {
     if (selectedIds.size === 0) return;
-    storageService.deleteCommentRecords(Array.from(selectedIds));
-    setSelectedIds(new Set());
-    refresh();
+    void deleteRecords(Array.from(selectedIds));
   };
 
   const handleDeleteAllFiltered = () => {
     if (filteredRecords.length === 0) return;
     if (!window.confirm(`현재 필터 조건의 댓글 ${filteredRecords.length}건을 모두 삭제할까요?`)) return;
-    storageService.deleteCommentRecords(filteredRecords.map((r) => r.id));
-    setSelectedIds(new Set());
-    refresh();
+    void deleteRecords(filteredRecords.map((r) => r.id));
   };
 
   const toggleSelect = (id: string) => {
@@ -142,7 +168,7 @@ export const CommentRecordsPage: React.FC = () => {
             <span>댓글 캡처 기록</span>
           </h1>
           <p className="text-[11px] sm:text-xs text-slate-500 mt-1">
-            자동 캡처된 댓글을 회차/기간별로 확인하고 삭제·다운로드할 수 있습니다. (아래쪽이 최신 댓글)
+            클라우드에 적재된 댓글을 회차/기간별로 확인하고 삭제·다운로드할 수 있습니다. (아래쪽이 최신 댓글)
           </p>
         </div>
 
@@ -163,6 +189,15 @@ export const CommentRecordsPage: React.FC = () => {
             <span>설정</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </Link>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            disabled={isLoading}
+            className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-xs font-bold border border-slate-200 flex items-center space-x-1 transition"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>새로고침</span>
+          </button>
         </div>
       </div>
 

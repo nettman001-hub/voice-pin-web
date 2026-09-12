@@ -202,10 +202,17 @@ export async function handleApplyVoiceCorrection(
 
   // 2-2. 댓글 및 등록 구매자 조회 (구매자 닉네임 검증용)
   const { data: comments } = await admin
-    .from('comments')
-    .select('id, nickname')
+    .from('live_comments')
+    .select('id, nickname_snapshot')
     .eq('workspace_id', workspaceId)
+    .eq('session_id', saleRow.session_id)
+    .order('captured_at', { ascending: false })
     .limit(50);
+
+  const normalizedComments = (comments || []).map((comment) => ({
+    id: comment.id,
+    nickname: comment.nickname_snapshot,
+  }));
 
   const { data: buyers } = await admin
     .from('buyers')
@@ -242,7 +249,7 @@ export async function handleApplyVoiceCorrection(
     {
       expectedRevision,
       registeredBuyers: buyers || [],
-      sessionComments: comments || [],
+      sessionComments: normalizedComments,
       printJobs: printJobs || [],
     }
   );

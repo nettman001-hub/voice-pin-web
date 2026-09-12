@@ -51,6 +51,10 @@ export interface SalePrintResult {
   error?: string;
 }
 
+export interface CloudCommentPublishingConfig {
+  sessionId?: string | null;
+}
+
 type StatusListener = (status: CommentStreamStatus, message?: string) => void;
 type CommentListener = (comment: StreamedComment) => void;
 
@@ -145,6 +149,14 @@ class CommentStreamService {
 
   public stopCollecting(): void {
     this.socket?.emit('collect:stop');
+  }
+
+  /**
+   * 댓글 도우미가 수집한 댓글을 현재 방송 회차의 클라우드 원본에 적재하도록 설정한다.
+   * 인증 정보는 도우미의 설치 설정을 사용하며, 웹에서는 회차 ID만 전달한다.
+   */
+  public configureCloudPublishing(config: CloudCommentPublishingConfig): void {
+    this.socket?.emit('cloud:config', { sessionId: config.sessionId || null });
   }
 
   /**

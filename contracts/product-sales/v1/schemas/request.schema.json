@@ -21,6 +21,8 @@
         "activate-product",
         "ingest-comments",
         "get-sales-feed",
+        "list-live-comments",
+        "delete-live-comments",
         "search-buyers",
         "confirm-buyer",
         "commit-sales",

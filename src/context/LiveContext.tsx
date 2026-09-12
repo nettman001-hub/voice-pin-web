@@ -18,6 +18,7 @@ import { isSupabaseConfigured } from '../services/supabaseClient';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
 import { useProductSales } from './ProductSalesContext';
 import { ProductSalesProduct } from '../types/productSales';
+import { productSalesApi } from '../services/productSalesApi';
 import { createNumberProductImage } from '../services/productImageService';
 import { InterimStreamChunker } from '../services/captionStreamService';
 import { buildPendingReasons, buildEvidenceSnapshot, evaluatePendingRules } from '../services/pendingSalesService';
@@ -637,12 +638,37 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     requiredListeningGeneration?: number
   ) => {
     const recognizedAt = new Date().toISOString();
+    // 판매 판정은 로컬 브라우저 캐시가 아닌 sales-api가 반환한 live_comments만 사용한다.
+    // 댓글 도우미가 클라우드 적재를 완료하기 전에는 안전하게 보류로 남긴다.
+    const cachedCloudComments = (productSalesRef.current.feed?.comments || []).map((comment) => ({
+      id: comment.id,
+      sessionId: comment.sessionId,
+      nickname: comment.nicknameSnapshot,
+      content: comment.content,
+      capturedAt: comment.capturedAt,
+    }));
+    const activeSessionId = productSalesRef.current.activeSession?.id;
+    let cloudComments = cachedCloudComments;
+    if (activeSessionId) {
+      try {
+        const latestFeed = await productSalesApi.getSalesFeed({ sessionId: activeSessionId, limit: 50 });
+        cloudComments = latestFeed.comments.map((comment) => ({
+          id: comment.id,
+          sessionId: comment.sessionId,
+          nickname: comment.nicknameSnapshot,
+          content: comment.content,
+          capturedAt: comment.capturedAt,
+        }));
+      } catch (error) {
+        console.warn('[Live] 클라우드 댓글 최신 조회 실패, 마지막 동기화본으로 검증합니다.', error);
+      }
+    }
     const nicknameVerification = verifyNicknameFromComments({
       transcript: fullText,
       spokenNickname: saleResult.buyerNickname,
       sessionId: currentSessionIdRef.current,
       recognizedAt,
-      comments: storageService.getCommentRecords()
+      comments: cloudComments
     });
     const hasVerifiedCommentNickname = Boolean(nicknameVerification.verifiedNickname);
     const isSuffixReference = Boolean(nicknameVerification.suffixDigits);
@@ -676,7 +702,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ? buildPendingReasons(
           { rawTranscript: fullText, buyerNickname, amount: saleResult.amount },
           {
-            comments: storageService.getCommentRecords(),
+            comments: cloudComments,
             activeProduct: product ? { unitPrice: product.unitPrice ?? undefined, productCode: resolvedProductCode } : undefined,
           }
         )
@@ -1253,7 +1279,13 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const currentReasons = pendingSale.pendingReasons || [];
         const ruleEval = evaluatePendingRules(currentReasons, {
           sale: pendingSale,
-          comments: storageService.getCommentRecords(),
+          comments: (productSalesRef.current.feed?.comments || []).map((comment) => ({
+            id: comment.id,
+            sessionId: comment.sessionId,
+            nickname: comment.nicknameSnapshot,
+            content: comment.content,
+            capturedAt: comment.capturedAt,
+          })),
           buyers: [],
           activeProduct: productSalesRef.current.activeProduct ? {
             unitPrice: productSalesRef.current.activeProduct.unitPrice ?? undefined,
