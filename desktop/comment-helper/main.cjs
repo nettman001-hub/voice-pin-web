@@ -407,11 +407,12 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      webSecurity: false
     }
   });
 
-  // 오디오 및 마이크 미디어 권한 자동 승인
+  // 오디오 및 마이크 미디어 권한 자동 승인 및 원격 API(Supabase) CORS/헤더 브리지
   if (session && session.defaultSession) {
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
       if (permission === 'media' || permission === 'notifications') {
@@ -420,6 +421,26 @@ function createWindow() {
       callback(true);
     });
     session.defaultSession.setPermissionCheckHandler(() => true);
+
+    // Supabase Edge Function 및 원격 API 요청 시 VoiceCAP 웹 오리진 보장
+    session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+      const url = details.url || '';
+      const requestHeaders = { ...details.requestHeaders };
+      if (url.includes('supabase.co') || url.includes('voicecap.shop')) {
+        requestHeaders['Origin'] = 'https://www.voicecap.shop';
+        requestHeaders['Referer'] = 'https://www.voicecap.shop/';
+      }
+      callback({ requestHeaders });
+    });
+
+    // CORS 응답 헤더 보정
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      const responseHeaders = { ...details.responseHeaders };
+      responseHeaders['access-control-allow-origin'] = ['*'];
+      responseHeaders['access-control-allow-headers'] = ['*'];
+      responseHeaders['access-control-allow-methods'] = ['GET, POST, PUT, DELETE, OPTIONS, PATCH'];
+      callback({ responseHeaders });
+    });
   }
 
   loadAppUrl();

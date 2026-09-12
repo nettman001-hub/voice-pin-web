@@ -73,9 +73,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const identitySyncRef = React.useRef<Promise<void> | null>(null);
 
   const setRemoteIdentity = useCallback(async (authUser: Parameters<typeof formatUser>[0], accessToken?: string | null) => {
-    const { data: onboarding, error } = await requireSupabase().functions.invoke('voicecap-onboard');
-    if (error || !onboarding?.ok) throw new Error(onboarding?.error || error?.message || 'VoiceCAP 작업공간을 준비하지 못했습니다.');
+    try {
+      const { data: onboarding, error } = await requireSupabase().functions.invoke('voicecap-onboard');
+      if (error || !onboarding?.ok) {
+        console.warn('[Auth] voicecap-onboard 응답 경고 (DB 직접 조회 진행):', error || onboarding?.error);
+      }
+    } catch (e) {
+      console.warn('[Auth] voicecap-onboard 호출 실패 (DB 직접 조회 진행):', e);
+    }
     const identity = await formatUser(authUser);
+    if (!identity.workspaceId) {
+      throw new Error('VoiceCAP 작업공간을 찾지 못했습니다. 관리자에게 문의하세요.');
+    }
     setUser(identity.user);
     setWorkspaceId(identity.workspaceId);
     setToken(accessToken ?? null);
