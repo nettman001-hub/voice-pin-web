@@ -18,15 +18,24 @@ import {
   Camera,
   Download,
   Menu,
-  X
+  X,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 
 interface HeaderProps {
   onToggleMobileMenu?: () => void;
   isMobileMenuOpen?: boolean;
+  onToggleSidebar?: () => void;
+  isSidebarCollapsed?: boolean;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu, isMobileMenuOpen }) => {
+export const Header: React.FC<HeaderProps> = ({
+  onToggleMobileMenu,
+  isMobileMenuOpen,
+  onToggleSidebar,
+  isSidebarCollapsed
+}) => {
   const { user, isAuthenticated, logout, switchUserRole } = useAuth();
   const {
     isListening,
@@ -60,16 +69,43 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu, isMobileMenu
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 text-slate-800 shadow-sm select-none">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        {/* 좌측: 햄버거 버튼 + 로고 & 버전 배지 */}
+        {/* 좌측: 사이드바 토글 버튼 + 로고 & 버전 배지 */}
         <div className="flex items-center space-x-2 sm:space-x-3">
-          {isAuthenticated && onToggleMobileMenu && (
-            <button
-              onClick={onToggleMobileMenu}
-              className="lg:hidden p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition active:scale-95"
-              aria-label="전체 메뉴 열기"
-            >
-              {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-            </button>
+          {isAuthenticated && (
+            <>
+              {/* 모바일 햄버거 토글 */}
+              {onToggleMobileMenu && (
+                <button
+                  type="button"
+                  onClick={onToggleMobileMenu}
+                  className="lg:hidden p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition active:scale-95"
+                  aria-label="전체 메뉴 열기"
+                >
+                  {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+                </button>
+              )}
+
+              {/* 데스크톱 사이드바 접기/펼치기 토글 */}
+              {onToggleSidebar && (
+                <button
+                  type="button"
+                  onClick={onToggleSidebar}
+                  className={`hidden lg:flex p-2 rounded-xl transition active:scale-95 items-center justify-center ${
+                    isSidebarCollapsed
+                      ? 'text-brand-600 bg-brand-50 hover:bg-brand-100 border border-brand-200 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                  title={isSidebarCollapsed ? '사이드 메뉴 열기' : '사이드 메뉴 숨기기'}
+                  aria-label={isSidebarCollapsed ? '사이드 메뉴 열기' : '사이드 메뉴 숨기기'}
+                >
+                  {isSidebarCollapsed ? (
+                    <PanelLeftOpen className="w-5 h-5" />
+                  ) : (
+                    <PanelLeftClose className="w-5 h-5" />
+                  )}
+                </button>
+              )}
+            </>
           )}
 
           <Link to={isAuthenticated ? (user?.role === '관리자' ? '/admin' : '/live') : '/onboarding'} className="flex items-center space-x-2 group">

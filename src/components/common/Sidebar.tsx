@@ -20,7 +20,8 @@ import {
   MessageCircle,
   MessageSquareText,
   ReceiptText,
-  Truck
+  Truck,
+  PanelLeftClose
 } from 'lucide-react';
 
 interface NavItem {
@@ -39,9 +40,16 @@ interface NavGroup {
 interface SidebarProps {
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile }) => {
+export const Sidebar: React.FC<SidebarProps> = ({
+  isMobileOpen,
+  onCloseMobile,
+  isCollapsed = false,
+  onToggleCollapse
+}) => {
   const { user } = useAuth();
   const { isListening } = useLive();
 
@@ -105,15 +113,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
   const content = (
     <div className="flex flex-col h-full select-none">
       <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-        <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+        <span className="text-xs font-bold uppercase tracking-wider text-slate-500 truncate">
           {user?.role === '관리자' ? '관리자 관제 센터' : '판매자 방송 관제'}
         </span>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-1.5 flex-shrink-0">
           <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-brand-50 text-brand-700 border border-brand-200">
             v1.0.0
           </span>
+          {onToggleCollapse && (
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              className="hidden lg:flex p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition"
+              title="사이드 메뉴 숨기기"
+              aria-label="사이드 메뉴 숨기기"
+            >
+              <PanelLeftClose className="w-4 h-4" />
+            </button>
+          )}
           {onCloseMobile && (
             <button
+              type="button"
               onClick={onCloseMobile}
               className="lg:hidden p-1 rounded-lg hover:bg-slate-100 text-slate-400"
               aria-label="메뉴 닫기"
@@ -202,9 +222,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, onCloseMobile })
 
   return (
     <>
-      {/* 1. 데스크톱 고정 사이드바 */}
-      <aside className="hidden lg:flex w-64 bg-white border-r border-slate-200 text-slate-700 flex-col h-[calc(100vh-4rem)] sticky top-16 select-none shadow-sm">
-        {content}
+      {/* 1. 데스크톱 고정 사이드바: isCollapsed 상태에 따라 너비 0으로 접힘 */}
+      <aside
+        className={`hidden lg:flex bg-white border-r border-slate-200 text-slate-700 flex-col h-[calc(100vh-4rem)] sticky top-16 select-none shadow-sm transition-all duration-200 ease-in-out ${
+          isCollapsed
+            ? 'w-0 opacity-0 border-r-0 overflow-hidden pointer-events-none'
+            : 'w-64 opacity-100'
+        }`}
+      >
+        <div className="w-64 flex flex-col h-full overflow-hidden">
+          {content}
+        </div>
       </aside>
 
       {/* 2. 모바일 슬라이드 드로어 */}

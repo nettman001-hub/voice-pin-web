@@ -8,6 +8,7 @@ import { AppDataProvider } from './context/AppDataContext';
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
 import { MobileBottomNav } from './components/common/MobileBottomNav';
+import { PanelLeftOpen } from 'lucide-react';
 
 // 페이지 목록
 import { OnboardingPage } from './pages/auth/OnboardingPage';
@@ -52,6 +53,23 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated } = useAuth();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('voicecap_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('voicecap_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
 
   // 온보딩 및 인증/공개 정책 페이지는 사이드바 및 하단 바 숨김
   const authRoutes = ['/onboarding', '/login', '/signup', '/password/reset', '/pricing', '/privacy'];
@@ -64,13 +82,29 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       <Header
         onToggleMobileMenu={showNav ? () => setIsMobileMenuOpen(!isMobileMenuOpen) : undefined}
         isMobileMenuOpen={isMobileMenuOpen}
+        onToggleSidebar={showNav ? toggleSidebar : undefined}
+        isSidebarCollapsed={isSidebarCollapsed}
       />
       <div className="flex-1 flex flex-row relative">
         {showNav && (
           <Sidebar
             isMobileOpen={isMobileMenuOpen}
             onCloseMobile={() => setIsMobileMenuOpen(false)}
+            isCollapsed={isSidebarCollapsed}
+            onToggleCollapse={toggleSidebar}
           />
+        )}
+        {showNav && isSidebarCollapsed && (
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className="hidden lg:flex fixed left-0 top-20 z-30 bg-white/95 backdrop-blur hover:bg-brand-50 border border-slate-200 border-l-0 shadow-md px-2.5 py-1.5 rounded-r-xl text-slate-500 hover:text-brand-600 transition-all group items-center space-x-1.5"
+            title="사이드 메뉴 열기"
+            aria-label="사이드 메뉴 열기"
+          >
+            <PanelLeftOpen className="w-4 h-4 text-brand-600 group-hover:scale-110 transition-transform" />
+            <span className="text-[11px] font-bold text-slate-600 group-hover:text-brand-700">메뉴 펼치기</span>
+          </button>
         )}
         <main className={`flex-1 overflow-x-hidden min-h-[calc(100vh-4rem)] ${showNav ? 'pb-20 lg:pb-0' : ''}`}>
           {children}
