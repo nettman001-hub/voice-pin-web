@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   ProductSalesBootstrapData,
   ProductSalesProduct,
@@ -66,6 +67,7 @@ const ProductSalesContext = createContext<ProductSalesContextType | null>(null);
 const SALES_FEED_POLL_INTERVAL_MS = 2_000;
 const SALES_FEED_RETRY_BASE_MS = 4_000;
 const SALES_FEED_RETRY_MAX_MS = 30_000;
+const SALES_FEED_POLL_PATHS = new Set(['/live', '/seller/product-sales', '/sales/product']);
 
 function isSameProduct(left: ProductSalesProduct | null, right: ProductSalesProduct | null) {
   if (left === right) return true;
@@ -95,6 +97,7 @@ async function hydrateProduct(product: ProductSalesProduct | null): Promise<Prod
 
 export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, user } = useAuth();
+  const location = useLocation();
   const [bootstrap, setBootstrap] = useState<ProductSalesBootstrapData | null>(null);
   const [feed, setFeed] = useState<ProductSalesFeedData | null>(null);
   const [candidate, setCandidate] = useState<VoiceSaleCandidate | null>(null);
@@ -110,6 +113,8 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const activeProduct = bootstrap?.activeProduct || null;
   const activeSession = bootstrap?.activeSession || null;
   const settings = bootstrap?.settings || null;
+  const normalizedPath = location.pathname.replace(/\/+$/, '') || '/';
+  const shouldPollSalesFeed = isAuthenticated && SALES_FEED_POLL_PATHS.has(normalizedPath);
 
   useEffect(() => {
     activeSessionRef.current = activeSession;
@@ -198,7 +203,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   useEffect(() => {
     const sessionId = activeSession?.id;
-    if (!sessionId) {
+    if (!shouldPollSalesFeed || !sessionId) {
       feedPollRequestIdRef.current += 1;
       feedPollFailureCountRef.current = 0;
       return;
@@ -229,7 +234,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
       feedPollRequestIdRef.current += 1;
       feedPollFailureCountRef.current = 0;
     };
-  }, [activeSession?.id, pollFeed]);
+  }, [activeSession?.id, pollFeed, shouldPollSalesFeed]);
 
   // Handle automatic candidate commit
   const handleCommitCandidate = useCallback(
