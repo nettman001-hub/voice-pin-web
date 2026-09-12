@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
 import { productSalesApi } from '../../services/productSalesApi';
 import { LiveSession } from '../../types/productSales';
@@ -35,9 +35,10 @@ interface BuyerGroupedSale {
 
 export const SalesListPage: React.FC = () => {
   const { sales, exportCsv, refreshSales } = useSales();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [sessionFilter, setSessionFilter] = useState<string>('ALL');
+  const sessionFilter = searchParams.get('session') || 'ALL';
   const [viewMode, setViewMode] = useState<'BUYER_GROUPED' | 'INDIVIDUAL'>('BUYER_GROUPED');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [sortOrder, setSortOrder] = useState<'AMOUNT_DESC' | 'COUNT_DESC' | 'LATEST' | 'OLDEST'>('AMOUNT_DESC');
@@ -77,6 +78,17 @@ export const SalesListPage: React.FC = () => {
   const selectedSession = sessionFilter === 'ALL'
     ? null
     : availableSessions.find((session) => session.id === sessionFilter) || null;
+  const sessionQuery = sessionFilter === 'ALL' ? '' : `?session=${encodeURIComponent(sessionFilter)}`;
+
+  const handleSessionFilterChange = (nextSessionId: string) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextSessionId === 'ALL') {
+      nextParams.delete('session');
+    } else {
+      nextParams.set('session', nextSessionId);
+    }
+    setSearchParams(nextParams);
+  };
 
   // 1차 필터링
   const filteredSales = useMemo(() => {
@@ -231,7 +243,7 @@ export const SalesListPage: React.FC = () => {
           <select
             id="sales-session-filter"
             value={sessionFilter}
-            onChange={(event) => setSessionFilter(event.target.value)}
+            onChange={(event) => handleSessionFilterChange(event.target.value)}
             className="min-w-0 flex-1 max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
           >
             <option value="ALL">전체 회차</option>
@@ -473,7 +485,7 @@ export const SalesListPage: React.FC = () => {
                           return (
                           <Link
                             key={rec.id}
-                            to={`/sales/${rec.id}`}
+                            to={`/sales/${rec.id}${sessionQuery}`}
                             className="p-3 rounded-xl bg-white border border-slate-200 hover:border-brand-400 flex items-center justify-between text-xs transition block shadow-sm group"
                           >
                             <div className="flex items-center space-x-3 min-w-0 flex-1 mr-2">
@@ -541,7 +553,7 @@ export const SalesListPage: React.FC = () => {
                 return (
                   <Link
                     key={sale.id}
-                    to={`/sales/${sale.id}`}
+                    to={`/sales/${sale.id}${sessionQuery}`}
                     className="block p-4 rounded-2xl bg-white border border-slate-200 hover:border-brand-400 transition shadow-sm group"
                   >
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">

@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
 import { SaleStatus } from '../../types/live';
 import { BuyerReconciliationPanel } from '../../components/sales/BuyerReconciliationPanel';
@@ -21,9 +21,11 @@ import {
 export const SalesDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { sales, updateSale, retrySalePrint, deleteSale } = useSales();
 
   const sale = sales.find((s) => s.id === id);
+  const returnToSalesList = `/sales${location.search}`;
 
   const [buyerNickname, setBuyerNickname] = useState(sale?.buyerNickname || '');
   const [productName, setProductName] = useState(sale?.productName || '');
@@ -39,7 +41,7 @@ export const SalesDetailPage: React.FC = () => {
     return (
       <div className="p-12 text-center text-xs text-slate-500">
         해당 판매 내역을 찾을 수 없습니다.{' '}
-        <Link to="/sales" className="text-brand-600 underline font-bold">
+        <Link to={returnToSalesList} className="text-brand-600 underline font-bold">
           목록으로 돌아가기
         </Link>
       </div>
@@ -88,7 +90,7 @@ export const SalesDetailPage: React.FC = () => {
   const handleDelete = () => {
     if (window.confirm('정말 이 판매 내역을 삭제하시겠습니까?')) {
       deleteSale(sale.id);
-      navigate('/sales');
+      navigate(returnToSalesList);
     }
   };
 
@@ -97,7 +99,7 @@ export const SalesDetailPage: React.FC = () => {
       {/* 상단 네비게이션 */}
       <div className="flex items-center justify-between">
         <button
-          onClick={() => navigate(-1)}
+          onClick={() => navigate(returnToSalesList)}
           className="text-xs font-bold text-slate-600 hover:text-slate-900 flex items-center space-x-1 transition active:scale-95"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -319,7 +321,7 @@ export const SalesDetailPage: React.FC = () => {
                 >
                   <img src={imgUrl} alt={`캡처 ${idx + 1}`} className="w-full h-36 sm:h-40 object-cover" />
                   <Link
-                    to={`/sales/${sale.id}/capture`}
+                    to={`/sales/${sale.id}/capture${location.search}`}
                     className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-xs text-white font-bold transition space-x-1"
                   >
                     <ExternalLink className="w-4 h-4" />
