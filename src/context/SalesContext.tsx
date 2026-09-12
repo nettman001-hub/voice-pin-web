@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { SaleRecord, SaleStatus } from '../types/live';
 import { storageService, getNextProductCodeForSession } from '../services/storageService';
 import { exportSalesToCsv } from '../services/csvExporter';
@@ -23,6 +23,7 @@ interface SalesContextType {
   deleteSale: (id: string) => void;
   confirmBatchSales: (saleIds: string[]) => BatchConfirmResult;
   exportCsv: (filteredRecords?: SaleRecord[], filename?: string) => boolean;
+  refreshSales: () => Promise<SaleRecord[]>;
   getSalesBySession: (sessionId: string) => SaleRecord[];
   getSettlementSummary: (period: 'TODAY' | 'WEEK' | 'MONTH' | 'CUSTOM', customRange?: { start: string; end: string }) => {
     summary: SettlementSummary;
@@ -37,6 +38,19 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const { workspaceId, isRemoteAuth } = useAuth();
   const [sales, setSales] = useState<SaleRecord[]>(() => storageService.getSales());
 
+  const refreshSales = useCallback(async (): Promise<SaleRecord[]> => {
+    if (!isRemoteAuth || !workspaceId) {
+      const rows = storageService.getSales();
+      setSales(rows);
+      return rows;
+    }
+
+    const rows = await remoteWorkspaceService.loadSales(workspaceId);
+    setSales(rows);
+    storageService.saveSales(rows);
+    return rows;
+  }, [isRemoteAuth, workspaceId]);
+
   useEffect(() => {
     if (!isRemoteAuth || !workspaceId) {
       setSales(storageService.getSales());
@@ -44,23 +58,18 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
     let active = true;
     let timer: number | undefined;
-    const load = async () => {
-      try {
-        const rows = await remoteWorkspaceService.loadSales(workspaceId);
-        if (!active) return;
-        setSales(rows);
-        storageService.saveSales(rows);
-      } catch (error) {
-        console.error('[Sales] remote load failed', error);
-      }
+    const load = () => {
+      void refreshSales().catch((error) => {
+        if (active) console.error('[Sales] remote load failed', error);
+      });
     };
-    void load();
+    load();
     const unsubscribe = remoteWorkspaceService.subscribe(workspaceId, () => {
       window.clearTimeout(timer);
-      timer = window.setTimeout(() => void load(), 350);
+      timer = window.setTimeout(load, 350);
     });
     return () => { active = false; window.clearTimeout(timer); unsubscribe(); };
-  }, [isRemoteAuth, workspaceId]);
+  }, [isRemoteAuth, workspaceId, refreshSales]);
 
   const persist = (sale: SaleRecord) => {
     storageService.updateSale(sale);
@@ -303,7 +312,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   };
 
-  return <SalesContext.Provider value={{ sales, addSale, updateSale, retrySalePrint, deleteSale, confirmBatchSales, exportCsv, getSalesBySession, getSettlementSummary }}>
+  return <SalesContext.Provider value={{ sales, addSale, updateSale, retrySalePrint, deleteSale, confirmBatchSales, exportCsv, refreshSales, getSalesBySession, getSettlementSummary }}>
     {children}
   </SalesContext.Provider>;
 };

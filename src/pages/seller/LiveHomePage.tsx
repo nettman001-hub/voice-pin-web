@@ -27,7 +27,8 @@ import {
   FileSpreadsheet,
   Zap,
   ExternalLink,
-  ShoppingBag
+  ShoppingBag,
+  RefreshCw
 } from 'lucide-react';
 import { LocalSttModel, SttMode } from '../../types/stt';
 import { COMMENT_HELPER_DOWNLOAD_URL } from '../../types/comment';
@@ -89,8 +90,8 @@ export const LiveHomePage: React.FC = () => {
     config: commentConfig
   } = useCommentCapture();
 
-  const { sales } = useSales();
-  const { activeSession, activeProduct } = useProductSales();
+  const { sales, refreshSales } = useSales();
+  const { activeSession, activeProduct, loadBootstrap, startNewSession } = useProductSales();
   const navigate = useNavigate();
   const [selectedCaptureModal, setSelectedCaptureModal] = useState<string | null>(null);
   const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
@@ -100,6 +101,9 @@ export const LiveHomePage: React.FC = () => {
   const [showAreaNotSetModal, setShowAreaNotSetModal] = useState<boolean>(false);
   const [isCapturingNow, setIsCapturingNow] = useState<boolean>(false);
   const [silenceCountdown, setSilenceCountdown] = useState<number | null>(null);
+  const [showSessionChoice, setShowSessionChoice] = useState(false);
+  const [isSessionStarting, setIsSessionStarting] = useState(false);
+  const [isSalesRefreshing, setIsSalesRefreshing] = useState(false);
   const selectedSttApiKey = sttProvider === 'SONIOX' ? sonioxApiKey : deepgramApiKey;
   const selectedSttName = sttProvider === 'SONIOX' ? 'Soniox v5' : 'Deepgram Nova-3';
   const isAllowedByAdmin = Boolean(user?.allowAdminSttKey);
@@ -174,12 +178,18 @@ export const LiveHomePage: React.FC = () => {
     }
   }, [liveComments]);
 
-  // 웹 청취 회차 코드는 사람이 읽는 로컬 ID이고 앱 상품판매 회차는 UUID다.
-  // 둘 다 현재 라이브에 속하므로 같은 자동 적재 목록에 합쳐서 보여준다.
-  const currentSessionSales = sales.filter((sale) => (
+  // 회차를 고른 뒤에는 서버 판매 회차 UUID를 사용하고, 오프라인 호환 시에만 로컬 ID를 보조로 사용한다.
+  const currentSessionSales = React.useMemo(() => sales.filter((sale) => (
     sale.sessionId === currentSessionId ||
     (activeSession?.id && sale.sessionId === activeSession.id)
-  ));
+  )), [activeSession?.id, currentSessionId, sales]);
+  const [displayedSessionSales, setDisplayedSessionSales] = useState(currentSessionSales);
+
+  // 청취를 멈춘 뒤에는 마지막으로 본 판매 목록을 고정하고, 수동 새로고침에서만 갱신한다.
+  React.useEffect(() => {
+    if (isListening) setDisplayedSessionSales(currentSessionSales);
+  }, [currentSessionSales, isListening]);
+
   const todayTotalAmount = currentSessionSales
     .filter((s) => s.status !== '보류')
     .reduce((sum, item) => sum + item.amount, 0);
@@ -188,18 +198,77 @@ export const LiveHomePage: React.FC = () => {
     if (isListening) {
       stopListening();
       stopCommentCapture();
-    } else {
-      if (sttMode === 'CLOUD') {
-        if (!canUseAdminKey) {
-          setShowNoPermissionModal(true);
-          return;
-        }
-        if (!hasAdminSttKey) {
-          setShowSellerKeyInfoModal(true);
-          return;
-        }
+      return;
+    }
+
+    if (sttMode === 'CLOUD') {
+      if (!canUseAdminKey) {
+        setShowNoPermissionModal(true);
+        return;
       }
-      startListening(audioSourceMode);
+      if (!hasAdminSttKey) {
+        setShowSellerKeyInfoModal(true);
+        return;
+      }
+    }
+
+    setShowSessionChoice(true);
+  };
+
+  const handleStartWithSession = async (choice: 'CONTINUE' | 'NEW') => {
+    if (isSessionStarting) return;
+
+    setIsSessionStarting(true);
+    try {
+      // getDisplayMedia는 버튼 클릭의 사용자 동작 안에서 요청해야 한다.
+      // 회차 API와 병렬로 준비해 새 회차 선택 시에도 탭 공유 창이 차단되지 않게 한다.
+      const tabAudioReady = audioSourceMode !== 'TAB_AUDIO'
+        ? Promise.resolve(true)
+        : (() => {
+            const activeAudioTrack = screenCaptureService.getActiveAudioTrack();
+            if (activeAudioTrack?.readyState === 'live') return Promise.resolve(true);
+            const activeScreenStream = screenCaptureService.getActiveStream();
+            return screenCaptureService
+              .getOrCreateStream(Boolean(activeScreenStream))
+              .then((stream) => Boolean(stream?.getAudioTracks().some((track) => track.readyState === 'live')));
+          })();
+
+      const selectedSession = choice === 'NEW'
+        ? startNewSession()
+        : (() => loadBootstrap().then((data) => {
+            if (!data?.activeSession) {
+              throw new Error('이어갈 활성 회차가 없습니다. 새 회차로 시작해 주세요.');
+            }
+            return data.activeSession;
+          }))();
+
+      const [hasTabAudio, session] = await Promise.all([tabAudioReady, selectedSession]);
+      if (!hasTabAudio) {
+        alert('방송 탭 오디오 공유를 취소했거나 오디오를 선택하지 않았습니다. 다시 시도해 주세요.');
+        return;
+      }
+
+      setShowSessionChoice(false);
+      await startListening(audioSourceMode, session.id);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '청취를 시작하지 못했습니다. 다시 시도해 주세요.');
+    } finally {
+      setIsSessionStarting(false);
+    }
+  };
+
+  const handleRefreshSessionSales = async () => {
+    setIsSalesRefreshing(true);
+    try {
+      const latestSales = await refreshSales();
+      setDisplayedSessionSales(latestSales.filter((sale) => (
+        sale.sessionId === currentSessionId
+        || (activeSession?.id && sale.sessionId === activeSession.id)
+      )));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '판매 내역을 새로고침하지 못했습니다.');
+    } finally {
+      setIsSalesRefreshing(false);
     }
   };
 
@@ -246,7 +315,7 @@ export const LiveHomePage: React.FC = () => {
               <AiLiveStatusBadge />
             </div>
             <p className="text-[11px] sm:text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <span>회차: <strong className="text-slate-900 font-mono">{currentSessionId}</strong></span>
+              <span>회차: <strong className="text-slate-900 font-mono">{activeSession?.displayCode || currentSessionId}</strong></span>
               <span>•</span>
               <span className="flex items-center space-x-1.5">
                 <span className={`w-2 h-2 rounded-full ${
@@ -909,20 +978,32 @@ export const LiveHomePage: React.FC = () => {
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                 <span>자동 적재된 판매 내역</span>
               </h3>
-              <Link to="/sales/review" className="text-xs text-brand-600 hover:underline font-bold flex items-center">
-                <span>일괄 검토</span>
-                <ArrowRight className="w-3.5 h-3.5 ml-1" />
-              </Link>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleRefreshSessionSales()}
+                  disabled={isSalesRefreshing}
+                  className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                  title="판매 내역 새로고침"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isSalesRefreshing ? 'animate-spin' : ''}`} />
+                  <span>새로고침</span>
+                </button>
+                <Link to="/sales/review" className="text-xs text-brand-600 hover:underline font-bold flex items-center">
+                  <span>일괄 검토</span>
+                  <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                </Link>
+              </div>
             </div>
 
             <div className="space-y-2.5 sm:space-y-3 max-h-[360px] overflow-y-auto pr-1">
-              {currentSessionSales.length === 0 ? (
+              {displayedSessionSales.length === 0 ? (
                 <div className="py-10 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-2xl">
                   이번 방송 회차에서 저장된 판매 내역이 없습니다.<br />
                   "구매확정" 멘트를 말씀하시면 자동 등록됩니다.
                 </div>
               ) : (
-                currentSessionSales.map((sale) => {
+                displayedSessionSales.map((sale) => {
                   const productImage = sale.productImageUrl
                     || sale.captureImageUrls?.[0]
                     || (sale.productCode && sale.productCode === activeProduct?.productCode ? activeProduct?.imageUrl : undefined);
@@ -935,7 +1016,7 @@ export const LiveHomePage: React.FC = () => {
                         : '기존';
 
                   // 다건 구매자 판정 및 금액 포맷팅 (시간순 정렬)
-                  const buyerSessionSales = currentSessionSales
+                  const buyerSessionSales = displayedSessionSales
                     .filter((s) => areNicknamesSimilar(s.buyerNickname, sale.buyerNickname))
                     .sort((a, b) => new Date(a.recognizedAt).getTime() - new Date(b.recognizedAt).getTime());
                   const multiAmount = formatMultiSaleAmount(buyerSessionSales.map((s) => s.amount));
@@ -1090,6 +1171,66 @@ export const LiveHomePage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* 청취 시작 전 회차 선택 */}
+      {showSessionChoice && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="session-choice-title"
+        >
+          <div className="w-full max-w-md space-y-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 id="session-choice-title" className="text-lg font-black text-slate-900">방송 회차 선택</h2>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  청취를 중지해도 회차는 유지됩니다. 이어서 시작하면 기존 판매·댓글에 계속 기록됩니다.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSessionChoice(false)}
+                disabled={isSessionStarting}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 disabled:opacity-50"
+                aria-label="회차 선택 닫기"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {activeSession && (
+              <button
+                type="button"
+                onClick={() => void handleStartWithSession('CONTINUE')}
+                disabled={isSessionStarting}
+                className="w-full rounded-2xl border border-brand-200 bg-brand-50 p-4 text-left transition hover:border-brand-400 hover:bg-brand-100 disabled:cursor-wait disabled:opacity-60"
+              >
+                <span className="block text-sm font-black text-brand-900">기존 회차와 이어서 하기</span>
+                <span className="mt-1 block text-xs text-brand-700">
+                  {activeSession.displayCode} · 현재 상품과 판매 기록을 그대로 사용합니다.
+                </span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => void handleStartWithSession('NEW')}
+              disabled={isSessionStarting}
+              className="w-full rounded-2xl bg-gradient-to-r from-brand-600 via-brand-500 to-rose-500 p-4 text-left text-white shadow-md transition hover:brightness-105 disabled:cursor-wait disabled:opacity-60"
+            >
+              <span className="block text-sm font-black">새 회차로 시작하기</span>
+              <span className="mt-1 block text-xs text-white/85">
+                {activeSession ? '기존 회차를 마감하고 새 판매·댓글 회차를 만듭니다.' : '새 판매·댓글 회차를 만들고 청취를 시작합니다.'}
+              </span>
+            </button>
+
+            {isSessionStarting && (
+              <p className="text-center text-xs font-medium text-slate-500">회차와 방송 탭 오디오를 준비하고 있습니다…</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 5분 무자막 지속 시 자동 청취 중지 경고 */}
       {silenceCountdown !== null && isListening && (

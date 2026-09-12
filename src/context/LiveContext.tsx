@@ -117,7 +117,7 @@ interface LiveContextType {
   sttEngineMessage: string;
   isScreenShareConnected: boolean;
   hasScreenShareAudio: boolean;
-  startListening: (mode?: 'TAB_AUDIO' | 'MIC') => Promise<void>;
+  startListening: (mode?: 'TAB_AUDIO' | 'MIC', salesSessionId?: string) => Promise<void>;
   stopListening: () => void;
   disconnectScreenShare: () => void;
   injectTestMent: (text: string) => void;
@@ -181,6 +181,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     productSalesRef.current = productSales;
   }, [productSales]);
+
+  // 판매 피드는 실제 청취 중인 라이브 화면에서만 갱신한다.
+  useEffect(() => {
+    productSales.setFeedPollingEnabled(isListening);
+  }, [isListening, productSales.setFeedPollingEnabled]);
 
   useEffect(() => {
     return localSttService.subscribeStatus((status) => {
@@ -1333,7 +1338,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // 라이브 청취 시작 (크롬 탭 방송 소리 또는 마이크)
-  const startListening = async (mode: 'TAB_AUDIO' | 'MIC' = 'TAB_AUDIO') => {
+  const startListening = async (
+    mode: 'TAB_AUDIO' | 'MIC' = 'TAB_AUDIO',
+    salesSessionId?: string,
+  ) => {
     if (!isAuthenticatedRef.current || !currentUserIdRef.current) {
       setSttEngineStatus('ERROR');
       setSttEngineMessage('로그인 후 라이브 청취를 시작해 주세요.');
@@ -1365,7 +1373,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const previousMode = activeAudioSourceModeRef.current;
       activeAudioSourceModeRef.current = mode;
       isListeningRef.current = true;
-      const newSessionId = generateSessionId();
+      const newSessionId = salesSessionId || generateSessionId();
       setCurrentSessionId(newSessionId);
       setSessionStartTime(new Date().toISOString());
       setCurrentInterimTranscript('');

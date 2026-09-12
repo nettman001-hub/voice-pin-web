@@ -1,45 +1,19 @@
 import { admin, successResponse, errorResponse } from '../../_shared/productSales.ts'
 import { getWorkspaceSettings } from './common.ts'
 
-export async function ensureActiveSession(workspaceId: string) {
+export async function getActiveSession(workspaceId: string) {
   const { data: existing } = await admin
     .from('live_sessions')
     .select('*')
     .eq('workspace_id', workspaceId)
     .eq('status', 'ACTIVE')
     .maybeSingle()
-
-  if (existing) return existing
-
-  const koreaNow = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString()
-  const displayCode = `${koreaNow.slice(0, 10).replace(/-/g, '')}_${koreaNow.slice(11, 16).replace(':', '')}`
-  const { data: created, error } = await admin
-    .from('live_sessions')
-    .insert({
-      workspace_id: workspaceId,
-      display_code: displayCode,
-      status: 'ACTIVE',
-      revision: 1,
-    })
-    .select('*')
-    .single()
-
-  if (!error && created) return created
-
-  // 웹과 앱이 동시에 처음 연결되면 한쪽 insert가 ACTIVE unique index에 막힐 수 있다.
-  const { data: racedSession } = await admin
-    .from('live_sessions')
-    .select('*')
-    .eq('workspace_id', workspaceId)
-    .eq('status', 'ACTIVE')
-    .maybeSingle()
-  if (racedSession) return racedSession
-  throw new Error(error?.message || '공통 라이브 회차를 만들지 못했습니다.')
+  return existing || null
 }
 
 export async function handleGetBootstrap(workspaceId: string, capabilities: Set<string>) {
   const settings = await getWorkspaceSettings(workspaceId)
-  const session = await ensureActiveSession(workspaceId)
+  const session = await getActiveSession(workspaceId)
 
   let activeProduct = null
   if (session?.active_product_id) {

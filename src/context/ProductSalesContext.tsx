@@ -31,7 +31,9 @@ interface ProductSalesContextType {
   isLoading: boolean;
   error: string | null;
 
-  loadBootstrap: () => Promise<void>;
+  loadBootstrap: () => Promise<ProductSalesBootstrapData | null>;
+  startNewSession: () => Promise<ProductSalesSession>;
+  setFeedPollingEnabled: (enabled: boolean) => void;
   updateSettings: (newSettings: Partial<ProductSalesSettings>) => Promise<void>;
   prepareProduct: (
     requestedProductCode?: string,
@@ -103,6 +105,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [candidate, setCandidate] = useState<VoiceSaleCandidate | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [feedPollingEnabled, setFeedPollingEnabledState] = useState(false);
 
   const controllerRef = useRef<VoiceCandidateController | null>(null);
   const activeSessionRef = useRef<ProductSalesSession | null>(null);
@@ -114,25 +117,41 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const activeSession = bootstrap?.activeSession || null;
   const settings = bootstrap?.settings || null;
   const normalizedPath = location.pathname.replace(/\/+$/, '') || '/';
-  const shouldPollSalesFeed = isAuthenticated && SALES_FEED_POLL_PATHS.has(normalizedPath);
+  const shouldPollSalesFeed = isAuthenticated && feedPollingEnabled && SALES_FEED_POLL_PATHS.has(normalizedPath);
 
   useEffect(() => {
     activeSessionRef.current = activeSession;
   }, [activeSession]);
 
-  const loadBootstrap = useCallback(async () => {
+  const loadBootstrap = useCallback(async (): Promise<ProductSalesBootstrapData | null> => {
     setIsLoading(true);
     try {
       const data = await productSalesApi.getBootstrap();
       const hydratedProduct = await hydrateProduct(data.activeProduct);
       activeSessionRef.current = data.activeSession;
-      setBootstrap({ ...data, activeProduct: hydratedProduct });
+      const hydratedData = { ...data, activeProduct: hydratedProduct };
+      setBootstrap(hydratedData);
       setError(null);
+      return hydratedData;
     } catch (err: any) {
       setError(err.message || '부트스트랩 로딩 실패');
+      return null;
     } finally {
       setIsLoading(false);
     }
+  }, []);
+
+  const startNewSession = useCallback(async (): Promise<ProductSalesSession> => {
+    await productSalesApi.startSession(crypto.randomUUID());
+    const data = await loadBootstrap();
+    if (!data?.activeSession) {
+      throw new Error('새 방송 회차를 시작하지 못했습니다. 다시 시도해 주세요.');
+    }
+    return data.activeSession;
+  }, [loadBootstrap]);
+
+  const setFeedPollingEnabled = useCallback((enabled: boolean) => {
+    setFeedPollingEnabledState(enabled);
   }, []);
 
   const pollFeed = useCallback(async () => {
@@ -197,6 +216,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
       setBootstrap(null);
       setFeed(null);
       setError(null);
+      setFeedPollingEnabledState(false);
       return;
     }
     void loadBootstrap();
@@ -461,6 +481,8 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
         isLoading,
         error,
         loadBootstrap,
+        startNewSession,
+        setFeedPollingEnabled,
         updateSettings,
         prepareProduct,
         commitProduct,

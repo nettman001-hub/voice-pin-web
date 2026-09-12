@@ -1,6 +1,5 @@
 import { admin, successResponse, errorResponse, sha256 } from '../../_shared/productSales.ts'
 import { calculateSummary, calculateBuyerStats } from './common.ts'
-import { ensureActiveSession } from './sessions.ts'
 
 export async function handlePrepareProduct(workspaceId: string, actorId: string, body: any) {
   const { sessionId: requestedSessionId, expectedSessionRevision, requestedProductCode, name, unitPrice, imageKind } = body
@@ -8,8 +7,7 @@ export async function handlePrepareProduct(workspaceId: string, actorId: string,
   let sessionId = requestedSessionId
 
   if (!sessionId) {
-    const activeSession = await ensureActiveSession(workspaceId)
-    sessionId = activeSession.id
+    return errorResponse('VALIDATION_ERROR', '상품을 등록하려면 먼저 방송 청취를 시작해 회차를 선택해야 합니다.', 400)
   }
 
   if (sessionId) {
