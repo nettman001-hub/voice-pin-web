@@ -20,7 +20,11 @@ import {
   Zap,
 } from 'lucide-react';
 
-export const AiLiveStatusBadge: React.FC = () => {
+interface AiLiveStatusBadgeProps {
+  compact?: boolean;
+}
+
+export const AiLiveStatusBadge: React.FC<AiLiveStatusBadgeProps> = ({ compact = false }) => {
   const { sales } = useSales();
   const [runtimeStatus, setRuntimeStatus] = useState<AiRuntimeStatus | null>(null);
   const [healthSummary, setHealthSummary] = useState<AiHealthSummaryResponse | null>(null);
@@ -181,15 +185,18 @@ export const AiLiveStatusBadge: React.FC = () => {
 
   return (
     <>
-      {/* 상단 클릭 가능한 AI 상태 배지 */}
+      {/* 클릭 가능한 AI 상태 배지 */}
       <button
         type="button"
         onClick={() => setIsOpenModal(true)}
-        className={`px-3 py-1.5 rounded-2xl border text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-2xs hover:shadow-xs active:scale-95 ${badgeInfo.colorClass}`}
+        className={`${compact ? 'w-full px-2.5 py-2 rounded-xl text-[11px] justify-between' : 'px-3 py-1.5 rounded-2xl text-xs'} border font-bold transition flex items-center gap-2 cursor-pointer shadow-2xs hover:shadow-xs active:scale-95 ${badgeInfo.colorClass}`}
         title="클릭하여 보류·정정 AI 2개 슬롯의 상세 모델, 연결 상태 및 전환 이력을 확인합니다."
       >
-        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${badgeInfo.dotColor}`} />
-        <span className="truncate max-w-[280px] sm:max-w-none">{badgeInfo.label}</span>
+        <span className="flex items-center gap-2 min-w-0">
+          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${badgeInfo.dotColor}`} />
+          <span className="truncate max-w-[280px] sm:max-w-none">{compact ? '판매 AI' : badgeInfo.label}</span>
+        </span>
+        {compact && <span className="text-[9px] font-medium opacity-70 whitespace-nowrap">상태 보기</span>}
         <Sparkles className="w-3.5 h-3.5 opacity-60 flex-shrink-0" />
       </button>
 

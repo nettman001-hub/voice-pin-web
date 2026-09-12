@@ -245,6 +245,7 @@ const KEYS = {
   NOTIFICATIONS: 'dadryeo_notifications',
   STT_MODE: 'voicecap_stt_mode',
   LOCAL_STT_MODEL: 'voicecap_local_stt_model',
+  AUDIO_SOURCE_MODE: 'voicecap_audio_source_mode',
   CAPTURE_AREA: 'voicecap_capture_area_config',
   CAPTURE_AREA_SNAPSHOT: 'voicecap_capture_area_snapshot',
   COMMENT_RECORDS: 'voicecap_comment_records',
@@ -330,6 +331,14 @@ export class StorageService {
     localStorage.setItem(KEYS.LOCAL_STT_MODEL, model);
   }
 
+  // 판매자 라이브 음성 입력 방식
+  public getAudioSourceMode(): 'TAB_AUDIO' | 'MIC' {
+    return localStorage.getItem(KEYS.AUDIO_SOURCE_MODE) === 'MIC' ? 'MIC' : 'TAB_AUDIO';
+  }
+  public setAudioSourceMode(mode: 'TAB_AUDIO' | 'MIC'): void {
+    localStorage.setItem(KEYS.AUDIO_SOURCE_MODE, mode);
+  }
+
   // 전체 데이터 백업 (JSON 파일 다운로드용)
   public exportFullBackup(): string {
     const backupData = {
@@ -343,7 +352,8 @@ export class StorageService {
       notifications: this.getNotifications(),
       commerce: this.getCommerceState(),
       sttMode: this.getSttMode(),
-      localSttModel: this.getLocalSttModel()
+      localSttModel: this.getLocalSttModel(),
+      audioSourceMode: this.getAudioSourceMode()
     };
     return JSON.stringify(backupData, null, 2);
   }
@@ -364,6 +374,9 @@ export class StorageService {
       }
       if (data.localSttModel === 'large-v3-turbo' || data.localSttModel === 'small' || data.localSttModel === 'base') {
         this.setLocalSttModel(data.localSttModel);
+      }
+      if (data.audioSourceMode === 'TAB_AUDIO' || data.audioSourceMode === 'MIC') {
+        this.setAudioSourceMode(data.audioSourceMode);
       }
       return true;
     } catch (e) {

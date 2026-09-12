@@ -248,7 +248,7 @@ export const Header: React.FC<HeaderProps> = ({
                         onClick={() => setShowUserMenu(false)}
                         className="flex items-center px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600"
                       >
-                        <User className="w-4 h-4 mr-2 text-emerald-500" /> 마이페이지 & 백업
+                        <User className="w-4 h-4 mr-2 text-emerald-500" /> 판매자 설정 & 백업
                       </Link>
                     </>
                   ) : (
@@ -366,7 +366,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div>
                 <strong className="text-brand-900 block text-sm">라이브 청취 시작</strong>
                 <span className="text-slate-600 mt-0.5 block">
-                  홈 화면에서 [라이브 청취 시작]을 누르고 방송 탭과 [탭 오디오 공유]를 선택합니다. 청취 중지나 로그아웃 후에도 같은 브라우저 탭에서는 공유 연결을 재사용하며, 상단의 [탭 공유 유지 중] 버튼으로 완전히 해제할 수 있습니다.
+                  홈 화면에서 [시작]을 누르고 방송 탭과 [탭 오디오 공유]를 선택합니다. 청취 중지나 로그아웃 후에도 같은 브라우저 탭에서는 공유 연결을 재사용하며, 상단의 [탭 공유 유지 중] 버튼으로 완전히 해제할 수 있습니다.
                 </span>
               </div>
             </div>

@@ -12,7 +12,9 @@ import {
   Download,
   Upload,
   Database,
-  RefreshCw
+  RefreshCw,
+  MonitorSpeaker,
+  Mic2
 } from 'lucide-react';
 import { Smartphone } from 'lucide-react';
 import { devicePairingService, PairingCode } from '../../services/devicePairingService';
@@ -26,6 +28,14 @@ export const MyPage: React.FC = () => {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [pairing, setPairing] = useState<PairingCode | null>(null);
   const [pairingBusy, setPairingBusy] = useState(false);
+  const [audioSourceMode, setAudioSourceMode] = useState<'TAB_AUDIO' | 'MIC'>(() => storageService.getAudioSourceMode());
+
+  const handleAudioSourceChange = (mode: 'TAB_AUDIO' | 'MIC') => {
+    setAudioSourceMode(mode);
+    storageService.setAudioSourceMode(mode);
+    setToastMsg(mode === 'TAB_AUDIO' ? '방송 탭 소리로 설정했습니다.' : '내 마이크로 설정했습니다.');
+    setTimeout(() => setToastMsg(null), 3000);
+  };
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,13 +109,13 @@ export const MyPage: React.FC = () => {
       {/* 헤더 */}
       <div className="bg-white border border-slate-200 p-4 sm:p-6 rounded-3xl shadow-sm">
         <div className="flex items-center space-x-2">
-          <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">마이페이지 & 데이터 관리</h1>
+          <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">판매자 설정 & 데이터 관리</h1>
           <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 text-[10px] sm:text-xs font-bold border border-brand-200">
             {user?.role} 계정
           </span>
         </div>
         <p className="text-[11px] sm:text-xs text-slate-500 mt-1">
-          계정 프로필 정보 및 판매 데이터의 전체 백업/복원을 안전하게 관리합니다.
+          방송 입력 방식, 계정 프로필 및 판매 데이터 백업을 관리합니다.
         </p>
       </div>
 
@@ -123,6 +133,61 @@ export const MyPage: React.FC = () => {
           <span>{toastMsg}</span>
         </div>
       )}
+
+      {/* 라이브 방송 음성 입력 설정 */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4">
+        <div>
+          <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
+            <MonitorSpeaker className="w-4 h-4 text-brand-600" />
+            <span>라이브 방송 음성 입력</span>
+          </h3>
+          <p className="mt-1 text-[11px] sm:text-xs text-slate-500">
+            선택한 방식은 라이브 청취 홈의 다음 시작부터 적용됩니다.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3" role="radiogroup" aria-label="라이브 방송 음성 입력 방식">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={audioSourceMode === 'TAB_AUDIO'}
+            onClick={() => handleAudioSourceChange('TAB_AUDIO')}
+            className={`p-3.5 rounded-2xl border text-left transition active:scale-[0.99] ${
+              audioSourceMode === 'TAB_AUDIO'
+                ? 'bg-brand-50 border-brand-300 ring-1 ring-brand-200 text-brand-900'
+                : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2 text-xs font-black">
+                <MonitorSpeaker className="w-4 h-4" /> 방송 탭 소리
+              </span>
+              {audioSourceMode === 'TAB_AUDIO' && <CheckCircle2 className="w-4 h-4 text-brand-600" />}
+            </div>
+            <p className="mt-1.5 text-[10px] sm:text-[11px] text-slate-500">라이브 방송이 재생되는 브라우저 탭의 소리를 인식합니다.</p>
+          </button>
+
+          <button
+            type="button"
+            role="radio"
+            aria-checked={audioSourceMode === 'MIC'}
+            onClick={() => handleAudioSourceChange('MIC')}
+            className={`p-3.5 rounded-2xl border text-left transition active:scale-[0.99] ${
+              audioSourceMode === 'MIC'
+                ? 'bg-brand-50 border-brand-300 ring-1 ring-brand-200 text-brand-900'
+                : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2 text-xs font-black">
+                <Mic2 className="w-4 h-4" /> 내 마이크
+              </span>
+              {audioSourceMode === 'MIC' && <CheckCircle2 className="w-4 h-4 text-brand-600" />}
+            </div>
+            <p className="mt-1.5 text-[10px] sm:text-[11px] text-slate-500">현재 기기의 마이크로 판매자의 음성을 직접 인식합니다.</p>
+          </button>
+        </div>
+      </div>
 
       {/* 프로필 수정 폼 */}
       <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 sm:space-y-6">

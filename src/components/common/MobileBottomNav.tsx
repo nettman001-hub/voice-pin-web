@@ -62,7 +62,7 @@ export const MobileBottomNav: React.FC = () => {
       icon: FileSpreadsheet
     },
     {
-      name: '마이',
+      name: '설정',
       path: '/my',
       icon: User
     }

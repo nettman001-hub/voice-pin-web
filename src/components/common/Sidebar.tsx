@@ -2,6 +2,7 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLive } from '../../context/LiveContext';
+import { AiLiveStatusBadge } from '../live/AiLiveStatusBadge';
 import {
   Radio,
   Sliders,
@@ -88,7 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { name: '요금제 및 멤버십', path: '/subscription/plans', icon: CreditCard },
         { name: '구독 & 결제 관리', path: '/subscription/manage', icon: BarChart3 },
         { name: '알림 설정', path: '/notifications/settings', icon: Bell },
-        { name: '마이페이지 & 백업', path: '/my', icon: User },
+        { name: '판매자 설정 & 백업', path: '/my', icon: User },
       ]
     }
   ];
@@ -205,17 +206,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ))}
       </div>
 
-      {/* 하단 시스템 상태 안내 위젯 */}
+      {/* 하단 판매 AI 상태 */}
       <div className="p-3 border-t border-slate-200 bg-slate-50">
-        <div className="p-2.5 rounded-xl bg-white border border-slate-200 shadow-sm text-xs flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-            <span className="font-bold text-slate-800 text-[11px]">VoiceCAP AI</span>
-          </div>
-          <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-            정상 가동
-          </span>
-        </div>
+        <AiLiveStatusBadge compact />
       </div>
     </div>
   );
