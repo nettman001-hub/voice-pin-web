@@ -15,6 +15,7 @@ export const ProductSalesPage: React.FC = () => {
     candidate,
     isLoading,
     loadBootstrap,
+    pollFeed,
     registerProduct,
     commitSales,
     cancelCandidate,
@@ -27,6 +28,17 @@ export const ProductSalesPage: React.FC = () => {
   const [inputPrice, setInputPrice] = useState('');
   const [selectedBuyerMap, setSelectedBuyerMap] = useState<Map<string, { quantity: number; commentIds: string[]; nickname: string }>>(new Map());
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    try {
+      setIsRefreshing(true);
+      await loadBootstrap();
+      await pollFeed();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // Handle comment selection
   const handleToggleComment = (commentId: string, buyerId: string, nickname: string) => {
@@ -141,11 +153,12 @@ export const ProductSalesPage: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => loadBootstrap()}
+            onClick={() => void handleRefresh()}
+            disabled={isRefreshing}
             className="p-2 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50"
             title="새로고침"
           >
-            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${(isLoading || isRefreshing) ? 'animate-spin' : ''}`} />
           </button>
           {settings?.productRegistrationEnabled && (
             <button

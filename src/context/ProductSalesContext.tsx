@@ -67,7 +67,7 @@ const ProductSalesContext = createContext<ProductSalesContextType | null>(null);
 const SALES_FEED_POLL_INTERVAL_MS = 2_000;
 const SALES_FEED_RETRY_BASE_MS = 4_000;
 const SALES_FEED_RETRY_MAX_MS = 30_000;
-const SALES_FEED_POLL_PATHS = new Set(['/live', '/seller/product-sales', '/sales/product']);
+const SALES_FEED_POLL_PATHS = new Set(['/live']);
 
 function isSameProduct(left: ProductSalesProduct | null, right: ProductSalesProduct | null) {
   if (left === right) return true;
@@ -125,6 +125,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
     try {
       const data = await productSalesApi.getBootstrap();
       const hydratedProduct = await hydrateProduct(data.activeProduct);
+      activeSessionRef.current = data.activeSession;
       setBootstrap({ ...data, activeProduct: hydratedProduct });
       setError(null);
     } catch (err: any) {
