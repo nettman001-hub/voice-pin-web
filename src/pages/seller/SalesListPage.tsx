@@ -1,6 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
+import { productSalesApi } from '../../services/productSalesApi';
+import { LiveSession } from '../../types/productSales';
 import { SaleRecord } from '../../types/live';
 import { BuyerReconciliationPanel, BuyerStatusBadges } from '../../components/sales/BuyerReconciliationPanel';
 import {
@@ -32,7 +34,7 @@ interface BuyerGroupedSale {
 }
 
 export const SalesListPage: React.FC = () => {
-  const { sales, exportCsv } = useSales();
+  const { sales, exportCsv, refreshSales } = useSales();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [sessionFilter, setSessionFilter] = useState<string>('ALL');
@@ -40,12 +42,41 @@ export const SalesListPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [sortOrder, setSortOrder] = useState<'AMOUNT_DESC' | 'COUNT_DESC' | 'LATEST' | 'OLDEST'>('AMOUNT_DESC');
   const [expandedBuyers, setExpandedBuyers] = useState<string[]>([]);
+  const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all([refreshSales(), productSalesApi.listSessions()])
+      .then(([, sessionData]) => {
+        if (active) setCloudSessions(sessionData.sessions);
+      })
+      .catch((error) => console.error('[SalesList] 클라우드 판매 내역 조회 실패', error));
+    return () => { active = false; };
+  }, [refreshSales]);
 
   // 고유 방송 회차 세션 목록 추출
   const availableSessions = useMemo(() => {
-    const sessions = Array.from(new Set(sales.map((s) => s.sessionId))).filter(Boolean);
-    return sessions.sort((a, b) => b.localeCompare(a));
-  }, [sales]);
+    const sessionsById = new Map(cloudSessions.map((session) => [session.id, session]));
+    // 이전 형식으로 저장된 판매 건도 클라우드 sales 테이블에서 확인할 수 있게 유지한다.
+    sales.forEach((sale) => {
+      if (sale.sessionId && !sessionsById.has(sale.sessionId)) {
+        sessionsById.set(sale.sessionId, {
+          id: sale.sessionId,
+          displayCode: sale.sessionId,
+          status: 'ENDED',
+          revision: 1,
+          startedAt: sale.recognizedAt,
+        });
+      }
+    });
+    return Array.from(sessionsById.values()).sort((left, right) => (
+      new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime()
+    ));
+  }, [cloudSessions, sales]);
+
+  const selectedSession = sessionFilter === 'ALL'
+    ? null
+    : availableSessions.find((session) => session.id === sessionFilter) || null;
 
   // 1차 필터링
   const filteredSales = useMemo(() => {
@@ -139,13 +170,13 @@ export const SalesListPage: React.FC = () => {
     const pendingCount = targetSales.filter((s) => s.status === '보류').length;
 
     return {
-      sessionName: sessionFilter === 'ALL' ? '전체 방송 회차 합산' : `회차: ${sessionFilter}`,
+      sessionName: sessionFilter === 'ALL' ? '전체 방송 회차 합산' : `회차: ${selectedSession?.displayCode || sessionFilter}`,
       totalCount: targetSales.length,
       totalAmount,
       uniqueBuyerCount: uniqueBuyers.size,
       pendingCount
     };
-  }, [sales, sessionFilter]);
+  }, [sales, sessionFilter, selectedSession?.displayCode]);
 
   const toggleBuyerExpand = (nickname: string) => {
     setExpandedBuyers((prev) =>
@@ -193,46 +224,23 @@ export const SalesListPage: React.FC = () => {
 
       {/* 회차 선택 탭 & 회차 요약 카드 */}
       <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
-        <div className="flex items-center justify-start flex-wrap gap-2 sm:gap-2.5 pb-2 border-b border-slate-100">
-          <div className="flex items-center flex-shrink-0 mr-1">
-            <span className="text-xs font-bold text-slate-700 flex items-center">
-              <Layers className="w-3.5 h-3.5 mr-1.5 text-brand-600" /> 회차 선택:
-            </span>
-            {sessionFilter !== 'ALL' && (
-              <span className="ml-2 px-2 py-0.5 rounded-lg bg-brand-50 text-brand-700 font-mono text-xs font-bold border border-brand-200">
-                {sessionFilter}
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-1 max-w-full">
-            <button
-              onClick={() => setSessionFilter('ALL')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex-shrink-0 ${
-                sessionFilter === 'ALL'
-                  ? 'bg-brand-600 text-white shadow-sm'
-                  : 'bg-slate-50 text-slate-600 hover:text-slate-900 border border-slate-200'
-              }`}
-            >
-              전체 회차
-            </button>
-            {availableSessions.map((sessionId, idx) => (
-              <button
-                key={sessionId}
-                onClick={() => setSessionFilter(sessionId)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition flex-shrink-0 flex items-center space-x-1 ${
-                  sessionFilter === sessionId
-                    ? 'bg-brand-600 text-white shadow-sm'
-                    : 'bg-slate-50 text-slate-600 hover:text-slate-900 border border-slate-200'
-                }`}
-              >
-                <span>{sessionId}</span>
-                {idx === 0 && (
-                  <span className="ml-1 text-[9px] bg-rose-500 text-white px-1 py-0.2 rounded">최신</span>
-                )}
-              </button>
+        <div className="flex items-center gap-3 pb-2 border-b border-slate-100">
+          <label htmlFor="sales-session-filter" className="text-xs font-bold text-slate-700 flex items-center flex-shrink-0">
+            <Layers className="w-3.5 h-3.5 mr-1.5 text-brand-600" /> 회차 선택:
+          </label>
+          <select
+            id="sales-session-filter"
+            value={sessionFilter}
+            onChange={(event) => setSessionFilter(event.target.value)}
+            className="min-w-0 flex-1 max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
+          >
+            <option value="ALL">전체 회차</option>
+            {availableSessions.map((session) => (
+              <option key={session.id} value={session.id}>
+                {session.displayCode}{session.status === 'ACTIVE' ? ' · 진행 중' : ''}
+              </option>
             ))}
-          </div>
+          </select>
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 pt-1">

@@ -11,6 +11,29 @@ export async function getActiveSession(workspaceId: string) {
   return existing || null
 }
 
+export async function handleListSessions(workspaceId: string) {
+  const { data: sessions, error } = await admin
+    .from('live_sessions')
+    .select('id, display_code, status, active_product_id, revision, started_at, ended_at')
+    .eq('workspace_id', workspaceId)
+    .order('started_at', { ascending: false })
+    .limit(500)
+
+  if (error) return errorResponse('DATABASE_ERROR', `방송 회차 조회 실패: ${error.message}`, 500)
+
+  return successResponse({
+    sessions: (sessions || []).map((session) => ({
+      id: session.id,
+      displayCode: session.display_code,
+      status: session.status,
+      activeProductId: session.active_product_id,
+      revision: session.revision,
+      startedAt: session.started_at,
+      endedAt: session.ended_at,
+    })),
+  })
+}
+
 export async function handleGetBootstrap(workspaceId: string, capabilities: Set<string>) {
   const settings = await getWorkspaceSettings(workspaceId)
   const session = await getActiveSession(workspaceId)

@@ -13,6 +13,7 @@ import {
 
 import {
   handleGetBootstrap,
+  handleListSessions,
   handleUpdateSettings,
   handleStartSession,
   handleEndSession,
@@ -128,6 +129,9 @@ serve(async (req: Request) => {
       case 'get-bootstrap':
         requireCapability('SALES_READ')
         return await handleGetBootstrap(workspaceId, capabilities)
+      case 'list-sessions':
+        requireCapability('SALES_READ')
+        return await handleListSessions(workspaceId)
       case 'update-settings':
         requireCapability('SALES_WRITE')
         return await handleUpdateSettings(workspaceId, body)

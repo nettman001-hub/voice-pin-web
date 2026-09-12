@@ -158,6 +158,10 @@ export const productSalesApi = {
     }>('get-sales-feed', params);
   },
 
+  async listSessions() {
+    return invokeSalesApi<{ sessions: LiveSession[] }>('list-sessions');
+  },
+
   async listLiveComments(params: { sessionId?: string; limit?: number } = {}) {
     return invokeSalesApi<{ comments: LiveComment[] }>('list-live-comments', params);
   },

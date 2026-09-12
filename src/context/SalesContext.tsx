@@ -1,6 +1,6 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { SaleRecord, SaleStatus } from '../types/live';
-import { storageService, getNextProductCodeForSession } from '../services/storageService';
+import { getNextProductCodeForSession } from '../services/storageService';
 import { exportSalesToCsv } from '../services/csvExporter';
 import { useAuth } from './AuthContext';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
@@ -36,24 +36,32 @@ const SalesContext = createContext<SalesContextType | undefined>(undefined);
 
 export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { workspaceId, isRemoteAuth } = useAuth();
-  const [sales, setSales] = useState<SaleRecord[]>(() => storageService.getSales());
+  // 판매 내역은 로그인한 작업공간의 Supabase sales 테이블만 원본으로 사용한다.
+  // 로컬 저장소에는 판매 이력을 복제하지 않아 다른 PC에서도 같은 목록을 바로 조회한다.
+  const [sales, setSales] = useState<SaleRecord[]>([]);
+  const salesRef = useRef<SaleRecord[]>([]);
+
+  useEffect(() => {
+    salesRef.current = sales;
+  }, [sales]);
 
   const refreshSales = useCallback(async (): Promise<SaleRecord[]> => {
     if (!isRemoteAuth || !workspaceId) {
-      const rows = storageService.getSales();
-      setSales(rows);
-      return rows;
+      salesRef.current = [];
+      setSales([]);
+      return [];
     }
 
     const rows = await remoteWorkspaceService.loadSales(workspaceId);
+    salesRef.current = rows;
     setSales(rows);
-    storageService.saveSales(rows);
     return rows;
   }, [isRemoteAuth, workspaceId]);
 
   useEffect(() => {
     if (!isRemoteAuth || !workspaceId) {
-      setSales(storageService.getSales());
+      salesRef.current = [];
+      setSales([]);
       return;
     }
     let active = true;
@@ -72,14 +80,15 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [isRemoteAuth, workspaceId, refreshSales]);
 
   const persist = (sale: SaleRecord) => {
-    storageService.updateSale(sale);
     if (isRemoteAuth && workspaceId) {
       void remoteWorkspaceService.saveSale(workspaceId, sale).catch((error) => console.error('[Sales] remote save failed', error));
     }
   };
 
   const replaceSale = (sale: SaleRecord) => {
-    setSales((previous) => previous.map((item) => item.id === sale.id ? sale : item));
+    const nextSales = salesRef.current.map((item) => item.id === sale.id ? sale : item);
+    salesRef.current = nextSales;
+    setSales(nextSales);
     persist(sale);
   };
 
@@ -111,7 +120,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       sessionId: sale.sessionId,
     }).then((result) => {
       // 그 사이에 같은 판매가 다시 수정되었다면 오래된 인쇄 응답으로 상태를 덮어쓰지 않는다.
-      const latest = storageService.getSales().find((item) => item.id === sale.id);
+      const latest = salesRef.current.find((item) => item.id === sale.id);
       if (!latest || latest.printRevision !== sale.printRevision) return;
       replaceSale({
         ...latest,
@@ -120,7 +129,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         printError: result.ok ? undefined : (result.error || '인쇄에 실패했습니다.'),
       });
     }).catch((error) => {
-      const latest = storageService.getSales().find((item) => item.id === sale.id);
+      const latest = salesRef.current.find((item) => item.id === sale.id);
       if (!latest || latest.printRevision !== sale.printRevision) return;
       replaceSale({
         ...latest,
@@ -156,8 +165,9 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const newSale = isPrintableSale(baseSale)
       ? { ...baseSale, printStatus: 'QUEUED' as const, printRevision: Math.max(1, baseSale.printRevision || 0) }
       : baseSale;
-    setSales((previous) => [newSale, ...previous]);
-    storageService.addSale(newSale);
+    const nextSales = [newSale, ...salesRef.current];
+    salesRef.current = nextSales;
+    setSales(nextSales);
     if (isRemoteAuth && workspaceId) {
       void remoteWorkspaceService.saveSale(workspaceId, newSale).catch((error) => console.error('[Sales] remote add failed', error));
     }
@@ -166,7 +176,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const updateSale = (updated: SaleRecord) => {
-    const previous = storageService.getSales().find((sale) => sale.id === updated.id);
+    const previous = salesRef.current.find((sale) => sale.id === updated.id);
     const shouldPrint = previous
       ? isPrintableSale(updated) && (!isPrintableSale(previous) || hasSellerEditChanged(previous, updated))
       : false;
@@ -178,21 +188,22 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const retrySalePrint = (id: string) => {
-    const sale = storageService.getSales().find((item) => item.id === id);
+    const sale = salesRef.current.find((item) => item.id === id);
     if (!sale || !isPrintableSale(sale)) return;
     queueSalePrint(sale, Math.max(1, sale.printRevision || 0) + 1);
   };
 
   const deleteSale = (id: string) => {
-    setSales((previous) => previous.filter((sale) => sale.id !== id));
-    storageService.deleteSale(id);
+    const nextSales = salesRef.current.filter((sale) => sale.id !== id);
+    salesRef.current = nextSales;
+    setSales(nextSales);
     if (isRemoteAuth && workspaceId) {
       void remoteWorkspaceService.deleteSale(workspaceId, id).catch((error) => console.error('[Sales] remote delete failed', error));
     }
   };
 
   const confirmBatchSales = (saleIds: string[]): BatchConfirmResult => {
-    const allSales = storageService.getSales();
+    const allSales = salesRef.current;
     const targetSales = allSales.filter((sale) => saleIds.includes(sale.id));
     const confirmedSaleIds: string[] = [];
     const skippedSales: BatchConfirmResult['skippedSales'] = [];
