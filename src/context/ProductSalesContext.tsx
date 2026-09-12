@@ -63,6 +63,26 @@ interface ProductSalesContextType {
 
 const ProductSalesContext = createContext<ProductSalesContextType | null>(null);
 
+const SALES_FEED_POLL_INTERVAL_MS = 2_000;
+const SALES_FEED_RETRY_BASE_MS = 4_000;
+const SALES_FEED_RETRY_MAX_MS = 30_000;
+
+function isSameProduct(left: ProductSalesProduct | null, right: ProductSalesProduct | null) {
+  if (left === right) return true;
+  if (!left || !right) return false;
+
+  return left.id === right.id
+    && left.productCode === right.productCode
+    && left.name === right.name
+    && left.unitPrice === right.unitPrice
+    && left.imageKind === right.imageKind
+    && left.imagePath === right.imagePath
+    && left.imageUrl === right.imageUrl
+    && left.source === right.source
+    && left.revision === right.revision
+    && left.salesRevision === right.salesRevision;
+}
+
 async function hydrateProduct(product: ProductSalesProduct | null): Promise<ProductSalesProduct | null> {
   if (!product) return null;
   const imagePath = product.imagePath || product.imageUrl || '';
@@ -83,6 +103,9 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const controllerRef = useRef<VoiceCandidateController | null>(null);
   const activeSessionRef = useRef<ProductSalesSession | null>(null);
+  const feedPollInFlightRef = useRef(false);
+  const feedPollRequestIdRef = useRef(0);
+  const feedPollFailureCountRef = useRef(0);
 
   const activeProduct = bootstrap?.activeProduct || null;
   const activeSession = bootstrap?.activeSession || null;
@@ -107,27 +130,61 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, []);
 
   const pollFeed = useCallback(async () => {
-    if (!activeSession) return;
+    const session = activeSessionRef.current;
+    if (!session || feedPollInFlightRef.current) return;
+
+    const requestId = ++feedPollRequestIdRef.current;
+    const sessionId = session.id;
     try {
+      feedPollInFlightRef.current = true;
       const feedData = await productSalesApi.getSalesFeed({
-        sessionId: activeSession.id,
+        sessionId,
         limit: 50,
       });
       const hydratedProduct = await hydrateProduct(feedData.activeProduct);
+
+      // A newer request, session switch, or local write has made this response obsolete.
+      if (
+        requestId !== feedPollRequestIdRef.current
+        || activeSessionRef.current?.id !== sessionId
+        || (activeSessionRef.current?.revision ?? 0) > feedData.sessionRevision
+      ) {
+        return;
+      }
+
+      feedPollFailureCountRef.current = 0;
       setFeed({ ...feedData, activeProduct: hydratedProduct });
-      setBootstrap((previous) => previous ? {
-        ...previous,
-        activeProduct: hydratedProduct,
-        activeSession: previous.activeSession ? {
-          ...previous.activeSession,
-          activeProductId: hydratedProduct?.id || null,
-          revision: feedData.sessionRevision,
-        } : previous.activeSession,
-      } : previous);
+
+      setBootstrap((previous) => {
+        if (!previous?.activeSession || previous.activeSession.id !== sessionId) return previous;
+        if (previous.activeSession.revision > feedData.sessionRevision) return previous;
+
+        const sessionChanged = previous.activeSession.activeProductId !== (hydratedProduct?.id || null)
+          || previous.activeSession.revision !== feedData.sessionRevision;
+        const productChanged = !isSameProduct(previous.activeProduct, hydratedProduct);
+
+        if (!sessionChanged && !productChanged) return previous;
+
+        return {
+          ...previous,
+          activeProduct: productChanged ? hydratedProduct : previous.activeProduct,
+          activeSession: sessionChanged
+            ? {
+              ...previous.activeSession,
+              activeProductId: hydratedProduct?.id || null,
+              revision: feedData.sessionRevision,
+            }
+            : previous.activeSession,
+        };
+      });
     } catch {
-      // Background poll failure silent
+      if (requestId === feedPollRequestIdRef.current && activeSessionRef.current?.id === sessionId) {
+        feedPollFailureCountRef.current = Math.min(feedPollFailureCountRef.current + 1, 10);
+      }
+    } finally {
+      feedPollInFlightRef.current = false;
     }
-  }, [activeSession]);
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -140,11 +197,39 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, [isAuthenticated, user?.id, loadBootstrap]);
 
   useEffect(() => {
-    if (!activeSession) return;
-    pollFeed();
-    const timer = setInterval(pollFeed, 2000);
-    return () => clearInterval(timer);
-  }, [activeSession, pollFeed]);
+    const sessionId = activeSession?.id;
+    if (!sessionId) {
+      feedPollRequestIdRef.current += 1;
+      feedPollFailureCountRef.current = 0;
+      return;
+    }
+
+    let disposed = false;
+    let timer: number | undefined;
+
+    const scheduleNextPoll = async () => {
+      const startedAt = Date.now();
+      await pollFeed();
+      if (disposed || activeSessionRef.current?.id !== sessionId) return;
+
+      const failures = feedPollFailureCountRef.current;
+      const delay = failures > 0
+        ? Math.min(SALES_FEED_RETRY_BASE_MS * (2 ** (failures - 1)), SALES_FEED_RETRY_MAX_MS)
+        : Math.max(0, SALES_FEED_POLL_INTERVAL_MS - (Date.now() - startedAt));
+
+      timer = window.setTimeout(() => {
+        void scheduleNextPoll();
+      }, delay);
+    };
+
+    void scheduleNextPoll();
+    return () => {
+      disposed = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+      feedPollRequestIdRef.current += 1;
+      feedPollFailureCountRef.current = 0;
+    };
+  }, [activeSession?.id, pollFeed]);
 
   // Handle automatic candidate commit
   const handleCommitCandidate = useCallback(
