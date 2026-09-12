@@ -1,10 +1,12 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, Tray, nativeImage, shell, utilityProcess } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, Tray, nativeImage, session, shell, utilityProcess } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
 
-const APP_NAME = 'VoiceCAP 댓글 도우미';
+const APP_NAME = 'VoiceCAP';
+const APP_USER_MODEL_ID = 'shop.voicecap.desktop';
+const LOCAL_SERVER_URL = 'http://127.0.0.1:2137';
 const WEB_APP_URL = 'https://www.voicecap.shop/live';
 const SERVER_HOST = '127.0.0.1';
 const SERVER_PORT = 2137;
@@ -14,6 +16,7 @@ const PRINT_SETTINGS_FILE = 'print-settings.json';
 const PRINT_HISTORY_FILE = 'print-history.json';
 
 let mainWindow = null;
+let helperWindow = null;
 let tray = null;
 let serverProcess = null;
 let healthTimer = null;
@@ -266,6 +269,9 @@ function publishStatus() {
   if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
     mainWindow.webContents.send('helper:status', snapshot);
   }
+  if (helperWindow && !helperWindow.isDestroyed() && !helperWindow.webContents.isDestroyed()) {
+    helperWindow.webContents.send('helper:status', snapshot);
+  }
   if (tray) {
     tray.setToolTip(`${APP_NAME} · ${statusLabel()}`);
     tray.setContextMenu(buildTrayMenu());
@@ -276,8 +282,8 @@ function buildTrayMenu() {
   return Menu.buildFromTemplate([
     { label: `상태: ${statusLabel()}`, enabled: false },
     { type: 'separator' },
-    { label: '상태 화면 열기', click: showWindow },
-    { label: 'VoiceCAP 홈페이지 열기', click: () => shell.openExternal(WEB_APP_URL) },
+    { label: 'VoiceCAP 대시보드 열기', click: showWindow },
+    { label: '도우미 상태/설정 창 열기', click: showHelperWindow },
     { label: '댓글 서버 다시 시작', click: restartServer },
     { label: '업데이트 확인', click: () => checkForUpdates(true) },
     { label: '진단 로그 열기', click: () => shell.showItemInFolder(logFile) },
@@ -363,28 +369,57 @@ async function checkForUpdates(interactive = false) {
   }
 }
 
+function loadAppUrl() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  writeLog('helper', `메인 대시보드 로드 시도: ${LOCAL_SERVER_URL}`);
+  mainWindow.loadURL(LOCAL_SERVER_URL).catch((err) => {
+    writeLog('helper', `로컬 서버 로드 대기 중 (${err.message}), 1.5초 후 재시도...`);
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.loadURL(LOCAL_SERVER_URL).catch(() => {});
+      }
+    }, 1500);
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 460,
-    height: 820,
-    minWidth: 420,
+    width: 1440,
+    height: 900,
+    minWidth: 1100,
     minHeight: 700,
     show: false,
     title: APP_NAME,
     icon: iconPath(),
     autoHideMenuBar: true,
-    backgroundColor: '#f3f7fb',
+    backgroundColor: '#f8fafc',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: false
     }
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'ui', 'index.html'));
-  mainWindow.webContents.on('did-fail-load', (_event, code, description) => {
-    writeLog('ui-error', `화면 로드 실패 (${code}): ${description}`);
+  // 오디오 및 마이크 미디어 권한 자동 승인
+  if (session && session.defaultSession) {
+    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+      if (permission === 'media' || permission === 'notifications') {
+        return callback(true);
+      }
+      callback(true);
+    });
+    session.defaultSession.setPermissionCheckHandler(() => true);
+  }
+
+  loadAppUrl();
+
+  mainWindow.webContents.on('did-fail-load', (_event, code, description, validatedURL) => {
+    writeLog('ui-error', `메인 화면 로드 실패 (${code}): ${description} [${validatedURL}]`);
+    // 서버 시작 지연 시 재시도
+    if (code === -102 || code === -105 || code === -106) {
+      setTimeout(loadAppUrl, 2000);
+    }
   });
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     writeLog('ui-error', `화면 프로세스 종료: ${details.reason}`);
@@ -418,8 +453,52 @@ function createWindow() {
     mainWindow = null;
   });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://')) shell.openExternal(url);
+    if (url.startsWith(LOCAL_SERVER_URL)) {
+      return { action: 'allow' };
+    }
+    if (url.startsWith('https://') || url.startsWith('http://')) {
+      shell.openExternal(url);
+    }
     return { action: 'deny' };
+  });
+}
+
+function showHelperWindow() {
+  if (helperWindow && !helperWindow.isDestroyed()) {
+    if (helperWindow.isMinimized()) helperWindow.restore();
+    helperWindow.show();
+    helperWindow.focus();
+    return;
+  }
+
+  helperWindow = new BrowserWindow({
+    width: 460,
+    height: 820,
+    minWidth: 420,
+    minHeight: 700,
+    show: false,
+    title: `${APP_NAME} 도우미 설정`,
+    icon: iconPath(),
+    autoHideMenuBar: true,
+    backgroundColor: '#f3f7fb',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+
+  helperWindow.loadFile(path.join(__dirname, 'ui', 'index.html'));
+  helperWindow.once('ready-to-show', () => helperWindow.show());
+  helperWindow.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      helperWindow.hide();
+    }
+  });
+  helperWindow.on('closed', () => {
+    helperWindow = null;
   });
 }
 
@@ -768,10 +847,12 @@ ipcMain.handle('helper:detect-stt-devices', async () => {
 });
 
 ipcMain.handle('helper:hide-window', () => mainWindow?.hide());
+ipcMain.handle('helper:open-helper-window', () => showHelperWindow());
+ipcMain.handle('helper:show-main-window', () => showWindow());
 ipcMain.handle('helper:quit', quitApp);
 
 app.whenReady().then(() => {
-  app.setAppUserModelId('shop.voicecap.commenthelper');
+  app.setAppUserModelId(APP_USER_MODEL_ID);
   prepareLogs();
   loadPrintSettings();
   createWindow();
