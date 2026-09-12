@@ -108,6 +108,13 @@ export const RecognitionRulesPage: React.FC = () => {
     });
   }, [captureAreaConfig]);
 
+  useEffect(() => {
+    setCommentUsername(commentConfig.tiktokUsername);
+    setCommentAlertWords(commentConfig.alertWords.join(', '));
+    setCommentAlertDuration(String(commentConfig.alertDurationSec));
+    setCommentAlertCommand(commentConfig.alertVoiceCommand);
+  }, [commentConfig]);
+
   useEffect(() => screenCaptureService.subscribeConnection((state) => {
     setIsScreenConnected(state.isConnected);
     if (!state.isConnected) setPreviewStream(null);

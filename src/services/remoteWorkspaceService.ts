@@ -1,5 +1,6 @@
-import { RecognitionWordRule } from '../types/rules';
+import { RecognitionWordRule, CaptureAreaConfig } from '../types/rules';
 import { TrainingSentence } from '../types/training';
+import { CommentCaptureConfig } from '../types/comment';
 import { SttMode, LocalSttModel } from '../types/stt';
 import { CommerceState, CustomerPurchaseClaim, PaymentReceipt, SettlementInvoice, Shipment, SmsMessage } from '../types/commerce';
 import { SaleRecord } from '../types/live';
@@ -687,5 +688,21 @@ export const remoteWorkspaceService = {
     sttConfidence?: number;
   }): Promise<void> {
     await this.saveWorkspaceSettings(workspaceId, 'user_preferences', preferences);
+  },
+
+  // 댓글 수집 설정 (알림 단어, 틱톡 사용자명, 표시 시간 등)
+  async loadCommentCaptureConfig(workspaceId: string): Promise<Partial<CommentCaptureConfig> | null> {
+    return this.fetchWorkspaceSettings<Partial<CommentCaptureConfig>>(workspaceId, 'comment_capture_config');
+  },
+  async saveCommentCaptureConfig(workspaceId: string, config: CommentCaptureConfig): Promise<void> {
+    await this.saveWorkspaceSettings(workspaceId, 'comment_capture_config', config);
+  },
+
+  // 캡처 영역 설정 (프리셋, 해상도 비율 등)
+  async loadCaptureAreaConfig(workspaceId: string): Promise<CaptureAreaConfig | null> {
+    return this.fetchWorkspaceSettings<CaptureAreaConfig>(workspaceId, 'capture_area_config');
+  },
+  async saveCaptureAreaConfig(workspaceId: string, config: CaptureAreaConfig): Promise<void> {
+    await this.saveWorkspaceSettings(workspaceId, 'capture_area_config', config);
   },
 };

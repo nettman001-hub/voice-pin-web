@@ -1,15 +1,16 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
+import { useAuth } from './AuthContext';
 import { useLive } from './LiveContext';
 import { storageService } from '../services/storageService';
+import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
 import {
   commentDedupeKey,
   commentStreamService,
   StreamedComment
 } from '../services/commentStreamService';
 import type { CommentStreamStatus } from '../services/commentStreamService';
-import { CommentCaptureConfig, CommentRecord } from '../types/comment';
-import { DEFAULT_COMMENT_SERVER_URL } from '../types/comment';
+import { CommentCaptureConfig, CommentRecord, DEFAULT_COMMENT_CAPTURE_CONFIG, DEFAULT_COMMENT_SERVER_URL } from '../types/comment';
 
 export interface CommentAlert {
   id: string;
@@ -37,6 +38,7 @@ interface CommentCaptureContextType {
 const CommentCaptureContext = createContext<CommentCaptureContextType | undefined>(undefined);
 
 export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { workspaceId } = useAuth();
   const { isListening, currentSessionId, transcriptLogs } = useLive();
 
   // 안전을 위해 브라우저를 새로 열거나 새로고침할 때마다 댓글 수집은 꺼진 상태로 시작한다.
@@ -67,6 +69,42 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     isActiveRef.current = isActive;
   }, [isActive]);
 
+  // 클라우드 댓글 수집 설정 동기화
+  useEffect(() => {
+    if (!workspaceId) return;
+    let active = true;
+
+    const syncCloudConfig = async () => {
+      try {
+        const cloudConfig = await remoteWorkspaceService.loadCommentCaptureConfig(workspaceId);
+        if (!active) return;
+        if (cloudConfig) {
+          const merged: CommentCaptureConfig = {
+            ...DEFAULT_COMMENT_CAPTURE_CONFIG,
+            ...cloudConfig,
+            serverUrl: DEFAULT_COMMENT_SERVER_URL,
+            alertWords: Array.isArray(cloudConfig.alertWords)
+              ? cloudConfig.alertWords
+              : DEFAULT_COMMENT_CAPTURE_CONFIG.alertWords
+          };
+          setConfig(merged);
+          storageService.saveCommentCaptureConfig(merged);
+        } else {
+          // 클라우드에 아직 없으면 현재 로컬 설정을 최초 시딩 저장
+          const current = storageService.getCommentCaptureConfig();
+          void remoteWorkspaceService.saveCommentCaptureConfig(workspaceId, current);
+        }
+      } catch (err) {
+        console.warn('[CommentCaptureContext] 클라우드 설정 동기화 실패:', err);
+      }
+    };
+
+    void syncCloudConfig();
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
+
   // 평상시 최초 상태는 OFF지만, 라이브 청취가 시작되면 댓글 수집도 함께 켠다.
   // 라이브 중 판매자가 댓글 수집만 직접 끈 경우에는 isListening이 다시 바뀔 때까지
   // 강제로 재활성화하지 않아 사용자의 수동 선택을 유지한다.
@@ -76,10 +114,16 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     }
   }, [isListening]);
 
-  const saveConfig = useCallback((next: CommentCaptureConfig) => {
-    setConfig(next);
-    storageService.saveCommentCaptureConfig(next);
-  }, []);
+  const saveConfig = useCallback(
+    (next: CommentCaptureConfig) => {
+      setConfig(next);
+      storageService.saveCommentCaptureConfig(next);
+      if (workspaceId) {
+        void remoteWorkspaceService.saveCommentCaptureConfig(workspaceId, next);
+      }
+    },
+    [workspaceId]
+  );
 
   const dismissAlert = useCallback(() => {
     if (alertTimerRef.current) {

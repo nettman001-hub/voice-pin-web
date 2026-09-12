@@ -111,6 +111,9 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const setCaptureAreaConfig = (cfg: CaptureAreaConfig) => {
     setCaptureAreaConfigState(cfg);
     storageService.saveCaptureAreaConfig(cfg);
+    if (workspaceId) {
+      void remoteWorkspaceService.saveCaptureAreaConfig(workspaceId, cfg);
+    }
   };
 
   // 학습 상태
@@ -209,6 +212,18 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
           // 클라우드에 아직 학습 문장이 없으면 현재 문장을 최초 시딩 저장
           const currentSentences = storageService.getTrainingSentences();
           void remoteWorkspaceService.saveVoiceTraining(workspaceId, currentSentences);
+        }
+
+        // 3. 캡처 영역 설정 동기화
+        const cloudArea = await remoteWorkspaceService.loadCaptureAreaConfig(workspaceId);
+        if (!active) return;
+        if (cloudArea) {
+          setCaptureAreaConfigState(cloudArea);
+          storageService.saveCaptureAreaConfig(cloudArea);
+        } else {
+          // 클라우드에 아직 캡처 영역 설정이 없으면 현재 로컬 설정을 최초 시딩 저장
+          const currentArea = storageService.getCaptureAreaConfig() || CAPTURE_PRESETS[0];
+          void remoteWorkspaceService.saveCaptureAreaConfig(workspaceId, currentArea);
         }
       } catch (err) {
         console.warn('[AppDataContext] 클라우드 설정 동기화 실패:', err);
