@@ -35,10 +35,6 @@ import { formatMultiSaleAmount } from '../../services/salesExtractor';
 import { areNicknamesSimilar } from '../../services/nicknameMatcher';
 import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
 import { CommentHelperModal } from '../../components/helper/CommentHelperModal';
-import { salesDemoService } from '../../services/salesDemoService';
-import type { SaleRecord, SttTranscriptLog } from '../../types/live';
-import type { CommentRecord } from '../../types/comment';
-import type { MatchedRuleItem } from '../../context/LiveContext';
 
 const SILENCE_WARNING_DELAY_MS = 5 * 60 * 1000;
 const SILENCE_STOP_COUNTDOWN_SECONDS = 20;
@@ -157,82 +153,6 @@ export const LiveHomePage: React.FC = () => {
   }, [isListening, silenceCountdown, stopCommentCapture, stopListening]);
 
   // 댓글 피드: 아래쪽이 최신글이 되도록 새 댓글이 오면 자동 스크롤한다.
-  // 영업용 실시간 데모 모드 상태
-  const [isDemoActive, setIsDemoActive] = useState(false);
-  const [demoElapsedSeconds, setDemoElapsedSeconds] = useState(0);
-  const [demoWaveform, setDemoWaveform] = useState<Uint8Array>(() => new Uint8Array(128));
-  const [demoAudioLevel, setDemoAudioLevel] = useState(0);
-  const [demoComments, setDemoComments] = useState<CommentRecord[]>([]);
-  const [demoTranscriptLogs, setDemoTranscriptLogs] = useState<SttTranscriptLog[]>([]);
-  const [demoInterimTranscript, setDemoInterimTranscript] = useState('');
-  const [demoMatchedRule, setDemoMatchedRule] = useState<MatchedRuleItem | null>(null);
-  const [demoSales, setDemoSales] = useState<SaleRecord[]>([]);
-  const [demoTotals, setDemoTotals] = useState({ count: 0, amount: 0 });
-
-  const handleToggleDemo = () => {
-    if (isDemoActive) {
-      salesDemoService.stop();
-      setIsDemoActive(false);
-      setDemoElapsedSeconds(0);
-      setDemoComments([]);
-      setDemoTranscriptLogs([]);
-      setDemoInterimTranscript('');
-      setDemoMatchedRule(null);
-      setDemoSales([]);
-      setDemoTotals({ count: 0, amount: 0 });
-      setDemoAudioLevel(0);
-      setDemoWaveform(new Uint8Array(128));
-    } else {
-      if (isListening) {
-        stopListening();
-        stopCommentCapture();
-      }
-      setIsDemoActive(true);
-      salesDemoService.start({
-        onWaveform: (level, wave) => {
-          setDemoAudioLevel(level);
-          setDemoWaveform(wave);
-        },
-        onComment: (comment) => {
-          setDemoComments((prev) => [...prev, comment].slice(-100));
-        },
-        onCommentsBatch: (comments) => {
-          setDemoComments(comments);
-        },
-        onTranscriptInterim: (text) => {
-          setDemoInterimTranscript(text);
-        },
-        onTranscriptFinal: (log) => {
-          setDemoTranscriptLogs((prev) => [log, ...prev].slice(0, 300));
-        },
-        onTranscriptReset: (logs) => {
-          setDemoTranscriptLogs(logs);
-        },
-        onMatchedRule: (rule) => {
-          setDemoMatchedRule(rule);
-        },
-        onSalesUpdate: (salesList) => {
-          setDemoSales(salesList);
-        },
-        onTotalsUpdate: (count, amount) => {
-          setDemoTotals({ count, amount });
-        },
-        onStatusChange: (running, elapsed) => {
-          setIsDemoActive(running);
-          setDemoElapsedSeconds(elapsed);
-        }
-      });
-    }
-  };
-
-  React.useEffect(() => {
-    return () => {
-      if (salesDemoService.isRunning()) {
-        salesDemoService.stop();
-      }
-    };
-  }, []);
-
   // 회차를 고른 뒤에는 서버 판매 회차 UUID를 사용하고, 오프라인 호환 시에만 로컬 ID를 보조로 사용한다.
   const currentSessionSales = React.useMemo(() => sales.filter((sale) => (
     sale.sessionId === currentSessionId ||
@@ -249,16 +169,15 @@ export const LiveHomePage: React.FC = () => {
     .filter((s) => s.status !== '보류')
     .reduce((sum, item) => sum + item.amount, 0);
 
-  const effectiveIsActive = isListening || isDemoActive;
-  const effectiveAudioLevel = isDemoActive ? Math.round(demoAudioLevel * 100) : audioLevel;
-  const effectiveWaveform = isDemoActive ? demoWaveform : waveform;
-  const effectiveComments = isDemoActive ? demoComments : liveComments;
-  const effectiveTranscriptLogs = isDemoActive ? demoTranscriptLogs : transcriptLogs;
-  const effectiveInterimTranscript = isDemoActive ? demoInterimTranscript : currentInterimTranscript;
-  const effectiveMatchedRuleItem = isDemoActive ? demoMatchedRule : lastMatchedRuleItem;
-  const effectiveSessionSales = isDemoActive ? demoSales : displayedSessionSales;
-  const effectiveSalesCount = isDemoActive ? demoTotals.count : currentSessionSales.length;
-  const effectiveTotalAmount = isDemoActive ? demoTotals.amount : todayTotalAmount;
+  const effectiveAudioLevel = audioLevel;
+  const effectiveWaveform = waveform;
+  const effectiveComments = liveComments;
+  const effectiveTranscriptLogs = transcriptLogs;
+  const effectiveInterimTranscript = currentInterimTranscript;
+  const effectiveMatchedRuleItem = lastMatchedRuleItem;
+  const effectiveSessionSales = displayedSessionSales;
+  const effectiveSalesCount = currentSessionSales.length;
+  const effectiveTotalAmount = todayTotalAmount;
 
   // 댓글 피드: 아래쪽이 최신글이 되도록 새 댓글이 오면 자동 스크롤한다.
   React.useEffect(() => {
@@ -397,28 +316,6 @@ export const LiveHomePage: React.FC = () => {
             </label>
 
           <button
-            onClick={handleToggleDemo}
-            className={`h-8 px-2.5 sm:px-3 rounded-lg font-black text-xs shadow-sm flex items-center justify-center gap-1.5 transition active:scale-95 ${
-              isDemoActive
-                ? 'bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-300 animate-pulse'
-                : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-purple-500/20'
-            }`}
-            title={isDemoActive ? '영업용 실시간 데모 시연을 중지합니다' : '실제 방송처럼 작동하는 영업용 실시간 데모를 시작합니다'}
-          >
-            {isDemoActive ? (
-              <>
-                <Square className="w-3.5 h-3.5 fill-current text-rose-600" />
-                <span>데모 중지</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                <span>데모 시작</span>
-              </>
-            )}
-          </button>
-
-          <button
             onClick={handleToggleListening}
             className={`h-8 min-w-16 px-2.5 rounded-lg font-black text-xs shadow-sm flex items-center justify-center gap-1.5 transition active:scale-95 ${
               isListening
@@ -440,37 +337,6 @@ export const LiveHomePage: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {/* 영업용 실시간 데모 시연 배너 */}
-      {isDemoActive && (
-        <div className="p-3 sm:p-3.5 rounded-2xl bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white text-xs font-bold flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 shadow-lg border border-purple-500/40 animate-in fade-in">
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 rounded-xl bg-purple-500/30 border border-purple-400/50 flex items-center justify-center flex-shrink-0">
-              <Sparkles className="w-4 h-4 text-amber-300 animate-spin" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs sm:text-sm font-black text-white">
-                  🎬 영업 시연용 실시간 데모 모드 작동 중
-                </span>
-                <span className="px-2 py-0.5 rounded-full bg-purple-500/40 text-purple-200 border border-purple-400/30 text-[10px] font-mono">
-                  {Math.floor(demoElapsedSeconds / 60).toString().padStart(2, '0')}:{(demoElapsedSeconds % 60).toString().padStart(2, '0')}
-                </span>
-              </div>
-              <p className="text-[11px] sm:text-xs text-purple-200/90 font-normal mt-0.5">
-                실제 방송 환경과 동일하게 오디오 파형, 틱톡 시청자 댓글, AI 음성 인식, 규칙 감지, 판매 내역 자동 적재 및 주문 정정이 실시간 시뮬레이션됩니다.
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={handleToggleDemo}
-            className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition whitespace-nowrap self-end sm:self-center"
-          >
-            <Square className="w-3 h-3 fill-current" />
-            <span>데모 중지</span>
-          </button>
-        </div>
-      )}
 
       {/* 방송 소리 청취 안내 배너 */}
       {isListening && (
@@ -535,7 +401,7 @@ export const LiveHomePage: React.FC = () => {
               <AudioVisualizer
                 waveform={effectiveWaveform}
                 audioLevel={effectiveAudioLevel}
-                isActive={effectiveIsActive}
+                isActive={isListening}
                 variant="inline"
                 className="h-7 w-full"
               />
@@ -551,13 +417,9 @@ export const LiveHomePage: React.FC = () => {
           <div className="order-2 bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2 flex-wrap gap-y-1">
-                <MessageSquareText className={`w-4 h-4 ${isCommentCaptureRunning || isDemoActive ? 'text-rose-500 animate-pulse' : 'text-cyan-600'}`} />
+                <MessageSquareText className={`w-4 h-4 ${isCommentCaptureRunning ? 'text-rose-500 animate-pulse' : 'text-cyan-600'}`} />
                 <span>실시간 댓글 캡처 ({effectiveComments.length}건)</span>
-                {isDemoActive ? (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
-                    데모 수집 중
-                  </span>
-                ) : !isCommentCaptureActive ? (
+                {!isCommentCaptureActive ? (
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
                     함께시작 꺼짐
                   </span>
@@ -615,9 +477,7 @@ export const LiveHomePage: React.FC = () => {
             <div ref={commentFeedRef} className="max-h-[140px] min-h-[38px] overflow-y-auto space-y-1 pr-1">
               {effectiveComments.length === 0 ? (
                 <div className="py-2.5 sm:py-3 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl min-h-[38px] flex items-center justify-center">
-                  {isDemoActive
-                    ? '데모 댓글 유입 대기 중...'
-                    : isCommentCaptureRunning
+                  {isCommentCaptureRunning
                     ? `@${commentConfig.tiktokUsername || '?'} 라이브 댓글을 실시간 수집 중입니다...`
                     : '"댓글캡처" 체크 후 라이브 청취를 시작하면 틱톡 댓글이 실시간 표시됩니다.'}
                 </div>
@@ -702,13 +562,13 @@ export const LiveHomePage: React.FC = () => {
                   최근 실시간 전사 로그
                 </h3>
                 <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-                  {isDemoActive ? '데모 전사' : '화면'} {effectiveTranscriptLogs.length}건 / {isDemoActive ? '데모 시연 모드' : `오늘 누적 ${totalSessionTranscriptCount || transcriptLogs.length}건`}
+                  화면 {effectiveTranscriptLogs.length}건 / 오늘 누적 {totalSessionTranscriptCount || transcriptLogs.length}건
                 </span>
               </div>
               <div className="flex items-center space-x-1.5">
                 <button
                   onClick={() => downloadSessionTranscripts('txt')}
-                  disabled={isDemoActive || (totalSessionTranscriptCount || transcriptLogs.length) === 0}
+                  disabled={(totalSessionTranscriptCount || transcriptLogs.length) === 0}
                   className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] sm:text-[11px] font-bold border border-slate-300 transition flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
                   title="오늘 방송 전체 음성 전사 로그를 텍스트(.txt) 파일로 다운로드"
                 >
@@ -717,7 +577,7 @@ export const LiveHomePage: React.FC = () => {
                 </button>
                 <button
                   onClick={() => downloadSessionTranscripts('csv')}
-                  disabled={isDemoActive || (totalSessionTranscriptCount || transcriptLogs.length) === 0}
+                  disabled={(totalSessionTranscriptCount || transcriptLogs.length) === 0}
                   className="px-2 py-0.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] sm:text-[11px] font-bold border border-emerald-200 transition flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
                   title="오늘 방송 전체 음성 전사 로그를 엑셀(.csv) 파일로 다운로드 (한글 엑셀 호환)"
                 >
@@ -738,7 +598,7 @@ export const LiveHomePage: React.FC = () => {
 
               {effectiveTranscriptLogs.length === 0 && !effectiveInterimTranscript ? (
                 <div className="py-2.5 sm:py-3 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl min-h-[38px] flex items-center justify-center">
-                  {isDemoActive ? '데모 음성 발화 및 실시간 전사 대기 중...' : '아직 전사된 발화 로그가 없습니다.'}
+                  아직 전사된 발화 로그가 없습니다.
                 </div>
               ) : (
                 effectiveTranscriptLogs.map((log) => (
@@ -786,26 +646,6 @@ export const LiveHomePage: React.FC = () => {
                 <Sparkles className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
                 <span>빠른 시연 & 테스트 멘트 주입 버튼</span>
               </p>
-              <button
-                onClick={handleToggleDemo}
-                className={`px-2.5 py-0.5 rounded-lg text-[11px] font-black whitespace-nowrap active:scale-95 transition flex items-center gap-1 shadow-xs ${
-                  isDemoActive
-                    ? 'bg-rose-500 hover:bg-rose-600 text-white animate-pulse'
-                    : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white'
-                }`}
-              >
-                {isDemoActive ? (
-                  <>
-                    <Square className="w-3 h-3 fill-current" />
-                    <span>데모 중지 ({Math.floor(demoElapsedSeconds / 60).toString().padStart(2, '0')}:{(demoElapsedSeconds % 60).toString().padStart(2, '0')})</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-3 h-3 text-amber-300" />
-                    <span>🎬 실시간 전체 데모</span>
-                  </>
-                )}
-              </button>
             </div>
             <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar pb-0.5">
               <button
@@ -882,13 +722,13 @@ export const LiveHomePage: React.FC = () => {
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                <span>{isDemoActive ? '데모 자동 적재 판매 내역' : '자동 적재된 판매 내역'}</span>
+                <span>자동 적재된 판매 내역</span>
               </h3>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => void handleRefreshSessionSales()}
-                  disabled={isDemoActive || isSalesRefreshing}
+                  disabled={isSalesRefreshing}
                   className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
                   title="판매 내역 새로고침"
                 >
@@ -905,7 +745,7 @@ export const LiveHomePage: React.FC = () => {
             <div className="space-y-2 max-h-[200px] sm:max-h-[220px] overflow-y-auto pr-1">
               {effectiveSessionSales.length === 0 ? (
                 <div className="py-2.5 sm:py-3 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl min-h-[38px] flex items-center justify-center">
-                  {isDemoActive ? '데모 판매 내역 생성 대기 중... ("구매확정" 시 자동 등록)' : '이번 방송 회차에서 저장된 판매 내역이 없습니다. ("구매확정" 시 자동 등록)'}
+                  이번 방송 회차에서 저장된 판매 내역이 없습니다. ("구매확정" 시 자동 등록)
                 </div>
               ) : (
                 effectiveSessionSales.map((sale) => {
@@ -929,8 +769,7 @@ export const LiveHomePage: React.FC = () => {
                   return (
                   <Link
                     key={sale.id}
-                    to={isDemoActive ? '#' : `/sales/${sale.id}`}
-                    onClick={(e) => { if (isDemoActive) e.preventDefault(); }}
+                    to={`/sales/${sale.id}`}
                     className={`block p-3 sm:p-3.5 rounded-xl border transition active:scale-[0.99] hover:shadow-sm ${
                       sale.status === '보류'
                         ? 'bg-amber-50/70 border-amber-200 text-amber-900'
