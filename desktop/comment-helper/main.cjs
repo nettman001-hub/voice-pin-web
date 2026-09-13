@@ -3,6 +3,7 @@ const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
+const { execSync } = require('child_process');
 
 const APP_NAME = 'VoiceCAP';
 const APP_USER_MODEL_ID = 'shop.voicecap.desktop';
@@ -111,10 +112,40 @@ function serverEntryPath() {
   return path.join(app.getAppPath(), 'server', 'index.js');
 }
 
+function cleanupLegacyHelperProcess() {
+  if (process.platform !== 'win32') return;
+  try {
+    // 1. 구버전 독립형 'VoiceCAP 댓글 도우미.exe' 프로세스가 백그라운드에 남아있다면 강제 종료하여 2137 포트를 확보
+    execSync('taskkill /F /IM "VoiceCAP 댓글 도우미.exe" /T', { stdio: 'ignore' });
+    writeLog('helper', '기존 독립형 댓글 도우미 프로세스 정리 완료');
+  } catch (_) {}
+
+  try {
+    // 2. 2137 포트를 점유하고 있는 이전 프로세스가 남아있다면 정리하여 'Cannot GET /' 방지
+    const output = execSync(`netstat -ano | findstr :${SERVER_PORT}`, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    });
+    for (const line of output.split('\n')) {
+      const match = line.trim().match(/LISTENING\s+(\d+)/);
+      if (match) {
+        const pid = parseInt(match[1], 10);
+        if (pid && pid !== process.pid) {
+          writeLog('helper', `포트 ${SERVER_PORT} 점유 중인 기존 프로세스 (PID ${pid}) 정리`);
+          execSync(`taskkill /F /PID ${pid} /T`, { stdio: 'ignore' });
+        }
+      }
+    }
+  } catch (_) {}
+}
+
 function startServer() {
   clearTimeout(restartTimer);
   restartTimer = null;
   if (serverProcess) return;
+
+  // 구버전 독립형 도우미 또는 이전 세션의 포트 점유 해제
+  cleanupLegacyHelperProcess();
 
   const runtimeConfig = readRuntimeConfig();
   state.helper = 'starting';

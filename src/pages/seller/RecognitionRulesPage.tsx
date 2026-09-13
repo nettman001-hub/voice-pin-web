@@ -25,8 +25,11 @@ import {
   Play,
   Square,
   ArrowRight,
-  Download
+  Download,
+  Bot
 } from 'lucide-react';
+import { CommentHelperModal } from '../../components/helper/CommentHelperModal';
+import { isDesktopApp } from '../../services/authCredentialsService';
 
 export const RecognitionRulesPage: React.FC = () => {
   const {
@@ -58,6 +61,8 @@ export const RecognitionRulesPage: React.FC = () => {
   const [commentHelperCheckComplete, setCommentHelperCheckComplete] = useState(
     commentServerStatus !== 'DISCONNECTED'
   );
+  const [showHelperModal, setShowHelperModal] = useState(false);
+  const isDesktop = isDesktopApp();
 
   const [newWord, setNewWord] = useState('');
   const [newAction, setNewAction] = useState<RuleAction>('DB_SAVE');
@@ -819,29 +824,58 @@ export const RecognitionRulesPage: React.FC = () => {
           </div>
         </div>
 
-        {shouldShowCommentHelperInstall && (
-          <div className="px-3.5 py-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-amber-900 text-[11px] font-black break-words">
-                댓글 받기 프로그램을 확인해 주세요.
-              </p>
-              <p className="mt-1 text-amber-800/90 text-[10px] leading-relaxed break-words">
-                먼저 Windows 시작 메뉴에서 <strong>VoiceCAP 댓글 도우미</strong>를 실행해 주세요. 프로그램이 없다면 다운로드하여 한 번만 설치하면 됩니다.
-              </p>
-              <p className="mt-1 text-amber-700/80 text-[10px] break-words">
-                실행 또는 설치 후에는 이 페이지를 새로고침해 주세요.
-              </p>
+        {isDesktop ? (
+          <div className="px-3.5 py-3.5 rounded-2xl bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-brand-500/20 text-brand-400 border border-brand-500/30 flex items-center justify-center shrink-0">
+                <Bot className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs font-black text-white flex items-center gap-1.5">
+                  <span>윈도우 앱 내장 댓글 도우미</span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold">통합됨</span>
+                </p>
+                <p className="text-[11px] text-slate-300 mt-0.5">
+                  별도 프로그램 설치 없이 윈도우 앱 내에서 라벨 프린터(50x30 / 영수증) 및 오프라인 GPU STT가 즉시 연동됩니다.
+                </p>
+              </div>
             </div>
-            <a
-              href={COMMENT_HELPER_DOWNLOAD_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="shrink-0 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-black shadow-sm transition"
-            >
-              <Download className="w-3.5 h-3.5" />
-              프로그램 다운로드
-            </a>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowHelperModal(true)}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-[11px] font-black shadow-sm transition active:scale-95"
+              >
+                <Bot className="w-3.5 h-3.5" />
+                도우미 & 장치 설정
+              </button>
+            </div>
           </div>
+        ) : (
+          shouldShowCommentHelperInstall && (
+            <div className="px-3.5 py-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-amber-900 text-[11px] font-black break-words">
+                  댓글 받기 프로그램을 확인해 주세요.
+                </p>
+                <p className="mt-1 text-amber-800/90 text-[10px] leading-relaxed break-words">
+                  먼저 Windows 시작 메뉴에서 <strong>VoiceCAP 댓글 도우미</strong>를 실행해 주세요. 프로그램이 없다면 다운로드하여 한 번만 설치하면 됩니다.
+                </p>
+                <p className="mt-1 text-amber-700/80 text-[10px] break-words">
+                  실행 또는 설치 후에는 이 페이지를 새로고침해 주세요.
+                </p>
+              </div>
+              <a
+                href={COMMENT_HELPER_DOWNLOAD_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-black shadow-sm transition"
+              >
+                <Download className="w-3.5 h-3.5" />
+                프로그램 다운로드
+              </a>
+            </div>
+          )
         )}
 
         {isCommentActive && commentServerStatus === 'ERROR' && (
@@ -1107,6 +1141,8 @@ export const RecognitionRulesPage: React.FC = () => {
         </div>
       )}
 
+      {/* 댓글 도우미 및 장치 설정 모달 */}
+      <CommentHelperModal isOpen={showHelperModal} onClose={() => setShowHelperModal(false)} />
     </div>
   );
 };

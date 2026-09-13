@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLive } from '../../context/LiveContext';
 import { Modal } from './Modal';
+import { CommentHelperModal } from '../helper/CommentHelperModal';
+import { commentHelperService } from '../../services/commentHelperService';
+import { CommentHelperStatus } from '../../types/helper';
 import {
   Mic,
   Radio,
@@ -20,7 +23,8 @@ import {
   Menu,
   X,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  Bot
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -50,6 +54,16 @@ export const Header: React.FC<HeaderProps> = ({
 
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showGuideModal, setShowGuideModal] = useState(false);
+  const [showHelperModal, setShowHelperModal] = useState(false);
+  const [helperStatus, setHelperStatus] = useState<CommentHelperStatus | null>(null);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const unsubscribe = commentHelperService.subscribeStatus((st) => {
+      setHelperStatus(st);
+    });
+    return () => unsubscribe();
+  }, [isAuthenticated]);
 
   const handleLogoutKeepingShare = () => {
     setShowUserMenu(false);
@@ -161,6 +175,28 @@ export const Header: React.FC<HeaderProps> = ({
                 {hasScreenShareAudio ? '탭 공유 유지 중' : '공유 오디오 없음'}
               </span>
               <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {/* 댓글 도우미 내장 관제 버튼 */}
+          {isAuthenticated && (
+            <button
+              type="button"
+              onClick={() => setShowHelperModal(true)}
+              className="flex items-center space-x-1.5 p-2 sm:px-3 sm:py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition border border-slate-200 active:scale-95 group"
+              title="VoiceCAP 내장 댓글 도우미 (프린터·STT 가속) 설정 열기"
+            >
+              <Bot className="w-4 h-4 text-brand-600 flex-shrink-0 group-hover:rotate-12 transition-transform" />
+              <span className="hidden sm:inline">댓글 도우미</span>
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  !helperStatus || helperStatus.helper === 'error'
+                    ? 'bg-rose-500'
+                    : helperStatus.tiktokState === 'collecting'
+                      ? 'bg-emerald-500 animate-pulse'
+                      : 'bg-emerald-400'
+                }`}
+              />
             </button>
           )}
 
@@ -283,6 +319,16 @@ export const Header: React.FC<HeaderProps> = ({
                       </Link>
                     </>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowUserMenu(false);
+                      setShowHelperModal(true);
+                    }}
+                    className="w-full flex items-center px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600 font-medium"
+                  >
+                    <Bot className="w-4 h-4 mr-2 text-brand-600" /> 댓글 도우미 & 장치 설정
+                  </button>
                   <div className="border-t border-slate-100 my-1"></div>
                   <button
                     onClick={handleLogoutKeepingShare}
@@ -412,6 +458,11 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
       </Modal>
+
+      <CommentHelperModal
+        isOpen={showHelperModal}
+        onClose={() => setShowHelperModal(false)}
+      />
     </header>
   );
 };

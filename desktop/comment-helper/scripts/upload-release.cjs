@@ -86,9 +86,11 @@ async function main() {
   const releaseDir = path.resolve(__dirname, '..', 'release');
   const batPath = path.resolve(__dirname, 'setup-offline-stt.bat');
   const filesToUpload = [
+    { name: 'VoiceCAP-Setup.exe', path: path.join(releaseDir, 'VoiceCAP-Setup.exe'), type: 'application/octet-stream' },
+    { name: 'VoiceCAP-Setup.exe.blockmap', path: path.join(releaseDir, 'VoiceCAP-Setup.exe.blockmap'), type: 'application/octet-stream' },
     { name: 'VoiceCAP-Comment-Helper-Setup.exe', path: path.join(releaseDir, 'VoiceCAP-Comment-Helper-Setup.exe'), type: 'application/octet-stream' },
-    { name: 'latest.yml', path: path.join(releaseDir, 'latest.yml'), type: 'text/yaml' },
     { name: 'VoiceCAP-Comment-Helper-Setup.exe.blockmap', path: path.join(releaseDir, 'VoiceCAP-Comment-Helper-Setup.exe.blockmap'), type: 'application/octet-stream' },
+    { name: 'latest.yml', path: path.join(releaseDir, 'latest.yml'), type: 'text/yaml' },
     { name: 'setup-offline-stt.bat', path: batPath, type: 'application/x-bat' }
   ].filter(f => fs.existsSync(f.path));
 

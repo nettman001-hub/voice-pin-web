@@ -65,7 +65,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [autoLogin] = useState(false);
+  const [autoLogin, setAutoLogin] = useState(false);
   const [loginAttempts, setLoginAttempts] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
   const [lockUntil, setLockUntil] = useState<number | null>(null);
@@ -148,7 +148,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => { active = false; listener.subscription.unsubscribe(); };
   }, [syncRemoteIdentity]);
 
-  const login = async (email: string, pass: string, _rememberMe = false): Promise<AuthResult> => {
+  const login = async (email: string, pass: string, rememberMe = false): Promise<AuthResult> => {
+    setAutoLogin(Boolean(rememberMe));
     if (isLocked && lockUntil && Date.now() < lockUntil) {
       return { success: false, message: `로그인이 잠겨 있습니다. ${Math.ceil((lockUntil - Date.now()) / 60000)}분 후 다시 시도해 주세요.` };
     }

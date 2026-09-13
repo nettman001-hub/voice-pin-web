@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { aiSettingsApi } from '../../services/aiSettingsApi';
 import { AiRuntimeStatus } from '../../types/aiTask';
 import { AiHealthSummaryResponse, AiSlotHealth } from '../../types/aiHealth';
@@ -59,6 +60,15 @@ export const AiLiveStatusBadge: React.FC<AiLiveStatusBadgeProps> = ({ compact = 
     }, 15000); // 15초 주기 경량 상태 갱신
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!isOpenModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpenModal(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpenModal]);
 
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
@@ -201,9 +211,15 @@ export const AiLiveStatusBadge: React.FC<AiLiveStatusBadgeProps> = ({ compact = 
       </button>
 
       {/* AI 상세 모달 (PLAN.md 6번 명세) */}
-      {isOpenModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 flex flex-col max-h-[90vh]">
+      {isOpenModal && typeof document !== 'undefined' && createPortal(
+        <div
+          className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4"
+          onClick={() => setIsOpenModal(false)}
+        >
+          <div
+            className="bg-white border border-slate-200 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 flex flex-col max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* 모달 헤더 */}
             <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
               <div className="flex items-center space-x-2.5">
@@ -308,7 +324,8 @@ export const AiLiveStatusBadge: React.FC<AiLiveStatusBadgeProps> = ({ compact = 
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

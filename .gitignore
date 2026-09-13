@@ -52,3 +52,8 @@ chrome-net-export-log.json
 
 # Local unpacked/patched asar
 *.asar
+
+# Local secrets & token files
+*토큰*
+*token*
+*.secret

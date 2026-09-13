@@ -22,7 +22,8 @@ import {
   MessageSquareText,
   ReceiptText,
   Truck,
-  PanelLeftClose
+  PanelLeftClose,
+  Bot
 } from 'lucide-react';
 
 interface NavItem {
@@ -63,6 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { name: '상품 판매 관리', path: '/seller/product-sales', icon: ShoppingBag },
         { name: '음성인식 훈련 (학습)', path: '/voice-training', icon: Sparkles },
         { name: '캡처 영역 & 단어 규칙', path: '/recognition-rules', icon: Sliders },
+        { name: '댓글 도우미 & 장치 설정', path: '/seller/helper', icon: Bot, badge: '내장' },
       ]
     },
     {

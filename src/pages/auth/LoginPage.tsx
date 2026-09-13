@@ -1,7 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Mic, Lock, Mail, AlertCircle } from 'lucide-react';
+import {
+  saveAutoLoginCredentials,
+  getAutoLoginCredentials,
+  clearAutoLoginCredentials,
+} from '../../services/authCredentialsService';
 
 export const LoginPage: React.FC = () => {
   const { login, isLocked, lockUntil, loginAttempts, isRemoteAuth } = useAuth();
@@ -9,8 +14,25 @@ export const LoginPage: React.FC = () => {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [autoLogin, setAutoLogin] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const saved = getAutoLoginCredentials();
+    if (saved && saved.autoLogin) {
+      setEmail(saved.email);
+      setPassword(saved.password);
+      setAutoLogin(true);
+    }
+  }, []);
+
+  const handleAutoLoginChange = (checked: boolean) => {
+    setAutoLogin(checked);
+    if (!checked) {
+      clearAutoLoginCredentials();
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -18,10 +40,16 @@ export const LoginPage: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      const res = await login(email, password, false);
+      const res = await login(email, password, autoLogin);
       if (!res.success) {
         setErrorMessage(res.message || '로그인에 실패했습니다.');
         return;
+      }
+
+      if (autoLogin) {
+        saveAutoLoginCredentials(email, password);
+      } else {
+        clearAutoLoginCredentials();
       }
 
       if (email.includes('admin')) {
@@ -121,7 +149,30 @@ export const LoginPage: React.FC = () => {
             </div>
           </div>
 
-          <p className="text-[11px] text-slate-500">회원 정보는 저장하지 않고, 새로고침 유지용 임시 인증 토큰만 현재 탭에 보관합니다.</p>
+          {/* 자동 로그인 체크박스 */}
+          <div className="flex items-center justify-between pt-0.5">
+            <label className="flex items-center space-x-2 cursor-pointer select-none group">
+              <input
+                type="checkbox"
+                id="autoLogin"
+                checked={autoLogin}
+                onChange={(e) => handleAutoLoginChange(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer accent-brand-600"
+              />
+              <span className="text-xs font-semibold text-slate-700 group-hover:text-brand-600 transition-colors">
+                자동 로그인
+              </span>
+            </label>
+            <span className="text-[11px] text-slate-400">
+              {autoLogin ? '다음 로그인 시 정보 자동 입력' : ''}
+            </span>
+          </div>
+
+          <p className="text-[11px] text-slate-500">
+            {autoLogin
+              ? '자동 로그인이 켜져 있어 다음 로그인 시 아이디와 비밀번호가 자동으로 채워집니다.'
+              : '자동 로그인 체크 시 다음부터 아이디와 비밀번호가 입력 폼에 미리 채워집니다.'}
+          </p>
 
           <button
             type="submit"

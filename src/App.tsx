@@ -9,6 +9,7 @@ import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
 import { MobileBottomNav } from './components/common/MobileBottomNav';
 import { PanelLeftOpen } from 'lucide-react';
+import { isDesktopApp, hasAutoLoginCredentials } from './services/authCredentialsService';
 
 // 페이지 목록
 import { OnboardingPage } from './pages/auth/OnboardingPage';
@@ -31,6 +32,7 @@ import { InvoiceManagementPage } from './pages/seller/InvoiceManagementPage';
 import { ShipmentManagementPage } from './pages/seller/ShipmentManagementPage';
 import { DeviceManagementPage } from './pages/seller/DeviceManagementPage';
 import { ProductSalesPage } from './pages/seller/ProductSalesPage';
+import { CommentHelperPage } from './pages/seller/CommentHelperPage';
 import { CommerceProvider } from './context/CommerceContext';
 import { ProductSalesProvider } from './context/ProductSalesContext';
 
@@ -118,7 +120,12 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 const RootRedirect: React.FC = () => {
   const { isAuthenticated, isInitialized, user } = useAuth();
   if (!isInitialized) return <AuthLoadingState />;
-  if (!isAuthenticated) return <Navigate to="/onboarding" replace />;
+  if (!isAuthenticated) {
+    if (isDesktopApp() || hasAutoLoginCredentials()) {
+      return <Navigate to="/login" replace />;
+    }
+    return <Navigate to="/onboarding" replace />;
+  }
   if (user?.role === '관리자') return <Navigate to="/admin" replace />;
   return <Navigate to="/live" replace />;
 };
@@ -187,6 +194,8 @@ export const App: React.FC = () => {
                           <Route path="/settlement" element={<SettlementPage />} />
                           <Route path="/seller/devices" element={<DeviceManagementPage />} />
                           <Route path="/devices" element={<DeviceManagementPage />} />
+                          <Route path="/seller/helper" element={<CommentHelperPage />} />
+                          <Route path="/helper" element={<CommentHelperPage />} />
 
                     {/* 3. 구독 섹션 (PG-014 ~ PG-017) */}
                     <Route path="/subscription" element={<Navigate to="/subscription/plans" replace />} />

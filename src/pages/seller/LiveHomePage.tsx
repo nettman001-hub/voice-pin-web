@@ -25,7 +25,8 @@ import {
   Download,
   FileSpreadsheet,
   ShoppingBag,
-  RefreshCw
+  RefreshCw,
+  Bot
 } from 'lucide-react';
 import { COMMENT_HELPER_DOWNLOAD_URL } from '../../types/comment';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
@@ -33,6 +34,11 @@ import { useProductSales } from '../../context/ProductSalesContext';
 import { formatMultiSaleAmount } from '../../services/salesExtractor';
 import { areNicknamesSimilar } from '../../services/nicknameMatcher';
 import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
+import { CommentHelperModal } from '../../components/helper/CommentHelperModal';
+import { salesDemoService } from '../../services/salesDemoService';
+import type { SaleRecord, SttTranscriptLog } from '../../types/live';
+import type { CommentRecord } from '../../types/comment';
+import type { MatchedRuleItem } from '../../context/LiveContext';
 
 const SILENCE_WARNING_DELAY_MS = 5 * 60 * 1000;
 const SILENCE_STOP_COUNTDOWN_SECONDS = 20;
@@ -86,6 +92,7 @@ export const LiveHomePage: React.FC = () => {
   const [showSellerKeyInfoModal, setShowSellerKeyInfoModal] = useState<boolean>(false);
   const [showNoPermissionModal, setShowNoPermissionModal] = useState<boolean>(false);
   const [silenceCountdown, setSilenceCountdown] = useState<number | null>(null);
+  const [showHelperModal, setShowHelperModal] = useState<boolean>(false);
   const [showSessionChoice, setShowSessionChoice] = useState(false);
   const [isSessionStarting, setIsSessionStarting] = useState(false);
   const [isSalesRefreshing, setIsSalesRefreshing] = useState(false);
@@ -150,11 +157,81 @@ export const LiveHomePage: React.FC = () => {
   }, [isListening, silenceCountdown, stopCommentCapture, stopListening]);
 
   // 댓글 피드: 아래쪽이 최신글이 되도록 새 댓글이 오면 자동 스크롤한다.
-  React.useEffect(() => {
-    if (commentFeedRef.current) {
-      commentFeedRef.current.scrollTop = commentFeedRef.current.scrollHeight;
+  // 영업용 실시간 데모 모드 상태
+  const [isDemoActive, setIsDemoActive] = useState(false);
+  const [demoElapsedSeconds, setDemoElapsedSeconds] = useState(0);
+  const [demoWaveform, setDemoWaveform] = useState<Uint8Array>(() => new Uint8Array(128));
+  const [demoAudioLevel, setDemoAudioLevel] = useState(0);
+  const [demoComments, setDemoComments] = useState<CommentRecord[]>([]);
+  const [demoTranscriptLogs, setDemoTranscriptLogs] = useState<SttTranscriptLog[]>([]);
+  const [demoInterimTranscript, setDemoInterimTranscript] = useState('');
+  const [demoMatchedRule, setDemoMatchedRule] = useState<MatchedRuleItem | null>(null);
+  const [demoSales, setDemoSales] = useState<SaleRecord[]>([]);
+  const [demoTotals, setDemoTotals] = useState({ count: 0, amount: 0 });
+
+  const handleToggleDemo = () => {
+    if (isDemoActive) {
+      salesDemoService.stop();
+      setIsDemoActive(false);
+      setDemoElapsedSeconds(0);
+      setDemoComments([]);
+      setDemoTranscriptLogs([]);
+      setDemoInterimTranscript('');
+      setDemoMatchedRule(null);
+      setDemoSales([]);
+      setDemoTotals({ count: 0, amount: 0 });
+      setDemoAudioLevel(0);
+      setDemoWaveform(new Uint8Array(128));
+    } else {
+      if (isListening) {
+        stopListening();
+        stopCommentCapture();
+      }
+      setIsDemoActive(true);
+      salesDemoService.start({
+        onWaveform: (level, wave) => {
+          setDemoAudioLevel(level);
+          setDemoWaveform(wave);
+        },
+        onComment: (comment) => {
+          setDemoComments((prev) => [...prev, comment].slice(-100));
+        },
+        onCommentsBatch: (comments) => {
+          setDemoComments(comments);
+        },
+        onTranscriptInterim: (text) => {
+          setDemoInterimTranscript(text);
+        },
+        onTranscriptFinal: (log) => {
+          setDemoTranscriptLogs((prev) => [log, ...prev].slice(0, 300));
+        },
+        onTranscriptReset: (logs) => {
+          setDemoTranscriptLogs(logs);
+        },
+        onMatchedRule: (rule) => {
+          setDemoMatchedRule(rule);
+        },
+        onSalesUpdate: (salesList) => {
+          setDemoSales(salesList);
+        },
+        onTotalsUpdate: (count, amount) => {
+          setDemoTotals({ count, amount });
+        },
+        onStatusChange: (running, elapsed) => {
+          setIsDemoActive(running);
+          setDemoElapsedSeconds(elapsed);
+        }
+      });
     }
-  }, [liveComments]);
+  };
+
+  React.useEffect(() => {
+    return () => {
+      if (salesDemoService.isRunning()) {
+        salesDemoService.stop();
+      }
+    };
+  }, []);
 
   // 회차를 고른 뒤에는 서버 판매 회차 UUID를 사용하고, 오프라인 호환 시에만 로컬 ID를 보조로 사용한다.
   const currentSessionSales = React.useMemo(() => sales.filter((sale) => (
@@ -171,6 +248,24 @@ export const LiveHomePage: React.FC = () => {
   const todayTotalAmount = currentSessionSales
     .filter((s) => s.status !== '보류')
     .reduce((sum, item) => sum + item.amount, 0);
+
+  const effectiveIsActive = isListening || isDemoActive;
+  const effectiveAudioLevel = isDemoActive ? Math.round(demoAudioLevel * 100) : audioLevel;
+  const effectiveWaveform = isDemoActive ? demoWaveform : waveform;
+  const effectiveComments = isDemoActive ? demoComments : liveComments;
+  const effectiveTranscriptLogs = isDemoActive ? demoTranscriptLogs : transcriptLogs;
+  const effectiveInterimTranscript = isDemoActive ? demoInterimTranscript : currentInterimTranscript;
+  const effectiveMatchedRuleItem = isDemoActive ? demoMatchedRule : lastMatchedRuleItem;
+  const effectiveSessionSales = isDemoActive ? demoSales : displayedSessionSales;
+  const effectiveSalesCount = isDemoActive ? demoTotals.count : currentSessionSales.length;
+  const effectiveTotalAmount = isDemoActive ? demoTotals.amount : todayTotalAmount;
+
+  // 댓글 피드: 아래쪽이 최신글이 되도록 새 댓글이 오면 자동 스크롤한다.
+  React.useEffect(() => {
+    if (commentFeedRef.current) {
+      commentFeedRef.current.scrollTop = commentFeedRef.current.scrollHeight;
+    }
+  }, [effectiveComments]);
 
   const handleToggleListening = () => {
     if (isListening) {
@@ -302,6 +397,28 @@ export const LiveHomePage: React.FC = () => {
             </label>
 
           <button
+            onClick={handleToggleDemo}
+            className={`h-8 px-2.5 sm:px-3 rounded-lg font-black text-xs shadow-sm flex items-center justify-center gap-1.5 transition active:scale-95 ${
+              isDemoActive
+                ? 'bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-300 animate-pulse'
+                : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-purple-500/20'
+            }`}
+            title={isDemoActive ? '영업용 실시간 데모 시연을 중지합니다' : '실제 방송처럼 작동하는 영업용 실시간 데모를 시작합니다'}
+          >
+            {isDemoActive ? (
+              <>
+                <Square className="w-3.5 h-3.5 fill-current text-rose-600" />
+                <span>데모 중지</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>데모 시작</span>
+              </>
+            )}
+          </button>
+
+          <button
             onClick={handleToggleListening}
             className={`h-8 min-w-16 px-2.5 rounded-lg font-black text-xs shadow-sm flex items-center justify-center gap-1.5 transition active:scale-95 ${
               isListening
@@ -323,6 +440,37 @@ export const LiveHomePage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* 영업용 실시간 데모 시연 배너 */}
+      {isDemoActive && (
+        <div className="p-3 sm:p-3.5 rounded-2xl bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white text-xs font-bold flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 shadow-lg border border-purple-500/40 animate-in fade-in">
+          <div className="flex items-center space-x-3">
+            <div className="w-8 h-8 rounded-xl bg-purple-500/30 border border-purple-400/50 flex items-center justify-center flex-shrink-0">
+              <Sparkles className="w-4 h-4 text-amber-300 animate-spin" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs sm:text-sm font-black text-white">
+                  🎬 영업 시연용 실시간 데모 모드 작동 중
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-purple-500/40 text-purple-200 border border-purple-400/30 text-[10px] font-mono">
+                  {Math.floor(demoElapsedSeconds / 60).toString().padStart(2, '0')}:{(demoElapsedSeconds % 60).toString().padStart(2, '0')}
+                </span>
+              </div>
+              <p className="text-[11px] sm:text-xs text-purple-200/90 font-normal mt-0.5">
+                실제 방송 환경과 동일하게 오디오 파형, 틱톡 시청자 댓글, AI 음성 인식, 규칙 감지, 판매 내역 자동 적재 및 주문 정정이 실시간 시뮬레이션됩니다.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleToggleDemo}
+            className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition whitespace-nowrap self-end sm:self-center"
+          >
+            <Square className="w-3 h-3 fill-current" />
+            <span>데모 중지</span>
+          </button>
+        </div>
+      )}
 
       {/* 방송 소리 청취 안내 배너 */}
       {isListening && (
@@ -363,31 +511,53 @@ export const LiveHomePage: React.FC = () => {
       )}
 
       {/* 메인 2열 그리드 */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 sm:gap-3.5">
         {/* 좌측 영역 (7 cols) */}
-        <div className="lg:col-span-7 flex flex-col gap-4 sm:gap-6">
-          {/* 오디오 파형 & 실시간 자막 */}
-          <div className="order-1 bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
-                <Volume2 className="w-4 h-4 text-brand-600" />
-                <span>실시간 오디오 스트림 & 파형 분석</span>
-              </h3>
-              <div className="text-[11px] sm:text-xs text-slate-500 font-mono">
-                레벨: <span className="text-brand-600 font-bold">{audioLevel}%</span>
+        <div className="lg:col-span-7 flex flex-col gap-2.5 sm:gap-3.5">
+          {/* 실시간 오디오 스트림 & 파형 분석 (라이브 청취 홈과 동일한 상하 높이 및 한 줄 배치) */}
+          <div className="order-1 bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between gap-2 sm:gap-3 min-h-[48px] sm:min-h-[50px]">
+            {/* 타이틀 및 아이콘 */}
+            <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
+              <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${
+                isListening
+                  ? 'bg-brand-50 text-brand-600 ring-1 ring-brand-500/20 shadow-xs'
+                  : 'bg-slate-100 text-slate-400'
+              }`}>
+                <Volume2 className={`w-4 h-4 ${isListening ? 'text-brand-600 animate-pulse' : 'text-slate-400'}`} />
               </div>
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 whitespace-nowrap">
+                실시간 오디오 스트림 & 파형 분석
+              </h3>
             </div>
 
-            <AudioVisualizer waveform={waveform} audioLevel={audioLevel} isActive={isListening} />
+            {/* 타이틀 바로 옆 좌우 한 줄 파형 표시 */}
+            <div className="flex-1 min-w-[70px] sm:min-w-[120px] max-w-[280px] lg:max-w-none h-7 flex items-center">
+              <AudioVisualizer
+                waveform={effectiveWaveform}
+                audioLevel={effectiveAudioLevel}
+                isActive={effectiveIsActive}
+                variant="inline"
+                className="h-7 w-full"
+              />
+            </div>
+
+            {/* 우측 레벨 표시 */}
+            <div className="text-[11px] sm:text-xs text-slate-500 font-mono flex-shrink-0 whitespace-nowrap bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
+              레벨: <span className="text-brand-600 font-bold">{effectiveAudioLevel}%</span>
+            </div>
           </div>
 
           {/* 실시간 댓글 캡처 피드 (아래쪽이 최신글) */}
-          <div className="order-2 bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
+          <div className="order-2 bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2 flex-wrap gap-y-1">
-                <MessageSquareText className={`w-4 h-4 ${isCommentCaptureRunning ? 'text-rose-500 animate-pulse' : 'text-cyan-600'}`} />
-                <span>실시간 댓글 캡처 ({liveComments.length}건)</span>
-                {!isCommentCaptureActive ? (
+                <MessageSquareText className={`w-4 h-4 ${isCommentCaptureRunning || isDemoActive ? 'text-rose-500 animate-pulse' : 'text-cyan-600'}`} />
+                <span>실시간 댓글 캡처 ({effectiveComments.length}건)</span>
+                {isDemoActive ? (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                    데모 수집 중
+                  </span>
+                ) : !isCommentCaptureActive ? (
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
                     함께시작 꺼짐
                   </span>
@@ -407,20 +577,34 @@ export const LiveHomePage: React.FC = () => {
                   </span>
                 )}
               </h3>
-              <Link to="/comments" className="text-xs text-brand-600 hover:underline font-bold flex items-center">
-                <span>전체 기록</span>
-                <ArrowRight className="w-3.5 h-3.5 ml-1" />
-              </Link>
+              <div className="flex items-center space-x-2.5">
+                <Link to="/seller/helper" className="text-xs text-slate-500 hover:text-brand-600 font-bold flex items-center transition">
+                  <Bot className="w-3.5 h-3.5 mr-1 text-brand-600" />
+                  <span>도우미 설정</span>
+                </Link>
+                <Link to="/comments" className="text-xs text-brand-600 hover:underline font-bold flex items-center">
+                  <span>전체 기록</span>
+                  <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                </Link>
+              </div>
             </div>
 
             {isCommentCaptureActive && (commentServerStatus === 'DISCONNECTED' || commentServerStatus === 'ERROR') && (
-              <p className="mb-3 px-3 py-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-bold">
-                ⚠️ {commentServerMessage || 'VoiceCAP 댓글 도우미가 실행 중인지 확인하세요.'}
-              </p>
+              <div className="mb-2 px-3 py-1.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-bold flex items-center justify-between">
+                <span>⚠️ {commentServerMessage || 'VoiceCAP 내장 댓글 도우미 연결을 확인하세요.'}</span>
+                <button
+                  type="button"
+                  onClick={() => setShowHelperModal(true)}
+                  className="underline text-rose-800 hover:text-rose-950 ml-2 whitespace-nowrap flex items-center gap-1 font-bold"
+                >
+                  <Bot className="w-3 h-3" />
+                  도우미 설정/재시작
+                </button>
+              </div>
             )}
 
             {isCommentCaptureActive && !commentConfig.tiktokUsername && (
-              <div className="mb-3 px-3.5 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between">
+              <div className="mb-2 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between">
                 <span>⚠️ 수집 대상 틱톡 ID가 설정되지 않았습니다.</span>
                 <Link to="/recognition-rules" className="font-bold underline text-amber-800 hover:text-amber-950 ml-2">
                   ID 설정하러 가기
@@ -428,18 +612,20 @@ export const LiveHomePage: React.FC = () => {
               </div>
             )}
 
-            <div ref={commentFeedRef} className="max-h-[220px] min-h-[60px] overflow-y-auto space-y-1.5 pr-1">
-              {liveComments.length === 0 ? (
-                <div className="py-6 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-2xl">
-                  {isCommentCaptureRunning
+            <div ref={commentFeedRef} className="max-h-[140px] min-h-[38px] overflow-y-auto space-y-1 pr-1">
+              {effectiveComments.length === 0 ? (
+                <div className="py-2.5 sm:py-3 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl min-h-[38px] flex items-center justify-center">
+                  {isDemoActive
+                    ? '데모 댓글 유입 대기 중...'
+                    : isCommentCaptureRunning
                     ? `@${commentConfig.tiktokUsername || '?'} 라이브 댓글을 실시간 수집 중입니다...`
                     : '"댓글캡처" 체크 후 라이브 청취를 시작하면 틱톡 댓글이 실시간 표시됩니다.'}
                 </div>
               ) : (
-                liveComments.map((c) => (
+                effectiveComments.map((c) => (
                   <div
                     key={c.id}
-                    className={`flex items-center space-x-2 p-2 rounded-xl border text-xs ${
+                    className={`flex items-center space-x-2 px-2.5 py-1.5 rounded-lg border text-xs ${
                       c.matchedAlertWord
                         ? 'bg-rose-50/70 border-rose-200'
                         : 'bg-slate-50/70 border-slate-200'
@@ -468,62 +654,62 @@ export const LiveHomePage: React.FC = () => {
             </div>
           </div>
 
-          {/* 규칙 감지 핵심 발화 & 액션 (실시간 댓글 캡처 바로 아래) */}
-          <div className="order-3 bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
+          {/* 규칙 감지 핵심 발화 & 액션 (실시간 오디오 스트림처럼 한 줄 슬림 카드) */}
+          <div className="order-3 bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between gap-2 sm:gap-3 min-h-[48px] sm:min-h-[50px]">
+            <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
                 <Sparkles className="w-4 h-4 text-amber-500" />
-                <h3 className="text-xs sm:text-sm font-bold text-slate-900">
-                  규칙 감지 핵심 발화 & 액션
-                </h3>
               </div>
-              {lastMatchedRuleItem && (
-                <span className="text-[10px] sm:text-xs text-slate-400 font-mono">{lastMatchedRuleItem.timestamp}</span>
-              )}
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 whitespace-nowrap">
+                규칙 감지 핵심 발화
+              </h3>
             </div>
 
-            {lastMatchedRuleItem ? (
-              <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-50/50 border border-amber-200 shadow-sm space-y-2">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center space-x-1.5 flex-wrap gap-1">
-                    {lastMatchedRuleItem.matchedKeywords.map((kw, idx) => (
-                      <span key={idx} className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-bold text-[10px] sm:text-xs border border-amber-300">
+            {effectiveMatchedRuleItem ? (
+              <div className="flex-1 min-w-0 flex items-center justify-between gap-2 p-1.5 sm:px-2.5 rounded-xl bg-amber-50/70 border border-amber-200">
+                <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                  <div className="flex items-center space-x-1 flex-shrink-0">
+                    {effectiveMatchedRuleItem.matchedKeywords.slice(0, 2).map((kw, idx) => (
+                      <span key={idx} className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-bold text-[10px] border border-amber-300">
                         #{kw}
                       </span>
                     ))}
                   </div>
-                  <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-[10px] sm:text-xs font-bold">
-                    {lastMatchedRuleItem.action}
+                  <span className="text-xs font-bold text-slate-900 truncate">
+                    "{effectiveMatchedRuleItem.text}"
                   </span>
                 </div>
-                <p className="text-xs sm:text-sm font-black text-slate-900 tracking-tight leading-snug break-words">
-                  "{lastMatchedRuleItem.text}"
-                </p>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <span className="px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-[10px] font-bold whitespace-nowrap">
+                    {effectiveMatchedRuleItem.action}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">{effectiveMatchedRuleItem.timestamp}</span>
+                </div>
               </div>
             ) : (
-              <div className="py-4 px-3 text-center rounded-2xl border border-dashed border-slate-200 text-xs text-slate-400 italic">
-                "구매확정, 금액, 닉네임, 캡처, 수정" 등 규칙 지정 단어가 포함된 문장이 감지되면 이곳에 하이라이트됩니다.
+              <div className="flex-1 min-w-0 flex items-center justify-center py-1 px-2.5 rounded-xl border border-dashed border-slate-200 text-[11px] sm:text-xs text-slate-400 truncate italic">
+                "구매확정, 금액, 닉네임, 캡처, 수정" 등 규칙 지정 단어 감지 시 하이라이트
               </div>
             )}
           </div>
 
           {/* 최근 전사 로그 */}
-          <div className="order-4 bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-3 sm:mb-4 flex-wrap gap-2">
+          <div className="order-4 bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
+            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
               <div className="flex items-center space-x-2 flex-wrap">
                 <Clock className="w-4 h-4 text-brand-600 shrink-0" />
                 <h3 className="text-xs sm:text-sm font-bold text-slate-900">
                   최근 실시간 전사 로그
                 </h3>
                 <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-                  화면 {transcriptLogs.length}건 / 오늘 누적 {totalSessionTranscriptCount || transcriptLogs.length}건
+                  {isDemoActive ? '데모 전사' : '화면'} {effectiveTranscriptLogs.length}건 / {isDemoActive ? '데모 시연 모드' : `오늘 누적 ${totalSessionTranscriptCount || transcriptLogs.length}건`}
                 </span>
               </div>
               <div className="flex items-center space-x-1.5">
                 <button
                   onClick={() => downloadSessionTranscripts('txt')}
-                  disabled={(totalSessionTranscriptCount || transcriptLogs.length) === 0}
-                  className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] sm:text-[11px] font-bold border border-slate-300 transition flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+                  disabled={isDemoActive || (totalSessionTranscriptCount || transcriptLogs.length) === 0}
+                  className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] sm:text-[11px] font-bold border border-slate-300 transition flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
                   title="오늘 방송 전체 음성 전사 로그를 텍스트(.txt) 파일로 다운로드"
                 >
                   <Download className="w-3 h-3" />
@@ -531,8 +717,8 @@ export const LiveHomePage: React.FC = () => {
                 </button>
                 <button
                   onClick={() => downloadSessionTranscripts('csv')}
-                  disabled={(totalSessionTranscriptCount || transcriptLogs.length) === 0}
-                  className="px-2.5 py-1 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] sm:text-[11px] font-bold border border-emerald-200 transition flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+                  disabled={isDemoActive || (totalSessionTranscriptCount || transcriptLogs.length) === 0}
+                  className="px-2 py-0.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] sm:text-[11px] font-bold border border-emerald-200 transition flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
                   title="오늘 방송 전체 음성 전사 로그를 엑셀(.csv) 파일로 다운로드 (한글 엑셀 호환)"
                 >
                   <FileSpreadsheet className="w-3 h-3" />
@@ -541,16 +727,24 @@ export const LiveHomePage: React.FC = () => {
               </div>
             </div>
 
-            <div className="space-y-2 max-h-[250px] sm:max-h-[300px] overflow-y-auto pr-1">
-              {transcriptLogs.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-400">
-                  아직 전사된 발화 로그가 없습니다.
+            <div className="space-y-1.5 max-h-[140px] sm:max-h-[160px] overflow-y-auto pr-1">
+              {/* 실시간 타이핑 중인 중간 자막 표시 */}
+              {effectiveInterimTranscript && (
+                <div className="p-2 sm:p-2.5 rounded-xl border border-brand-300 bg-brand-50/80 text-xs text-brand-900 animate-pulse flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-brand-500 animate-ping flex-shrink-0" />
+                  <span className="font-semibold">{effectiveInterimTranscript}</span>
+                </div>
+              )}
+
+              {effectiveTranscriptLogs.length === 0 && !effectiveInterimTranscript ? (
+                <div className="py-2.5 sm:py-3 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl min-h-[38px] flex items-center justify-center">
+                  {isDemoActive ? '데모 음성 발화 및 실시간 전사 대기 중...' : '아직 전사된 발화 로그가 없습니다.'}
                 </div>
               ) : (
-                transcriptLogs.map((log) => (
+                effectiveTranscriptLogs.map((log) => (
                   <div
                     key={log.id}
-                    className={`p-3 rounded-2xl border text-xs transition ${
+                    className={`p-2 sm:p-2.5 rounded-xl border text-xs transition ${
                       log.actionTriggered === 'SALE_SAVED'
                         ? 'bg-brand-50 border-brand-200 text-brand-900'
                         : log.actionTriggered === 'SCREEN_CAPTURED'
@@ -560,20 +754,20 @@ export const LiveHomePage: React.FC = () => {
                         : 'bg-slate-50 border-slate-200 text-slate-700'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center justify-between mb-0.5">
                       <span className="text-[10px] text-slate-400 font-mono">{log.timestamp}</span>
                       {log.actionTriggered === 'SALE_SAVED' && (
-                        <span className="text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700">
+                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-brand-100 text-brand-700">
                           🛍️ 판매 자동 저장
                         </span>
                       )}
                       {log.actionTriggered === 'SCREEN_CAPTURED' && (
-                        <span className="text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700">
+                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-cyan-100 text-cyan-700">
                           📸 댓글창 캡처
                         </span>
                       )}
                       {log.actionTriggered === 'VOICE_EDIT_START' && (
-                        <span className="text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-800">
                           ✏️ 수정 모드 진입
                         </span>
                       )}
@@ -586,45 +780,67 @@ export const LiveHomePage: React.FC = () => {
           </div>
 
           {/* 테스트 멘트 주입 툴바 (모바일 가로 스크롤 지원) */}
-          <div className="order-5 bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 text-xs shadow-sm space-y-2">
-            <p className="font-bold text-slate-700 flex items-center">
-              <Sparkles className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
-              <span>빠른 시연 & 테스트 멘트 주입 버튼</span>
-            </p>
-            <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar pb-1">
+          <div className="order-5 bg-white border border-slate-200 rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2.5 text-xs shadow-sm space-y-1.5">
+            <div className="flex items-center justify-between">
+              <p className="font-bold text-slate-700 flex items-center">
+                <Sparkles className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
+                <span>빠른 시연 & 테스트 멘트 주입 버튼</span>
+              </p>
+              <button
+                onClick={handleToggleDemo}
+                className={`px-2.5 py-0.5 rounded-lg text-[11px] font-black whitespace-nowrap active:scale-95 transition flex items-center gap-1 shadow-xs ${
+                  isDemoActive
+                    ? 'bg-rose-500 hover:bg-rose-600 text-white animate-pulse'
+                    : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white'
+                }`}
+              >
+                {isDemoActive ? (
+                  <>
+                    <Square className="w-3 h-3 fill-current" />
+                    <span>데모 중지 ({Math.floor(demoElapsedSeconds / 60).toString().padStart(2, '0')}:{(demoElapsedSeconds % 60).toString().padStart(2, '0')})</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3 h-3 text-amber-300" />
+                    <span>🎬 실시간 전체 데모</span>
+                  </>
+                )}
+              </button>
+            </div>
+            <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar pb-0.5">
               <button
                 onClick={() => injectTestMent('구매확정 됐습니다! 구매하신 분은 러블리님 이시구요 금액은 3만5천원입니다.')}
-                className="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
+                className="px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
               >
                 + "러블리님 35,000원"
               </button>
               <button
                 onClick={() => injectTestMent('구매확정! 닉네임 민트초코님 가격 19,900원입니다. 캡처하세요.')}
-                className="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
+                className="px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
               >
                 + "민트초코 19,900원 + 캡처하세요"
               </button>
               <button
                 onClick={() => injectTestMent('화면 캡처하세요.')}
-                className="px-3 py-1.5 rounded-xl bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border border-cyan-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
+                className="px-2.5 py-1 rounded-lg bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border border-cyan-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
               >
                 + "화면 캡처하세요"
               </button>
               <button
                 onClick={() => injectTestMent('수정 시작')}
-                className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold whitespace-nowrap active:scale-95 transition"
+                className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold whitespace-nowrap active:scale-95 transition"
               >
                 + "수정 시작"
               </button>
               <button
                 onClick={() => injectTestMent('닉네임은 달콤한하루님, 금액은 48,000원')}
-                className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold whitespace-nowrap active:scale-95 transition"
+                className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold whitespace-nowrap active:scale-95 transition"
               >
                 + "닉네임/금액 수정"
               </button>
               <button
                 onClick={() => injectTestMent('수정 완료')}
-                className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold whitespace-nowrap active:scale-95 transition"
+                className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold whitespace-nowrap active:scale-95 transition"
               >
                 + "수정 완료"
               </button>
@@ -633,35 +849,46 @@ export const LiveHomePage: React.FC = () => {
         </div>
 
         {/* 우측 영역 (5 cols) */}
-        <div className="lg:col-span-5 space-y-4 sm:space-y-6">
-          {/* 요약 카드 */}
-          <div className="grid grid-cols-2 gap-3 sm:gap-4">
-            <div className="p-4 sm:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
-              <span className="text-[11px] sm:text-xs text-slate-500 font-medium">이번 회차 판매</span>
-              <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-1">
-                {currentSessionSales.length} <span className="text-xs font-normal text-slate-400">건</span>
+        <div className="lg:col-span-5 space-y-2.5 sm:space-y-3.5">
+          {/* 요약 카드 (실시간 오디오 스트림 카드 및 라이브 청취 홈과 동일한 상하 높이) */}
+          <div className="grid grid-cols-2 gap-2 sm:gap-3">
+            <div className="bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between min-h-[48px] sm:min-h-[50px]">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="w-2 h-2 rounded-full bg-brand-500 flex-shrink-0" />
+                <span className="text-[11px] sm:text-xs text-slate-600 font-bold whitespace-nowrap truncate">
+                  이번 회차 판매
+                </span>
+              </div>
+              <div className="text-sm sm:text-base font-black text-slate-900 flex-shrink-0 ml-1">
+                {effectiveSalesCount} <span className="text-[10px] sm:text-xs font-normal text-slate-400">건</span>
               </div>
             </div>
-            <div className="p-4 sm:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
-              <span className="text-[11px] sm:text-xs text-slate-500 font-medium">실시간 합계</span>
-              <div className="text-xl sm:text-3xl font-black text-brand-600 mt-1 truncate">
-                {todayTotalAmount.toLocaleString()} <span className="text-xs font-normal text-slate-400">원</span>
+
+            <div className="bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between min-h-[48px] sm:min-h-[50px]">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+                <span className="text-[11px] sm:text-xs text-slate-600 font-bold whitespace-nowrap truncate">
+                  실시간 합계
+                </span>
+              </div>
+              <div className="text-sm sm:text-base font-black text-brand-600 truncate flex-shrink-0 ml-1">
+                {effectiveTotalAmount.toLocaleString()} <span className="text-[10px] sm:text-xs font-normal text-slate-400">원</span>
               </div>
             </div>
           </div>
 
           {/* 판매 내역 카드 리스트 */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-3 sm:mb-4">
+          <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                <span>자동 적재된 판매 내역</span>
+                <span>{isDemoActive ? '데모 자동 적재 판매 내역' : '자동 적재된 판매 내역'}</span>
               </h3>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => void handleRefreshSessionSales()}
-                  disabled={isSalesRefreshing}
+                  disabled={isDemoActive || isSalesRefreshing}
                   className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
                   title="판매 내역 새로고침"
                 >
@@ -675,14 +902,13 @@ export const LiveHomePage: React.FC = () => {
               </div>
             </div>
 
-            <div className="space-y-2.5 sm:space-y-3 max-h-[360px] overflow-y-auto pr-1">
-              {displayedSessionSales.length === 0 ? (
-                <div className="py-10 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-2xl">
-                  이번 방송 회차에서 저장된 판매 내역이 없습니다.<br />
-                  "구매확정" 멘트를 말씀하시면 자동 등록됩니다.
+            <div className="space-y-2 max-h-[200px] sm:max-h-[220px] overflow-y-auto pr-1">
+              {effectiveSessionSales.length === 0 ? (
+                <div className="py-2.5 sm:py-3 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl min-h-[38px] flex items-center justify-center">
+                  {isDemoActive ? '데모 판매 내역 생성 대기 중... ("구매확정" 시 자동 등록)' : '이번 방송 회차에서 저장된 판매 내역이 없습니다. ("구매확정" 시 자동 등록)'}
                 </div>
               ) : (
-                displayedSessionSales.map((sale) => {
+                effectiveSessionSales.map((sale) => {
                   const productImage = sale.productImageUrl
                     || sale.captureImageUrls?.[0]
                     || (sale.productCode && sale.productCode === activeProduct?.productCode ? activeProduct?.imageUrl : undefined);
@@ -695,7 +921,7 @@ export const LiveHomePage: React.FC = () => {
                         : '기존';
 
                   // 다건 구매자 판정 및 금액 포맷팅 (시간순 정렬)
-                  const buyerSessionSales = displayedSessionSales
+                  const buyerSessionSales = effectiveSessionSales
                     .filter((s) => areNicknamesSimilar(s.buyerNickname, sale.buyerNickname))
                     .sort((a, b) => new Date(a.recognizedAt).getTime() - new Date(b.recognizedAt).getTime());
                   const multiAmount = formatMultiSaleAmount(buyerSessionSales.map((s) => s.amount));
@@ -703,8 +929,9 @@ export const LiveHomePage: React.FC = () => {
                   return (
                   <Link
                     key={sale.id}
-                    to={`/sales/${sale.id}`}
-                    className={`block p-3.5 sm:p-4 rounded-2xl border transition active:scale-[0.99] hover:shadow-sm ${
+                    to={isDemoActive ? '#' : `/sales/${sale.id}`}
+                    onClick={(e) => { if (isDemoActive) e.preventDefault(); }}
+                    className={`block p-3 sm:p-3.5 rounded-xl border transition active:scale-[0.99] hover:shadow-sm ${
                       sale.status === '보류'
                         ? 'bg-amber-50/70 border-amber-200 text-amber-900'
                         : sale.status === '수동수정'
@@ -712,9 +939,9 @@ export const LiveHomePage: React.FC = () => {
                         : 'bg-slate-50/70 border-slate-200 text-slate-800'
                     }`}
                   >
-                    <div className="flex items-start gap-3 sm:gap-3.5">
+                    <div className="flex items-start gap-2.5 sm:gap-3">
                       {/* 상품 이미지 썸네일 */}
-                      <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden border border-slate-200/80 bg-slate-100 flex-shrink-0 shadow-sm flex items-center justify-center">
+                      <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-lg overflow-hidden border border-slate-200/80 bg-slate-100 flex-shrink-0 shadow-sm flex items-center justify-center">
                         {productImage ? (
                           <img
                             src={productImage}
@@ -1140,6 +1367,8 @@ export const LiveHomePage: React.FC = () => {
         </div>
       )}
 
+      {/* 댓글 도우미 및 장치 설정 모달 */}
+      <CommentHelperModal isOpen={showHelperModal} onClose={() => setShowHelperModal(false)} />
     </div>
   );
 };

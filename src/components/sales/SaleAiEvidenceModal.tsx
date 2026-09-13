@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { SaleRecord } from '../../types/live';
 import {
   X,
@@ -23,9 +24,25 @@ export const SaleAiEvidenceModal: React.FC<SaleAiEvidenceModalProps> = ({ sale, 
   const snapshot = sale.evidenceSnapshot;
   const history = sale.history || [];
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 flex flex-col max-h-[90vh]">
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white border border-slate-200 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 flex flex-col max-h-[90vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* 모달 헤더 */}
         <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
           <div className="flex items-center space-x-2.5">
@@ -254,6 +271,7 @@ export const SaleAiEvidenceModal: React.FC<SaleAiEvidenceModalProps> = ({ sale, 
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
