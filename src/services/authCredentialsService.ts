@@ -2,7 +2,7 @@
  * VoiceCAP 자동 로그인 자격 증명 관리 서비스
  *
  * 사용자가 "자동 로그인"을 체크하고 로그인하면 계정 정보(이메일, 비밀번호)를
- * 브라우저 및 윈도우 데스크톱 앱(Electron)의 localStorage에 안전하게 보관하여,
+ * 브라우저의 localStorage에 안전하게 보관하여,
  * 다음 로그인 시 폼에 미리 채워져 사용자가 로그인 버튼만 누를 수 있게 지원합니다.
  */
 
@@ -13,15 +13,6 @@ export interface SavedLoginCredentials {
   password: string;
   autoLogin: boolean;
   savedAt: string;
-}
-
-/**
- * 윈도우 데스크톱(Electron) 앱 환경인지 감지합니다.
- */
-export function isDesktopApp(): boolean {
-  if (typeof window === 'undefined') return false;
-  return Boolean((window as unknown as { voicecap?: unknown }).voicecap) ||
-    (typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent));
 }
 
 /**

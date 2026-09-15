@@ -1,7 +1,7 @@
 {
-  "name": "voicecap-desktop",
+  "name": "voicecap-comment-helper",
   "version": "1.3.7",
-  "description": "VoiceCAP All-in-One Live Commerce Desktop App for Windows",
+  "description": "VoiceCAP TikTok LIVE comment helper for Windows",
   "main": "main.cjs",
   "author": "VoiceCAP",
   "license": "UNLICENSED",
@@ -28,8 +28,8 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "shop.voicecap.desktop",
-    "productName": "VoiceCAP",
+    "appId": "shop.voicecap.commenthelper",
+    "productName": "VoiceCAP 댓글 도우미",
     "copyright": "Copyright © VoiceCAP",
     "asar": true,
     "asarUnpack": [
@@ -39,7 +39,6 @@
     "files": [
       "main.cjs",
       "preload.cjs",
-      "dist/**/*",
       "ui/**/*",
       "!ui/*.test.cjs",
       "assets/icon.png",
@@ -57,7 +56,7 @@
       "output": "release",
       "buildResources": "assets"
     },
-    "artifactName": "VoiceCAP-Setup.${ext}",
+    "artifactName": "VoiceCAP-Comment-Helper-Setup.${ext}",
     "win": {
       "target": [
         {
@@ -76,8 +75,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "runAfterFinish": true,
-      "shortcutName": "VoiceCAP",
-      "uninstallDisplayName": "VoiceCAP"
+      "shortcutName": "VoiceCAP 댓글 도우미",
+      "uninstallDisplayName": "VoiceCAP 댓글 도우미"
     },
     "publish": {
       "provider": "github",

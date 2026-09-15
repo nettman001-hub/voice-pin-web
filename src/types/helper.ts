@@ -68,8 +68,6 @@ export interface VoicecapNativeBridge {
   testPrint: () => Promise<{ ok: boolean; status: string; error?: string }>;
   setSttDevice: (device: string) => Promise<SttStatus>;
   detectSttDevices: () => Promise<{ ok: boolean; devices?: SttDeviceInfo[]; error?: string }>;
-  openHelperWindow: () => Promise<void>;
-  showMainWindow: () => Promise<void>;
   hideWindow: () => Promise<void>;
   quit: () => Promise<void>;
   onStatus: (listener: (status: CommentHelperStatus) => void) => () => void;

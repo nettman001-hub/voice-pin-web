@@ -6,14 +6,12 @@ import {
   SttDeviceInfo
 } from '../../types/helper';
 import { commentHelperService } from '../../services/commentHelperService';
-import { isDesktopApp } from '../../services/authCredentialsService';
 import {
   Printer,
   Cpu,
   RefreshCw,
   Power,
   FileText,
-  ExternalLink,
   CheckCircle2,
   AlertCircle,
   Clock,
@@ -41,7 +39,6 @@ export const CommentHelperPage: React.FC = () => {
   const [autoStart, setAutoStart] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
 
-  const isDesktop = isDesktopApp();
 
   useEffect(() => {
     const unsubscribe = commentHelperService.subscribeStatus((newStatus) => {
@@ -181,25 +178,12 @@ export const CommentHelperPage: React.FC = () => {
               <Bot className="w-5 h-5" />
             </div>
             <h1 className="text-2xl font-black text-slate-900 tracking-tight">댓글 도우미 & 장치 설정</h1>
-            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
-              내장 런타임
-            </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
             틱톡 라이브 댓글 실시간 수집, Windows 감열식 영수증 자동 인쇄, 오프라인 STT 하드웨어 가속을 중앙 관제합니다.
           </p>
         </div>
 
-        {isDesktop && (
-          <button
-            type="button"
-            onClick={() => void commentHelperService.openHelperWindow()}
-            className="self-start px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
-          >
-            <ExternalLink className="w-4 h-4" />
-            독립 미니 창 띄우기
-          </button>
-        )}
       </div>
 
       {/* 1. 실시간 작동 상태 요약 카드 */}
@@ -282,7 +266,7 @@ export const CommentHelperPage: React.FC = () => {
             >
               {printers.length === 0 ? (
                 <option value="">
-                  {isDesktop ? '감지된 프린터가 없습니다.' : 'Windows 앱에서 프린터를 감지합니다.'}
+                  댓글 도우미에서 프린터를 감지합니다.
                 </option>
               ) : (
                 printers.map((p) => (

@@ -36,7 +36,6 @@ test('Comment Helper: Service implementation and bridge support', () => {
   assert.ok(content.includes('setSttDevice'), 'Must implement setSttDevice');
   assert.ok(content.includes('setAutoStart'), 'Must implement setAutoStart');
   assert.ok(content.includes('restartServer'), 'Must implement restartServer');
-  assert.ok(content.includes('openHelperWindow'), 'Must implement openHelperWindow');
   assert.ok(content.includes('subscribeStatus'), 'Must implement subscribeStatus');
   // Check IPC and HTTP fallback
   assert.ok(content.includes('window.voicecap'), 'Must support window.voicecap Electron bridge');
@@ -93,5 +92,4 @@ test('Comment Helper: Routing and Navigation integration', () => {
   const rulesPath = path.join(rootDir, 'src', 'pages', 'seller', 'RecognitionRulesPage.tsx');
   const rulesContent = fs.readFileSync(rulesPath, 'utf8');
   assert.ok(rulesContent.includes('CommentHelperModal'), 'RecognitionRulesPage must include CommentHelperModal');
-  assert.ok(rulesContent.includes('윈도우 앱 내장 댓글 도우미'), 'RecognitionRulesPage must display embedded helper info in desktop mode');
 });

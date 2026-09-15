@@ -110,7 +110,7 @@ class CommentHelperService {
       enabled: Boolean(settings.enabled),
       printerName: settings.printerName || '',
       paperSize: settings.paperSize || 'LABEL_50_30',
-      message: '웹 브라우저에서는 Windows 프린터를 직접 제어할 수 없습니다. VoiceCAP Windows 앱을 사용해 주세요.'
+      message: '웹 브라우저에서는 Windows 프린터를 직접 제어할 수 없습니다. VoiceCAP 댓글 도우미를 실행해 주세요.'
     };
   }
 
@@ -124,7 +124,7 @@ class CommentHelperService {
     return {
       ok: false,
       status: 'FAILED',
-      error: '테스트 인쇄는 VoiceCAP Windows 앱에서만 실행할 수 있습니다.'
+      error: '테스트 인쇄는 VoiceCAP 댓글 도우미에서만 실행할 수 있습니다.'
     };
   }
 
@@ -181,15 +181,6 @@ class CommentHelperService {
   async openLogs(): Promise<void> {
     if (this.hasNativeBridge()) {
       await window.voicecap!.openLogs();
-    }
-  }
-
-  /**
-   * 기존의 독립된 도우미 미니 창을 띄웁니다.
-   */
-  async openHelperWindow(): Promise<void> {
-    if (this.hasNativeBridge()) {
-      await window.voicecap!.openHelperWindow();
     }
   }
 

@@ -7,14 +7,12 @@ import {
   SttDeviceInfo
 } from '../../types/helper';
 import { commentHelperService } from '../../services/commentHelperService';
-import { isDesktopApp } from '../../services/authCredentialsService';
 import {
   Printer,
   Cpu,
   RefreshCw,
   Power,
   FileText,
-  ExternalLink,
   X,
   CheckCircle2,
   AlertCircle,
@@ -47,7 +45,6 @@ export const CommentHelperModal: React.FC<CommentHelperModalProps> = ({ isOpen, 
   const [autoStart, setAutoStart] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
 
-  const isDesktop = isDesktopApp();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -197,15 +194,10 @@ export const CommentHelperModal: React.FC<CommentHelperModalProps> = ({ isOpen, 
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <h2 className="text-base font-black text-slate-900">VoiceCAP 내장 댓글 도우미</h2>
+                <h2 className="text-base font-black text-slate-900">VoiceCAP 댓글 도우미</h2>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700">
                   v{status?.version || '1.3.7'}
                 </span>
-                {isDesktop && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                    윈도우 앱 내장
-                  </span>
-                )}
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
                 틱톡 실시간 댓글 수집 · 영수증 프린터 자동 출력 · 오프라인 STT 가속
@@ -214,17 +206,6 @@ export const CommentHelperModal: React.FC<CommentHelperModalProps> = ({ isOpen, 
           </div>
 
           <div className="flex items-center space-x-2">
-            {isDesktop && (
-              <button
-                type="button"
-                onClick={() => void commentHelperService.openHelperWindow()}
-                className="p-1.5 rounded-xl hover:bg-slate-200 text-slate-500 hover:text-slate-800 text-xs font-semibold flex items-center gap-1 transition"
-                title="독립된 작은 보조 창으로 띄우기"
-              >
-                <ExternalLink className="w-4 h-4" />
-                <span className="hidden sm:inline text-[11px]">미니 창</span>
-              </button>
-            )}
             <button
               type="button"
               onClick={onClose}
@@ -313,7 +294,7 @@ export const CommentHelperModal: React.FC<CommentHelperModalProps> = ({ isOpen, 
                 >
                   {printers.length === 0 ? (
                     <option value="">
-                      {isDesktop ? '감지된 프린터가 없습니다.' : 'Windows 앱에서 프린터를 감지합니다.'}
+                      댓글 도우미에서 프린터를 감지합니다.
                     </option>
                   ) : (
                     printers.map((p) => (

@@ -145,15 +145,15 @@ test('Auth Credentials: App.tsx routing redirect integrity', () => {
   const appPath = path.join(rootDir, 'src', 'App.tsx');
   const appContent = fs.readFileSync(appPath, 'utf8');
 
-  // Must import isDesktopApp or hasAutoLoginCredentials
+  // Must import saved credential detection
   assert.ok(
-    appContent.includes('isDesktopApp') && appContent.includes('hasAutoLoginCredentials'),
-    'App.tsx must import isDesktopApp and hasAutoLoginCredentials'
+    appContent.includes('hasAutoLoginCredentials'),
+    'App.tsx must import hasAutoLoginCredentials'
   );
 
-  // RootRedirect must check isDesktopApp() or hasAutoLoginCredentials()
+  // RootRedirect must send users with saved credentials to the login page.
   assert.ok(
-    appContent.includes('isDesktopApp() || hasAutoLoginCredentials()'),
-    'RootRedirect must direct desktop app or users with saved credentials to /login'
+    appContent.includes('hasAutoLoginCredentials()'),
+    'RootRedirect must direct users with saved credentials to /login'
   );
 });

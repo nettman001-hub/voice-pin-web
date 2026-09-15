@@ -11,8 +11,6 @@ contextBridge.exposeInMainWorld('voicecap', {
   testPrint: () => ipcRenderer.invoke('helper:test-print'),
   setSttDevice: (device) => ipcRenderer.invoke('helper:set-stt-device', device),
   detectSttDevices: () => ipcRenderer.invoke('helper:detect-stt-devices'),
-  openHelperWindow: () => ipcRenderer.invoke('helper:open-helper-window'),
-  showMainWindow: () => ipcRenderer.invoke('helper:show-main-window'),
   hideWindow: () => ipcRenderer.invoke('helper:hide-window'),
   quit: () => ipcRenderer.invoke('helper:quit'),
   onStatus: (listener) => {

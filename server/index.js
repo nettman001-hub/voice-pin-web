@@ -69,10 +69,8 @@ const DEFAULT_ORIGINS = [
   'https://voice-pin-web.vercel.app',
   'http://localhost:5173',
   'http://localhost:3000',
-  'http://localhost:2137',
   'http://127.0.0.1:5173',
-  'http://127.0.0.1:3000',
-  'http://127.0.0.1:2137'
+  'http://127.0.0.1:3000'
 ];
 const ALLOWED_ORIGINS = new Set(
   (process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : DEFAULT_ORIGINS)
@@ -382,44 +380,6 @@ app.post('/api/ai-health', async (req, res) => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// SPA 정적 파일 서빙 & Fallback 라우팅 (VoiceCAP Windows Desktop)
-// ---------------------------------------------------------------------------
-function resolveWebDistDir() {
-  const candidates = [
-    process.env.WEB_DIST_PATH,
-    path.join(__dirname, 'dist'),
-    path.join(__dirname, '..', 'dist'),
-    path.join(__dirname, '..', '..', 'dist')
-  ].filter(Boolean);
-
-  for (const candidate of candidates) {
-    try {
-      if (fs.existsSync(candidate) && fs.existsSync(path.join(candidate, 'index.html'))) {
-        return candidate;
-      }
-    } catch (_) {}
-  }
-  return null;
-}
-
-const webDistDir = resolveWebDistDir();
-if (webDistDir) {
-  log(`[정적 서빙] VoiceCAP 웹 SPA 마운트: ${webDistDir}`);
-  app.use(express.static(webDistDir));
-  app.get('*', (req, res, next) => {
-    // API, 상태 조회, Socket.IO 경로는 통과
-    if (
-      req.path.startsWith('/api') ||
-      req.path.startsWith('/status') ||
-      req.path.startsWith('/socket.io')
-    ) {
-      return next();
-    }
-    res.sendFile(path.join(webDistDir, 'index.html'));
-  });
-}
-
 // engine.io가 /socket.io/ OPTIONS preflight를 직접 처리하므로(express 미들웨어보다 먼저),
 // 리스너 배열 맨 앞에 붙여 PNA 헤더를 모든 응답(특히 socket.io preflight)에 보장한다.
 httpServer.prependListener('request', (req, res) => {
@@ -678,9 +638,6 @@ httpServer.listen(PORT, HOST, () => {
   log(`VoiceCAP 댓글 수집 서버 기동: http://${HOST}:${PORT}`);
   log(`허용 오리진: ${[...ALLOWED_ORIGINS].join(', ')}`);
   log(`voicecapSMS 브리지: ${SMS_BRIDGE_API_KEY ? 'API 키 인증 사용' : 'API 키 없음 (로컬 개발 전용)'}`);
-  if (process.parentPort) {
-    process.parentPort.postMessage({ type: 'server:ready', port: PORT, host: HOST });
-  }
 });
 
 process.on('SIGINT', shutdown);

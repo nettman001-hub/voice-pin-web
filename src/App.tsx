@@ -9,7 +9,7 @@ import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
 import { MobileBottomNav } from './components/common/MobileBottomNav';
 import { PanelLeftOpen } from 'lucide-react';
-import { isDesktopApp, hasAutoLoginCredentials } from './services/authCredentialsService';
+import { hasAutoLoginCredentials } from './services/authCredentialsService';
 
 // 페이지 목록
 import { OnboardingPage } from './pages/auth/OnboardingPage';
@@ -121,7 +121,7 @@ const RootRedirect: React.FC = () => {
   const { isAuthenticated, isInitialized, user } = useAuth();
   if (!isInitialized) return <AuthLoadingState />;
   if (!isAuthenticated) {
-    if (isDesktopApp() || hasAutoLoginCredentials()) {
+    if (hasAutoLoginCredentials()) {
       return <Navigate to="/login" replace />;
     }
     return <Navigate to="/onboarding" replace />;
