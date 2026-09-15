@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useCommentCapture } from '../../context/CommentCaptureContext';
 import { productSalesApi } from '../../services/productSalesApi';
 import { CommentRecord } from '../../types/comment';
+import { LiveSession } from '../../types/productSales';
 import {
   MessageSquareText,
   Trash2,
@@ -16,6 +17,7 @@ import {
 export const CommentRecordsPage: React.FC = () => {
   const { isActive, isRunning } = useCommentCapture();
   const [allRecords, setAllRecords] = useState<CommentRecord[]>([]);
+  const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
   // 필터 상태: 회차 + 기간
@@ -28,7 +30,14 @@ export const CommentRecordsPage: React.FC = () => {
   const refresh = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { comments } = await productSalesApi.listLiveComments({ limit: 5000 });
+      const [{ comments }, sessionData] = await Promise.all([
+        productSalesApi.listLiveComments({ limit: 5000 }),
+        productSalesApi.listSessions().catch((error) => {
+          console.error('[CommentRecords] 방송 회차 이름 조회 실패', error);
+          return { sessions: [] as LiveSession[] };
+        }),
+      ]);
+      setCloudSessions(sessionData.sessions);
       setAllRecords(comments.map((comment) => ({
         id: comment.id,
         sessionId: comment.sessionId,
@@ -48,9 +57,43 @@ export const CommentRecordsPage: React.FC = () => {
   }, [refresh]);
 
   const sessionOptions = useMemo(() => {
-    const sessions = Array.from(new Set(allRecords.map((r) => r.sessionId)));
-    return sessions.sort((a, b) => b.localeCompare(a));
-  }, [allRecords]);
+    const sessionsById = new Map(cloudSessions.map((session) => [session.id, session]));
+    const firstCommentAtBySession = new Map<string, string>();
+
+    allRecords.forEach((record) => {
+      const current = firstCommentAtBySession.get(record.sessionId);
+      if (!current || record.capturedAt < current) {
+        firstCommentAtBySession.set(record.sessionId, record.capturedAt);
+      }
+    });
+
+    return Array.from(firstCommentAtBySession.entries())
+      .map(([sessionId, firstCommentAt]) => {
+        const session = sessionsById.get(sessionId);
+        const fallbackDate = new Date(firstCommentAt);
+        const fallbackLabel = Number.isNaN(fallbackDate.getTime())
+          ? '이전 방송 회차'
+          : `${fallbackDate.toLocaleDateString('ko-KR')} 방송 회차`;
+
+        return {
+          id: sessionId,
+          label: session?.displayCode || fallbackLabel,
+          status: session?.status,
+          startedAt: session?.startedAt || firstCommentAt,
+        };
+      })
+      .sort((left, right) => (
+        new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime()
+      ));
+  }, [allRecords, cloudSessions]);
+
+  const sessionLabelById = useMemo(
+    () => new Map(sessionOptions.map((session) => [session.id, session.label])),
+    [sessionOptions]
+  );
+  const selectedSessionLabel = sessionFilter === 'ALL'
+    ? null
+    : sessionLabelById.get(sessionFilter) || '이전 방송 회차';
 
   // 아래쪽이 최신글이 되도록 시간 오름차순 정렬
   const filteredRecords = useMemo(() => {
@@ -120,7 +163,7 @@ export const CommentRecordsPage: React.FC = () => {
       const nickname = `"${(r.nickname || '').replace(/"/g, '""')}"`;
       const content = `"${(r.content || '').replace(/"/g, '""')}"`;
       const word = `"${(r.matchedAlertWord || '').replace(/"/g, '""')}"`;
-      const session = `"${(r.sessionId || '').replace(/"/g, '""')}"`;
+      const session = `"${(sessionLabelById.get(r.sessionId) || '이전 방송 회차').replace(/"/g, '""')}"`;
       return [time, nickname, content, word, session].join(',');
     });
     return '\uFEFF' + [headers.join(','), ...lines].join('\r\n');
@@ -211,8 +254,10 @@ export const CommentRecordsPage: React.FC = () => {
             className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:border-brand-500"
           >
             <option value="ALL">전체 회차</option>
-            {sessionOptions.map((s) => (
-              <option key={s} value={s}>{s} 회차</option>
+            {sessionOptions.map((session) => (
+              <option key={session.id} value={session.id}>
+                {session.label}{session.status === 'ACTIVE' ? ' · 진행 중' : ''}
+              </option>
             ))}
           </select>
         </div>
@@ -279,7 +324,7 @@ export const CommentRecordsPage: React.FC = () => {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-xs sm:text-sm font-bold text-slate-900">
             캡처된 댓글 <span className="text-brand-600">{filteredRecords.length}</span>건
-            {sessionFilter !== 'ALL' && <span className="text-slate-400 font-normal"> · {sessionFilter} 회차</span>}
+            {selectedSessionLabel && <span className="text-slate-400 font-normal"> · {selectedSessionLabel}</span>}
           </h3>
 
           <div className="flex items-center gap-2">
