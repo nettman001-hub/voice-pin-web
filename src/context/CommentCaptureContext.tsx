@@ -64,14 +64,17 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   }, [config]);
 
   useEffect(() => {
-    sessionIdRef.current = currentSessionId;
-  }, [currentSessionId]);
+    // 댓글 도우미와 판매 피드는 서버가 발급한 방송 회차 UUID를 사용한다.
+    // currentSessionId는 음성 청취용 표시 ID이므로, 이를 우선하면 클라우드 댓글을
+    // 다른 회차로 판단해 화면에서 모두 제외하게 된다.
+    sessionIdRef.current = activeSession?.id || currentSessionId;
+  }, [activeSession?.id, currentSessionId]);
 
   // 댓글 도우미는 회차 ID를 받아야 live_comments 단일 원본에 적재할 수 있다.
   // 도우미의 인증 정보는 설치 설정에 남아 있고 브라우저에는 전달하지 않는다.
   useEffect(() => {
-    commentStreamService.configureCloudPublishing({ sessionId: activeSession?.id || null });
-  }, [activeSession?.id, serverStatus]);
+    commentStreamService.configureCloudPublishing({ sessionId: activeSession?.id || currentSessionId || null });
+  }, [activeSession?.id, currentSessionId, serverStatus]);
 
   useEffect(() => {
     isActiveRef.current = isActive;
@@ -268,8 +271,9 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
   // cloud live_comments가 댓글의 단일 원본이다. 로컬 저장소는 설정만 보관한다.
   useEffect(() => {
+    const cloudSessionId = activeSession?.id || currentSessionId;
     const sessionRecords = (feed?.comments || [])
-      .filter((comment) => comment.sessionId === currentSessionId)
+      .filter((comment) => comment.sessionId === cloudSessionId)
       .map((comment): CommentRecord => ({
         id: comment.id,
         sessionId: comment.sessionId,
@@ -284,7 +288,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       sessionRecords.map((record) => commentDedupeKey(record.nickname, record.content))
     );
     setLiveComments(sessionRecords);
-  }, [feed?.comments, currentSessionId]);
+  }, [activeSession?.id, feed?.comments, currentSessionId]);
 
   // 언마운트 시 정리
   useEffect(
