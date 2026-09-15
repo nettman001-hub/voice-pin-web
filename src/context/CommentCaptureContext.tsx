@@ -4,6 +4,7 @@ import { useAuth } from './AuthContext';
 import { useLive } from './LiveContext';
 import { storageService } from '../services/storageService';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
+import { productSalesApi } from '../services/productSalesApi';
 import { useProductSales } from './ProductSalesContext';
 import {
   commentDedupeKey,
@@ -19,6 +20,17 @@ export interface CommentAlert {
   word: string;
   content: string;
   firedAt: string;
+}
+
+interface QueuedCloudComment {
+  sessionId: string;
+  platformMessageId: string;
+  platformUserId?: string;
+  platformUniqueId?: string;
+  nickname: string;
+  content: string;
+  capturedAt: string;
+  ingestSequence: number;
 }
 
 interface CommentCaptureContextType {
@@ -41,7 +53,7 @@ const CommentCaptureContext = createContext<CommentCaptureContextType | undefine
 export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { workspaceId } = useAuth();
   const { isListening, currentSessionId, transcriptLogs } = useLive();
-  const { activeSession, feed } = useProductSales();
+  const { activeSession, feed, pollFeed } = useProductSales();
 
   // 안전을 위해 브라우저를 새로 열거나 새로고침할 때마다 댓글 수집은 꺼진 상태로 시작한다.
   // 판매자가 현재 방송에서 직접 시작 버튼을 눌렀을 때만 활성화한다.
@@ -58,6 +70,12 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   const configRef = useRef<CommentCaptureConfig>(config);
   const isActiveRef = useRef<boolean>(false);
   const sessionIdRef = useRef<string>(currentSessionId);
+  const pendingCommentsRef = useRef<Map<string, CommentRecord>>(new Map());
+  const cloudQueueRef = useRef<QueuedCloudComment[]>([]);
+  const cloudFlushTimerRef = useRef<number | null>(null);
+  const cloudFlushInFlightRef = useRef(false);
+  const cloudIngestSequenceRef = useRef(0);
+  const flushCloudQueueRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
     configRef.current = config;
@@ -69,12 +87,6 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     // 다른 회차로 판단해 화면에서 모두 제외하게 된다.
     sessionIdRef.current = activeSession?.id || currentSessionId;
   }, [activeSession?.id, currentSessionId]);
-
-  // 댓글 도우미는 회차 ID를 받아야 live_comments 단일 원본에 적재할 수 있다.
-  // 도우미의 인증 정보는 설치 설정에 남아 있고 브라우저에는 전달하지 않는다.
-  useEffect(() => {
-    commentStreamService.configureCloudPublishing({ sessionId: activeSession?.id || currentSessionId || null });
-  }, [activeSession?.id, currentSessionId, serverStatus]);
 
   useEffect(() => {
     isActiveRef.current = isActive;
@@ -181,6 +193,50 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     }
   }, [transcriptLogs, activeAlert, dismissAlert]);
 
+  const scheduleCloudFlush = useCallback((delayMs = 100) => {
+    if (cloudFlushTimerRef.current !== null) return;
+    cloudFlushTimerRef.current = window.setTimeout(() => {
+      cloudFlushTimerRef.current = null;
+      void flushCloudQueueRef.current();
+    }, delayMs);
+  }, []);
+
+  // 설치 버전에 상관없이 로그인한 웹 세션이 댓글을 cloud live_comments에 적재한다.
+  // 화면에는 소켓 댓글을 즉시 보여주고, 클라우드 반영 뒤 판매 피드를 다시 읽는다.
+  const flushCloudQueue = useCallback(async () => {
+    if (cloudFlushInFlightRef.current || cloudQueueRef.current.length === 0) return;
+
+    const sessionId = cloudQueueRef.current[0].sessionId;
+    let batchSize = 0;
+    while (
+      batchSize < cloudQueueRef.current.length
+      && batchSize < 50
+      && cloudQueueRef.current[batchSize].sessionId === sessionId
+    ) {
+      batchSize += 1;
+    }
+    const batch = cloudQueueRef.current.splice(0, batchSize);
+    cloudFlushInFlightRef.current = true;
+
+    try {
+      await productSalesApi.ingestComments({
+        sessionId,
+        comments: batch.map(({ sessionId: _sessionId, ...comment }) => comment),
+      });
+      await pollFeed();
+    } catch (error) {
+      cloudQueueRef.current.unshift(...batch);
+      console.warn('[CommentCaptureContext] 클라우드 댓글 적재 재시도:', error);
+    } finally {
+      cloudFlushInFlightRef.current = false;
+      if (cloudQueueRef.current.length > 0) {
+        scheduleCloudFlush(1_000);
+      }
+    }
+  }, [pollFeed, scheduleCloudFlush]);
+
+  flushCloudQueueRef.current = flushCloudQueue;
+
   // 댓글 도우미가 중계한 실시간 댓글 유입 처리
   const ingestComment = useCallback(
     (incoming: StreamedComment) => {
@@ -198,7 +254,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       const matchedWord = cfg.alertWords.find((word) => word && content.includes(word));
 
       const record: CommentRecord = {
-        id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: `stream-${incoming.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`}`,
         sessionId: sessionIdRef.current,
         nickname,
         uniqueId: incoming.uniqueId || undefined,
@@ -206,6 +262,28 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         capturedAt: incoming.receivedAt || new Date().toISOString(),
         ...(matchedWord ? { matchedAlertWord: matchedWord } : {})
       };
+
+      const platformMessageId = String(incoming.id || record.id);
+      pendingCommentsRef.current.set(platformMessageId, record);
+      setLiveComments((previous) => [...previous.filter((item) => item.id !== record.id), record]
+        .filter((item) => item.sessionId === record.sessionId)
+        .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime())
+        .slice(-100));
+
+      if (record.sessionId) {
+        cloudIngestSequenceRef.current += 1;
+        cloudQueueRef.current.push({
+          sessionId: record.sessionId,
+          platformMessageId,
+          platformUserId: incoming.userId || incoming.uniqueId || undefined,
+          platformUniqueId: incoming.uniqueId || undefined,
+          nickname,
+          content,
+          capturedAt: record.capturedAt,
+          ingestSequence: cloudIngestSequenceRef.current,
+        });
+        scheduleCloudFlush();
+      }
 
       setNewCount((prev) => prev + 1);
 
@@ -222,7 +300,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         );
       }
     },
-    [showAlert]
+    [scheduleCloudFlush, showAlert]
   );
 
   // 서버 상태/댓글 리스너 등록 (마운트 1회)
@@ -272,27 +350,39 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   // cloud live_comments가 댓글의 단일 원본이다. 로컬 저장소는 설정만 보관한다.
   useEffect(() => {
     const cloudSessionId = activeSession?.id || currentSessionId;
-    const sessionRecords = (feed?.comments || [])
-      .filter((comment) => comment.sessionId === cloudSessionId)
+    const sessionComments = (feed?.comments || [])
+      .filter((comment) => comment.sessionId === cloudSessionId);
+
+    for (const comment of sessionComments) {
+      pendingCommentsRef.current.delete(comment.platformMessageId);
+    }
+
+    const sessionRecords = sessionComments
       .map((comment): CommentRecord => ({
         id: comment.id,
         sessionId: comment.sessionId,
         nickname: comment.nicknameSnapshot,
         content: comment.content,
         capturedAt: comment.capturedAt,
-      }))
+      }));
+    const pendingRecords = Array.from(pendingCommentsRef.current.values())
+      .filter((comment) => comment.sessionId === cloudSessionId);
+    const mergedRecords = [...sessionRecords, ...pendingRecords]
       .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime())
       .slice(-100);
 
     seenKeysRef.current = new Set(
-      sessionRecords.map((record) => commentDedupeKey(record.nickname, record.content))
+      mergedRecords.map((record) => commentDedupeKey(record.nickname, record.content))
     );
-    setLiveComments(sessionRecords);
+    setLiveComments(mergedRecords);
   }, [activeSession?.id, feed?.comments, currentSessionId]);
 
   // 언마운트 시 정리
   useEffect(
     () => () => {
+      if (cloudFlushTimerRef.current !== null) {
+        window.clearTimeout(cloudFlushTimerRef.current);
+      }
       commentStreamService.stopCollecting();
       commentStreamService.disconnect();
     },

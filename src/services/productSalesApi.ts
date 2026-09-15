@@ -158,6 +158,26 @@ export const productSalesApi = {
     }>('get-sales-feed', params);
   },
 
+  async ingestComments(params: {
+    sessionId: string;
+    collectorId?: string;
+    comments: Array<{
+      platformMessageId: string;
+      platformUserId?: string;
+      platformUniqueId?: string;
+      nickname: string;
+      content: string;
+      capturedAt: string;
+      ingestSequence: number;
+    }>;
+  }) {
+    return invokeSalesApi<{
+      acceptedIds: string[];
+      duplicateIds: string[];
+      nextIngestCursor: string;
+    }>('ingest-comments', params);
+  },
+
   async listSessions() {
     return invokeSalesApi<{ sessions: LiveSession[] }>('list-sessions');
   },

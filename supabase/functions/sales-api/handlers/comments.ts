@@ -53,8 +53,10 @@ export async function handleIngestComments(workspaceId: string, actorId: string,
       ingest_sequence: Number(c.ingestSequence || Date.now()),
     })
 
-    if (insertErr) {
+    if (insertErr?.code === '23505') {
       duplicateIds.push(c.platformMessageId)
+    } else if (insertErr) {
+      return errorResponse('DATABASE_ERROR', `댓글 적재 실패: ${insertErr.message}`, 500)
     } else {
       acceptedIds.push(commentId)
     }
