@@ -1,4 +1,4 @@
-import { SaleRecord, CaptureItem, LiveSession } from '../types/live';
+import { SaleRecord, CaptureItem, LiveSession, SttTranscriptLog } from '../types/live';
 import { RecognitionWordRule, CaptureAreaConfig } from '../types/rules';
 import { TrainingSentence } from '../types/training';
 import { PaymentHistoryItem, PaymentCard } from '../types/subscription';
@@ -271,6 +271,21 @@ export class StorageService {
     } catch (e) {
       console.error(`[Storage] Failed to save key: ${key}`, e);
     }
+  }
+
+  private transcriptSessionKey(workspaceId: string, sessionId: string): string {
+    return `voicecap_transcripts:${encodeURIComponent(workspaceId)}:${encodeURIComponent(sessionId)}`;
+  }
+
+  public getSessionTranscripts(workspaceId: string, sessionId: string): SttTranscriptLog[] {
+    if (!workspaceId || !sessionId) return [];
+    const logs = this.getItem<SttTranscriptLog[]>(this.transcriptSessionKey(workspaceId, sessionId), []);
+    return Array.isArray(logs) ? logs : [];
+  }
+
+  public saveSessionTranscripts(workspaceId: string, sessionId: string, logs: SttTranscriptLog[]): void {
+    if (!workspaceId || !sessionId) return;
+    this.setItem(this.transcriptSessionKey(workspaceId, sessionId), logs);
   }
 
   // 초기화 및 시딩

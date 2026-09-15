@@ -237,10 +237,40 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const cloudSttStartTimeRef = useRef<number | null>(null);
   const activeCloudProviderRef = useRef<'DEEPGRAM' | 'SONIOX' | null>(null);
   const currentSessionIdRef = useRef<string>(currentSessionId);
+  const transcriptWorkspaceIdRef = useRef<string>(workspaceId || user?.id || 'local');
+  const sessionTranscriptsRef = useRef<Map<string, SttTranscriptLog[]>>(new Map());
+  const transcriptPersistTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     currentSessionIdRef.current = currentSessionId;
   }, [currentSessionId]);
+
+  useEffect(() => {
+    transcriptWorkspaceIdRef.current = workspaceId || user?.id || 'local';
+  }, [user?.id, workspaceId]);
+
+  const persistCurrentSessionTranscripts = useCallback(() => {
+    if (transcriptPersistTimerRef.current !== null) {
+      window.clearTimeout(transcriptPersistTimerRef.current);
+      transcriptPersistTimerRef.current = null;
+    }
+    const sessionId = currentSessionIdRef.current;
+    const logs = sessionTranscriptsRef.current.get(sessionId) || allSessionTranscriptsRef.current;
+    storageService.saveSessionTranscripts(transcriptWorkspaceIdRef.current, sessionId, logs);
+  }, []);
+
+  const scheduleTranscriptPersistence = useCallback(() => {
+    if (transcriptPersistTimerRef.current !== null) {
+      window.clearTimeout(transcriptPersistTimerRef.current);
+    }
+    transcriptPersistTimerRef.current = window.setTimeout(() => {
+      persistCurrentSessionTranscripts();
+    }, 500);
+  }, [persistCurrentSessionTranscripts]);
+
+  useEffect(() => () => {
+    persistCurrentSessionTranscripts();
+  }, [persistCurrentSessionTranscripts]);
 
   useEffect(() => {
     isListeningRef.current = isListening;
@@ -1341,11 +1371,17 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       actionTriggered
     };
 
-    // 전사 로그 적재: 화면 UI에는 최근 300건을 유지하여 렉을 원천 방지하고,
-    // 전체 회차 전사 로그는 allSessionTranscriptsRef에 8시간 이상 무제한으로 누적 보관
-    allSessionTranscriptsRef.current.push(newLog);
-    setTotalSessionTranscriptCount(allSessionTranscriptsRef.current.length);
+    // 화면 UI에는 최근 300건만 표시하고, 전체 로그는 방송 회차별로 보관한다.
+    // 같은 회차를 중지 후 다시 시작하거나 화면을 다시 열어도 TXT/CSV 전체 내역을 복원한다.
+    const transcriptSessionId = currentSessionIdRef.current;
+    const currentSessionLogs = sessionTranscriptsRef.current.get(transcriptSessionId)
+      || allSessionTranscriptsRef.current;
+    const nextSessionLogs = [...currentSessionLogs, newLog];
+    sessionTranscriptsRef.current.set(transcriptSessionId, nextSessionLogs);
+    allSessionTranscriptsRef.current = nextSessionLogs;
+    setTotalSessionTranscriptCount(nextSessionLogs.length);
     setTranscriptLogs((prev) => [newLog, ...prev.slice(0, 299)]);
+    scheduleTranscriptPersistence();
   }
 
   // 오늘 방송 전체 전사 로그 파일 다운로드 (.txt / .csv)
@@ -1359,7 +1395,9 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    const sessionCode = currentSessionId || new Date().toISOString().slice(0, 10);
+    const sessionCode = productSales.activeSession?.displayCode
+      || currentSessionId
+      || new Date().toISOString().slice(0, 10);
     const fileName = `VoiceCAP_전사로그_${sessionCode}.${format}`;
 
     if (format === 'txt') {
@@ -1448,8 +1486,26 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       activeAudioSourceModeRef.current = mode;
       isListeningRef.current = true;
       const newSessionId = salesSessionId || generateSessionId();
+      const isSameSession = newSessionId === currentSessionIdRef.current;
+
+      // 회차를 바꾸기 전에 직전 회차 전체 로그를 저장한다. 이어가기라면 같은 회차의
+      // 저장 로그를 복원하고, 새 회차일 때만 화면과 다운로드 누적 기준을 비운다.
+      persistCurrentSessionTranscripts();
+      const restoredSessionLogs = sessionTranscriptsRef.current.get(newSessionId)
+        || (isSameSession
+          ? allSessionTranscriptsRef.current
+          : storageService.getSessionTranscripts(transcriptWorkspaceIdRef.current, newSessionId));
+      sessionTranscriptsRef.current.set(newSessionId, restoredSessionLogs);
+      allSessionTranscriptsRef.current = restoredSessionLogs;
+      currentSessionIdRef.current = newSessionId;
       setCurrentSessionId(newSessionId);
-      setSessionStartTime(new Date().toISOString());
+      setTranscriptLogs([...restoredSessionLogs].reverse().slice(0, 300));
+      setTotalSessionTranscriptCount(restoredSessionLogs.length);
+      setSessionStartTime((previous) => isSameSession && previous ? previous : new Date().toISOString());
+      if (!isSameSession) {
+        setLiveTranscriptFlow([]);
+        setLastMatchedRuleItem(null);
+      }
       setCurrentInterimTranscript('');
       interimStreamChunkerRef.current.reset();
       setIsListening(true);
@@ -1652,6 +1708,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // 라이브 청취 중지 (TAB_AUDIO는 파이프라인을 일시정지해 공유 연결을 유지한다)
   const stopListening = useCallback(() => {
+    persistCurrentSessionTranscripts();
     listeningGenerationRef.current += 1;
     activeListeningUserIdRef.current = null;
     isListeningRef.current = false;
@@ -1696,7 +1753,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsVoiceEditing(false);
     setEditingFieldInfo(null);
     if (editTimeoutRef.current) clearTimeout(editTimeoutRef.current);
-  }, []);
+  }, [persistCurrentSessionTranscripts]);
 
   const disconnectScreenShare = useCallback(() => {
     stopListening();
