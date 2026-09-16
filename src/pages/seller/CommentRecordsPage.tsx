@@ -11,7 +11,9 @@ import {
   ArrowRight,
   BellRing,
   Search,
-  RefreshCw
+  RefreshCw,
+  FileText,
+  FileSpreadsheet
 } from 'lucide-react';
 
 export const CommentRecordsPage: React.FC = () => {
@@ -181,6 +183,26 @@ export const CommentRecordsPage: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const buildTxt = (rows: CommentRecord[]) => {
+    const lines = rows.map((r) => {
+      const time = new Date(r.capturedAt).toLocaleString('ko-KR');
+      const session = sessionLabelById.get(r.sessionId) || '이전 방송 회차';
+      const word = r.matchedAlertWord ? ` [감지단어: ${r.matchedAlertWord}]` : '';
+      return `[${time}] [${session}] ${r.nickname}: ${r.content}${word}`;
+    });
+    return lines.join('\r\n');
+  };
+
+  const handleDownloadTxt = () => {
+    if (filteredRecords.length === 0) return;
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadBlob(
+      buildTxt(filteredRecords),
+      `댓글캡처기록_${stamp}.txt`,
+      'text/plain;charset=utf-8;'
+    );
+  };
+
   const handleDownloadCsv = () => {
     if (filteredRecords.length === 0) return;
     const stamp = new Date().toISOString().slice(0, 10);
@@ -188,16 +210,6 @@ export const CommentRecordsPage: React.FC = () => {
       buildCsv(filteredRecords),
       `댓글캡처기록_${stamp}.csv`,
       'text/csv;charset=utf-8;'
-    );
-  };
-
-  const handleDownloadJson = () => {
-    if (filteredRecords.length === 0) return;
-    const stamp = new Date().toISOString().slice(0, 10);
-    downloadBlob(
-      JSON.stringify(filteredRecords, null, 2),
-      `댓글캡처기록_${stamp}.json`,
-      'application/json;charset=utf-8;'
     );
   };
 
@@ -300,20 +312,22 @@ export const CommentRecordsPage: React.FC = () => {
           <label className="font-bold text-slate-600">다운로드</label>
           <div className="flex gap-1.5">
             <button
-              onClick={handleDownloadCsv}
+              onClick={handleDownloadTxt}
               disabled={filteredRecords.length === 0}
-              className="flex-1 px-2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold flex items-center justify-center space-x-1 transition"
+              className="flex-1 px-2 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white font-bold flex items-center justify-center space-x-1 transition active:scale-95"
+              title="댓글 목록을 텍스트(.txt) 파일로 다운로드"
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>CSV</span>
+              <FileText className="w-3.5 h-3.5" />
+              <span>TXT</span>
             </button>
             <button
-              onClick={handleDownloadJson}
+              onClick={handleDownloadCsv}
               disabled={filteredRecords.length === 0}
-              className="flex-1 px-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white font-bold flex items-center justify-center space-x-1 transition"
+              className="flex-1 px-2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold flex items-center justify-center space-x-1 transition active:scale-95"
+              title="댓글 목록을 엑셀(.csv) 파일로 다운로드"
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>JSON</span>
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>CSV</span>
             </button>
           </div>
         </div>
