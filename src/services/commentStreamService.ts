@@ -209,8 +209,17 @@ class CommentStreamService {
 
 export const commentStreamService = new CommentStreamService();
 
-/** 닉네임+내용 조합 기준 중복 판별 키 (기존 OCR 시절 키 규격과 동일하게 유지) */
+/** 댓글 중복 판별 키 (고유 메시지 ID가 있으면 최우선 사용, 없을 시 닉네임+내용+타임스탬프 fallback) */
 const normalizeForDedupe = (text: string) => text.replace(/\s+/g, ' ').trim();
 
-export const commentDedupeKey = (nickname: string, content: string) =>
-  `${normalizeForDedupe(nickname)}␟${normalizeForDedupe(content)}`;
+export const commentDedupeKey = (
+  nickname: string,
+  content: string,
+  messageId?: string,
+  timestamp?: string
+) => {
+  if (messageId && messageId.trim()) {
+    return `msg:${messageId.trim()}`;
+  }
+  return `${normalizeForDedupe(nickname)}␟${normalizeForDedupe(content)}␟${timestamp || ''}`;
+};

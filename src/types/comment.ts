@@ -1,6 +1,7 @@
 // 댓글 수집 기록 1건 (로컬 수집 서버가 TikTok LIVE API로 받은 실시간 댓글)
 export interface CommentRecord {
   id: string;
+  platformMessageId?: string; // 틱톡 또는 수집 플랫폼 고유 메시지 ID
   sessionId: string;          // 방송 회차 (YYYYMMDD_HH)
   nickname: string;           // 댓글 작성자 닉네임
   uniqueId?: string;          // 틱톡 고유 ID (@ 제외)

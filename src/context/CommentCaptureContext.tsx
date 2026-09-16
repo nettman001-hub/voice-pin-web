@@ -85,7 +85,26 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     // 댓글 도우미와 판매 피드는 서버가 발급한 방송 회차 UUID를 사용한다.
     // currentSessionId는 음성 청취용 표시 ID이므로, 이를 우선하면 클라우드 댓글을
     // 다른 회차로 판단해 화면에서 모두 제외하게 된다.
-    sessionIdRef.current = activeSession?.id || currentSessionId;
+    const nextSessionId = activeSession?.id || currentSessionId;
+    const prevSessionId = sessionIdRef.current;
+    sessionIdRef.current = nextSessionId;
+
+    // 임시 세션 ID에서 정식 활성 세션 UUID로 전환된 경우 기존 메모리 댓글의 세션 ID를 자동 승격
+    if (nextSessionId && prevSessionId && prevSessionId !== nextSessionId) {
+      for (const [key, comment] of pendingCommentsRef.current.entries()) {
+        if (comment.sessionId === prevSessionId) {
+          pendingCommentsRef.current.set(key, { ...comment, sessionId: nextSessionId });
+        }
+      }
+      for (const item of cloudQueueRef.current) {
+        if (item.sessionId === prevSessionId) {
+          item.sessionId = nextSessionId;
+        }
+      }
+      setLiveComments((prev) =>
+        prev.map((c) => (c.sessionId === prevSessionId ? { ...c, sessionId: nextSessionId } : c))
+      );
+    }
   }, [activeSession?.id, currentSessionId]);
 
   useEffect(() => {
@@ -246,16 +265,28 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       const content = String(incoming.content || '').trim();
       if (!content || !nickname) return;
 
-      const key = commentDedupeKey(nickname, content);
+      const platformMessageId = String(incoming.id || '').trim()
+        || `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      // 메시지 ID 기반 중복 검사 (동일 시청자가 같은 내용의 댓글을 여러 번 남겨도 모두 정상 수신됨)
+      const key = commentDedupeKey(nickname, content, platformMessageId, incoming.receivedAt);
       if (seenKeysRef.current.has(key)) return;
       seenKeysRef.current.add(key);
+
+      // 메모리 누수 방지를 위한 슬라이딩 윈도우 관리 (최대 1,500개 유지)
+      if (seenKeysRef.current.size > 1500) {
+        const keysArray = Array.from(seenKeysRef.current);
+        seenKeysRef.current = new Set(keysArray.slice(-800));
+      }
 
       const cfg = configRef.current;
       const matchedWord = cfg.alertWords.find((word) => word && content.includes(word));
 
+      const currentSession = sessionIdRef.current;
       const record: CommentRecord = {
-        id: `stream-${incoming.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`}`,
-        sessionId: sessionIdRef.current,
+        id: `stream-${platformMessageId}`,
+        platformMessageId,
+        sessionId: currentSession,
         nickname,
         uniqueId: incoming.uniqueId || undefined,
         content,
@@ -263,12 +294,16 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         ...(matchedWord ? { matchedAlertWord: matchedWord } : {})
       };
 
-      const platformMessageId = String(incoming.id || record.id);
       pendingCommentsRef.current.set(platformMessageId, record);
-      setLiveComments((previous) => [...previous.filter((item) => item.id !== record.id), record]
-        .filter((item) => item.sessionId === record.sessionId)
-        .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime())
-        .slice(-100));
+
+      setLiveComments((previous) => {
+        const withoutSameMsg = previous.filter(
+          (item) => (item.platformMessageId ? item.platformMessageId !== platformMessageId : item.id !== record.id)
+        );
+        return [...withoutSameMsg, record]
+          .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime())
+          .slice(-100);
+      });
 
       if (record.sessionId) {
         cloudIngestSequenceRef.current += 1;
@@ -347,34 +382,87 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     }
   }, [isActive, isListening, serverStatus]);
 
-  // cloud live_comments가 댓글의 단일 원본이다. 로컬 저장소는 설정만 보관한다.
+  // cloud live_comments와 로컬 링버퍼의 무손실 병합 동기화
   useEffect(() => {
     const cloudSessionId = activeSession?.id || currentSessionId;
     const sessionComments = (feed?.comments || [])
       .filter((comment) => comment.sessionId === cloudSessionId);
 
     for (const comment of sessionComments) {
-      pendingCommentsRef.current.delete(comment.platformMessageId);
+      if (comment.platformMessageId) {
+        pendingCommentsRef.current.delete(comment.platformMessageId);
+        seenKeysRef.current.add(`msg:${comment.platformMessageId}`);
+      }
     }
 
-    const sessionRecords = sessionComments
-      .map((comment): CommentRecord => ({
-        id: comment.id,
-        sessionId: comment.sessionId,
-        nickname: comment.nicknameSnapshot,
-        content: comment.content,
-        capturedAt: comment.capturedAt,
-      }));
-    const pendingRecords = Array.from(pendingCommentsRef.current.values())
-      .filter((comment) => comment.sessionId === cloudSessionId);
-    const mergedRecords = [...sessionRecords, ...pendingRecords]
-      .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime())
-      .slice(-100);
+    const sessionRecords: CommentRecord[] = sessionComments.map((comment) => ({
+      id: comment.id,
+      platformMessageId: comment.platformMessageId,
+      sessionId: comment.sessionId,
+      nickname: comment.nicknameSnapshot,
+      content: comment.content,
+      capturedAt: comment.capturedAt,
+    }));
 
-    seenKeysRef.current = new Set(
-      mergedRecords.map((record) => commentDedupeKey(record.nickname, record.content))
-    );
-    setLiveComments(mergedRecords);
+    setLiveComments((prevComments) => {
+      const byMsgId = new Map<string, CommentRecord>();
+      const byRecordId = new Map<string, CommentRecord>();
+
+      // 1. 기존 화면에 표시 중이던 댓글 보존
+      for (const item of prevComments) {
+        const isCurrentOrActive = !cloudSessionId || item.sessionId === cloudSessionId || item.sessionId === currentSessionId;
+        if (isCurrentOrActive) {
+          const migratedItem = cloudSessionId && item.sessionId !== cloudSessionId
+            ? { ...item, sessionId: cloudSessionId }
+            : item;
+          if (migratedItem.platformMessageId) {
+            byMsgId.set(migratedItem.platformMessageId, migratedItem);
+          } else {
+            byRecordId.set(migratedItem.id, migratedItem);
+          }
+        }
+      }
+
+      // 2. 클라우드 판매 피드에서 반환된 최신 댓글 반영 (정식 레코드 ID로 갱신)
+      for (const cloudRec of sessionRecords) {
+        if (cloudRec.platformMessageId && byMsgId.has(cloudRec.platformMessageId)) {
+          const existing = byMsgId.get(cloudRec.platformMessageId)!;
+          byMsgId.set(cloudRec.platformMessageId, {
+            ...existing,
+            id: cloudRec.id,
+            sessionId: cloudRec.sessionId,
+            nickname: cloudRec.nickname || existing.nickname,
+            content: cloudRec.content || existing.content,
+            capturedAt: cloudRec.capturedAt || existing.capturedAt,
+          });
+        } else if (cloudRec.platformMessageId) {
+          byMsgId.set(cloudRec.platformMessageId, cloudRec);
+        } else {
+          byRecordId.set(cloudRec.id, cloudRec);
+        }
+      }
+
+      // 3. 아직 클라우드 피드에 반영 대기 중인 로컬 댓글 반영
+      for (const pending of pendingCommentsRef.current.values()) {
+        const isCurrentOrActive = !cloudSessionId || pending.sessionId === cloudSessionId || pending.sessionId === currentSessionId;
+        if (isCurrentOrActive) {
+          const migratedPending = cloudSessionId && pending.sessionId !== cloudSessionId
+            ? { ...pending, sessionId: cloudSessionId }
+            : pending;
+          if (migratedPending.platformMessageId && !byMsgId.has(migratedPending.platformMessageId)) {
+            byMsgId.set(migratedPending.platformMessageId, migratedPending);
+          } else if (!migratedPending.platformMessageId && !byRecordId.has(migratedPending.id)) {
+            byRecordId.set(migratedPending.id, migratedPending);
+          }
+        }
+      }
+
+      const allMerged = [...Array.from(byMsgId.values()), ...Array.from(byRecordId.values())]
+        .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime())
+        .slice(-100);
+
+      return allMerged;
+    });
   }, [activeSession?.id, feed?.comments, currentSessionId]);
 
   // 언마운트 시 정리
