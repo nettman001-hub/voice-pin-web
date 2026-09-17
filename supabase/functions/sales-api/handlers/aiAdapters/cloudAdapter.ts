@@ -21,13 +21,29 @@ export async function runCloudResolution(
   request: AiResolutionRequest,
   options: CloudAdapterOptions
 ): Promise<AiResolutionResult> {
-  const { slotConfig, secretApiKey } = options;
+  const { slotConfig } = options;
   const startTime = Date.now();
   const provider = slotConfig.provider || 'OPENAI';
   const model = slotConfig.model || (provider === 'ANTHROPIC' ? 'claude-3-5-haiku-20241022' : provider === 'DEEPSEEK' ? 'deepseek-chat' : 'gpt-4o-mini');
   const timeoutMs = (slotConfig.timeoutSeconds || 15) * 1000;
 
-  // 1. API 키 필수 검증
+  // 1. API 키 확인 (전달된 키가 없으면 환경변수에서 fallback)
+  let secretApiKey = (options.secretApiKey || '').trim();
+  if (!secretApiKey) {
+    try {
+      if (provider === 'DEEPSEEK') {
+        secretApiKey = (typeof Deno !== 'undefined' ? Deno.env.get('DEEPSEEK_API_KEY') : (globalThis as any).process?.env?.DEEPSEEK_API_KEY) || '';
+      } else if (provider === 'OPENAI') {
+        secretApiKey = (typeof Deno !== 'undefined' ? Deno.env.get('OPENAI_API_KEY') : (globalThis as any).process?.env?.OPENAI_API_KEY) || '';
+      } else if (provider === 'ANTHROPIC') {
+        secretApiKey = (typeof Deno !== 'undefined' ? Deno.env.get('ANTHROPIC_API_KEY') : (globalThis as any).process?.env?.ANTHROPIC_API_KEY) || '';
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 1-1. API 키 필수 검증
   if (!secretApiKey || !secretApiKey.trim()) {
     const latencyMs = Date.now() - startTime;
     return {

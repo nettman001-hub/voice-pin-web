@@ -134,11 +134,15 @@ async function getGlobalSttSettings() {
     .maybeSingle()
   if (error) throw error
   const value = (data?.value && typeof data.value === 'object') ? data.value as Record<string, unknown> : {}
+  const envDeepgram = Deno.env.get('DEEPGRAM_API_KEY') || ''
+  const envSoniox = Deno.env.get('SONIOX_API_KEY') || ''
+  const deepgramApiKey = typeof value.deepgramApiKey === 'string' && value.deepgramApiKey ? value.deepgramApiKey : envDeepgram
+  const sonioxApiKey = typeof value.sonioxApiKey === 'string' && value.sonioxApiKey ? value.sonioxApiKey : envSoniox
   return {
-    configured: Boolean(data),
+    configured: Boolean(data) || Boolean(envDeepgram || envSoniox),
     provider: value.provider === 'SONIOX' ? 'SONIOX' : 'DEEPGRAM',
-    deepgramApiKey: typeof value.deepgramApiKey === 'string' ? value.deepgramApiKey : '',
-    sonioxApiKey: typeof value.sonioxApiKey === 'string' ? value.sonioxApiKey : '',
+    deepgramApiKey,
+    sonioxApiKey,
   }
 }
 

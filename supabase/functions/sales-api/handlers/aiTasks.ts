@@ -171,13 +171,14 @@ export async function handleProcessAiTask(
 
   const slot1Config: AiSlotConfig = setting?.slot1 || {
     slotNumber: 1,
-    type: 'LOCAL',
-    provider: 'OLLAMA',
-    location: 'SAME_PC',
+    type: 'CLOUD',
+    provider: 'DEEPSEEK',
+    location: 'EXTERNAL_IP',
     routingMode: 'SERVER_DIRECT',
-    endpointUrl: 'http://127.0.0.1:11434',
-    model: 'exaone3.5:7.8b',
-    timeoutSeconds: AI_TASK_CONFIG.TIMEOUTS.SELF_HOSTED_SECONDS,
+    endpointUrl: 'https://api.deepseek.com/chat/completions',
+    model: 'deepseek-chat',
+    authType: 'API_KEY',
+    timeoutSeconds: AI_TASK_CONFIG.TIMEOUTS.CLOUD_SECONDS,
   };
 
   const slot2Config: AiSlotConfig = setting?.slot2 || {
@@ -204,6 +205,18 @@ export async function handleProcessAiTask(
         if (sec.slot_number === 2) slot2Secret = sec.secret_value;
       }
     }
+  }
+
+  // 2-1. 미등록 시 환경변수 fallback
+  try {
+    if (!slot1Secret && slot1Config.provider === 'DEEPSEEK') {
+      slot1Secret = (typeof Deno !== 'undefined' ? Deno.env.get('DEEPSEEK_API_KEY') : (globalThis as any).process?.env?.DEEPSEEK_API_KEY);
+    }
+    if (!slot2Secret && slot2Config.provider === 'DEEPSEEK') {
+      slot2Secret = (typeof Deno !== 'undefined' ? Deno.env.get('DEEPSEEK_API_KEY') : (globalThis as any).process?.env?.DEEPSEEK_API_KEY);
+    }
+  } catch {
+    // ignore
   }
 
   // 3. 서킷 브레이커 상태 조회

@@ -77,10 +77,39 @@ export async function handleGetAiSettings(workspaceId: string, actorId: string, 
 
   let finalSetting = setting
   if (!finalSetting) {
-    // 최초 기본 설정 생성
+    // 최초 기본 설정 생성 (1번 슬롯: DeepSeek)
+    const defaultSlot1 = {
+      slotNumber: 1,
+      type: 'CLOUD',
+      provider: 'DEEPSEEK',
+      location: 'EXTERNAL_IP',
+      routingMode: 'SERVER_DIRECT',
+      endpointUrl: 'https://api.deepseek.com/chat/completions',
+      model: 'deepseek-chat',
+      authType: 'API_KEY',
+      timeoutSeconds: 30,
+    }
+    const defaultSlot2 = {
+      slotNumber: 2,
+      type: 'CLOUD',
+      provider: 'OPENAI',
+      location: 'EXTERNAL_IP',
+      routingMode: 'SERVER_DIRECT',
+      endpointUrl: 'https://api.openai.com/v1/chat/completions',
+      model: 'gpt-4o-mini',
+      authType: 'API_KEY',
+      timeoutSeconds: 15,
+    }
     const { data: created, error: createErr } = await admin
       .from('ai_settings')
-      .insert({ scope: 'GLOBAL', version: 1, applied_version: 1, is_draft: false })
+      .insert({
+        scope: 'GLOBAL',
+        version: 1,
+        applied_version: 1,
+        is_draft: false,
+        slot1: defaultSlot1,
+        slot2: defaultSlot2,
+      })
       .select('*')
       .single()
 
@@ -99,6 +128,24 @@ export async function handleGetAiSettings(workspaceId: string, actorId: string, 
   const secretMap = new Map<number, { masked: string; type?: string }>()
   for (const s of secrets || []) {
     secretMap.set(s.slot_number, { masked: s.masked_value, type: s.secret_type })
+  }
+
+  // 환경변수에 DEEPSEEK_API_KEY가 있고 slot 1에 키가 없으면 자동 등록
+  try {
+    const envDeepseek = typeof Deno !== 'undefined' ? Deno.env.get('DEEPSEEK_API_KEY') : (globalThis as any).process?.env?.DEEPSEEK_API_KEY
+    if (envDeepseek && !secretMap.has(1)) {
+      await admin.from('ai_secrets').upsert({
+        setting_id: finalSetting.id,
+        slot_number: 1,
+        secret_type: 'API_KEY',
+        secret_value: envDeepseek,
+        masked_value: maskSecretValue(envDeepseek),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'setting_id,slot_number' })
+      secretMap.set(1, { masked: maskSecretValue(envDeepseek), type: 'API_KEY' })
+    }
+  } catch (secErr) {
+    console.warn('[aiSettings] auto-register env secret failed:', secErr)
   }
 
   return successResponse({
