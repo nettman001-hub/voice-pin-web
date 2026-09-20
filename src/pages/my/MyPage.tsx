@@ -123,23 +123,8 @@ export const MyPage: React.FC = () => {
         </p>
       </div>
 
-      {isRemoteAuth && (
-        <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3">
-          <div className="flex items-start gap-3"><div className="rounded-2xl bg-cyan-50 p-2.5"><Smartphone className="w-5 h-5 text-cyan-700" /></div><div><h3 className="text-sm font-black text-slate-900">voicecapSMS 휴대폰 연결</h3><p className="mt-1 text-[11px] text-slate-500">휴대폰 앱에서 이 코드만 입력하면 이 스토어에 연결됩니다. 코드는 10분 뒤 자동으로 만료되며 한 번만 사용할 수 있습니다.</p></div></div>
-          {pairing ? <div className="rounded-2xl border border-cyan-200 bg-cyan-50 p-4 text-center"><p className="text-[11px] font-bold text-cyan-800">휴대폰 앱의 ‘기기 연결 코드’에 입력하세요</p><code className="mt-2 block select-all text-2xl font-black tracking-[0.2em] text-slate-900">{pairing.code}</code><p className="mt-2 text-[10px] text-cyan-700">만료: {new Date(pairing.expiresAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</p></div> : <button type="button" onClick={() => void createPairingCode()} disabled={pairingBusy} className="w-full rounded-xl bg-cyan-600 px-4 py-3 text-xs font-bold text-white disabled:opacity-50">{pairingBusy ? '연결 코드 생성 중…' : '휴대폰 연결 코드 만들기'}</button>}
-          {pairing && <button type="button" onClick={() => void createPairingCode()} disabled={pairingBusy} className="w-full rounded-xl border border-cyan-200 bg-white px-4 py-2.5 text-xs font-bold text-cyan-700 disabled:opacity-50">새 코드 만들기</button>}
-        </div>
-      )}
-
-      {toastMsg && (
-        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center space-x-2 animate-in fade-in">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-          <span>{toastMsg}</span>
-        </div>
-      )}
-
-      {/* 실제 판매 시연 데모보기 카드 */}
-      <div className="bg-gradient-to-br from-purple-50/80 via-indigo-50/50 to-white border-2 border-purple-200 rounded-3xl p-4 sm:p-6 shadow-xs space-y-3">
+      {/* 실제 판매 시연 데모보기 카드 (최상단 강조) */}
+      <div className="bg-gradient-to-br from-purple-50/80 via-indigo-50/50 to-white border-2 border-purple-300 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start space-x-3">
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center flex-shrink-0 shadow-sm shadow-purple-500/30">
@@ -164,14 +149,29 @@ export const MyPage: React.FC = () => {
         <div className="pt-1">
           <Link
             to="/live?demo=start"
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-brand-600 hover:brightness-110 text-white text-xs font-black shadow-md shadow-purple-600/20 active:scale-95 transition"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 py-3 px-6 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-brand-600 hover:brightness-110 text-white text-xs sm:text-sm font-black shadow-md shadow-purple-600/20 active:scale-95 transition"
           >
-            <Play className="w-3.5 h-3.5 fill-current" />
+            <Play className="w-4 h-4 fill-current" />
             <span>라이브 청취 홈에서 데모보기 시작하기</span>
-            <ArrowRight className="w-3.5 h-3.5" />
+            <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
       </div>
+
+      {isRemoteAuth && (
+        <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3">
+          <div className="flex items-start gap-3"><div className="rounded-2xl bg-cyan-50 p-2.5"><Smartphone className="w-5 h-5 text-cyan-700" /></div><div><h3 className="text-sm font-black text-slate-900">voicecapSMS 휴대폰 연결</h3><p className="mt-1 text-[11px] text-slate-500">휴대폰 앱에서 이 코드만 입력하면 이 스토어에 연결됩니다. 코드는 10분 뒤 자동으로 만료되며 한 번만 사용할 수 있습니다.</p></div></div>
+          {pairing ? <div className="rounded-2xl border border-cyan-200 bg-cyan-50 p-4 text-center"><p className="text-[11px] font-bold text-cyan-800">휴대폰 앱의 ‘기기 연결 코드’에 입력하세요</p><code className="mt-2 block select-all text-2xl font-black tracking-[0.2em] text-slate-900">{pairing.code}</code><p className="mt-2 text-[10px] text-cyan-700">만료: {new Date(pairing.expiresAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</p></div> : <button type="button" onClick={() => void createPairingCode()} disabled={pairingBusy} className="w-full rounded-xl bg-cyan-600 px-4 py-3 text-xs font-bold text-white disabled:opacity-50">{pairingBusy ? '연결 코드 생성 중…' : '휴대폰 연결 코드 만들기'}</button>}
+          {pairing && <button type="button" onClick={() => void createPairingCode()} disabled={pairingBusy} className="w-full rounded-xl border border-cyan-200 bg-white px-4 py-2.5 text-xs font-bold text-cyan-700 disabled:opacity-50">새 코드 만들기</button>}
+        </div>
+      )}
+
+      {toastMsg && (
+        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center space-x-2 animate-in fade-in">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+          <span>{toastMsg}</span>
+        </div>
+      )}
 
       {/* 라이브 방송 음성 입력 설정 */}
       <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4">
