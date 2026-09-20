@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLive } from '../../context/LiveContext';
 import { storageService } from '../../services/storageService';
@@ -14,7 +15,10 @@ import {
   Database,
   RefreshCw,
   MonitorSpeaker,
-  Mic2
+  Mic2,
+  Sparkles,
+  Play,
+  ArrowRight
 } from 'lucide-react';
 import { Smartphone } from 'lucide-react';
 import { devicePairingService, PairingCode } from '../../services/devicePairingService';
@@ -133,6 +137,41 @@ export const MyPage: React.FC = () => {
           <span>{toastMsg}</span>
         </div>
       )}
+
+      {/* 실제 판매 시연 데모보기 카드 */}
+      <div className="bg-gradient-to-br from-purple-50/80 via-indigo-50/50 to-white border-2 border-purple-200 rounded-3xl p-4 sm:p-6 shadow-xs space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start space-x-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center flex-shrink-0 shadow-sm shadow-purple-500/30">
+              <Sparkles className="w-5 h-5 text-amber-300" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-sm sm:text-base font-black text-slate-900">
+                  라이브 판매 시연 데모보기
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 text-[10px] font-bold border border-purple-200">
+                  실제 방송 체험
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                실제 라이브 방송 상황처럼 <strong>실시간 오디오 파형, 틱톡 댓글 유입, AI 호스트 음성 전사, 주문 자동 적재 및 실시간 음성 정정</strong>을 라이브 청취 홈에서 바로 시연해 볼 수 있습니다.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="pt-1">
+          <Link
+            to="/live?demo=start"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-brand-600 hover:brightness-110 text-white text-xs font-black shadow-md shadow-purple-600/20 active:scale-95 transition"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>라이브 청취 홈에서 데모보기 시작하기</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+      </div>
 
       {/* 라이브 방송 음성 입력 설정 */}
       <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4">

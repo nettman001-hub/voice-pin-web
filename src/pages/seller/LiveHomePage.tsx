@@ -26,7 +26,8 @@ import {
   FileSpreadsheet,
   ShoppingBag,
   RefreshCw,
-  Bot
+  Bot,
+  Settings
 } from 'lucide-react';
 import { COMMENT_HELPER_DOWNLOAD_URL } from '../../types/comment';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
@@ -35,6 +36,11 @@ import { formatMultiSaleAmount } from '../../services/salesExtractor';
 import { areNicknamesSimilar } from '../../services/nicknameMatcher';
 import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
 import { CommentHelperModal } from '../../components/helper/CommentHelperModal';
+import { SellerSettingsModal } from '../../components/seller/SellerSettingsModal';
+import { salesDemoService } from '../../services/salesDemoService';
+import { CommentRecord } from '../../types/comment';
+import { SaleRecord, SttTranscriptLog } from '../../types/live';
+import { MatchedRuleItem } from '../../context/LiveContext';
 
 const SILENCE_WARNING_DELAY_MS = 5 * 60 * 1000;
 const SILENCE_STOP_COUNTDOWN_SECONDS = 20;
@@ -89,22 +95,92 @@ export const LiveHomePage: React.FC = () => {
   const [showNoPermissionModal, setShowNoPermissionModal] = useState<boolean>(false);
   const [silenceCountdown, setSilenceCountdown] = useState<number | null>(null);
   const [showHelperModal, setShowHelperModal] = useState<boolean>(false);
+  const [showSellerSettingsModal, setShowSellerSettingsModal] = useState<boolean>(false);
   const [showSessionChoice, setShowSessionChoice] = useState(false);
   const [isSessionStarting, setIsSessionStarting] = useState(false);
   const [isSalesRefreshing, setIsSalesRefreshing] = useState(false);
+
+  // 실제 판매 시연 데모 상태
+  const [isDemoActive, setIsDemoActive] = useState<boolean>(false);
+  const [demoElapsedSeconds, setDemoElapsedSeconds] = useState<number>(0);
+  const [demoWaveform, setDemoWaveform] = useState<Uint8Array>(() => new Uint8Array(128));
+  const [demoAudioLevel, setDemoAudioLevel] = useState<number>(0);
+  const [demoComments, setDemoComments] = useState<CommentRecord[]>([]);
+  const [demoTranscriptLogs, setDemoTranscriptLogs] = useState<SttTranscriptLog[]>([]);
+  const [demoInterimTranscript, setDemoInterimTranscript] = useState<string>('');
+  const [demoMatchedRuleItem, setDemoMatchedRuleItem] = useState<MatchedRuleItem | null>(null);
+  const [demoSales, setDemoSales] = useState<SaleRecord[]>([]);
+  const [demoSalesCount, setDemoSalesCount] = useState<number>(0);
+  const [demoTotalAmount, setDemoTotalAmount] = useState<number>(0);
+
   const selectedSttApiKey = sttProvider === 'SONIOX' ? sonioxApiKey : deepgramApiKey;
   const selectedSttName = sttProvider === 'SONIOX' ? 'Soniox v5' : 'Deepgram Nova-3';
   const isAllowedByAdmin = Boolean(user?.allowAdminSttKey);
   const canUseAdminKey = isAdmin || isAllowedByAdmin;
   const hasAdminSttKey = Boolean(selectedSttApiKey);
   const [keyInput, setKeyInput] = useState<string>(selectedSttApiKey || '');
-  const [audioSourceMode] = useState<'TAB_AUDIO' | 'MIC'>(() => storageService.getAudioSourceMode());
+  const [audioSourceMode, setAudioSourceMode] = useState<'TAB_AUDIO' | 'MIC'>(() => storageService.getAudioSourceMode());
+  const handleAudioSourceModeChange = (mode: 'TAB_AUDIO' | 'MIC') => {
+    storageService.setAudioSourceMode(mode);
+    setAudioSourceMode(mode);
+  };
   const commentFeedRef = React.useRef<HTMLDivElement | null>(null);
   const silenceWarningTimerRef = React.useRef<number | null>(null);
 
   const latestCaptionId = liveTranscriptFlow[liveTranscriptFlow.length - 1]?.id
     || transcriptLogs[0]?.id
     || '';
+
+  // 실제 판매 데모 시작 / 데모 중지 토글
+  const handleToggleDemo = () => {
+    if (isDemoActive) {
+      salesDemoService.stop();
+      setIsDemoActive(false);
+      setDemoElapsedSeconds(0);
+      return;
+    }
+
+    if (isListening) {
+      stopListening();
+      stopCommentCapture();
+    }
+
+    setIsDemoActive(true);
+    setDemoElapsedSeconds(0);
+    salesDemoService.start({
+      onWaveform: (level, wave) => {
+        setDemoAudioLevel(Math.round(level * 100));
+        setDemoWaveform(wave);
+      },
+      onComment: () => {},
+      onCommentsBatch: (comments) => setDemoComments(comments),
+      onTranscriptInterim: (text) => setDemoInterimTranscript(text),
+      onTranscriptFinal: (log) => setDemoTranscriptLogs((prev) => [log, ...prev].slice(0, 300)),
+      onTranscriptReset: (logs) => setDemoTranscriptLogs(logs),
+      onMatchedRule: (item) => setDemoMatchedRuleItem(item),
+      onSalesUpdate: (updatedSales) => setDemoSales(updatedSales),
+      onTotalsUpdate: (count, amount) => {
+        setDemoSalesCount(count);
+        setDemoTotalAmount(amount);
+      },
+      onStatusChange: (running, seconds) => {
+        setIsDemoActive(running);
+        setDemoElapsedSeconds(seconds);
+      }
+    });
+  };
+
+  React.useEffect(() => {
+    return () => {
+      salesDemoService.stop();
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.search.includes('demo=start')) {
+      handleToggleDemo();
+    }
+  }, []);
 
   // 청취 시작 또는 마지막 자막 생성 후 5분 동안 새 자막이 없으면 자동 중지 경고를 연다.
   React.useEffect(() => {
@@ -169,15 +245,15 @@ export const LiveHomePage: React.FC = () => {
     .filter((s) => s.status !== '보류')
     .reduce((sum, item) => sum + item.amount, 0);
 
-  const effectiveAudioLevel = audioLevel;
-  const effectiveWaveform = waveform;
-  const effectiveComments = liveComments;
-  const effectiveTranscriptLogs = transcriptLogs;
-  const effectiveInterimTranscript = currentInterimTranscript;
-  const effectiveMatchedRuleItem = lastMatchedRuleItem;
-  const effectiveSessionSales = displayedSessionSales;
-  const effectiveSalesCount = currentSessionSales.length;
-  const effectiveTotalAmount = todayTotalAmount;
+  const effectiveAudioLevel = isDemoActive ? demoAudioLevel : audioLevel;
+  const effectiveWaveform = isDemoActive ? demoWaveform : waveform;
+  const effectiveComments = isDemoActive ? demoComments : liveComments;
+  const effectiveTranscriptLogs = isDemoActive ? demoTranscriptLogs : transcriptLogs;
+  const effectiveInterimTranscript = isDemoActive ? demoInterimTranscript : currentInterimTranscript;
+  const effectiveMatchedRuleItem = isDemoActive ? demoMatchedRuleItem : lastMatchedRuleItem;
+  const effectiveSessionSales = isDemoActive ? demoSales : displayedSessionSales;
+  const effectiveSalesCount = isDemoActive ? demoSalesCount : currentSessionSales.length;
+  const effectiveTotalAmount = isDemoActive ? demoTotalAmount : todayTotalAmount;
 
   // 댓글 피드: 아래쪽이 최신글이 되도록 새 댓글이 오면 자동 스크롤한다.
   React.useEffect(() => {
@@ -292,7 +368,25 @@ export const LiveHomePage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
-            <label
+          {/* 판매자 설정 (실제 판매 데모 시작 & 설정) */}
+          <button
+            type="button"
+            onClick={() => setShowSellerSettingsModal(true)}
+            className={`h-8 px-2.5 rounded-lg text-[11px] font-bold border flex items-center justify-center gap-1.5 transition active:scale-95 ${
+              isDemoActive
+                ? 'bg-purple-100 text-purple-800 border-purple-300 ring-2 ring-purple-400/30'
+                : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+            }`}
+            title="판매자 설정 & 실제 판매 데모 시작"
+          >
+            <Settings className={`w-3.5 h-3.5 ${isDemoActive ? 'text-purple-600 animate-spin' : 'text-slate-500'}`} />
+            <span className="hidden sm:inline">판매자 설정</span>
+            {isDemoActive && (
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-600 animate-ping" />
+            )}
+          </button>
+
+          <label
             className={`h-8 px-2 rounded-lg text-[11px] font-bold border flex items-center justify-center gap-1.5 cursor-pointer transition select-none ${
                 isCommentCaptureActive
                   ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
@@ -337,6 +431,39 @@ export const LiveHomePage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* 영업 시연용 실시간 데모 배너 */}
+      {isDemoActive && (
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-brand-600 text-white shadow-md shadow-purple-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center space-x-3">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center flex-shrink-0 animate-pulse">
+              <Sparkles className="w-5 h-5 text-amber-300" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="text-xs sm:text-sm font-black tracking-tight">
+                  🎬 영업 시연용 실시간 데모 가동 중
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-white/25 text-[10px] font-bold font-mono">
+                  {Math.floor(demoElapsedSeconds / 60).toString().padStart(2, '0')}:{(demoElapsedSeconds % 60).toString().padStart(2, '0')}
+                </span>
+              </div>
+              <p className="text-[11px] sm:text-xs text-purple-100 font-normal mt-0.5">
+                실제 방송 오디오 파형, 틱톡 실시간 댓글 유입, AI 호스트 음성 전사, 주문 자동 적재 및 실시간 음성 정정 시나리오를 시연 중입니다.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2 self-end sm:self-center flex-shrink-0">
+            <button
+              onClick={handleToggleDemo}
+              className="px-3 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 active:scale-95 text-white font-bold text-xs transition border border-white/30 flex items-center space-x-1.5 shadow-xs"
+            >
+              <Square className="w-3 h-3 fill-current" />
+              <span>데모 중지</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 방송 소리 청취 안내 배너 */}
       {isListening && (
@@ -769,7 +896,8 @@ export const LiveHomePage: React.FC = () => {
                   return (
                   <Link
                     key={sale.id}
-                    to={`/sales/${sale.id}`}
+                    to={isDemoActive ? '#' : `/sales/${sale.id}`}
+                    onClick={(e) => { if (isDemoActive) e.preventDefault(); }}
                     className={`block p-3 sm:p-3.5 rounded-xl border transition active:scale-[0.99] hover:shadow-sm ${
                       sale.status === '보류'
                         ? 'bg-amber-50/70 border-amber-200 text-amber-900'
@@ -1208,6 +1336,19 @@ export const LiveHomePage: React.FC = () => {
 
       {/* 댓글 도우미 및 장치 설정 모달 */}
       <CommentHelperModal isOpen={showHelperModal} onClose={() => setShowHelperModal(false)} />
+
+      {/* 판매자 설정 및 실제 판매 데모보기 모달 */}
+      <SellerSettingsModal
+        isOpen={showSellerSettingsModal}
+        onClose={() => setShowSellerSettingsModal(false)}
+        isDemoActive={isDemoActive}
+        demoElapsedSeconds={demoElapsedSeconds}
+        onToggleDemo={handleToggleDemo}
+        audioSourceMode={audioSourceMode}
+        onChangeAudioSourceMode={handleAudioSourceModeChange}
+        sttProvider={sttProvider}
+        sttMode={sttMode}
+      />
     </div>
   );
 };
