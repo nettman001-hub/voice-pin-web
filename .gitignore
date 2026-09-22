@@ -57,3 +57,8 @@ chrome-net-export-log.json
 *토큰*
 *token*
 *.secret
+
+# Local scratch & subprojects
+.tools/
+voicecap-win/
+voicecap_windows_app_plan.html
