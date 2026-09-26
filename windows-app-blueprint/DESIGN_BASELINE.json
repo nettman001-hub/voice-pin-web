@@ -1,0 +1,75 @@
+{
+  "design_version": "1.0",
+  "status": "core_design_complete_before_efficiency_research",
+  "completed_at_utc": "2026-09-26T07:41:55.609570+00:00",
+  "source_commit": "62a464924b3785255e5d68e8898b14c23f66f554",
+  "scope": "Design documents and sample prototype only; no new Windows application implementation.",
+  "excluded": "Post-baseline appendices, design review and validation report are deliberately not part of the frozen core.",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "74aa0c22b0e00e6d4a0038c26a6990eced41b8e7f9aa46163f493471ea5a3906",
+      "bytes": 16540
+    },
+    {
+      "path": "01_SCOPE_AND_FEATURE_PARITY.md",
+      "sha256": "8907afe450a89536cfc9a397764120505d1e3a370ebe8463adf2d7bea783fae2",
+      "bytes": 39100
+    },
+    {
+      "path": "02_ARCHITECTURE_AND_HELPER_INTEGRATION.md",
+      "sha256": "8350098588ef032114e6d34aacd3090d5d550fda71f73360a5b5070b4bd267a9",
+      "bytes": 38056
+    },
+    {
+      "path": "03_DATA_API_SYNC.md",
+      "sha256": "7653c40a8a19705e59749a7f51f1555eb053bb1a0eecc2b68dcc698dfc84b611",
+      "bytes": 46285
+    },
+    {
+      "path": "04_UI_UX_DESIGN_SYSTEM.md",
+      "sha256": "83bbe08fba83952f0f7c584b36ad7bcf4f9b6366576488503424490182410e7b",
+      "bytes": 22600
+    },
+    {
+      "path": "05_SCREEN_SPECIFICATIONS.md",
+      "sha256": "a9ad33ed2ba0a5ee40f47ade592f8e243aa7a420ed2a252e59e41a32d5d54f25",
+      "bytes": 32467
+    },
+    {
+      "path": "06_IMPLEMENTATION_AND_TEST_PLAN.md",
+      "sha256": "674c259da2ce6bcacea2652f11b96fbadab0e0b7a722f766e505c6dce81c8fed",
+      "bytes": 46795
+    },
+    {
+      "path": "07_BUILD_RELEASE_AND_HANDOVER.md",
+      "sha256": "a12307e3713c8563d2cc8388fc2550eed9ba95bb984bce07aef129a37cad2bd6",
+      "bytes": 21166
+    },
+    {
+      "path": "prototype/app.js",
+      "sha256": "3664a5099553fef4524ad449be19417d326c354ec6da69284582fda8e732ac86",
+      "bytes": 28476
+    },
+    {
+      "path": "prototype/index.html",
+      "sha256": "c6b393b866f2d26ac1b7322cfc4d9c3a1e1df4863076c941a2895654fc45983e",
+      "bytes": 16046
+    },
+    {
+      "path": "prototype/README.md",
+      "sha256": "f9502b41df0aa8f514315ffdaeed2a159818dd97db61d6647fcc18c9e4bb8ef7",
+      "bytes": 2311
+    },
+    {
+      "path": "prototype/styles.css",
+      "sha256": "9b87d228fcc075ca042337a11a69b92d5d1b1733e61d7a97135fa2b35328ac46",
+      "bytes": 39255
+    },
+    {
+      "path": "tools/validate_design.py",
+      "sha256": "55b9a4138a56fee3645c361d19a39ff7d0edb9c110873edf8d21ed3b97c801cb",
+      "bytes": 4586
+    }
+  ]
+}
