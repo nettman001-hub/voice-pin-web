@@ -246,42 +246,42 @@ export const SalesListPage: React.FC = () => {
   };
 
   return (
-    <div className="p-3.5 sm:p-6 max-w-6xl mx-auto space-y-4 sm:space-y-6">
+    <div className="p-2.5 sm:p-4 max-w-7xl mx-auto space-y-2.5 sm:space-y-3">
       {/* 헤더 & 상단 액션 */}
-      <div className="bg-white border border-slate-200 p-4 sm:p-6 rounded-3xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200 px-3 py-2 sm:px-4 sm:py-2.5 rounded-2xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
         <div>
           <div className="flex items-center space-x-2">
-            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">판매 내역 목록</h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 text-[10px] sm:text-xs font-bold border border-brand-200">
+            <h1 className="text-sm sm:text-base font-black text-slate-900 tracking-tight">판매 내역 목록</h1>
+            <span className="px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 text-[10px] font-bold border border-brand-200">
               회차별 묶음
             </span>
           </div>
-          <p className="text-[11px] sm:text-xs text-slate-500 mt-1">
+          <p className="text-[10px] sm:text-[11px] text-slate-500 mt-0.5">
             방송 회차별로 판매 내역을 확인하고, 동일 구매자의 중복 주문을 하나로 합산하여 정산합니다.
           </p>
         </div>
 
-        <div className="grid grid-cols-2 sm:flex items-center gap-2 sm:space-x-3 w-full sm:w-auto">
+        <div className="flex items-center gap-1.5 w-full sm:w-auto">
           <Link
             to="/sales/review"
-            className="px-3.5 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold flex items-center justify-center space-x-1.5 transition active:scale-95 text-center"
+            className="h-8 px-2.5 sm:px-3 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold flex items-center justify-center space-x-1 transition active:scale-95 text-center flex-1 sm:flex-initial"
           >
-            <CheckSquare className="w-4 h-4 text-amber-600 flex-shrink-0" />
+            <CheckSquare className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
             <span>일괄 확인</span>
           </Link>
           <button
             onClick={handleExportCurrentView}
-            className="px-3.5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center justify-center space-x-1.5 transition active:scale-95 text-center"
+            className="h-8 px-2.5 sm:px-3 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-xs flex items-center justify-center space-x-1 transition active:scale-95 text-center flex-1 sm:flex-initial"
           >
-            <Download className="w-4 h-4 flex-shrink-0" />
+            <Download className="w-3.5 h-3.5 flex-shrink-0" />
             <span>CSV 저장</span>
           </button>
         </div>
       </div>
 
       {/* 회차 선택 탭 & 회차 요약 카드 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
-        <div className="flex items-center gap-3 pb-2 border-b border-slate-100">
+      <div className="bg-white border border-slate-200 rounded-2xl p-2.5 sm:p-3 shadow-sm space-y-2">
+        <div className="flex items-center gap-3 pb-1.5 border-b border-slate-100">
           <label htmlFor="sales-session-filter" className="text-xs font-bold text-slate-700 flex items-center flex-shrink-0">
             <Layers className="w-3.5 h-3.5 mr-1.5 text-brand-600" /> 회차 선택:
           </label>
@@ -289,7 +289,7 @@ export const SalesListPage: React.FC = () => {
             id="sales-session-filter"
             value={sessionFilter}
             onChange={(event) => handleSessionFilterChange(event.target.value)}
-            className="min-w-0 flex-1 max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
+            className="min-w-0 flex-1 max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
           >
             {availableSessions.map((session) => {
               const isLatest = session.id === latestSessionId;
@@ -304,43 +304,43 @@ export const SalesListPage: React.FC = () => {
           </select>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 pt-1">
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200">
-            <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">선택 회차 총 매출액</span>
-            <div className="text-lg sm:text-xl font-black text-brand-600 mt-1 truncate">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 pt-0.5">
+          <div className="p-2 sm:p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] text-slate-500 font-medium">선택 회차 총 매출액</span>
+            <div className="text-base sm:text-lg font-black text-brand-600 mt-0.5 truncate">
               {currentSessionSummary.totalAmount.toLocaleString()}{' '}
-              <span className="text-xs font-normal text-slate-500">원</span>
+              <span className="text-[10px] font-normal text-slate-500">원</span>
             </div>
           </div>
 
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200">
-            <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">고유 구매자 수</span>
-            <div className="text-lg sm:text-xl font-black text-purple-700 mt-1">
+          <div className="p-2 sm:p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] text-slate-500 font-medium">고유 구매자 수</span>
+            <div className="text-base sm:text-lg font-black text-purple-700 mt-0.5">
               {currentSessionSummary.uniqueBuyerCount}{' '}
-              <span className="text-xs font-normal text-slate-500">명</span>
+              <span className="text-[10px] font-normal text-slate-500">명</span>
             </div>
           </div>
 
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200">
-            <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">총 주문 건수</span>
-            <div className="text-lg sm:text-xl font-black text-slate-900 mt-1">
+          <div className="p-2 sm:p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] text-slate-500 font-medium">총 주문 건수</span>
+            <div className="text-base sm:text-lg font-black text-slate-900 mt-0.5">
               {currentSessionSummary.totalCount}{' '}
-              <span className="text-xs font-normal text-slate-500">건</span>
+              <span className="text-[10px] font-normal text-slate-500">건</span>
             </div>
           </div>
 
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200">
-            <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">보류 건수</span>
-            <div className="text-lg sm:text-xl font-black text-amber-600 mt-1">
+          <div className="p-2 sm:p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] text-slate-500 font-medium">보류 건수</span>
+            <div className="text-base sm:text-lg font-black text-amber-600 mt-0.5">
               {currentSessionSummary.pendingCount}{' '}
-              <span className="text-xs font-normal text-slate-500">건</span>
+              <span className="text-[10px] font-normal text-slate-500">건</span>
             </div>
           </div>
         </div>
       </div>
 
       {/* 필터 & 뷰 모드 전환 바 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
+      <div className="bg-white border border-slate-200 rounded-2xl p-2.5 sm:p-3 shadow-sm space-y-2">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           <div className="grid grid-cols-2 sm:flex items-center gap-1.5 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
             <button

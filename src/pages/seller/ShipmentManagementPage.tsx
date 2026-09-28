@@ -109,14 +109,14 @@ export const ShipmentManagementPage: React.FC = () => {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5 p-3.5 sm:p-6">
-      <header className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-        <h1 className="flex items-center gap-2 text-xl font-black text-slate-900 sm:text-2xl"><Truck className="h-6 w-6 text-brand-600" /> 택배발송 관리</h1>
-        <p className="mt-1 text-xs text-slate-500">확인된 구매정보의 배송지를 바탕으로 포장, 운송장, 발송 문자, 배송완료까지 관리합니다.</p>
+    <div className="mx-auto max-w-7xl space-y-2.5 sm:space-y-3 p-2.5 sm:p-4">
+      <header className="rounded-2xl border border-slate-200 bg-white px-3 py-2 sm:px-4 sm:py-2.5 shadow-sm">
+        <h1 className="flex items-center gap-1.5 text-sm sm:text-base font-black text-slate-900"><Truck className="h-4 w-4 sm:h-5 sm:w-5 text-brand-600" /> 택배발송 관리</h1>
+        <p className="mt-0.5 text-[10px] sm:text-[11px] text-slate-500">확인된 구매정보의 배송지를 바탕으로 포장, 운송장, 발송 문자, 배송완료까지 관리합니다.</p>
       </header>
 
       {/* 방송 회차 선택 바 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 shadow-sm">
+      <div className="bg-white border border-slate-200 rounded-2xl p-2.5 sm:p-3 shadow-sm">
         <div className="flex items-center gap-3">
           <label htmlFor="shipment-session-filter" className="text-xs font-bold text-slate-700 flex items-center flex-shrink-0">
             <Layers className="w-3.5 h-3.5 mr-1.5 text-brand-600" /> 회차 선택:
@@ -125,7 +125,7 @@ export const ShipmentManagementPage: React.FC = () => {
             id="shipment-session-filter"
             value={sessionFilter}
             onChange={(e) => handleSessionFilterChange(e.target.value)}
-            className="min-w-0 flex-1 max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
+            className="min-w-0 flex-1 max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
           >
             {availableSessions.map((session) => {
               const isLatest = session.id === latestSessionId;
@@ -141,33 +141,33 @@ export const ShipmentManagementPage: React.FC = () => {
         </div>
       </div>
 
-      {feedback && <div role="status" className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-xs font-bold text-cyan-800">{feedback}</div>}
+      {feedback && <div role="status" className="rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-bold text-cyan-800">{feedback}</div>}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {(['READY', 'PACKED', 'SHIPPED', 'DELIVERED'] as ShipmentStatus[]).map((status) => (
-          <div key={status} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div key={status} className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-xs">
             <div className="text-[10px] text-slate-500">{shipmentLabels[status]}</div>
-            <strong className="mt-1 block text-xl text-slate-900">{filteredShipments.filter((item) => item.status === status).length}</strong>
+            <strong className="mt-0.5 block text-base sm:text-lg font-black text-slate-900">{filteredShipments.filter((item) => item.status === status).length}</strong>
           </div>
         ))}
       </div>
 
-      <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-        <div className="mb-3 flex items-center justify-between gap-3">
+      <section className="rounded-2xl border border-slate-200 bg-white p-2.5 sm:p-3 shadow-sm">
+        <div className="mb-2 flex items-center justify-between gap-2">
           <div>
-            <h2 className="text-sm font-black text-slate-900">판매내역에서 발송 업무 만들기 ({candidates.length}건)</h2>
+            <h2 className="text-xs sm:text-sm font-black text-slate-900">판매내역에서 발송 업무 만들기 ({candidates.length}건)</h2>
             <p className="text-[10px] text-slate-500">확인완료 건을 우선 표시하며 주소가 없으면 생성 후 직접 입력할 수 있습니다.</p>
           </div>
-          <button onClick={handleCreate} className="flex flex-shrink-0 items-center gap-1 rounded-xl bg-brand-600 px-3 py-2 text-xs font-bold text-white"><Box className="h-4 w-4" /> 선택 등록</button>
+          <button onClick={handleCreate} className="h-8 flex flex-shrink-0 items-center gap-1 rounded-lg bg-brand-600 hover:bg-brand-500 px-2.5 text-xs font-bold text-white transition active:scale-95"><Box className="h-3.5 w-3.5" /> 선택 등록</button>
         </div>
-        <div className="max-h-64 space-y-2 overflow-y-auto">
+        <div className="max-h-60 space-y-1.5 overflow-y-auto">
           {candidates.map((sale) => {
             const claim = getClaimForSales([sale.id]);
             return (
-              <label key={sale.id} className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 p-3 hover:bg-slate-50 transition">
+              <label key={sale.id} className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-slate-200 p-2.5 hover:bg-slate-50 transition">
                 <input type="checkbox" checked={selectedIds.includes(sale.id)} onChange={() => setSelectedIds((prev) => prev.includes(sale.id) ? prev.filter((id) => id !== sale.id) : [...prev, sale.id])} />
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-900">
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs font-bold text-slate-900">
                     {sale.buyerNickname}
                     <span className={`rounded-full px-2 py-0.5 text-[9px] ${isVerified([sale.id]) ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}>{isVerified([sale.id]) ? '확인완료' : '미확인'}</span>
                     <span className="text-[10px] text-slate-400 font-normal">회차: {formatSessionDisplay(sale.sessionId, { sessions: cloudSessions, recognizedAt: sale.recognizedAt })}</span>
@@ -177,17 +177,17 @@ export const ShipmentManagementPage: React.FC = () => {
               </label>
             );
           })}
-          {candidates.length === 0 && <p className="p-5 text-center text-xs text-slate-400">선택된 회차에 추가할 판매내역이 없습니다.</p>}
+          {candidates.length === 0 && <p className="p-4 text-center text-xs text-slate-400">선택된 회차에 추가할 판매내역이 없습니다.</p>}
         </div>
       </section>
 
-      <section className="space-y-3">
-        {filteredShipments.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-xs text-slate-400">선택된 회차에 등록된 택배 발송 업무가 없습니다.</div> : filteredShipments.map((shipment) => (
-          <article key={shipment.id} className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-2"><PackageCheck className="h-5 w-5 text-brand-600" /><strong className="text-sm text-slate-900">{shipment.recipientName}</strong><span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-700">{shipmentLabels[shipment.status]}</span></div><div className="flex gap-1">{shipment.saleIds.map((id) => <Link key={id} to={`/sales/${id}`} className="rounded-lg bg-slate-50 px-2 py-1 text-[10px] font-bold text-slate-600">#{id}</Link>)}</div></div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              <input value={shipment.recipientName} onChange={(e) => patchShipment(shipment, { recipientName: e.target.value })} aria-label="수령인" placeholder="수령인" className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs" />
-              <input value={shipment.phoneNumber} onChange={(e) => patchShipment(shipment, { phoneNumber: e.target.value })} aria-label="연락처" placeholder="연락처" className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs" />
+      <section className="space-y-2">
+        {filteredShipments.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-xs text-slate-400">선택된 회차에 등록된 택배 발송 업무가 없습니다.</div> : filteredShipments.map((shipment) => (
+          <article key={shipment.id} className="rounded-2xl border border-slate-200 bg-white p-2.5 sm:p-3 shadow-sm">
+            <div className="mb-2 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-1.5"><PackageCheck className="h-4 w-4 text-brand-600" /><strong className="text-xs sm:text-sm text-slate-900">{shipment.recipientName}</strong><span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-700">{shipmentLabels[shipment.status]}</span></div><div className="flex gap-1">{shipment.saleIds.map((id) => <Link key={id} to={`/sales/${id}`} className="rounded-lg bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-600">#{id}</Link>)}</div></div>
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-4">
+              <input value={shipment.recipientName} onChange={(e) => patchShipment(shipment, { recipientName: e.target.value })} aria-label="수령인" placeholder="수령인" className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs" />
+              <input value={shipment.phoneNumber} onChange={(e) => patchShipment(shipment, { phoneNumber: e.target.value })} aria-label="연락처" placeholder="연락처" className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs" />
               <select value={shipment.carrier} onChange={(e) => patchShipment(shipment, { carrier: e.target.value })} aria-label="택배사" className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs"><option>CJ대한통운</option><option>우체국택배</option><option>한진택배</option><option>롯데택배</option><option>로젠택배</option></select>
               <input value={shipment.trackingNumber} onChange={(e) => patchShipment(shipment, { trackingNumber: e.target.value })} aria-label="운송장 번호" placeholder="운송장 번호" className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs" />
               <input value={shipment.address} onChange={(e) => patchShipment(shipment, { address: e.target.value })} aria-label="배송주소" placeholder="배송주소" className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs sm:col-span-2" />

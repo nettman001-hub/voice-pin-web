@@ -252,32 +252,32 @@ export const CommentRecordsPage: React.FC = () => {
   };
 
   return (
-    <div className="p-3.5 sm:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6">
+    <div className="p-2.5 sm:p-4 max-w-7xl mx-auto space-y-2.5 sm:space-y-3">
       {/* 헤더 */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border border-slate-200 p-4 sm:p-6 rounded-3xl shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white border border-slate-200 px-3 py-2 sm:px-4 sm:py-2.5 rounded-2xl shadow-sm">
         <div>
-          <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center space-x-2">
-            <MessageSquareText className="w-6 h-6 text-cyan-600" />
+          <h1 className="text-sm sm:text-base font-black text-slate-900 tracking-tight flex items-center space-x-1.5">
+            <MessageSquareText className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-600" />
             <span>댓글 캡처 기록</span>
           </h1>
-          <p className="text-[11px] sm:text-xs text-slate-500 mt-1">
+          <p className="text-[10px] sm:text-[11px] text-slate-500 mt-0.5">
             클라우드에 적재된 댓글을 회차/기간별로 확인하고 삭제·다운로드할 수 있습니다. (아래쪽이 최신 댓글)
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold border ${
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <span className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${
             isRunning
               ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
               : isActive
               ? 'bg-amber-50 text-amber-800 border-amber-200'
               : 'bg-slate-100 text-slate-600 border-slate-200'
           }`}>
-            {isRunning ? '자동 캡처 동작 중' : isActive ? '대기 중 (청취 필요)' : '자동 캡처 중지됨'}
+            {isRunning ? '자동 캡처 중' : isActive ? '대기 중' : '중지됨'}
           </span>
           <Link
             to="/recognition-rules"
-            className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 flex items-center space-x-1 transition"
+            className="h-8 px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 flex items-center space-x-1 transition"
           >
             <span>설정</span>
             <ArrowRight className="w-3.5 h-3.5" />
@@ -286,7 +286,7 @@ export const CommentRecordsPage: React.FC = () => {
             type="button"
             onClick={() => void refresh()}
             disabled={isLoading}
-            className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-xs font-bold border border-slate-200 flex items-center space-x-1 transition"
+            className="h-8 px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-xs font-bold border border-slate-200 flex items-center space-x-1 transition"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             <span>새로고침</span>
@@ -295,13 +295,13 @@ export const CommentRecordsPage: React.FC = () => {
       </div>
 
       {/* 필터 바 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
-        <div className="space-y-1">
-          <label className="font-bold text-slate-600">방송 회차</label>
+      <div className="bg-white border border-slate-200 rounded-2xl p-2.5 sm:p-3 shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 text-xs">
+        <div className="space-y-0.5">
+          <label className="text-[11px] font-bold text-slate-600">방송 회차</label>
           <select
             value={sessionFilter}
             onChange={(e) => handleSessionFilterChange(e.target.value)}
-            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:border-brand-500 font-medium"
+            className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:border-brand-500 font-medium text-xs"
           >
             {sessionOptions.map((session) => {
               const isLatest = session.id === latestSessionId;
@@ -316,47 +316,47 @@ export const CommentRecordsPage: React.FC = () => {
           </select>
         </div>
 
-        <div className="space-y-1">
-          <label className="font-bold text-slate-600">시작일</label>
+        <div className="space-y-0.5">
+          <label className="text-[11px] font-bold text-slate-600">시작일</label>
           <input
             type="date"
             value={fromDate}
             onChange={(e) => setFromDate(e.target.value)}
-            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
+            className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 text-xs"
           />
         </div>
 
-        <div className="space-y-1">
-          <label className="font-bold text-slate-600">종료일</label>
+        <div className="space-y-0.5">
+          <label className="text-[11px] font-bold text-slate-600">종료일</label>
           <input
             type="date"
             value={toDate}
             onChange={(e) => setToDate(e.target.value)}
-            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
+            className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 text-xs"
           />
         </div>
 
-        <div className="space-y-1">
-          <label className="font-bold text-slate-600">검색 (닉네임/내용)</label>
+        <div className="space-y-0.5">
+          <label className="text-[11px] font-bold text-slate-600">검색 (닉네임/내용)</label>
           <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               placeholder="검색어"
-              className="w-full pl-8 pr-3 py-2.5 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
+              className="w-full pl-7 pr-2.5 py-1.5 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 text-xs"
             />
           </div>
         </div>
 
-        <div className="space-y-1">
-          <label className="font-bold text-slate-600">다운로드</label>
+        <div className="space-y-0.5">
+          <label className="text-[11px] font-bold text-slate-600">다운로드</label>
           <div className="flex gap-1.5">
             <button
               onClick={handleDownloadTxt}
               disabled={filteredRecords.length === 0}
-              className="flex-1 px-2 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white font-bold flex items-center justify-center space-x-1 transition active:scale-95"
+              className="flex-1 h-8 px-2 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center space-x-1 transition active:scale-95"
               title="댓글 목록을 텍스트(.txt) 파일로 다운로드"
             >
               <FileText className="w-3.5 h-3.5" />
@@ -365,7 +365,7 @@ export const CommentRecordsPage: React.FC = () => {
             <button
               onClick={handleDownloadCsv}
               disabled={filteredRecords.length === 0}
-              className="flex-1 px-2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold flex items-center justify-center space-x-1 transition active:scale-95"
+              className="flex-1 h-8 px-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center space-x-1 transition active:scale-95"
               title="댓글 목록을 엑셀(.csv) 파일로 다운로드"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
@@ -376,7 +376,7 @@ export const CommentRecordsPage: React.FC = () => {
       </div>
 
       {/* 목록 카드 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3">
+      <div className="bg-white border border-slate-200 rounded-2xl p-2.5 sm:p-3 shadow-sm space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-xs sm:text-sm font-bold text-slate-900">
             캡처된 댓글 <span className="text-brand-600">{filteredRecords.length}</span>건
