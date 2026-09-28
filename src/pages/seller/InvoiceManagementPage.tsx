@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Check, CreditCard, FileText, RefreshCw, Send, Smartphone, WalletCards } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Check, CreditCard, FileText, RefreshCw, Send, Smartphone, WalletCards, Layers } from 'lucide-react';
 import { useSales } from '../../context/SalesContext';
 import { useCommerce } from '../../context/CommerceContext';
 import { useAuth } from '../../context/AuthContext';
+import { productSalesApi } from '../../services/productSalesApi';
+import { LiveSession } from '../../types/productSales';
+import { formatSessionDisplay } from '../../utils/sessionFormatter';
 
 const invoiceStatusLabel = {
   DRAFT: '작성중',
@@ -15,6 +18,8 @@ const invoiceStatusLabel = {
 
 export const InvoiceManagementPage: React.FC = () => {
   const { sales } = useSales();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
   const {
     invoices,
     payments,
@@ -35,10 +40,78 @@ export const InvoiceManagementPage: React.FC = () => {
   const [feedback, setFeedback] = useState('');
   const { isRemoteAuth } = useAuth();
 
+  useEffect(() => {
+    productSalesApi.listSessions()
+      .then((data) => setCloudSessions(data.sessions))
+      .catch((err) => console.warn('[InvoiceManagement] 세션 목록 로드 실패:', err));
+  }, []);
+
+  // 고유 방송 회차 세션 목록 추출
+  const availableSessions = useMemo(() => {
+    const sessionsById = new Map(cloudSessions.map((session) => [session.id, session]));
+    sales.forEach((sale) => {
+      if (sale.sessionId && !sessionsById.has(sale.sessionId)) {
+        sessionsById.set(sale.sessionId, {
+          id: sale.sessionId,
+          displayCode: formatSessionDisplay(sale.sessionId, { recognizedAt: sale.recognizedAt }),
+          status: 'ENDED',
+          revision: 1,
+          startedAt: sale.recognizedAt,
+        });
+      }
+    });
+    return Array.from(sessionsById.values()).sort((left, right) => (
+      new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime()
+    ));
+  }, [cloudSessions, sales]);
+
+  // 가장 최근 회차 세션 (진행 중인 세션 우선, 없으면 시작시각 기준 가장 최근 회차)
+  const latestSessionId = useMemo(() => {
+    if (availableSessions.length === 0) return null;
+    const active = availableSessions.find((s) => s.status === 'ACTIVE');
+    return active ? active.id : availableSessions[0].id;
+  }, [availableSessions]);
+
+  // URL 파라미터가 없으면 최근 회차를 기본값으로 지정
+  const sessionFilter = useMemo(() => {
+    const raw = searchParams.get('session');
+    if (raw !== null) {
+      return raw;
+    }
+    return latestSessionId || 'ALL';
+  }, [searchParams, latestSessionId]);
+
+  // 초기 진입 시 URL에 session 파라미터가 없으면 최근 회차로 URL 동기화 (기본값 최근회차)
+  useEffect(() => {
+    if (searchParams.get('session') === null && latestSessionId) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set('session', latestSessionId);
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [searchParams, latestSessionId, setSearchParams]);
+
+  const handleSessionFilterChange = (nextSessionId: string) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('session', nextSessionId);
+    setSearchParams(nextParams);
+  };
+
   const selectableSales = useMemo(
-    () => sales.filter((sale) => sale.status !== '보류' && !isPaid([sale.id])),
-    [sales, isPaid]
+    () => sales.filter((sale) => {
+      if (sale.status === '보류' || isPaid([sale.id])) return false;
+      if (sessionFilter !== 'ALL' && sale.sessionId !== sessionFilter) return false;
+      return true;
+    }),
+    [sales, isPaid, sessionFilter]
   );
+
+  const filteredInvoices = useMemo(() => {
+    if (sessionFilter === 'ALL') return invoices;
+    const saleSessionMap = new Map(sales.map((s) => [s.id, s.sessionId]));
+    return invoices.filter((inv) =>
+      inv.saleIds.some((id) => saleSessionMap.get(id) === sessionFilter)
+    );
+  }, [invoices, sales, sessionFilter]);
   const selectedSales = selectableSales.filter((sale) => selectedIds.includes(sale.id));
   const selectedNickname = selectedSales[0]?.buyerNickname || '';
   const selectedAmount = selectedSales.reduce((sum, sale) => sum + sale.amount, 0);
@@ -110,17 +183,44 @@ export const InvoiceManagementPage: React.FC = () => {
         </div>
       </section>
 
+      {/* 방송 회차 선택 바 */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Layers className="w-4 h-4 text-brand-600" />
+          <span className="text-xs font-bold text-slate-800">방송 회차 선택:</span>
+        </div>
+        <select
+          value={sessionFilter}
+          onChange={(e) => handleSessionFilterChange(e.target.value)}
+          className="min-w-0 flex-1 sm:max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
+        >
+          {availableSessions.map((session) => {
+            const isLatest = session.id === latestSessionId;
+            return (
+              <option key={session.id} value={session.id}>
+                {session.displayCode}
+                {session.status === 'ACTIVE' ? ' · 진행 중 (실시간)' : isLatest ? ' (최근 회차)' : ''}
+              </option>
+            );
+          })}
+          <option value="ALL">전체 회차 (모든 방송 합산)</option>
+        </select>
+      </div>
+
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.05fr_.95fr]">
         <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <h2 className="mb-3 text-sm font-black text-slate-900">1. 청구할 판매내역 선택</h2>
           <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
-            {selectableSales.length === 0 ? <p className="rounded-xl bg-slate-50 p-5 text-center text-xs text-slate-400">청구 가능한 판매내역이 없습니다.</p> : selectableSales.map((sale) => {
+            {selectableSales.length === 0 ? <p className="rounded-xl bg-slate-50 p-5 text-center text-xs text-slate-400">선택된 회차에 청구 가능한 판매내역이 없습니다.</p> : selectableSales.map((sale) => {
               const selected = selectedIds.includes(sale.id);
               const locked = selectedIds.length > 0 && !selected && selectedNickname !== sale.buyerNickname;
               return (
                 <label key={sale.id} className={`flex items-center gap-3 rounded-xl border p-3 ${selected ? 'border-brand-400 bg-brand-50' : 'border-slate-200'} ${locked ? 'cursor-not-allowed opacity-45' : 'cursor-pointer'}`}>
                   <input type="checkbox" checked={selected} disabled={locked} onChange={() => toggleSale(sale.id)} className="h-4 w-4" />
-                  <div className="min-w-0 flex-1"><div className="truncate text-xs font-bold text-slate-900">{sale.buyerNickname} · {sale.productName || '상품명 미입력'}</div><div className="mt-0.5 text-[10px] text-slate-500">{sale.sessionId}</div></div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-xs font-bold text-slate-900">{sale.buyerNickname} · {sale.productName || '상품명 미입력'}</div>
+                    <div className="mt-0.5 text-[10px] text-slate-500">회차: {formatSessionDisplay(sale.sessionId, { sessions: cloudSessions, recognizedAt: sale.recognizedAt })}</div>
+                  </div>
                   <strong className="text-sm text-brand-700">{sale.amount.toLocaleString()}원</strong>
                 </label>
               );
@@ -143,9 +243,9 @@ export const InvoiceManagementPage: React.FC = () => {
       </div>
 
       <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-        <h2 className="mb-4 flex items-center gap-1.5 text-sm font-black text-slate-900"><Smartphone className="h-4 w-4 text-cyan-600" /> 생성된 정산서 ({invoices.length})</h2>
+        <h2 className="mb-4 flex items-center gap-1.5 text-sm font-black text-slate-900"><Smartphone className="h-4 w-4 text-cyan-600" /> 생성된 정산서 ({filteredInvoices.length})</h2>
         <div className="space-y-3">
-          {invoices.length === 0 ? <p className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-xs text-slate-400">아직 생성된 정산서가 없습니다.</p> : invoices.map((invoice) => (
+          {filteredInvoices.length === 0 ? <p className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-xs text-slate-400">선택된 회차에 생성된 정산서가 없습니다.</p> : filteredInvoices.map((invoice) => (
             <article key={invoice.id} className="rounded-2xl border border-slate-200 p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div><div className="flex items-center gap-2"><strong className="text-sm text-slate-900">{invoice.customerNickname}</strong><span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{invoiceStatusLabel[invoice.status]}</span></div><p className="mt-1 text-[10px] text-slate-500">{invoice.phoneNumber} · 기한 {invoice.dueDate}</p></div>

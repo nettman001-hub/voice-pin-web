@@ -1,9 +1,12 @@
-import React, { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Box, CheckCircle2, PackageCheck, Send, Truck } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Box, CheckCircle2, PackageCheck, Send, Truck, Layers } from 'lucide-react';
 import { useSales } from '../../context/SalesContext';
 import { useCommerce } from '../../context/CommerceContext';
 import { Shipment, ShipmentStatus } from '../../types/commerce';
+import { productSalesApi } from '../../services/productSalesApi';
+import { LiveSession } from '../../types/productSales';
+import { formatSessionDisplay } from '../../utils/sessionFormatter';
 
 const shipmentLabels: Record<ShipmentStatus, string> = {
   READY: '발송대기', PACKED: '포장완료', SHIPPED: '발송완료', DELIVERED: '배송완료', CANCELLED: '취소'
@@ -11,14 +14,85 @@ const shipmentLabels: Record<ShipmentStatus, string> = {
 
 export const ShipmentManagementPage: React.FC = () => {
   const { sales } = useSales();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
   const { shipments, isVerified, getClaimForSales, createShipmentsForSales, updateShipment, sendShippingNotice } = useCommerce();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [feedback, setFeedback] = useState('');
+
+  useEffect(() => {
+    productSalesApi.listSessions()
+      .then((data) => setCloudSessions(data.sessions))
+      .catch((err) => console.warn('[ShipmentManagement] 세션 목록 로드 실패:', err));
+  }, []);
+
+  // 고유 방송 회차 세션 목록 추출
+  const availableSessions = useMemo(() => {
+    const sessionsById = new Map(cloudSessions.map((session) => [session.id, session]));
+    sales.forEach((sale) => {
+      if (sale.sessionId && !sessionsById.has(sale.sessionId)) {
+        sessionsById.set(sale.sessionId, {
+          id: sale.sessionId,
+          displayCode: formatSessionDisplay(sale.sessionId, { recognizedAt: sale.recognizedAt }),
+          status: 'ENDED',
+          revision: 1,
+          startedAt: sale.recognizedAt,
+        });
+      }
+    });
+    return Array.from(sessionsById.values()).sort((left, right) => (
+      new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime()
+    ));
+  }, [cloudSessions, sales]);
+
+  // 가장 최근 회차 세션 (진행 중인 세션 우선, 없으면 시작시각 기준 가장 최근 회차)
+  const latestSessionId = useMemo(() => {
+    if (availableSessions.length === 0) return null;
+    const active = availableSessions.find((s) => s.status === 'ACTIVE');
+    return active ? active.id : availableSessions[0].id;
+  }, [availableSessions]);
+
+  // URL 파라미터가 없으면 최근 회차를 기본값으로 지정
+  const sessionFilter = useMemo(() => {
+    const raw = searchParams.get('session');
+    if (raw !== null) {
+      return raw;
+    }
+    return latestSessionId || 'ALL';
+  }, [searchParams, latestSessionId]);
+
+  // 초기 진입 시 URL에 session 파라미터가 없으면 최근 회차로 URL 동기화 (기본값 최근회차)
+  useEffect(() => {
+    if (searchParams.get('session') === null && latestSessionId) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set('session', latestSessionId);
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [searchParams, latestSessionId, setSearchParams]);
+
+  const handleSessionFilterChange = (nextSessionId: string) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('session', nextSessionId);
+    setSearchParams(nextParams);
+  };
+
   const shippedSaleIds = new Set(shipments.flatMap((shipment) => shipment.saleIds));
   const candidates = useMemo(
-    () => sales.filter((sale) => sale.status !== '보류' && !shippedSaleIds.has(sale.id)),
-    [sales, shipments]
+    () => sales.filter((sale) => {
+      if (sale.status === '보류' || shippedSaleIds.has(sale.id)) return false;
+      if (sessionFilter !== 'ALL' && sale.sessionId !== sessionFilter) return false;
+      return true;
+    }),
+    [sales, shippedSaleIds, sessionFilter]
   );
+
+  const filteredShipments = useMemo(() => {
+    if (sessionFilter === 'ALL') return shipments;
+    const saleSessionMap = new Map(sales.map((s) => [s.id, s.sessionId]));
+    return shipments.filter((shipment) =>
+      shipment.saleIds.some((id) => saleSessionMap.get(id) === sessionFilter)
+    );
+  }, [shipments, sales, sessionFilter]);
 
   const handleCreate = () => {
     if (selectedIds.length === 0) return setFeedback('택배 업무로 등록할 판매내역을 선택해 주세요.');
@@ -41,27 +115,72 @@ export const ShipmentManagementPage: React.FC = () => {
         <p className="mt-1 text-xs text-slate-500">확인된 구매정보의 배송지를 바탕으로 포장, 운송장, 발송 문자, 배송완료까지 관리합니다.</p>
       </header>
 
+      {/* 방송 회차 선택 바 */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Layers className="w-4 h-4 text-brand-600" />
+          <span className="text-xs font-bold text-slate-800">방송 회차 선택:</span>
+        </div>
+        <select
+          value={sessionFilter}
+          onChange={(e) => handleSessionFilterChange(e.target.value)}
+          className="min-w-0 flex-1 sm:max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
+        >
+          {availableSessions.map((session) => {
+            const isLatest = session.id === latestSessionId;
+            return (
+              <option key={session.id} value={session.id}>
+                {session.displayCode}
+                {session.status === 'ACTIVE' ? ' · 진행 중 (실시간)' : isLatest ? ' (최근 회차)' : ''}
+              </option>
+            );
+          })}
+          <option value="ALL">전체 회차 (모든 방송 합산)</option>
+        </select>
+      </div>
+
       {feedback && <div role="status" className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-xs font-bold text-cyan-800">{feedback}</div>}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {(['READY', 'PACKED', 'SHIPPED', 'DELIVERED'] as ShipmentStatus[]).map((status) => (
-          <div key={status} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"><div className="text-[10px] text-slate-500">{shipmentLabels[status]}</div><strong className="mt-1 block text-xl text-slate-900">{shipments.filter((item) => item.status === status).length}</strong></div>
+          <div key={status} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="text-[10px] text-slate-500">{shipmentLabels[status]}</div>
+            <strong className="mt-1 block text-xl text-slate-900">{filteredShipments.filter((item) => item.status === status).length}</strong>
+          </div>
         ))}
       </div>
 
       <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-        <div className="mb-3 flex items-center justify-between gap-3"><div><h2 className="text-sm font-black text-slate-900">판매내역에서 발송 업무 만들기</h2><p className="text-[10px] text-slate-500">확인완료 건을 우선 표시하며 주소가 없으면 생성 후 직접 입력할 수 있습니다.</p></div><button onClick={handleCreate} className="flex flex-shrink-0 items-center gap-1 rounded-xl bg-brand-600 px-3 py-2 text-xs font-bold text-white"><Box className="h-4 w-4" /> 선택 등록</button></div>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-black text-slate-900">판매내역에서 발송 업무 만들기 ({candidates.length}건)</h2>
+            <p className="text-[10px] text-slate-500">확인완료 건을 우선 표시하며 주소가 없으면 생성 후 직접 입력할 수 있습니다.</p>
+          </div>
+          <button onClick={handleCreate} className="flex flex-shrink-0 items-center gap-1 rounded-xl bg-brand-600 px-3 py-2 text-xs font-bold text-white"><Box className="h-4 w-4" /> 선택 등록</button>
+        </div>
         <div className="max-h-64 space-y-2 overflow-y-auto">
           {candidates.map((sale) => {
             const claim = getClaimForSales([sale.id]);
-            return <label key={sale.id} className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 p-3"><input type="checkbox" checked={selectedIds.includes(sale.id)} onChange={() => setSelectedIds((prev) => prev.includes(sale.id) ? prev.filter((id) => id !== sale.id) : [...prev, sale.id])} /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-900">{sale.buyerNickname}<span className={`rounded-full px-2 py-0.5 text-[9px] ${isVerified([sale.id]) ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}>{isVerified([sale.id]) ? '확인완료' : '미확인'}</span></div><p className="truncate text-[10px] text-slate-500">{claim?.address || '배송주소 미수신'} · {sale.amount.toLocaleString()}원</p></div></label>;
+            return (
+              <label key={sale.id} className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 p-3 hover:bg-slate-50 transition">
+                <input type="checkbox" checked={selectedIds.includes(sale.id)} onChange={() => setSelectedIds((prev) => prev.includes(sale.id) ? prev.filter((id) => id !== sale.id) : [...prev, sale.id])} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-900">
+                    {sale.buyerNickname}
+                    <span className={`rounded-full px-2 py-0.5 text-[9px] ${isVerified([sale.id]) ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}>{isVerified([sale.id]) ? '확인완료' : '미확인'}</span>
+                    <span className="text-[10px] text-slate-400 font-normal">회차: {formatSessionDisplay(sale.sessionId, { sessions: cloudSessions, recognizedAt: sale.recognizedAt })}</span>
+                  </div>
+                  <p className="truncate text-[10px] text-slate-500">{claim?.address || '배송주소 미수신'} · {sale.amount.toLocaleString()}원</p>
+                </div>
+              </label>
+            );
           })}
-          {candidates.length === 0 && <p className="p-5 text-center text-xs text-slate-400">추가할 판매내역이 없습니다.</p>}
+          {candidates.length === 0 && <p className="p-5 text-center text-xs text-slate-400">선택된 회차에 추가할 판매내역이 없습니다.</p>}
         </div>
       </section>
 
       <section className="space-y-3">
-        {shipments.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-xs text-slate-400">등록된 택배 발송 업무가 없습니다.</div> : shipments.map((shipment) => (
+        {filteredShipments.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-xs text-slate-400">선택된 회차에 등록된 택배 발송 업무가 없습니다.</div> : filteredShipments.map((shipment) => (
           <article key={shipment.id} className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-2"><PackageCheck className="h-5 w-5 text-brand-600" /><strong className="text-sm text-slate-900">{shipment.recipientName}</strong><span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-700">{shipmentLabels[shipment.status]}</span></div><div className="flex gap-1">{shipment.saleIds.map((id) => <Link key={id} to={`/sales/${id}`} className="rounded-lg bg-slate-50 px-2 py-1 text-[10px] font-bold text-slate-600">#{id}</Link>)}</div></div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Calendar, ChevronDown, ChevronRight, Download, Layers } from 'lucide-react';
 import { useSales } from '../../context/SalesContext';
 import { productSalesApi } from '../../services/productSalesApi';
@@ -16,6 +17,7 @@ interface SettlementGroup {
 
 export const SettlementPage: React.FC = () => {
   const { sales, exportCsv } = useSales();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [groupMode, setGroupMode] = useState<GroupMode>('DATE');
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
   const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
@@ -26,7 +28,62 @@ export const SettlementPage: React.FC = () => {
       .catch((err) => console.warn('[Settlement] 세션 목록 로드 실패 (무시):', err));
   }, []);
 
-  const validSales = useMemo(() => sales.filter((sale) => sale.status !== '보류'), [sales]);
+  // 고유 방송 회차 세션 목록 추출
+  const availableSessions = useMemo(() => {
+    const sessionsById = new Map(cloudSessions.map((session) => [session.id, session]));
+    sales.forEach((sale) => {
+      if (sale.sessionId && !sessionsById.has(sale.sessionId)) {
+        sessionsById.set(sale.sessionId, {
+          id: sale.sessionId,
+          displayCode: formatSessionDisplay(sale.sessionId, { recognizedAt: sale.recognizedAt }),
+          status: 'ENDED',
+          revision: 1,
+          startedAt: sale.recognizedAt,
+        });
+      }
+    });
+    return Array.from(sessionsById.values()).sort((left, right) => (
+      new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime()
+    ));
+  }, [cloudSessions, sales]);
+
+  // 가장 최근 회차 세션 (진행 중인 세션 우선, 없으면 시작시각 기준 가장 최근 회차)
+  const latestSessionId = useMemo(() => {
+    if (availableSessions.length === 0) return null;
+    const active = availableSessions.find((s) => s.status === 'ACTIVE');
+    return active ? active.id : availableSessions[0].id;
+  }, [availableSessions]);
+
+  // URL 파라미터가 없으면 최근 회차를 기본값으로 지정
+  const sessionFilter = useMemo(() => {
+    const raw = searchParams.get('session');
+    if (raw !== null) {
+      return raw;
+    }
+    return latestSessionId || 'ALL';
+  }, [searchParams, latestSessionId]);
+
+  // 초기 진입 시 URL에 session 파라미터가 없으면 최근 회차로 URL 동기화 (기본값 최근회차)
+  useEffect(() => {
+    if (searchParams.get('session') === null && latestSessionId) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set('session', latestSessionId);
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [searchParams, latestSessionId, setSearchParams]);
+
+  const handleSessionFilterChange = (nextSessionId: string) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('session', nextSessionId);
+    setSearchParams(nextParams);
+  };
+
+  const filteredSalesBySession = useMemo(() => {
+    if (sessionFilter === 'ALL') return sales;
+    return sales.filter((s) => s.sessionId === sessionFilter);
+  }, [sales, sessionFilter]);
+
+  const validSales = useMemo(() => filteredSalesBySession.filter((sale) => sale.status !== '보류'), [filteredSalesBySession]);
   const groups = useMemo<SettlementGroup[]>(() => {
     const grouped = new Map<string, SettlementGroup>();
     validSales.forEach((sale) => {
@@ -48,7 +105,7 @@ export const SettlementPage: React.FC = () => {
 
   const totalRevenue = validSales.reduce((sum, sale) => sum + sale.amount, 0);
   const avgOrderPrice = validSales.length ? Math.round(totalRevenue / validSales.length) : 0;
-  const pendingCount = sales.filter((sale) => sale.status === '보류').length;
+  const pendingCount = filteredSalesBySession.filter((sale) => sale.status === '보류').length;
   const groupLabel = groupMode === 'DATE' ? '일자' : '회차';
 
   const toggleGroup = (key: string) => {
@@ -69,9 +126,36 @@ export const SettlementPage: React.FC = () => {
           </div>
           <p className="text-[11px] sm:text-xs text-slate-500 mt-1">일자별 또는 방송 회차별로 판매를 집계하고 엑셀용 CSV를 다운로드합니다.</p>
         </div>
-        <button onClick={() => exportCsv(validSales, `VoiceCAP_정산_전체_${Date.now()}.csv`)} className="w-full md:w-auto px-5 py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center justify-center gap-1.5 transition active:scale-95">
-          <Download className="w-4 h-4" /> 전체 판매 CSV 다운로드
+        <button
+          onClick={() => exportCsv(validSales, `VoiceCAP_정산_${sessionFilter}_${Date.now()}.csv`)}
+          className="w-full md:w-auto px-5 py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center justify-center gap-1.5 transition active:scale-95"
+        >
+          <Download className="w-4 h-4" /> {sessionFilter === 'ALL' ? '전체 판매 CSV 다운로드' : '선택 회차 CSV 다운로드'}
         </button>
+      </div>
+
+      {/* 방송 회차 선택 바 */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Layers className="w-4 h-4 text-brand-600" />
+          <span className="text-xs font-bold text-slate-800">정산 회차 선택:</span>
+        </div>
+        <select
+          value={sessionFilter}
+          onChange={(e) => handleSessionFilterChange(e.target.value)}
+          className="min-w-0 flex-1 sm:max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
+        >
+          {availableSessions.map((session) => {
+            const isLatest = session.id === latestSessionId;
+            return (
+              <option key={session.id} value={session.id}>
+                {session.displayCode}
+                {session.status === 'ACTIVE' ? ' · 진행 중 (실시간)' : isLatest ? ' (최근 회차)' : ''}
+              </option>
+            );
+          })}
+          <option value="ALL">전체 회차 (모든 방송 합산)</option>
+        </select>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
