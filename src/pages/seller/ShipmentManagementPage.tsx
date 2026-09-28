@@ -294,8 +294,25 @@ export const ShipmentManagementPage: React.FC = () => {
                   )}
                 </div>
 
-                <div className="flex items-center gap-1.5">
-                  <div className="flex gap-1">{shipment.saleIds.map((id) => <Link key={id} to={`/sales/${id}`} className="rounded-lg bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-600">#{id}</Link>)}</div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <div className="flex flex-wrap items-center gap-1">
+                    {shipment.saleIds.map((id) => {
+                      const sale = sales.find((s) => s.id === id);
+                      const sessionText = sale?.sessionId
+                        ? formatSessionDisplay(sale.sessionId, { sessions: cloudSessions, recognizedAt: sale.recognizedAt })
+                        : '회차 미확인';
+                      return (
+                        <Link
+                          key={id}
+                          to={`/sales/${id}`}
+                          className="rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-0.5 text-[10px] font-bold text-indigo-700 transition"
+                          title="판매 상세내역 보기"
+                        >
+                          회차: {sessionText}
+                        </Link>
+                      );
+                    })}
+                  </div>
                   {!isEditing && (
                     <button
                       type="button"

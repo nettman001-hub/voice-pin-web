@@ -256,8 +256,23 @@ export const InvoiceManagementPage: React.FC = () => {
                 <div><div className="flex items-center gap-2"><strong className="text-xs font-bold text-slate-900">{invoice.customerNickname}</strong><span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{invoiceStatusLabel[invoice.status]}</span></div><p className="mt-0.5 text-[10px] text-slate-500">{invoice.phoneNumber} · 기한 {invoice.dueDate}</p></div>
                 <strong className="text-sm font-black text-brand-700">{invoice.amount.toLocaleString()}원</strong>
               </div>
-              <div className="mt-2 flex flex-wrap justify-end gap-1.5">
-                {invoice.saleIds.map((id) => <Link key={id} to={`/sales/${id}`} className="rounded-lg bg-slate-50 px-2 py-1 text-[10px] font-bold text-slate-600">판매 #{id}</Link>)}
+              <div className="mt-2 flex flex-wrap items-center justify-end gap-1.5">
+                {invoice.saleIds.map((id) => {
+                  const sale = sales.find((s) => s.id === id);
+                  const sessionText = sale?.sessionId
+                    ? formatSessionDisplay(sale.sessionId, { sessions: cloudSessions, recognizedAt: sale.recognizedAt })
+                    : '회차 미확인';
+                  return (
+                    <Link
+                      key={id}
+                      to={`/sales/${id}`}
+                      className="rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-0.5 text-[10px] font-bold text-indigo-700 transition"
+                      title="판매 상세내역 보기"
+                    >
+                      회차: {sessionText}
+                    </Link>
+                  );
+                })}
                 {invoice.status === 'DRAFT' && <button onClick={() => void handleSend(invoice.id)} className="flex items-center gap-1 rounded-lg bg-cyan-600 px-2.5 py-1 text-[10px] font-bold text-white"><Send className="h-3 w-3" /> SMS 발송</button>}
                 {!['PAID', 'CANCELLED'].includes(invoice.status) && <button onClick={() => cancelInvoice(invoice.id)} className="rounded-lg bg-rose-50 px-2.5 py-1 text-[10px] font-bold text-rose-700">취소</button>}
               </div>
