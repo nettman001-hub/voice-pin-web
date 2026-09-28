@@ -15,12 +15,14 @@ import {
 import { useCommerce } from '../../context/CommerceContext';
 import { CustomerPurchaseClaim, MatchStatus } from '../../types/commerce';
 import { SaleRecord } from '../../types/live';
-import { formatSessionDisplay } from '../../utils/sessionFormatter';
+import { productSalesApi } from '../../services/productSalesApi';
+import { formatSessionDisplay, SessionInfoLike } from '../../utils/sessionFormatter';
 
 interface BuyerReconciliationPanelProps {
   buyerNickname: string;
   records: SaleRecord[];
   captureImageUrls: string[];
+  availableSessions?: SessionInfoLike[];
 }
 
 const matchLabels: Record<MatchStatus, { label: string; className: string }> = {
@@ -96,8 +98,22 @@ const ImageGallery: React.FC<{ urls: string[]; altPrefix: string; emptyText: str
 export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> = ({
   buyerNickname,
   records,
-  captureImageUrls
+  captureImageUrls,
+  availableSessions
 }) => {
+  const [internalSessions, setInternalSessions] = useState<SessionInfoLike[]>([]);
+
+  useEffect(() => {
+    if (!availableSessions || availableSessions.length === 0) {
+      productSalesApi.listSessions()
+        .then((data) => setInternalSessions(data.sessions))
+        .catch(() => {});
+    }
+  }, [availableSessions]);
+
+  const effectiveSessions = (availableSessions && availableSessions.length > 0)
+    ? availableSessions
+    : internalSessions;
   const {
     bridgeStatus,
     getClaimForSales,
@@ -170,7 +186,7 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
             <dt className="text-slate-500">구매자</dt><dd className="font-bold text-slate-900">{buyerNickname}</dd>
             <dt className="text-slate-500">상품</dt><dd className="font-semibold text-slate-800">{productNames.join(', ') || '상품명 미입력'}</dd>
             <dt className="text-slate-500">판매금액</dt><dd className="font-black text-brand-700">{totalAmount.toLocaleString()}원</dd>
-            <dt className="text-slate-500">방송회차</dt><dd className="font-semibold text-slate-800">{Array.from(new Set(records.map((record) => formatSessionDisplay(record.sessionId, { recognizedAt: record.recognizedAt })))).join(', ')}</dd>
+            <dt className="text-slate-500">방송회차</dt><dd className="font-semibold text-slate-800">{Array.from(new Set(records.map((record) => formatSessionDisplay(record.sessionId, { sessions: effectiveSessions, recognizedAt: record.recognizedAt })))).join(', ')}</dd>
           </dl>
           <ImageGallery urls={captureImageUrls} altPrefix={`${buyerNickname} 자동 판매 캡처`} emptyText="자동 판매정보에 연결된 캡처 이미지가 없습니다." />
         </section>

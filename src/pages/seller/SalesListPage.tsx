@@ -476,6 +476,7 @@ export const SalesListPage: React.FC = () => {
                           buyerNickname={buyer.buyerNickname}
                           records={buyer.records}
                           captureImageUrls={buyer.captureImageUrls}
+                          availableSessions={availableSessions}
                         />
 
                         <div className="text-[11px] font-bold text-slate-600 mb-2 flex items-center justify-between">
