@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useCommentCapture } from '../../context/CommentCaptureContext';
 import { productSalesApi } from '../../services/productSalesApi';
 import { CommentRecord } from '../../types/comment';
 import { LiveSession } from '../../types/productSales';
+import { formatSessionDisplay } from '../../utils/sessionFormatter';
 import {
   MessageSquareText,
   Trash2,
@@ -18,12 +19,12 @@ import {
 
 export const CommentRecordsPage: React.FC = () => {
   const { isActive, isRunning } = useCommentCapture();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [allRecords, setAllRecords] = useState<CommentRecord[]>([]);
   const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  // 필터 상태: 회차 + 기간
-  const [sessionFilter, setSessionFilter] = useState<string>('ALL');
+  // 필터 상태: 기간 + 검색어
   const [fromDate, setFromDate] = useState<string>('');
   const [toDate, setToDate] = useState<string>('');
   const [searchText, setSearchText] = useState<string>('');
@@ -62,6 +63,12 @@ export const CommentRecordsPage: React.FC = () => {
     const sessionsById = new Map(cloudSessions.map((session) => [session.id, session]));
     const firstCommentAtBySession = new Map<string, string>();
 
+    // 1) 클라우드 세션 목록 기본 등록 (댓글이 아직 없는 진행 중 회차 등도 포함)
+    cloudSessions.forEach((session) => {
+      firstCommentAtBySession.set(session.id, session.startedAt || new Date().toISOString());
+    });
+
+    // 2) 실제 댓글 기록에 있는 세션 등록
     allRecords.forEach((record) => {
       const current = firstCommentAtBySession.get(record.sessionId);
       if (!current || record.capturedAt < current) {
@@ -72,14 +79,14 @@ export const CommentRecordsPage: React.FC = () => {
     return Array.from(firstCommentAtBySession.entries())
       .map(([sessionId, firstCommentAt]) => {
         const session = sessionsById.get(sessionId);
-        const fallbackDate = new Date(firstCommentAt);
-        const fallbackLabel = Number.isNaN(fallbackDate.getTime())
-          ? '이전 방송 회차'
-          : `${fallbackDate.toLocaleDateString('ko-KR')} 방송 회차`;
+        const label = formatSessionDisplay(sessionId, {
+          sessions: cloudSessions,
+          recognizedAt: session?.startedAt || firstCommentAt
+        });
 
         return {
           id: sessionId,
-          label: session?.displayCode || fallbackLabel,
+          label,
           status: session?.status,
           startedAt: session?.startedAt || firstCommentAt,
         };
@@ -88,6 +95,37 @@ export const CommentRecordsPage: React.FC = () => {
         new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime()
       ));
   }, [allRecords, cloudSessions]);
+
+  // 가장 최근 회차 세션 (진행 중인 세션 우선, 없으면 시작시각 기준 가장 최근 회차)
+  const latestSessionId = useMemo(() => {
+    if (sessionOptions.length === 0) return null;
+    const active = sessionOptions.find((s) => s.status === 'ACTIVE');
+    return active ? active.id : sessionOptions[0].id;
+  }, [sessionOptions]);
+
+  // URL 파라미터가 없으면 최근 회차를 기본값으로 지정
+  const sessionFilter = useMemo(() => {
+    const raw = searchParams.get('session');
+    if (raw !== null) {
+      return raw;
+    }
+    return latestSessionId || 'ALL';
+  }, [searchParams, latestSessionId]);
+
+  // 초기 진입 시 URL에 session 파라미터가 없으면 최근 회차로 URL 동기화 (기본값 최근회차)
+  useEffect(() => {
+    if (searchParams.get('session') === null && latestSessionId) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set('session', latestSessionId);
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [searchParams, latestSessionId, setSearchParams]);
+
+  const handleSessionFilterChange = (nextSessionId: string) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('session', nextSessionId);
+    setSearchParams(nextParams);
+  };
 
   const sessionLabelById = useMemo(
     () => new Map(sessionOptions.map((session) => [session.id, session.label])),
@@ -262,15 +300,19 @@ export const CommentRecordsPage: React.FC = () => {
           <label className="font-bold text-slate-600">방송 회차</label>
           <select
             value={sessionFilter}
-            onChange={(e) => setSessionFilter(e.target.value)}
-            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:border-brand-500"
+            onChange={(e) => handleSessionFilterChange(e.target.value)}
+            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:border-brand-500 font-medium"
           >
-            <option value="ALL">전체 회차</option>
-            {sessionOptions.map((session) => (
-              <option key={session.id} value={session.id}>
-                {session.label}{session.status === 'ACTIVE' ? ' · 진행 중' : ''}
-              </option>
-            ))}
+            {sessionOptions.map((session) => {
+              const isLatest = session.id === latestSessionId;
+              return (
+                <option key={session.id} value={session.id}>
+                  {session.label}
+                  {session.status === 'ACTIVE' ? ' · 진행 중 (실시간)' : isLatest ? ' (최근 회차)' : ''}
+                </option>
+              );
+            })}
+            <option value="ALL">전체 회차 (모든 방송 합산)</option>
           </select>
         </div>
 
