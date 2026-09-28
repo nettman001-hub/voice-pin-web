@@ -3,10 +3,23 @@ import { TrainingSentence } from '../types/training';
 import { CommentCaptureConfig } from '../types/comment';
 import { SttMode, LocalSttModel } from '../types/stt';
 import { CommerceState, CustomerPurchaseClaim, PaymentReceipt, SettlementInvoice, Shipment, SmsMessage } from '../types/commerce';
-import { SaleRecord } from '../types/live';
+import { SaleRecord, SttTranscriptLog } from '../types/live';
 import { User } from '../types/auth';
 import { AdminSaleItem, SellerSttUsageSummary, SttUsageLogItem, SttUsageRecordPayload } from '../types/admin';
 import { isSupabaseConfigured, requireSupabase } from './supabaseClient';
+
+export interface CloudSessionTranscriptsPayload {
+  sessionId: string;
+  workspaceId: string;
+  transcriptCount: number;
+  savedAt: string;
+  logs: SttTranscriptLog[];
+}
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isValidUuid = (value: string | undefined | null): boolean => {
+  return typeof value === 'string' && UUID_REGEX.test(value.trim());
+};
 
 type Row = Record<string, any>;
 const signedImageCache = new Map<string, { url: string; expiresAt: number }>();
@@ -731,5 +744,52 @@ export const remoteWorkspaceService = {
   },
   async saveCaptureAreaConfig(workspaceId: string, config: CaptureAreaConfig): Promise<void> {
     await this.saveWorkspaceSettings(workspaceId, 'capture_area_config', config);
+  },
+
+  /**
+   * 방송 세션별 전체 발화 로그(전체 멘트 이력)를 Supabase 클라우드(workspace_settings)에 영구 저장합니다.
+   * 방송 종료 시 브라우저 로컬 저장소에서 1회 일괄 업로드됩니다.
+   */
+  async saveCloudSessionTranscripts(workspaceId: string, sessionId: string, logs: SttTranscriptLog[]): Promise<boolean> {
+    if (!isSupabaseConfigured || !isValidUuid(workspaceId) || !sessionId || !Array.isArray(logs) || logs.length === 0) {
+      return false;
+    }
+    const payload: CloudSessionTranscriptsPayload = {
+      sessionId,
+      workspaceId,
+      transcriptCount: logs.length,
+      savedAt: new Date().toISOString(),
+      logs,
+    };
+    try {
+      await this.saveWorkspaceSettings(workspaceId, `session_transcripts_${sessionId}`, payload);
+      return true;
+    } catch (err) {
+      console.warn(`[RemoteWorkspace] 세션 발화 로그 클라우드 저장 실패 (${sessionId}):`, err);
+      return false;
+    }
+  },
+
+  /**
+   * Supabase 클라우드에 백업된 방송 세션별 전체 발화 로그를 불러옵니다.
+   * 브라우저 캐시가 비어있거나 기기 변경 시 복원 용도로 활용됩니다.
+   */
+  async fetchCloudSessionTranscripts(workspaceId: string, sessionId: string): Promise<SttTranscriptLog[] | null> {
+    if (!isSupabaseConfigured || !isValidUuid(workspaceId) || !sessionId) {
+      return null;
+    }
+    try {
+      const payload = await this.fetchWorkspaceSettings<CloudSessionTranscriptsPayload>(
+        workspaceId,
+        `session_transcripts_${sessionId}`
+      );
+      if (payload && Array.isArray(payload.logs)) {
+        return payload.logs;
+      }
+      return null;
+    } catch (err) {
+      console.warn(`[RemoteWorkspace] 세션 발화 로그 클라우드 조회 실패 (${sessionId}):`, err);
+      return null;
+    }
   },
 };

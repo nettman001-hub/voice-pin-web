@@ -27,7 +27,8 @@ import {
   ShoppingBag,
   RefreshCw,
   Bot,
-  Settings
+  Settings,
+  Cloud
 } from 'lucide-react';
 import { COMMENT_HELPER_DOWNLOAD_URL } from '../../types/comment';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
@@ -70,7 +71,8 @@ export const LiveHomePage: React.FC = () => {
     setSttMode,
     startListening,
     stopListening,
-    injectTestMent
+    injectTestMent,
+    cloudSyncStatus
   } = useLive();
 
   const { user } = useAuth();
@@ -700,6 +702,18 @@ export const LiveHomePage: React.FC = () => {
                 <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
                   화면 {effectiveTranscriptLogs.length}건 / 오늘 누적 {totalSessionTranscriptCount || transcriptLogs.length}건
                 </span>
+                {cloudSyncStatus === 'saving' && (
+                  <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-full animate-pulse">
+                    <Cloud className="w-3 h-3 animate-spin" />
+                    <span>Supabase 저장 중...</span>
+                  </span>
+                )}
+                {cloudSyncStatus === 'saved' && (
+                  <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full" title="방송 발화 전체 로그가 Supabase 클라우드에 안전하게 영구 보관되었습니다.">
+                    <Cloud className="w-3 h-3 text-emerald-600" />
+                    <span>Supabase 보관됨</span>
+                  </span>
+                )}
               </div>
               <div className="flex items-center space-x-1.5">
                 <button

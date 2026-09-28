@@ -129,6 +129,8 @@ interface LiveContextType {
     requiredListeningGeneration?: number,
     targetSaleId?: string | null
   ) => Promise<string>;
+  cloudSyncStatus: 'idle' | 'saving' | 'saved' | 'error';
+  syncCurrentTranscriptsToCloud: (sessionIdOverride?: string) => Promise<boolean>;
 }
 
 const LiveContext = createContext<LiveContextType | undefined>(undefined);
@@ -250,6 +252,9 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     transcriptWorkspaceIdRef.current = workspaceId || user?.id || 'local';
   }, [user?.id, workspaceId]);
 
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const lastSavedCloudTranscriptCountRef = useRef<Map<string, number>>(new Map());
+
   const persistCurrentSessionTranscripts = useCallback(() => {
     if (transcriptPersistTimerRef.current !== null) {
       window.clearTimeout(transcriptPersistTimerRef.current);
@@ -259,6 +264,53 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const logs = sessionTranscriptsRef.current.get(sessionId) || allSessionTranscriptsRef.current;
     storageService.saveSessionTranscripts(transcriptWorkspaceIdRef.current, sessionId, logs);
   }, []);
+
+  /**
+   * 방송 세션의 전체 발화 로그(SttTranscriptLog[])를 Supabase 클라우드(workspace_settings)에 저장합니다.
+   * 방송 종료 시점이나 세션 전환 시점에 호출됩니다.
+   */
+  const syncSessionTranscriptsToCloud = useCallback(async (sessionIdOverride?: string): Promise<boolean> => {
+    const targetSessionId = sessionIdOverride || currentSessionIdRef.current;
+    if (!targetSessionId) return false;
+
+    const logs = sessionTranscriptsRef.current.get(targetSessionId) || allSessionTranscriptsRef.current;
+    if (!logs || logs.length === 0) {
+      return false;
+    }
+
+    // 이미 이 세션의 동일한 개수만큼 클라우드에 성공적으로 저장된 적이 있다면 중복 업로드 스킵
+    const lastSavedCount = lastSavedCloudTranscriptCountRef.current.get(targetSessionId) || 0;
+    if (lastSavedCount === logs.length) {
+      return true;
+    }
+
+    const targetWorkspaceId = workspaceId || user?.id;
+    if (!isSupabaseConfigured || !targetWorkspaceId) {
+      return false;
+    }
+
+    setCloudSyncStatus('saving');
+    try {
+      const success = await remoteWorkspaceService.saveCloudSessionTranscripts(
+        targetWorkspaceId,
+        targetSessionId,
+        logs
+      );
+      if (success) {
+        lastSavedCloudTranscriptCountRef.current.set(targetSessionId, logs.length);
+        setCloudSyncStatus('saved');
+        console.log(`[LiveContext] 방송 전체 발화 로그 Supabase 저장 완료 (${logs.length}건, 세션: ${targetSessionId})`);
+        return true;
+      } else {
+        setCloudSyncStatus('error');
+        return false;
+      }
+    } catch (err) {
+      console.warn('[LiveContext] 방송 전체 발화 로그 클라우드 저장 실패:', err);
+      setCloudSyncStatus('error');
+      return false;
+    }
+  }, [user?.id, workspaceId]);
 
   const scheduleTranscriptPersistence = useCallback(() => {
     if (transcriptPersistTimerRef.current !== null) {
@@ -271,7 +323,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => () => {
     persistCurrentSessionTranscripts();
-  }, [persistCurrentSessionTranscripts]);
+    void syncSessionTranscriptsToCloud();
+  }, [persistCurrentSessionTranscripts, syncSessionTranscriptsToCloud]);
 
   useEffect(() => {
     isListeningRef.current = isListening;
@@ -1497,6 +1550,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // 회차를 바꾸기 전에 직전 회차 전체 로그를 저장한다. 이어가기라면 같은 회차의
       // 저장 로그를 복원하고, 새 회차일 때만 화면과 다운로드 누적 기준을 비운다.
       persistCurrentSessionTranscripts();
+      const prevSessionId = currentSessionIdRef.current;
+      if (prevSessionId && !isSameSession) {
+        void syncSessionTranscriptsToCloud(prevSessionId);
+      }
+
       const restoredSessionLogs = sessionTranscriptsRef.current.get(newSessionId)
         || (isSameSession
           ? allSessionTranscriptsRef.current
@@ -1507,6 +1565,23 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCurrentSessionId(newSessionId);
       setTranscriptLogs([...restoredSessionLogs].reverse().slice(0, 300));
       setTotalSessionTranscriptCount(restoredSessionLogs.length);
+
+      // 만약 로컬에 로그가 비어있다면, 클라우드(Supabase)에 백업된 발화 로그가 있는지 비동기로 조회해 복원
+      if (restoredSessionLogs.length === 0 && isSupabaseConfigured && (workspaceId || user?.id)) {
+        const targetWs = workspaceId || user?.id || '';
+        void remoteWorkspaceService.fetchCloudSessionTranscripts(targetWs, newSessionId).then((cloudLogs) => {
+          if (cloudLogs && cloudLogs.length > 0 && currentSessionIdRef.current === newSessionId) {
+            sessionTranscriptsRef.current.set(newSessionId, cloudLogs);
+            allSessionTranscriptsRef.current = cloudLogs;
+            setTranscriptLogs([...cloudLogs].reverse().slice(0, 300));
+            setTotalSessionTranscriptCount(cloudLogs.length);
+            lastSavedCloudTranscriptCountRef.current.set(newSessionId, cloudLogs.length);
+            storageService.saveSessionTranscripts(transcriptWorkspaceIdRef.current, newSessionId, cloudLogs);
+            console.log(`[LiveContext] 클라우드(Supabase)로부터 세션 발화 로그 ${cloudLogs.length}건 복원 완료`);
+          }
+        });
+      }
+
       setSessionStartTime((previous) => isSameSession && previous ? previous : new Date().toISOString());
       if (!isSameSession) {
         setLiveTranscriptFlow([]);
@@ -1712,9 +1787,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // 라이브 청취 중지 (TAB_AUDIO는 파이프라인을 일시정지해 공유 연결을 유지한다)
+    // 라이브 청취 중지 (TAB_AUDIO는 파이프라인을 일시정지해 공유 연결을 유지한다)
   const stopListening = useCallback(() => {
     persistCurrentSessionTranscripts();
+    // 방송 종료 시 전체 멘트 이력을 Supabase 클라우드에 비동기 자동 저장
+    void syncSessionTranscriptsToCloud();
     listeningGenerationRef.current += 1;
     activeListeningUserIdRef.current = null;
     isListeningRef.current = false;
@@ -1759,7 +1836,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsVoiceEditing(false);
     setEditingFieldInfo(null);
     if (editTimeoutRef.current) clearTimeout(editTimeoutRef.current);
-  }, [persistCurrentSessionTranscripts]);
+  }, [persistCurrentSessionTranscripts, syncSessionTranscriptsToCloud]);
 
   const disconnectScreenShare = useCallback(() => {
     stopListening();
@@ -1864,7 +1941,9 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         stopListening,
         disconnectScreenShare,
         injectTestMent,
-        captureCurrentScreen
+        captureCurrentScreen,
+        cloudSyncStatus,
+        syncCurrentTranscriptsToCloud: syncSessionTranscriptsToCloud
       }}
     >
       {children}
