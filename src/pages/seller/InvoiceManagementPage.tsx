@@ -168,48 +168,66 @@ export const InvoiceManagementPage: React.FC = () => {
             <h1 className="flex items-center gap-2 text-xl font-black text-slate-900 sm:text-2xl"><FileText className="h-6 w-6 text-brand-600" /> 정산서 관리 & 발송</h1>
             <p className="mt-1 text-xs text-slate-500">판매내역으로 청구 정산서를 만들고 voicecapSMS 앱을 통해 고객에게 발송합니다.</p>
           </div>
-          <button onClick={() => void syncBridge()} className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700">
+          <button onClick={() => void syncBridge()} className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700 transition">
             <RefreshCw className="h-4 w-4" /> 입금·문자 동기화
           </button>
         </div>
       </header>
 
-      {feedback && <div role="status" className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-xs font-bold text-cyan-800">{feedback}</div>}
-
-      <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div><h2 className="text-sm font-black text-slate-900">voicecapSMS 연결 상태</h2><p className="mt-1 text-[11px] text-slate-500">서버 주소와 API 키를 직접 넣지 않습니다. 마이페이지에서 만든 1회용 연결 코드로 휴대폰을 연결합니다.</p></div>
-          <span className={`w-fit rounded-full px-2.5 py-1 text-[10px] font-bold ${bridgeStatus === 'ONLINE' ? 'bg-emerald-50 text-emerald-700' : bridgeStatus === 'CHECKING' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>{isRemoteAuth ? bridgeMessage : '수파베이스 설정 후 사용 가능'}</span>
+      {/* 최상단 방송 회차 선택 바 */}
+      <div className="rounded-3xl border-2 border-brand-200 bg-white p-4 sm:p-5 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-brand-50 text-brand-600 border border-brand-100 flex-shrink-0">
+              <Layers className="w-5 h-5" />
+            </div>
+            <div>
+              <label htmlFor="invoice-session-filter" className="text-sm font-black text-slate-900 flex items-center gap-2">
+                <span>방송 회차 선택</span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  {sessionFilter === 'ALL' ? '전체 회차' : '회차별 보기'}
+                </span>
+              </label>
+              <p className="text-xs text-slate-500 font-normal mt-0.5">
+                정산서를 작성하고 발송할 방송 회차를 선택하세요. (기본값: 최근 회차)
+              </p>
+            </div>
+          </div>
+          <select
+            id="invoice-session-filter"
+            value={sessionFilter}
+            onChange={(e) => handleSessionFilterChange(e.target.value)}
+            className="w-full sm:w-auto min-w-[280px] sm:min-w-[340px] rounded-xl border-2 border-brand-400 bg-slate-50 hover:bg-white px-3.5 py-2.5 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/20 transition shadow-xs cursor-pointer"
+          >
+            {availableSessions.map((session) => {
+              const isLatest = session.id === latestSessionId;
+              return (
+                <option key={session.id} value={session.id}>
+                  {session.displayCode}
+                  {session.status === 'ACTIVE' ? ' · 진행 중 (실시간)' : isLatest ? ' (최근 회차)' : ''}
+                </option>
+              );
+            })}
+            <option value="ALL">전체 회차 (모든 방송 합산)</option>
+          </select>
         </div>
-      </section>
-
-      {/* 방송 회차 선택 바 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Layers className="w-4 h-4 text-brand-600" />
-          <span className="text-xs font-bold text-slate-800">방송 회차 선택:</span>
-        </div>
-        <select
-          value={sessionFilter}
-          onChange={(e) => handleSessionFilterChange(e.target.value)}
-          className="min-w-0 flex-1 sm:max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
-        >
-          {availableSessions.map((session) => {
-            const isLatest = session.id === latestSessionId;
-            return (
-              <option key={session.id} value={session.id}>
-                {session.displayCode}
-                {session.status === 'ACTIVE' ? ' · 진행 중 (실시간)' : isLatest ? ' (최근 회차)' : ''}
-              </option>
-            );
-          })}
-          <option value="ALL">전체 회차 (모든 방송 합산)</option>
-        </select>
       </div>
+
+      {feedback && <div role="status" className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-xs font-bold text-cyan-800">{feedback}</div>}
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.05fr_.95fr]">
         <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <h2 className="mb-3 text-sm font-black text-slate-900">1. 청구할 판매내역 선택</h2>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-black text-slate-900 flex items-center gap-2">
+              <span>1. 청구할 판매내역 선택</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200">
+                {sessionFilter === 'ALL' ? '전체 회차' : availableSessions.find((s) => s.id === sessionFilter)?.displayCode || sessionFilter}
+              </span>
+            </h2>
+            <span className="text-xs font-semibold text-slate-500">
+              청구 가능 {selectableSales.length}건
+            </span>
+          </div>
           <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
             {selectableSales.length === 0 ? <p className="rounded-xl bg-slate-50 p-5 text-center text-xs text-slate-400">선택된 회차에 청구 가능한 판매내역이 없습니다.</p> : selectableSales.map((sale) => {
               const selected = selectedIds.includes(sale.id);
@@ -258,6 +276,18 @@ export const InvoiceManagementPage: React.FC = () => {
               </div>
             </article>
           ))}
+        </div>
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-black text-slate-900">voicecapSMS 연결 상태</h2>
+            <p className="mt-1 text-[11px] text-slate-500">서버 주소와 API 키를 직접 넣지 않습니다. 마이페이지에서 만든 1회용 연결 코드로 휴대폰을 연결합니다.</p>
+          </div>
+          <span className={`w-fit rounded-full px-2.5 py-1 text-[10px] font-bold ${bridgeStatus === 'ONLINE' ? 'bg-emerald-50 text-emerald-700' : bridgeStatus === 'CHECKING' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'}`}>
+            {isRemoteAuth ? bridgeMessage : '수파베이스 설정 후 사용 가능'}
+          </span>
         </div>
       </section>
 
