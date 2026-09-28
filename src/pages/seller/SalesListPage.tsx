@@ -16,11 +16,13 @@ import {
   Download,
   Layers,
   ArrowRight,
-  Clock
+  Clock,
+  ZoomIn
 } from 'lucide-react';
 import { formatAmountAsDecimal, formatMultiSaleAmount } from '../../services/salesExtractor';
 import { areNicknamesSimilar } from '../../services/nicknameMatcher';
 import { formatSessionDisplay } from '../../utils/sessionFormatter';
+import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 
 interface BuyerGroupedSale {
   buyerNickname: string;
@@ -46,6 +48,27 @@ export const SalesListPage: React.FC = () => {
   const [sortOrder, setSortOrder] = useState<'AMOUNT_DESC' | 'COUNT_DESC' | 'LATEST' | 'OLDEST'>('AMOUNT_DESC');
   const [expandedBuyers, setExpandedBuyers] = useState<string[]>([]);
   const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
+  const [viewerModal, setViewerModal] = useState<{
+    isOpen: boolean;
+    images: string[];
+    initialIndex: number;
+    title: string;
+  }>({
+    isOpen: false,
+    images: [],
+    initialIndex: 0,
+    title: ''
+  });
+
+  const openImageViewer = (images: string[], index = 0, title = '이미지') => {
+    if (!images || images.length === 0) return;
+    setViewerModal({
+      isOpen: true,
+      images,
+      initialIndex: index,
+      title
+    });
+  };
 
   useEffect(() => {
     let active = true;
@@ -399,10 +422,32 @@ export const SalesListPage: React.FC = () => {
                     >
                       <div className="flex items-center space-x-3.5">
                         {buyerThumbnail ? (
-                          <div className="relative w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex-shrink-0 shadow-sm flex items-center justify-center">
-                            <img src={buyerThumbnail} alt={`${buyer.buyerNickname} 구매 상품`} className="w-full h-full object-cover" />
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const allImages = Array.from(new Set([
+                                ...buyer.productImageUrls,
+                                ...buyer.captureImageUrls,
+                                ...buyer.records.map((r) => r.productImageUrl).filter(Boolean),
+                                ...buyer.records.flatMap((r) => r.captureImageUrls || []).filter(Boolean)
+                              ] as string[]));
+                              openImageViewer(
+                                allImages.length > 0 ? allImages : [buyerThumbnail],
+                                0,
+                                `${buyer.buyerNickname}님 관련 이미지`
+                              );
+                            }}
+                            className="group/thumb relative w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex-shrink-0 shadow-sm flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-brand-500 transition"
+                            title="클릭하여 원본 이미지 보기"
+                          >
+                            <img src={buyerThumbnail} alt={`${buyer.buyerNickname} 구매 상품`} className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform" />
+                            <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center text-white">
+                              <ZoomIn className="w-4 h-4" />
+                            </div>
                             {buyer.orderCount > 1 && (
-                              <span className="absolute bottom-0 right-0 bg-slate-900/80 text-white text-[9px] px-1 rounded-tl font-bold">
+                              <span className="absolute bottom-0 right-0 bg-slate-900/80 text-white text-[9px] px-1 rounded-tl font-bold z-10">
                                 +{buyer.orderCount}
                               </span>
                             )}
@@ -492,9 +537,31 @@ export const SalesListPage: React.FC = () => {
                             className="p-3 rounded-xl bg-white border border-slate-200 hover:border-brand-400 flex items-center justify-between text-xs transition block shadow-sm group"
                           >
                             <div className="flex items-center space-x-3 min-w-0 flex-1 mr-2">
-                              <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200/80 bg-slate-100 flex-shrink-0 flex items-center justify-center shadow-xs">
+                              <div
+                                className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200/80 bg-slate-100 flex-shrink-0 flex items-center justify-center shadow-xs relative group/thumb cursor-pointer"
+                                onClick={(e) => {
+                                  if (recImage) {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    const images = rec.captureImageUrls && rec.captureImageUrls.length > 0
+                                      ? rec.captureImageUrls
+                                      : [recImage];
+                                    openImageViewer(
+                                      images,
+                                      0,
+                                      `${rec.buyerNickname} 상품/캡처`
+                                    );
+                                  }
+                                }}
+                                title={recImage ? '클릭하여 원본 크기로 보기' : undefined}
+                              >
                                 {recImage ? (
-                                  <img src={recImage} alt={rec.productCode || rec.productName || '상품'} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200" />
+                                  <>
+                                    <img src={recImage} alt={rec.productCode || rec.productName || '상품'} className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform duration-200" />
+                                    <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center text-white">
+                                      <ZoomIn className="w-3.5 h-3.5" />
+                                    </div>
+                                  </>
                                 ) : (
                                   <ShoppingBag className="w-4 h-4 text-brand-600/70" />
                                 )}
@@ -562,13 +629,35 @@ export const SalesListPage: React.FC = () => {
                   >
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                       <div className="flex items-start space-x-3.5 sm:space-x-4 min-w-0 flex-1">
-                        <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-slate-100 border border-slate-200/80 flex items-center justify-center overflow-hidden flex-shrink-0 shadow-sm">
+                        <div
+                          className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-slate-100 border border-slate-200/80 flex items-center justify-center overflow-hidden flex-shrink-0 shadow-sm relative group/thumb cursor-pointer"
+                          onClick={(e) => {
+                            if (saleImage) {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const images = sale.captureImageUrls && sale.captureImageUrls.length > 0
+                                ? sale.captureImageUrls
+                                : [saleImage];
+                              openImageViewer(
+                                images,
+                                0,
+                                `${sale.buyerNickname} 상품/캡처`
+                              );
+                            }
+                          }}
+                          title={saleImage ? '클릭하여 원본 크기로 보기' : undefined}
+                        >
                           {saleImage ? (
-                            <img
-                              src={saleImage}
-                              alt={sale.productName || sale.productCode || '상품'}
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                            />
+                            <>
+                              <img
+                                src={saleImage}
+                                alt={sale.productName || sale.productCode || '상품'}
+                                className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform duration-200"
+                              />
+                              <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center text-white">
+                                <ZoomIn className="w-4 h-4" />
+                              </div>
+                            </>
                           ) : (
                             <div className="flex flex-col items-center justify-center text-slate-400 p-1">
                               <ShoppingBag className="w-5 h-5 text-brand-600/70" />
@@ -652,6 +741,16 @@ export const SalesListPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {viewerModal.isOpen && (
+        <ImageViewerModal
+          isOpen={viewerModal.isOpen}
+          onClose={() => setViewerModal((prev) => ({ ...prev, isOpen: false }))}
+          images={viewerModal.images}
+          initialIndex={viewerModal.initialIndex}
+          titlePrefix={viewerModal.title}
+        />
+      )}
     </div>
   );
 };

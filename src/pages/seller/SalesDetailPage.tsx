@@ -19,8 +19,10 @@ import {
   AlertCircle,
   ExternalLink,
   Printer,
-  RotateCw
+  RotateCw,
+  ZoomIn
 } from 'lucide-react';
+import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 
 export const SalesDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -41,6 +43,17 @@ export const SalesDetailPage: React.FC = () => {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
+  const [viewerModal, setViewerModal] = useState<{
+    isOpen: boolean;
+    images: string[];
+    initialIndex: number;
+    title: string;
+  }>({
+    isOpen: false,
+    images: [],
+    initialIndex: 0,
+    title: ''
+  });
 
   useEffect(() => {
     productSalesApi.listSessions()
@@ -189,9 +202,29 @@ export const SalesDetailPage: React.FC = () => {
 
         {/* 상품 대표 사진 및 캡처 이미지 등록/변경 카드 */}
         <div className="p-4 sm:p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-white border border-slate-200 overflow-hidden flex-shrink-0 shadow-sm flex items-center justify-center relative group">
+          <div
+            className={`w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-white border border-slate-200 overflow-hidden flex-shrink-0 shadow-sm flex items-center justify-center relative group ${
+              productImageUrl ? 'cursor-pointer hover:ring-2 hover:ring-brand-500' : ''
+            }`}
+            onClick={() => {
+              if (productImageUrl) {
+                setViewerModal({
+                  isOpen: true,
+                  images: [productImageUrl],
+                  initialIndex: 0,
+                  title: `${sale.productName || '상품'} 대표 사진`
+                });
+              }
+            }}
+            title={productImageUrl ? '클릭하여 원본 사진 보기' : undefined}
+          >
             {productImageUrl ? (
-              <img src={productImageUrl} alt="상품 사진" className="w-full h-full object-cover" />
+              <>
+                <img src={productImageUrl} alt="상품 사진" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                  <ZoomIn className="w-5 h-5" />
+                </div>
+              </>
             ) : (
               <div className="flex flex-col items-center justify-center text-slate-400 p-2 text-center">
                 <ShoppingBag className="w-6 h-6 text-brand-500 mb-1" />
@@ -331,16 +364,22 @@ export const SalesDetailPage: React.FC = () => {
               {sale.captureImageUrls.map((imgUrl: string, idx: number) => (
                 <div
                   key={idx}
-                  className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 relative group shadow-sm"
+                  onClick={() => {
+                    setViewerModal({
+                      isOpen: true,
+                      images: sale.captureImageUrls || [],
+                      initialIndex: idx,
+                      title: `${sale.buyerNickname}님 캡처 이미지`
+                    });
+                  }}
+                  className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 relative group shadow-sm cursor-pointer hover:ring-2 hover:ring-brand-500 transition"
+                  title="클릭하여 원본 크기로 보기"
                 >
-                  <img src={imgUrl} alt={`캡처 ${idx + 1}`} className="w-full h-36 sm:h-40 object-cover" />
-                  <Link
-                    to={`/sales/${sale.id}/capture${location.search}`}
-                    className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-xs text-white font-bold transition space-x-1"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    <span>전체화면 보기</span>
-                  </Link>
+                  <img src={imgUrl} alt={`캡처 ${idx + 1}`} className="w-full h-36 sm:h-40 object-cover group-hover:scale-105 transition-transform duration-200" />
+                  <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 flex items-center justify-center text-xs text-white font-bold transition space-x-1.5 backdrop-blur-[1px]">
+                    <ZoomIn className="w-4 h-4" />
+                    <span>원본 확대 보기</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -377,6 +416,16 @@ export const SalesDetailPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {viewerModal.isOpen && (
+        <ImageViewerModal
+          isOpen={viewerModal.isOpen}
+          onClose={() => setViewerModal((prev) => ({ ...prev, isOpen: false }))}
+          images={viewerModal.images}
+          initialIndex={viewerModal.initialIndex}
+          titlePrefix={viewerModal.title}
+        />
+      )}
     </div>
   );
 };

@@ -28,7 +28,8 @@ import {
   RefreshCw,
   Bot,
   Settings,
-  Cloud
+  Cloud,
+  ZoomIn
 } from 'lucide-react';
 import { COMMENT_HELPER_DOWNLOAD_URL } from '../../types/comment';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
@@ -38,6 +39,7 @@ import { areNicknamesSimilar } from '../../services/nicknameMatcher';
 import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
 import { AiSaleBadge } from '../../components/sales/AiSaleBadge';
 import { formatSessionDisplay } from '../../utils/sessionFormatter';
+import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 import { CommentHelperModal } from '../../components/helper/CommentHelperModal';
 import { SellerSettingsModal } from '../../components/seller/SellerSettingsModal';
 import { salesDemoService } from '../../services/salesDemoService';
@@ -103,6 +105,17 @@ export const LiveHomePage: React.FC = () => {
   const [showSessionChoice, setShowSessionChoice] = useState(false);
   const [isSessionStarting, setIsSessionStarting] = useState(false);
   const [isSalesRefreshing, setIsSalesRefreshing] = useState(false);
+  const [viewerModal, setViewerModal] = useState<{
+    isOpen: boolean;
+    images: string[];
+    initialIndex: number;
+    title: string;
+  }>({
+    isOpen: false,
+    images: [],
+    initialIndex: 0,
+    title: ''
+  });
 
   // 실제 판매 시연 데모 상태
   const [isDemoActive, setIsDemoActive] = useState<boolean>(false);
@@ -953,13 +966,36 @@ export const LiveHomePage: React.FC = () => {
                   >
                     <div className="flex items-start gap-2.5 sm:gap-3">
                       {/* 상품 이미지 썸네일 */}
-                      <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-lg overflow-hidden border border-slate-200/80 bg-slate-100 flex-shrink-0 shadow-sm flex items-center justify-center">
+                      <div
+                        className={`w-12 h-12 sm:w-14 sm:h-14 rounded-lg overflow-hidden border border-slate-200/80 bg-slate-100 flex-shrink-0 shadow-sm flex items-center justify-center relative group/thumb ${
+                          productImage ? 'cursor-pointer hover:ring-2 hover:ring-brand-500' : ''
+                        }`}
+                        onClick={() => {
+                          if (productImage) {
+                            const images = sale.captureImageUrls && sale.captureImageUrls.length > 0
+                              ? sale.captureImageUrls
+                              : [productImage];
+                            setViewerModal({
+                              isOpen: true,
+                              images,
+                              initialIndex: 0,
+                              title: `${sale.buyerNickname} 상품/캡처`
+                            });
+                          }
+                        }}
+                        title={productImage ? '클릭하여 원본 크기로 보기' : undefined}
+                      >
                         {productImage ? (
-                          <img
-                            src={productImage}
-                            alt={`${sale.productCode || sale.buyerNickname} 상품`}
-                            className="w-full h-full object-cover hover:scale-105 transition-transform duration-200"
-                          />
+                          <>
+                            <img
+                              src={productImage}
+                              alt={`${sale.productCode || sale.buyerNickname} 상품`}
+                              className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform duration-200"
+                            />
+                            <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center text-white">
+                              <ZoomIn className="w-3.5 h-3.5" />
+                            </div>
+                          </>
                         ) : (
                           <div className="flex flex-col items-center justify-center text-slate-400 p-1">
                             <ShoppingBag className="w-5 h-5 text-brand-600/70" />
@@ -1395,6 +1431,16 @@ export const LiveHomePage: React.FC = () => {
         sttProvider={sttProvider}
         sttMode={sttMode}
       />
+
+      {viewerModal.isOpen && (
+        <ImageViewerModal
+          isOpen={viewerModal.isOpen}
+          onClose={() => setViewerModal((prev) => ({ ...prev, isOpen: false }))}
+          images={viewerModal.images}
+          initialIndex={viewerModal.initialIndex}
+          titlePrefix={viewerModal.title}
+        />
+      )}
     </div>
   );
 };

@@ -10,13 +10,15 @@ import {
   Save,
   Send,
   Smartphone,
-  WalletCards
+  WalletCards,
+  ZoomIn
 } from 'lucide-react';
 import { useCommerce } from '../../context/CommerceContext';
 import { CustomerPurchaseClaim, MatchStatus } from '../../types/commerce';
 import { SaleRecord } from '../../types/live';
 import { productSalesApi } from '../../services/productSalesApi';
 import { formatSessionDisplay, SessionInfoLike } from '../../utils/sessionFormatter';
+import { ImageViewerModal } from '../common/ImageViewerModal';
 
 interface BuyerReconciliationPanelProps {
   buyerNickname: string;
@@ -67,33 +69,60 @@ export const BuyerStatusBadges: React.FC<{ saleIds: string[] }> = ({ saleIds }) 
   );
 };
 
-const ImageGallery: React.FC<{ urls: string[]; altPrefix: string; emptyText: string }> = ({ urls, altPrefix, emptyText }) => (
-  urls.length > 0 ? (
-    <div className={`grid gap-2 ${urls.length > 1 ? 'grid-cols-2' : 'mx-auto max-w-md'}`}>
-      {urls.map((url, index) => (
-        <figure key={`${altPrefix}-${index}`} className="overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
-          <div className="flex min-h-32 items-center justify-center p-2">
-            <img
-              src={url}
-              alt={`${altPrefix} ${index + 1}`}
-              loading="lazy"
-              className="block h-auto max-h-64 w-auto max-w-full rounded-lg object-contain"
-            />
-          </div>
-          {urls.length > 1 && (
-            <figcaption className="border-t border-slate-200 bg-white px-2 py-1 text-center text-[10px] text-slate-500">
-              이미지 {index + 1}
-            </figcaption>
-          )}
-        </figure>
-      ))}
-    </div>
-  ) : (
-    <div className="flex min-h-24 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-center text-xs text-slate-400">
-      {emptyText}
-    </div>
-  )
-);
+const ImageGallery: React.FC<{ urls: string[]; altPrefix: string; emptyText: string }> = ({ urls, altPrefix, emptyText }) => {
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+
+  return (
+    <>
+      {urls.length > 0 ? (
+        <div className={`grid gap-2 ${urls.length > 1 ? 'grid-cols-2' : 'mx-auto max-w-md'}`}>
+          {urls.map((url, index) => (
+            <figure
+              key={`${altPrefix}-${index}`}
+              onClick={() => setSelectedIdx(index)}
+              className="group relative cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-slate-100 transition-all hover:border-brand-400 hover:shadow-md"
+              title="클릭하여 원본 크기로 보기"
+            >
+              <div className="relative flex min-h-32 items-center justify-center p-2">
+                <img
+                  src={url}
+                  alt={`${altPrefix} ${index + 1}`}
+                  loading="lazy"
+                  className="block h-auto max-h-64 w-auto max-w-full rounded-lg object-contain transition-transform duration-200 group-hover:scale-[1.02]"
+                />
+                <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-slate-950/25 opacity-0 backdrop-blur-[1px] transition-opacity group-hover:opacity-100">
+                  <span className="flex items-center gap-1.5 rounded-full bg-slate-900/85 px-3 py-1.5 text-xs font-bold text-white shadow-lg">
+                    <ZoomIn className="h-3.5 w-3.5" /> 원본 보기
+                  </span>
+                </div>
+              </div>
+              <figcaption className="flex items-center justify-between border-t border-slate-200 bg-white px-2.5 py-1 text-[11px] text-slate-500 group-hover:text-brand-700">
+                <span className="font-semibold">이미지 {index + 1}</span>
+                <span className="flex items-center gap-1 text-[10px] text-slate-400 group-hover:text-brand-600">
+                  <ZoomIn className="h-3 w-3" /> 크게 보기
+                </span>
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      ) : (
+        <div className="flex min-h-24 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-center text-xs text-slate-400">
+          {emptyText}
+        </div>
+      )}
+
+      {selectedIdx !== null && (
+        <ImageViewerModal
+          isOpen={selectedIdx !== null}
+          onClose={() => setSelectedIdx(null)}
+          images={urls}
+          initialIndex={selectedIdx}
+          titlePrefix={altPrefix}
+        />
+      )}
+    </>
+  );
+};
 
 export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> = ({
   buyerNickname,
