@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLive } from '../../context/LiveContext';
+import { useProductSales } from '../../context/ProductSalesContext';
+import { formatSessionDisplay } from '../../utils/sessionFormatter';
 import { Modal } from './Modal';
 import { CommentHelperModal } from '../helper/CommentHelperModal';
 import { commentHelperService } from '../../services/commentHelperService';
@@ -49,6 +51,9 @@ export const Header: React.FC<HeaderProps> = ({
     stopListening,
     disconnectScreenShare
   } = useLive();
+  const productSales = useProductSales();
+  const activeSession = productSales?.activeSession;
+  const sessionDisplay = activeSession?.displayCode || formatSessionDisplay(currentSessionId);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -149,8 +154,8 @@ export const Header: React.FC<HeaderProps> = ({
                 <Radio className={`w-3 h-3 ${isListening ? 'animate-spin text-rose-500' : ''}`} />
                 <span>{isListening ? 'ON AIR' : '대기 중'}</span>
               </div>
-              <span className="text-xs text-slate-600 font-mono bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                {currentSessionId}
+              <span className="text-xs text-slate-700 font-bold bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200" title={`현재 방송 회차: ${sessionDisplay}`}>
+                {sessionDisplay}
               </span>
             </div>
           )}

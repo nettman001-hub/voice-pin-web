@@ -6,6 +6,7 @@ import { BuyerReconciliationPanel } from '../../components/sales/BuyerReconcilia
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
 import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
 import { AiSaleBadge } from '../../components/sales/AiSaleBadge';
+import { formatSessionDisplay } from '../../utils/sessionFormatter';
 import {
   ShoppingBag,
   ArrowLeft,
@@ -161,7 +162,7 @@ export const SalesDetailPage: React.FC = () => {
           <div className="text-[10px] sm:text-[11px] text-slate-400 mt-2 flex flex-wrap items-center gap-1.5 sm:gap-2">
             <span>인식 시각: {new Date(sale.recognizedAt).toLocaleString('ko-KR')}</span>
             <span>•</span>
-            <span>방송 회차: {sale.sessionId}</span>
+            <span>방송 회차: <strong className="font-semibold text-slate-700">{formatSessionDisplay(sale.sessionId, { recognizedAt: sale.recognizedAt })}</strong></span>
           </div>
 
           {/* AI 보완·음성 정정 이력 배지, Diff 및 근거보기/되돌리기 버튼 */}

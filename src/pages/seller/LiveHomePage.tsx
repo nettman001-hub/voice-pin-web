@@ -37,6 +37,7 @@ import { formatMultiSaleAmount } from '../../services/salesExtractor';
 import { areNicknamesSimilar } from '../../services/nicknameMatcher';
 import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
 import { AiSaleBadge } from '../../components/sales/AiSaleBadge';
+import { formatSessionDisplay } from '../../utils/sessionFormatter';
 import { CommentHelperModal } from '../../components/helper/CommentHelperModal';
 import { SellerSettingsModal } from '../../components/seller/SellerSettingsModal';
 import { salesDemoService } from '../../services/salesDemoService';
@@ -365,7 +366,7 @@ export const LiveHomePage: React.FC = () => {
               </span>
             </div>
             <p className="hidden sm:block text-[10px] leading-none text-slate-400 mt-0.5 truncate">
-              회차 <strong className="text-slate-600 font-mono">{activeSession?.displayCode || currentSessionId}</strong>
+              회차 <strong className="text-slate-700 font-bold">{formatSessionDisplay(activeSession?.displayCode || currentSessionId)}</strong>
             </p>
           </div>
         </div>

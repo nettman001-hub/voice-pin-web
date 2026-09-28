@@ -1,6 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar, ChevronDown, ChevronRight, Download, Layers } from 'lucide-react';
 import { useSales } from '../../context/SalesContext';
+import { productSalesApi } from '../../services/productSalesApi';
+import { LiveSession } from '../../types/productSales';
+import { formatSessionDisplay } from '../../utils/sessionFormatter';
 
 type GroupMode = 'DATE' | 'SESSION';
 
@@ -15,6 +18,13 @@ export const SettlementPage: React.FC = () => {
   const { sales, exportCsv } = useSales();
   const [groupMode, setGroupMode] = useState<GroupMode>('DATE');
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
+  const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
+
+  useEffect(() => {
+    productSalesApi.listSessions()
+      .then((data) => setCloudSessions(data.sessions))
+      .catch((err) => console.warn('[Settlement] 세션 목록 로드 실패 (무시):', err));
+  }, []);
 
   const validSales = useMemo(() => sales.filter((sale) => sale.status !== '보류'), [sales]);
   const groups = useMemo<SettlementGroup[]>(() => {
@@ -22,14 +32,19 @@ export const SettlementPage: React.FC = () => {
     validSales.forEach((sale) => {
       const date = sale.recognizedAt.slice(0, 10);
       const key = groupMode === 'DATE' ? date : sale.sessionId;
-      const label = groupMode === 'DATE' ? date : `회차 ${sale.sessionId}`;
+      const label = groupMode === 'DATE'
+        ? date
+        : formatSessionDisplay(sale.sessionId, {
+            sessions: cloudSessions,
+            recognizedAt: sale.recognizedAt
+          });
       const current = grouped.get(key) || { key, label, sales: [], total: 0 };
       current.sales.push(sale);
       current.total += sale.amount;
       grouped.set(key, current);
     });
     return Array.from(grouped.values()).sort((a, b) => b.key.localeCompare(a.key));
-  }, [groupMode, validSales]);
+  }, [cloudSessions, groupMode, validSales]);
 
   const totalRevenue = validSales.reduce((sum, sale) => sum + sale.amount, 0);
   const avgOrderPrice = validSales.length ? Math.round(totalRevenue / validSales.length) : 0;
@@ -106,7 +121,7 @@ export const SettlementPage: React.FC = () => {
                 </div>
                 {expanded && <div className="p-3 sm:p-4 border-t border-slate-100 bg-white space-y-2">
                   {group.sales.map((sale) => <div key={sale.id} className="p-2.5 sm:p-3 rounded-xl bg-slate-50 border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs">
-                    <div className="flex items-center gap-x-3 gap-y-1 flex-wrap"><strong className="text-slate-900">{sale.buyerNickname}</strong><span className="text-slate-500">{sale.productName || '상품명 미입력'}</span><span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">회차: {sale.sessionId}</span></div>
+                    <div className="flex items-center gap-x-3 gap-y-1 flex-wrap"><strong className="text-slate-900">{sale.buyerNickname}</strong><span className="text-slate-500">{sale.productName || '상품명 미입력'}</span><span className="text-[10px] bg-slate-200 text-slate-800 font-semibold px-2 py-0.5 rounded-full" title={`회차 ID: ${sale.sessionId}`}>회차: {formatSessionDisplay(sale.sessionId, { sessions: cloudSessions, recognizedAt: sale.recognizedAt })}</span></div>
                     <strong className="text-slate-900 self-end sm:self-auto">{sale.amount.toLocaleString()}원</strong>
                   </div>)}
                 </div>}

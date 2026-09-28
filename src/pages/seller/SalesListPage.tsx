@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { formatAmountAsDecimal, formatMultiSaleAmount } from '../../services/salesExtractor';
 import { areNicknamesSimilar } from '../../services/nicknameMatcher';
+import { formatSessionDisplay } from '../../utils/sessionFormatter';
 
 interface BuyerGroupedSale {
   buyerNickname: string;
@@ -64,7 +65,7 @@ export const SalesListPage: React.FC = () => {
       if (sale.sessionId && !sessionsById.has(sale.sessionId)) {
         sessionsById.set(sale.sessionId, {
           id: sale.sessionId,
-          displayCode: sale.sessionId,
+          displayCode: formatSessionDisplay(sale.sessionId, { recognizedAt: sale.recognizedAt }),
           status: 'ENDED',
           revision: 1,
           startedAt: sale.recognizedAt,
@@ -433,7 +434,7 @@ export const SalesListPage: React.FC = () => {
                           <div className="text-[11px] text-slate-500 mt-1 flex items-center space-x-2">
                             <span>최근 주문: {new Date(buyer.latestRecognizedAt).toLocaleTimeString('ko-KR')}</span>
                             <span>•</span>
-                            <span>회차: {buyer.sessionIds.join(', ')}</span>
+                            <span>회차: {buyer.sessionIds.map((id) => formatSessionDisplay(id, { sessions: availableSessions, recognizedAt: buyer.latestRecognizedAt })).join(', ')}</span>
                           </div>
                         </div>
                       </div>
@@ -602,8 +603,8 @@ export const SalesListPage: React.FC = () => {
                             </span>
                             <AiSaleBadge sale={sale} />
                             <BuyerStatusBadges saleIds={[sale.id]} />
-                            <span className="text-[10px] text-slate-600 font-mono bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                              회차: {sale.sessionId}
+                            <span className="text-[10px] text-slate-700 font-semibold bg-slate-100 px-2 py-0.5 rounded border border-slate-200" title={`방송 회차: ${sale.sessionId}`}>
+                              회차: {formatSessionDisplay(sale.sessionId, { sessions: availableSessions, recognizedAt: sale.recognizedAt })}
                             </span>
                           </div>
 

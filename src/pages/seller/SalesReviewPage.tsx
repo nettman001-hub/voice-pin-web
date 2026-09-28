@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
 import { useLive } from '../../context/LiveContext';
@@ -15,13 +15,23 @@ import {
   ArrowLeft,
   Sparkles
 } from 'lucide-react';
+import { productSalesApi } from '../../services/productSalesApi';
+import { LiveSession } from '../../types/productSales';
+import { formatSessionDisplay } from '../../utils/sessionFormatter';
 
 export const SalesReviewPage: React.FC = () => {
   const { sales, confirmBatchSales, updateSale, deleteSale } = useSales();
   const { currentSessionId } = useLive();
   const navigate = useNavigate();
 
+  const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
   const [sessionFilter, setSessionFilter] = useState<string>(currentSessionId);
+
+  useEffect(() => {
+    productSalesApi.listSessions()
+      .then((data) => setCloudSessions(data.sessions))
+      .catch((err) => console.warn('[SalesReview] 세션 목록 로드 실패 (무시):', err));
+  }, []);
   const [editingRecords, setEditingRecords] = useState<{ [id: string]: { nickname: string; amount: string } }>({});
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
@@ -118,19 +128,27 @@ export const SalesReviewPage: React.FC = () => {
         >
           전체 회차
         </button>
-        {availableSessions.map((s) => (
-          <button
-            key={s}
-            onClick={() => setSessionFilter(s)}
-            className={`px-3 py-1.5 rounded-xl font-mono font-bold transition flex-shrink-0 ${
-              sessionFilter === s
-                ? 'bg-brand-600 text-white shadow-sm'
-                : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
-            }`}
-          >
-            {s}
-          </button>
-        ))}
+        {availableSessions.map((s) => {
+          const firstSale = sales.find((x) => x.sessionId === s);
+          const label = formatSessionDisplay(s, {
+            sessions: cloudSessions,
+            recognizedAt: firstSale?.recognizedAt
+          });
+          return (
+            <button
+              key={s}
+              onClick={() => setSessionFilter(s)}
+              className={`px-3 py-1.5 rounded-xl font-bold transition flex-shrink-0 ${
+                sessionFilter === s
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
+              }`}
+              title={`회차 ID: ${s}`}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       {/* 테이블 형태의 일괄 검토 뷰 */}
@@ -169,8 +187,8 @@ export const SalesReviewPage: React.FC = () => {
                       <span className="text-[11px] sm:text-xs text-slate-400 font-mono">
                         {new Date(sale.recognizedAt).toLocaleTimeString('ko-KR')}
                       </span>
-                      <span className="text-[10px] text-slate-500 font-mono bg-white px-1.5 py-0.2 rounded border border-slate-200">
-                        {sale.sessionId}
+                      <span className="text-[10px] text-slate-700 font-bold bg-white px-2 py-0.5 rounded-full border border-slate-200" title={`회차 ID: ${sale.sessionId}`}>
+                        {formatSessionDisplay(sale.sessionId, { sessions: cloudSessions, recognizedAt: sale.recognizedAt })}
                       </span>
                     </div>
 
