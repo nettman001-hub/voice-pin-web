@@ -1249,11 +1249,21 @@ const SlotCard: React.FC<SlotCardProps> = ({
             <KeyRound className="w-3.5 h-3.5 text-brand-600" />
             <span>인증 방식 및 비밀정보 격리 보관</span>
           </span>
-          {config.hasSecret && !clearSecret && (
-            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded font-mono text-[10px] font-bold">
-              {config.maskedSecret || '키 등록됨 (sk-***)'}
+          {config.hasSecret && !clearSecret ? (
+            config.authType === 'NONE' ? (
+              <span className="px-2 py-0.5 bg-slate-200 text-slate-600 border border-slate-300 rounded font-mono text-[10px] font-medium">
+                키 보관됨 (인증 미사용)
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded font-mono text-[10px] font-bold">
+                {config.maskedSecret || '키 등록됨 (sk-***)'}
+              </span>
+            )
+          ) : config.authType === 'NONE' ? (
+            <span className="px-2 py-0.5 bg-slate-100 text-slate-500 border border-slate-200 rounded text-[10px] font-medium">
+              인증 없이 호출
             </span>
-          )}
+          ) : null}
         </div>
 
         <div className="grid grid-cols-3 gap-2">
@@ -1272,6 +1282,41 @@ const SlotCard: React.FC<SlotCardProps> = ({
             </button>
           ))}
         </div>
+
+        {config.authType === 'NONE' && (
+          <div className="pt-1">
+            {config.hasSecret && !clearSecret ? (
+              <div className="flex items-center justify-between text-[11px] text-slate-500 bg-slate-100/70 px-3 py-2 rounded-xl border border-slate-200">
+                <span>기존 등록된 키가 보관 중이나, '인증 없음' 상태이므로 헤더에 전송되지 않습니다.</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClearSecret(true);
+                    setNewSecret('');
+                  }}
+                  className="px-2.5 py-1 text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-lg text-xs font-bold transition ml-2 whitespace-nowrap"
+                >
+                  보관된 키 완전 삭제
+                </button>
+              </div>
+            ) : clearSecret ? (
+              <div className="text-xs text-rose-600 font-bold bg-rose-50 px-3 py-2 rounded-xl border border-rose-200 flex items-center justify-between">
+                <span>[초안 저장 시 보관된 키 삭제 예정]</span>
+                <button
+                  type="button"
+                  onClick={() => setClearSecret(false)}
+                  className="underline text-slate-600 font-normal text-xs ml-2"
+                >
+                  삭제 취소
+                </button>
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-400">
+                헤더에 인증 키(Authorization / x-api-key)를 포함하지 않고 엔드포인트를 직접 호출합니다.
+              </p>
+            )}
+          </div>
+        )}
 
         {config.authType !== 'NONE' && (
           <div className="space-y-2 pt-1">

@@ -15,15 +15,15 @@ function formatAiSettingResponse(row: any, secretMap?: Map<number, { masked: str
   const secret2 = secretMap?.get(2)
 
   const resolveAuthType = (slot: any, sec?: { masked: string; type?: string }, defaultType: string = 'NONE') => {
-    // 1. 만약 슬롯 설정 자체에 authType이 지정되어 있다면 우선 적용
-    if (slot?.authType && slot.authType !== 'NONE') {
+    // 1. 만약 슬롯 설정 자체에 authType이 지정되어 있다면 (NONE 포함) 사용자 설정을 최우선 적용
+    if (typeof slot?.authType === 'string' && slot.authType.trim() !== '') {
       return slot.authType
     }
-    // 2. 만약 ai_secrets에 등록된 비밀정보 타입이 있다면 해당 타입 동기화
+    // 2. 만약 슬롯에 authType이 누락된 레거시 데이터인 경우에만 ai_secrets에 등록된 비밀정보 타입 동기화
     if (sec?.type === 'API_KEY') return 'API_KEY'
     if (sec?.type === 'BEARER_TOKEN') return 'BEARER'
     if (sec?.type === 'CUSTOM_HEADER') return 'CUSTOM_HEADER'
-    return slot?.authType || defaultType
+    return defaultType
   }
 
   const slot1 = {
@@ -221,8 +221,8 @@ export async function handleSaveAiSettings(workspaceId: string, actorId: string,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'setting_id,slot_number' })
     }
-  } else if (nextSlot1.authType) {
-    // 키는 새로 등록하지 않았으나 authType만 변경된 경우 secret_type 동기화
+  } else if (nextSlot1.authType && nextSlot1.authType !== 'NONE') {
+    // 키는 새로 등록하지 않았으나 authType만 변경된 경우 secret_type 동기화 (NONE 제외)
     const secType = nextSlot1.authType === 'BEARER' ? 'BEARER_TOKEN' : (nextSlot1.authType === 'CUSTOM_HEADER' ? 'CUSTOM_HEADER' : 'API_KEY')
     await admin.from('ai_secrets')
       .update({ secret_type: secType, updated_at: new Date().toISOString() })
@@ -248,8 +248,8 @@ export async function handleSaveAiSettings(workspaceId: string, actorId: string,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'setting_id,slot_number' })
     }
-  } else if (nextSlot2.authType) {
-    // 키는 새로 등록하지 않았으나 authType만 변경된 경우 secret_type 동기화
+  } else if (nextSlot2.authType && nextSlot2.authType !== 'NONE') {
+    // 키는 새로 등록하지 않았으나 authType만 변경된 경우 secret_type 동기화 (NONE 제외)
     const secType = nextSlot2.authType === 'BEARER' ? 'BEARER_TOKEN' : (nextSlot2.authType === 'CUSTOM_HEADER' ? 'CUSTOM_HEADER' : 'API_KEY')
     await admin.from('ai_secrets')
       .update({ secret_type: secType, updated_at: new Date().toISOString() })
