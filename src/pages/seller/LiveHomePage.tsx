@@ -35,6 +35,7 @@ import { useProductSales } from '../../context/ProductSalesContext';
 import { formatMultiSaleAmount } from '../../services/salesExtractor';
 import { areNicknamesSimilar } from '../../services/nicknameMatcher';
 import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
+import { AiSaleBadge } from '../../components/sales/AiSaleBadge';
 import { CommentHelperModal } from '../../components/helper/CommentHelperModal';
 import { SellerSettingsModal } from '../../components/seller/SellerSettingsModal';
 import { salesDemoService } from '../../services/salesDemoService';
@@ -967,6 +968,7 @@ export const LiveHomePage: React.FC = () => {
                             variant="pill"
                             currentSessionId={sale.sessionId || currentSessionId || activeSession?.id}
                           />
+                          <AiSaleBadge sale={sale} />
                           <span className={`text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold border ${
                             sale.source === 'ANDROID_COMMENTS'
                               ? 'bg-blue-50 text-blue-700 border-blue-200'

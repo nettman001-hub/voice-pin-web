@@ -5,6 +5,7 @@ import { productSalesApi } from '../../services/productSalesApi';
 import { LiveSession } from '../../types/productSales';
 import { SaleRecord } from '../../types/live';
 import { BuyerReconciliationPanel, BuyerStatusBadges } from '../../components/sales/BuyerReconciliationPanel';
+import { AiSaleBadge } from '../../components/sales/AiSaleBadge';
 import {
   ShoppingBag,
   Search,
@@ -509,6 +510,7 @@ export const SalesListPage: React.FC = () => {
                                   >
                                     {rec.status}
                                   </span>
+                                  <AiSaleBadge sale={rec} />
                                   {(rec.productCode || rec.productName) && (
                                     <span className="text-[11px] font-semibold text-slate-700">
                                       상품 {rec.productCode || ''}{rec.productName ? ` · ${rec.productName}` : ''}
@@ -598,6 +600,7 @@ export const SalesListPage: React.FC = () => {
                             >
                               {sale.status}
                             </span>
+                            <AiSaleBadge sale={sale} />
                             <BuyerStatusBadges saleIds={[sale.id]} />
                             <span className="text-[10px] text-slate-600 font-mono bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                               회차: {sale.sessionId}

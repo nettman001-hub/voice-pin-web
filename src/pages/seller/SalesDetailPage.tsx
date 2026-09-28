@@ -5,6 +5,7 @@ import { SaleStatus } from '../../types/live';
 import { BuyerReconciliationPanel } from '../../components/sales/BuyerReconciliationPanel';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
 import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
+import { AiSaleBadge } from '../../components/sales/AiSaleBadge';
 import {
   ShoppingBag,
   ArrowLeft,
@@ -135,17 +136,20 @@ export const SalesDetailPage: React.FC = () => {
             </div>
           </div>
 
-          <span
-            className={`px-3 py-1 rounded-full text-xs font-bold self-start sm:self-auto ${
-              sale.status === '보류'
-                ? 'bg-amber-400 text-slate-950'
-                : sale.status === '수동수정'
-                ? 'bg-purple-100 text-purple-700'
-                : 'bg-emerald-50 text-emerald-700'
-            }`}
-          >
-            현재 상태: {sale.status}
-          </span>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <span
+              className={`px-3 py-1 rounded-full text-xs font-bold ${
+                sale.status === '보류'
+                  ? 'bg-amber-400 text-slate-950'
+                  : sale.status === '수동수정'
+                  ? 'bg-purple-100 text-purple-700'
+                  : 'bg-emerald-50 text-emerald-700'
+              }`}
+            >
+              현재 상태: {sale.status}
+            </span>
+            <AiSaleBadge sale={sale} />
+          </div>
         </div>
 
         {/* 원본 발화 문장 */}

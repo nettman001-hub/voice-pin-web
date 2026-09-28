@@ -7,6 +7,7 @@ import { extractSaleFromTranscript, parseKoreanAmount } from '../services/salesE
 import { parseVoiceCommand } from '../services/voiceCommandParser';
 import { nicknameVerificationNote, verifyNicknameFromComments } from '../services/commentNicknameVerifier';
 import { storageService, generateSessionId, getNextProductCodeForSession } from '../services/storageService';
+import { generateSequentialProductName } from '../utils/productNaming';
 import { useSales } from './SalesContext';
 import { useAuth } from './AuthContext';
 import { CaptureAreaConfig } from '../types/rules';
@@ -717,7 +718,12 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sales,
       productSalesRef.current.activeProduct?.productCode
     );
-    const resolvedProductCode = product?.productCode || productLink.fallbackCode || fallbackAutoCode;
+    // 판매 적재 시 판매자 멘트를 듣지 않고 순차적 번호(001-YYYYMMDD-방송회차)로 상품명 강제 생성
+    const sessionSalesCount = sales.filter((s) => s.sessionId === sessionId).length;
+    const activeSessionDisplayCode = productSalesRef.current.activeSession?.displayCode;
+    const autoSequentialProductName = generateSequentialProductName(activeSessionDisplayCode, sessionSalesCount);
+    const sequentialProductCode = String(sessionSalesCount + 1).padStart(3, '0');
+    const resolvedProductCode = sequentialProductCode || product?.productCode || productLink.fallbackCode || fallbackAutoCode;
 
     // 최근 60초 내 캡처된 화면이 있으면 연결
     const recentCapture = storageService.getCaptures().find((capture) => {
@@ -745,7 +751,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         buyerNickname,
         amount: saleResult.amount,
         productCode: resolvedProductCode,
-        productName: product?.name || undefined,
+        productName: autoSequentialProductName,
         unitPrice: product?.unitPrice ?? 0,
         quantity: 1,
         captureImageUrls: fallbackImage ? [fallbackImage] : undefined,
@@ -766,7 +772,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       note: nicknameVerificationNote(nicknameVerification),
       productId: product?.id,
       productCode: resolvedProductCode,
-      productName: product?.name || undefined,
+      productName: autoSequentialProductName,
       productImageUrl: product?.imageUrl || fallbackImage,
       productImagePath: product?.imagePath,
       quantity: 1,

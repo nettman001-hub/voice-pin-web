@@ -4,6 +4,7 @@ import { useSales } from '../../context/SalesContext';
 import { useLive } from '../../context/LiveContext';
 import { SaleRecord } from '../../types/live';
 import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
+import { AiSaleBadge } from '../../components/sales/AiSaleBadge';
 import {
   CheckSquare,
   AlertCircle,
@@ -164,6 +165,7 @@ export const SalesReviewPage: React.FC = () => {
                       >
                         {sale.status}
                       </span>
+                      <AiSaleBadge sale={sale} />
                       <span className="text-[11px] sm:text-xs text-slate-400 font-mono">
                         {new Date(sale.recognizedAt).toLocaleTimeString('ko-KR')}
                       </span>

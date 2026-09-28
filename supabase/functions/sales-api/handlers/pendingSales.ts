@@ -17,6 +17,7 @@ import {
 } from './pendingSalesCore.ts';
 import { createAiTaskObject, processAiTask } from './aiTaskCore.ts';
 import { AI_TASK_CONFIG } from './aiTaskConfig.ts';
+import { normalizeCommentIntentForPrompt } from './aiAdapters/common.ts';
 
 /**
  * 1. 단건 판매 보류 해결 및 원자적 확정 (Revision 충돌 검증 포함)
@@ -544,7 +545,7 @@ export async function handleTriggerPendingAiResolution(
       relevantComments: normalizedComments.slice(0, 10).map((c) => ({
         commentId: c.id,
         nickname: c.nickname,
-        text: c.text,
+        text: normalizeCommentIntentForPrompt(c.text),
         timestamp: c.created_at,
       })),
       activeProduct: products?.[0] ? {

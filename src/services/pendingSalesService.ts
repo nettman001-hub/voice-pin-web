@@ -7,7 +7,7 @@ import type {
 } from '../types/pendingSale.ts';
 import type { SaleRecord } from '../types/live.ts';
 import type { AiResolutionResult } from '../types/aiResolution.ts';
-import { findMatchingNickname, extractPhoneSuffix4Digits, normalizeNickname } from './nicknameMatcher.ts';
+import { findMatchingNickname, extractPhoneSuffix4Digits, normalizeNickname, areNicknamesSame } from './nicknameMatcher.ts';
 import { parseKoreanAmount } from './salesExtractor.ts';
 
 export interface RuleEvaluationInput {
@@ -352,10 +352,10 @@ export function validateAiResolutionForSale(
   if (aiBuyerNick) {
     const normAiNick = normalizeNickname(aiBuyerNick);
     const matchingComment = options.sessionComments.find(
-      (c) => normalizeNickname(c.nickname) === normAiNick
+      (c) => normalizeNickname(c.nickname) === normAiNick || areNicknamesSame(c.nickname, aiBuyerNick)
     );
     const matchingBuyer = options.sessionBuyers?.find(
-      (b) => normalizeNickname(b.display_nickname) === normAiNick
+      (b) => normalizeNickname(b.display_nickname) === normAiNick || areNicknamesSame(b.display_nickname, aiBuyerNick)
     );
 
     if (!matchingComment && !matchingBuyer) {
