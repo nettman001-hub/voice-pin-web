@@ -174,30 +174,17 @@ export const InvoiceManagementPage: React.FC = () => {
         </div>
       </header>
 
-      {/* 최상단 방송 회차 선택 바 */}
-      <div className="rounded-3xl border-2 border-brand-200 bg-white p-4 sm:p-5 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-brand-50 text-brand-600 border border-brand-100 flex-shrink-0">
-              <Layers className="w-5 h-5" />
-            </div>
-            <div>
-              <label htmlFor="invoice-session-filter" className="text-sm font-black text-slate-900 flex items-center gap-2">
-                <span>방송 회차 선택</span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  {sessionFilter === 'ALL' ? '전체 회차' : '회차별 보기'}
-                </span>
-              </label>
-              <p className="text-xs text-slate-500 font-normal mt-0.5">
-                정산서를 작성하고 발송할 방송 회차를 선택하세요. (기본값: 최근 회차)
-              </p>
-            </div>
-          </div>
+      {/* 방송 회차 선택 바 */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 shadow-sm">
+        <div className="flex items-center gap-3">
+          <label htmlFor="invoice-session-filter" className="text-xs font-bold text-slate-700 flex items-center flex-shrink-0">
+            <Layers className="w-3.5 h-3.5 mr-1.5 text-brand-600" /> 회차 선택:
+          </label>
           <select
             id="invoice-session-filter"
             value={sessionFilter}
             onChange={(e) => handleSessionFilterChange(e.target.value)}
-            className="w-full sm:w-auto min-w-[280px] sm:min-w-[340px] rounded-xl border-2 border-brand-400 bg-slate-50 hover:bg-white px-3.5 py-2.5 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500/20 transition shadow-xs cursor-pointer"
+            className="min-w-0 flex-1 max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
           >
             {availableSessions.map((session) => {
               const isLatest = session.id === latestSessionId;

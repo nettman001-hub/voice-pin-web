@@ -135,27 +135,29 @@ export const SettlementPage: React.FC = () => {
       </div>
 
       {/* 방송 회차 선택 바 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Layers className="w-4 h-4 text-brand-600" />
-          <span className="text-xs font-bold text-slate-800">정산 회차 선택:</span>
+      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 shadow-sm">
+        <div className="flex items-center gap-3">
+          <label htmlFor="settlement-session-filter" className="text-xs font-bold text-slate-700 flex items-center flex-shrink-0">
+            <Layers className="w-3.5 h-3.5 mr-1.5 text-brand-600" /> 회차 선택:
+          </label>
+          <select
+            id="settlement-session-filter"
+            value={sessionFilter}
+            onChange={(e) => handleSessionFilterChange(e.target.value)}
+            className="min-w-0 flex-1 max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
+          >
+            {availableSessions.map((session) => {
+              const isLatest = session.id === latestSessionId;
+              return (
+                <option key={session.id} value={session.id}>
+                  {session.displayCode}
+                  {session.status === 'ACTIVE' ? ' · 진행 중 (실시간)' : isLatest ? ' (최근 회차)' : ''}
+                </option>
+              );
+            })}
+            <option value="ALL">전체 회차 (모든 방송 합산)</option>
+          </select>
         </div>
-        <select
-          value={sessionFilter}
-          onChange={(e) => handleSessionFilterChange(e.target.value)}
-          className="min-w-0 flex-1 sm:max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
-        >
-          {availableSessions.map((session) => {
-            const isLatest = session.id === latestSessionId;
-            return (
-              <option key={session.id} value={session.id}>
-                {session.displayCode}
-                {session.status === 'ACTIVE' ? ' · 진행 중 (실시간)' : isLatest ? ' (최근 회차)' : ''}
-              </option>
-            );
-          })}
-          <option value="ALL">전체 회차 (모든 방송 합산)</option>
-        </select>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
