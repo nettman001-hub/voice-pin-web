@@ -374,13 +374,21 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (state.shipments.some((shipment) => intersects(shipment.saleIds, ids))) return;
       const sale = sales.find((item) => item.id === ids[0]);
       const claim = getClaimForSales(ids);
+      const invoice = state.invoices.find((inv) => intersects(inv.saleIds, ids));
       if (!sale) return;
+
+      const phoneNumber = (claim?.phoneNumber || invoice?.phoneNumber || '').trim();
+      const address = (claim?.address || invoice?.address || '').trim();
+
+      // 주소 또는 연락처가 없으면 발송 업무(발송대기)로 생성하지 않음!
+      if (!phoneNumber || !address) return;
+
       created.push({
         id: `shipment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         saleIds: ids,
-        recipientName: claim?.nickname || sale.buyerNickname,
-        phoneNumber: claim?.phoneNumber || '',
-        address: claim?.address || '',
+        recipientName: claim?.nickname || invoice?.customerNickname || sale.buyerNickname,
+        phoneNumber,
+        address,
         carrier: 'CJ대한통운',
         trackingNumber: '',
         status: 'READY',
