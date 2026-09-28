@@ -42,7 +42,6 @@ export const SalesListPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [searchTerm, setSearchTerm] = useState('');
-  const sessionFilter = searchParams.get('session') || 'ALL';
   const [viewMode, setViewMode] = useState<'BUYER_GROUPED' | 'INDIVIDUAL'>('BUYER_GROUPED');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [sortOrder, setSortOrder] = useState<'AMOUNT_DESC' | 'COUNT_DESC' | 'LATEST' | 'OLDEST'>('AMOUNT_DESC');
@@ -100,6 +99,31 @@ export const SalesListPage: React.FC = () => {
     ));
   }, [cloudSessions, sales]);
 
+  // 가장 최근 회차 세션 (진행 중인 세션 우선, 없으면 시작시각 기준 가장 최근 회차)
+  const latestSessionId = useMemo(() => {
+    if (availableSessions.length === 0) return null;
+    const active = availableSessions.find((s) => s.status === 'ACTIVE');
+    return active ? active.id : availableSessions[0].id;
+  }, [availableSessions]);
+
+  // URL 파라미터가 없으면 최근 회차를 기본값으로 지정
+  const sessionFilter = useMemo(() => {
+    const raw = searchParams.get('session');
+    if (raw !== null) {
+      return raw;
+    }
+    return latestSessionId || 'ALL';
+  }, [searchParams, latestSessionId]);
+
+  // 초기 진입 시 URL에 session 파라미터가 없으면 최근 회차로 URL 동기화 (기본값 최근회차)
+  useEffect(() => {
+    if (searchParams.get('session') === null && latestSessionId) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set('session', latestSessionId);
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [searchParams, latestSessionId, setSearchParams]);
+
   const selectedSession = sessionFilter === 'ALL'
     ? null
     : availableSessions.find((session) => session.id === sessionFilter) || null;
@@ -107,11 +131,7 @@ export const SalesListPage: React.FC = () => {
 
   const handleSessionFilterChange = (nextSessionId: string) => {
     const nextParams = new URLSearchParams(searchParams);
-    if (nextSessionId === 'ALL') {
-      nextParams.delete('session');
-    } else {
-      nextParams.set('session', nextSessionId);
-    }
+    nextParams.set('session', nextSessionId);
     setSearchParams(nextParams);
   };
 
@@ -271,12 +291,16 @@ export const SalesListPage: React.FC = () => {
             onChange={(event) => handleSessionFilterChange(event.target.value)}
             className="min-w-0 flex-1 max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
           >
-            <option value="ALL">전체 회차</option>
-            {availableSessions.map((session) => (
-              <option key={session.id} value={session.id}>
-                {session.displayCode}{session.status === 'ACTIVE' ? ' · 진행 중' : ''}
-              </option>
-            ))}
+            {availableSessions.map((session) => {
+              const isLatest = session.id === latestSessionId;
+              return (
+                <option key={session.id} value={session.id}>
+                  {session.displayCode}
+                  {session.status === 'ACTIVE' ? ' · 진행 중 (실시간)' : isLatest ? ' (최근 회차)' : ''}
+                </option>
+              );
+            })}
+            <option value="ALL">전체 회차 (모든 방송 합산)</option>
           </select>
         </div>
 
