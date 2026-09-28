@@ -123,6 +123,21 @@ export const AdminAiSettingsPage: React.FC = () => {
       const prevSlot = prev[targetKey];
       const updatedSlot = { ...prevSlot, [field]: value };
 
+      // 0. 인증 방식(authType)을 'NONE'으로 변경 시 비밀정보 즉시 삭제 대기 및 화면 상태 초기화
+      if (field === 'authType' && value === 'NONE') {
+        if (slotNum === 1) {
+          setSlot1ClearSecret(true);
+          setSlot1NewSecret('');
+          setShowSlot1SecretInput(false);
+        } else {
+          setSlot2ClearSecret(true);
+          setSlot2NewSecret('');
+          setShowSlot2SecretInput(false);
+        }
+        updatedSlot.hasSecret = false;
+        updatedSlot.maskedSecret = undefined;
+      }
+
       // 1. 실행 유형(type) 변경 시 위치 및 라우팅 모드 자동 동기화
       if (field === 'type') {
         if (value === 'LOCAL') {
@@ -206,17 +221,38 @@ export const AdminAiSettingsPage: React.FC = () => {
           slot1: {
             ...cleanSlot1,
             newSecret: slot1NewSecret.trim() || undefined,
-            clearSecret: slot1ClearSecret,
+            // 인증 없음(NONE)인 경우 DB의 ai_secrets 키 레코드를 완전히 삭제하도록 명시적 지시
+            clearSecret: cleanSlot1.authType === 'NONE' ? true : slot1ClearSecret,
           },
           slot2: {
             ...cleanSlot2,
             newSecret: slot2NewSecret.trim() || undefined,
-            clearSecret: slot2ClearSecret,
+            // 인증 없음(NONE)인 경우 DB의 ai_secrets 키 레코드를 완전히 삭제하도록 명시적 지시
+            clearSecret: cleanSlot2.authType === 'NONE' ? true : slot2ClearSecret,
           },
         },
       });
 
-      setSettings(updated);
+      const finalSlot1Auth = cleanSlot1.authType === 'NONE' ? 'NONE' : (updated.slot1?.authType || 'NONE');
+      const finalSlot2Auth = cleanSlot2.authType === 'NONE' ? 'NONE' : (updated.slot2?.authType || 'API_KEY');
+
+      const sanitizedUpdated: AiSettings = {
+        ...updated,
+        slot1: {
+          ...updated.slot1,
+          authType: finalSlot1Auth,
+          hasSecret: finalSlot1Auth === 'NONE' ? false : (updated.slot1?.hasSecret ?? false),
+          maskedSecret: finalSlot1Auth === 'NONE' ? undefined : updated.slot1?.maskedSecret,
+        },
+        slot2: {
+          ...updated.slot2,
+          authType: finalSlot2Auth,
+          hasSecret: finalSlot2Auth === 'NONE' ? false : (updated.slot2?.hasSecret ?? false),
+          maskedSecret: finalSlot2Auth === 'NONE' ? undefined : updated.slot2?.maskedSecret,
+        },
+      };
+
+      setSettings(sanitizedUpdated);
       setSlot1NewSecret('');
       setSlot1ClearSecret(false);
       setShowSlot1SecretInput(false);
