@@ -24,6 +24,16 @@ export function generateSessionId(): string {
   return `${y}-${m}-${d} 라이브 회차`;
 }
 
+// 서버 정식 UUID 세션인지 임시 세션 ID인지 판별 (P1-3: 정식 방송 간 전환 시 댓글 혼입 차단용)
+export function isTemporarySessionId(sessionId?: string | null): boolean {
+  if (!sessionId) return false;
+  // 표준 UUID 형식 (8-4-4-4-12)이면 정식 발급된 서버 세션
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId.trim())) {
+    return false;
+  }
+  return true;
+}
+
 // 해당 회차의 판매 시작 시 1번부터 자동으로 상품번호 부여
 export function getNextProductCodeForSession(
   sessionId?: string | null,
@@ -283,18 +293,19 @@ export class StorageService {
     }
   }
 
-  private setItem<T>(key: string, value: T): boolean {
+  private setItem<T>(key: string, value: T, options?: { allowEviction?: boolean }): boolean {
     try {
       localStorage.setItem(key, JSON.stringify(value));
       return true;
     } catch (e) {
       console.error(`[Storage] Failed to save key: ${key}`, e);
-      // QuotaExceededError 자동 대응: 배열 데이터인 경우 과거 데이터 50% 절삭 후 재시도
-      if (Array.isArray(value) && value.length > 50) {
+      // P1-1: 절대 판매(SALES), 결제(PAYMENTS), 정산(COMMERCE) 등 금융/판매 데이터는 자동 절삭 금지!
+      // 오직 allowEviction이 명시적으로 허용된 비필수 캐시(예: 실시간 댓글)만 과거 데이터 50% 절삭 시도
+      if (options?.allowEviction && Array.isArray(value) && value.length > 50) {
         try {
           const trimmed = value.slice(0, Math.floor(value.length / 2));
           localStorage.setItem(key, JSON.stringify(trimmed));
-          console.warn(`[Storage] 용량 초과 자동 대응: ${key} 데이터 50% 절삭 저장 완료`);
+          console.warn(`[Storage] 비필수 캐시 용량 초과 자동 대응: ${key} 데이터 50% 절삭 저장 완료`);
           return true;
         } catch {
           return false;
@@ -441,14 +452,50 @@ export class StorageService {
 
   // 판매 내역 (workspace별 격리 지원)
   public getSales(workspaceIdOverride?: string | null): SaleRecord[] {
+    const ws = workspaceIdOverride !== undefined ? workspaceIdOverride : this.currentWorkspaceId;
     const key = this.scopedKey(KEYS.SALES, workspaceIdOverride);
     const data = this.getItem<SaleRecord[] | null>(key, null);
     if (data) return data;
-    // 이전 버전 전역 키 마이그레이션 호환
+    // workspace가 지정된 경우 타 계정/공용 데이터가 혼입되지 않도록 빈 배열 반환 (P1-4 해결)
+    if (ws) {
+      return [];
+    }
+    // workspace가 아예 없는 비로그인/단독 상태일 때만 공용 키 조회
     return this.getItem<SaleRecord[]>(KEYS.SALES, INITIAL_SALES);
   }
   public saveSales(sales: SaleRecord[], workspaceIdOverride?: string | null) {
-    this.setItem(this.scopedKey(KEYS.SALES, workspaceIdOverride), sales);
+    const key = this.scopedKey(KEYS.SALES, workspaceIdOverride);
+    const success = this.setItem(key, sales);
+    if (!success) {
+      console.warn('[Storage] 판매 데이터 용량 초과로 비필수 캐시 정리 후 재시도...');
+      // 1단계: 캡처 영역 스냅샷 캐시 삭제
+      localStorage.removeItem(KEYS.CAPTURE_AREA_SNAPSHOT);
+      this.captureAreaSnapshotCache = null;
+
+      // 2단계: 댓글 캐시 50% 절삭
+      const comments = this.getCommentRecords(workspaceIdOverride);
+      if (comments.length > 50) {
+        this.saveCommentRecords(comments.slice(0, Math.floor(comments.length / 2)), workspaceIdOverride);
+      }
+
+      // 3단계: 부트스트랩 캐시 삭제
+      localStorage.removeItem(this.scopedKey(KEYS.BOOTSTRAP, workspaceIdOverride));
+
+      // 재시도
+      const retrySuccess = this.setItem(key, sales);
+      if (!retrySuccess) {
+        // 최후의 수단: 댓글 캐시 전체 삭제 후 판매 기록 100% 보존
+        localStorage.removeItem(this.scopedKey(KEYS.COMMENT_RECORDS, workspaceIdOverride));
+        const finalRetry = this.setItem(key, sales);
+        if (!finalRetry) {
+          console.error('[Storage] 치명적 오류: 비필수 캐시 전체 정리 후에도 판매 데이터 저장 실패');
+        } else {
+          console.warn('[Storage] 댓글 캐시 정리 후 판매 데이터 저장 성공');
+        }
+      } else {
+        console.info('[Storage] 비필수 캐시 정리 후 판매 데이터 저장 성공');
+      }
+    }
   }
 
   public addSale(sale: SaleRecord, workspaceIdOverride?: string | null) {
@@ -569,14 +616,20 @@ export class StorageService {
   // 댓글 캡처 기록
   // 댓글 캡처 기록 (workspace별 격리 지원)
   public getCommentRecords(workspaceIdOverride?: string | null): CommentRecord[] {
+    const ws = workspaceIdOverride !== undefined ? workspaceIdOverride : this.currentWorkspaceId;
     const key = this.scopedKey(KEYS.COMMENT_RECORDS, workspaceIdOverride);
     const data = this.getItem<CommentRecord[] | null>(key, null);
     if (data) return data;
-    // 이전 버전 전역 키 마이그레이션 호환
+    // workspace가 지정된 경우 타 계정/공용 데이터가 혼입되지 않도록 빈 배열 반환 (P1-4 해결)
+    if (ws) {
+      return [];
+    }
+    // workspace가 아예 없는 비로그인/단독 상태일 때만 공용 키 조회
     return this.getItem<CommentRecord[]>(KEYS.COMMENT_RECORDS, []);
   }
   public saveCommentRecords(records: CommentRecord[], workspaceIdOverride?: string | null) {
-    this.setItem(this.scopedKey(KEYS.COMMENT_RECORDS, workspaceIdOverride), records);
+    // 댓글은 비필수 캐시이므로 용량 초과 시 과거 데이터 50% 절삭 허용 (allowEviction: true)
+    this.setItem(this.scopedKey(KEYS.COMMENT_RECORDS, workspaceIdOverride), records, { allowEviction: true });
   }
 
   // 중복 제거(upsert), 정식 buyerId 보존, 최대 1,000건 안전 제한
@@ -626,6 +679,11 @@ export class StorageService {
   // 임시 세션 ID에서 정식 UUID로 전환 시 로컬 스토리지 댓글 세션 ID 승격
   public promoteSessionComments(fromSessionId: string, toSessionId: string, workspaceIdOverride?: string | null) {
     if (!fromSessionId || !toSessionId || fromSessionId === toSessionId) return;
+    // P1-3: fromSessionId가 임시 세션 ID(날짜명 등)일 때만 정식 UUID 세션으로 승격!
+    // 정식 UUID 세션 A에서 정식 UUID 세션 B로 바뀔 때는 절대 댓글을 옮기면 안 됨!
+    if (!isTemporarySessionId(fromSessionId)) {
+      return;
+    }
     const list = this.getCommentRecords(workspaceIdOverride);
     let changed = false;
     const updated = list.map((item) => {

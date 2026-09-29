@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { AlertTriangle, X } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { useLive } from './LiveContext';
-import { storageService } from '../services/storageService';
+import { storageService, isTemporarySessionId } from '../services/storageService';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
 import { productSalesApi } from '../services/productSalesApi';
 import { useProductSales } from './ProductSalesContext';
@@ -95,27 +95,36 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
     // 임시 세션 ID에서 정식 활성 세션 UUID로 전환된 경우 기존 메모리 댓글의 세션 ID를 자동 승격
     if (nextSessionId && prevSessionId && prevSessionId !== nextSessionId) {
-      // 로컬 스토리지에 이미 저장된 댓글들의 sessionId도 일괄 승격
-      storageService.promoteSessionComments(prevSessionId, nextSessionId);
+      // P1-3: prevSessionId가 임시 세션 ID(날짜명 등)일 때만 정식 세션 UUID로 승격!
+      if (isTemporarySessionId(prevSessionId)) {
+        // 로컬 스토리지에 이미 저장된 댓글들의 sessionId도 일괄 승격
+        storageService.promoteSessionComments(prevSessionId, nextSessionId);
 
-      for (const [key, comment] of pendingCommentsRef.current.entries()) {
-        if (comment.sessionId === prevSessionId) {
-          pendingCommentsRef.current.set(key, { ...comment, sessionId: nextSessionId });
+        for (const [key, comment] of pendingCommentsRef.current.entries()) {
+          if (comment.sessionId === prevSessionId) {
+            pendingCommentsRef.current.set(key, { ...comment, sessionId: nextSessionId });
+          }
         }
-      }
-      for (const item of cloudQueueRef.current) {
-        if (item.sessionId === prevSessionId) {
-          item.sessionId = nextSessionId;
+        for (const item of cloudQueueRef.current) {
+          if (item.sessionId === prevSessionId) {
+            item.sessionId = nextSessionId;
+          }
         }
-      }
-      setLiveComments((prev) => {
-        const updated = prev.map((c) => (c.sessionId === prevSessionId ? { ...c, sessionId: nextSessionId } : c));
-        // 로컬DB에 이미 저장되어 있는 해당 세션의 댓글도 합산
+        setLiveComments((prev) => {
+          const updated = prev.map((c) => (c.sessionId === prevSessionId ? { ...c, sessionId: nextSessionId } : c));
+          // 로컬DB에 이미 저장되어 있는 해당 세션의 댓글도 합산
+          const localComments = storageService.getSessionCommentRecords(nextSessionId);
+          const idSet = new Set(updated.map((item) => item.platformMessageId || item.id));
+          const missing = localComments.filter((item) => !idSet.has(item.platformMessageId || item.id));
+          return [...updated, ...missing].slice(-100);
+        });
+      } else {
+        // 정식 세션 간 전환인 경우: 이전 세션 댓글 큐/상태를 비우고 새 세션의 로컬 댓글 로드
+        pendingCommentsRef.current.clear();
+        cloudQueueRef.current = [];
         const localComments = storageService.getSessionCommentRecords(nextSessionId);
-        const idSet = new Set(updated.map((item) => item.platformMessageId || item.id));
-        const missing = localComments.filter((item) => !idSet.has(item.platformMessageId || item.id));
-        return [...updated, ...missing].slice(-100);
-      });
+        setLiveComments(localComments.slice(-100));
+      }
     }
   }, [activeSession?.id, currentSessionId]);
 
@@ -301,7 +310,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         sessionId: currentSession,
         nickname,
         uniqueId: incoming.uniqueId || undefined,
-        buyerId: incoming.userId || incoming.uniqueId || undefined,
+        buyerId: undefined, // P1-2: 서버 buyers.id는 서버가 발급한 UUID여야 하므로 틱톡 ID 대입 중단
         content,
         capturedAt: incoming.receivedAt || new Date().toISOString(),
         ...(matchedWord ? { matchedAlertWord: matchedWord } : {})
@@ -416,9 +425,15 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       platformMessageId: comment.platformMessageId,
       sessionId: comment.sessionId,
       nickname: comment.nicknameSnapshot,
+      buyerId: comment.buyerId || undefined,
       content: comment.content,
       capturedAt: comment.capturedAt,
     }));
+
+    // 클라우드 피드에서 전달받은 정식 레코드 ID 및 buyerId를 로컬 스토리지 댓글에도 즉시 반영
+    if (sessionRecords.length > 0) {
+      storageService.addCommentRecords(sessionRecords);
+    }
 
     setLiveComments((prevComments) => {
       const byMsgId = new Map<string, CommentRecord>();
@@ -439,7 +454,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         }
       }
 
-      // 2. 클라우드 판매 피드에서 반환된 최신 댓글 반영 (정식 레코드 ID로 갱신)
+      // 2. 클라우드 판매 피드에서 반환된 최신 댓글 반영 (정식 레코드 ID 및 buyerId로 갱신)
       for (const cloudRec of sessionRecords) {
         if (cloudRec.platformMessageId && byMsgId.has(cloudRec.platformMessageId)) {
           const existing = byMsgId.get(cloudRec.platformMessageId)!;
@@ -448,6 +463,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
             id: cloudRec.id,
             sessionId: cloudRec.sessionId,
             nickname: cloudRec.nickname || existing.nickname,
+            buyerId: cloudRec.buyerId || existing.buyerId,
             content: cloudRec.content || existing.content,
             capturedAt: cloudRec.capturedAt || existing.capturedAt,
           });

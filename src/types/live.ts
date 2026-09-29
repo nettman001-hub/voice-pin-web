@@ -30,6 +30,8 @@ export interface SaleRecord {
   printError?: string;
   /** 판매 데이터 정합성 버전 (충돌 감지용) */
   revision?: number;
+  /** 서버 동기화 상태: PENDING (로컬 생성 후 서버 전송 중/미확정), SYNCED (서버 저장 확인됨) */
+  syncStatus?: 'PENDING' | 'SYNCED';
   /** 구조화된 보류 사유 목록 (복수 사유 지원) */
   pendingReasons?: import('./pendingSale.ts').StructuredPendingReason[];
   /** 분석 시점의 불변 근거 스냅샷 */

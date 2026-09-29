@@ -119,8 +119,10 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const normalizedPath = location.pathname.replace(/\/+$/, '') || '/';
   const shouldPollSalesFeed = isAuthenticated && feedPollingEnabled && SALES_FEED_POLL_PATHS.has(normalizedPath);
 
+  const workspaceIdRef = useRef<string | null>(workspaceId || null);
   // 워크스페이스 변경 시 storageService 스코프 동기화
   useEffect(() => {
+    workspaceIdRef.current = workspaceId || null;
     storageService.setWorkspaceId(workspaceId || null);
   }, [workspaceId]);
 
@@ -142,8 +144,9 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
     const { summary, buyerStats } = storageService.getSessionSalesSummary(sessionId);
 
     // 2. 로컬DB 댓글 테이블에서 현재 세션 댓글 읽기 (정식 buyerId 보존)
+    // P1-8: localRecords는 시간 오름차순(과거->최신)이므로 최신 50건은 반드시 slice(-50)이어야 함
     const localRecords = storageService.getSessionCommentRecords(sessionId);
-    const comments: LiveComment[] = localRecords.slice(0, 50).map((r, index) => ({
+    const comments: LiveComment[] = localRecords.slice(-50).map((r, index) => ({
       id: r.id,
       sessionId: r.sessionId,
       collectorId: 'local-helper',
@@ -176,9 +179,14 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
   // [안전장치 1회 동기화 (Bootstrap)]
   // 방송 시작 또는 화면 새로고침 시 1회만 Supabase에서 최신 상태를 받아와 로컬DB를 초기화/동기화
   const loadBootstrap = useCallback(async (): Promise<ProductSalesBootstrapData | null> => {
+    const requestWorkspaceId = workspaceIdRef.current;
     setIsLoading(true);
     try {
       const data = await productSalesApi.getBootstrap();
+      // P1-4: 요청 시점의 워크스페이스와 현재 워크스페이스가 다르면(계정 전환 등) 이전 응답 폐기
+      if (workspaceIdRef.current !== requestWorkspaceId) {
+        return null;
+      }
       const hydratedProduct = await hydrateProduct(data.activeProduct);
       activeSessionRef.current = data.activeSession;
       activeProductRef.current = hydratedProduct;
@@ -222,10 +230,13 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
       return hydratedData;
     } catch (err: any) {
+      if (workspaceIdRef.current !== requestWorkspaceId) {
+        return null;
+      }
       console.warn('[ProductSalesContext] 부트스트랩 API 실패, 로컬 캐시 복원 시도:', err);
       const cached = storageService.getBootstrapCache();
       // 타 계정/타 워크스페이스 캐시 오염 원천 차단
-      if (cached && (!workspaceId || cached.workspaceId === workspaceId)) {
+      if (cached && (!requestWorkspaceId || cached.workspaceId === requestWorkspaceId)) {
         activeSessionRef.current = cached.activeSession;
         activeProductRef.current = cached.activeProduct;
         setBootstrap(cached);
@@ -237,9 +248,11 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
       setError(err.message || '부트스트랩 로딩 실패');
       return null;
     } finally {
-      setIsLoading(false);
+      if (workspaceIdRef.current === requestWorkspaceId) {
+        setIsLoading(false);
+      }
     }
-  }, [buildLocalFeed, workspaceId]);
+  }, [buildLocalFeed]);
 
   const startNewSession = useCallback(async (): Promise<ProductSalesSession> => {
     await productSalesApi.startSession(crypto.randomUUID());
@@ -311,9 +324,21 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
         e.key.includes('voicecap_active_session') ||
         e.key.includes('voicecap_comment_records')
       ) {
-        const session = activeSessionRef.current || storageService.getActiveSession();
+        // P1-7: 활성 상품 및 세션도 로컬 저장소 최신값으로 동기화
+        const session = storageService.getActiveSession();
+        const product = storageService.getActiveProduct();
+        if (session) activeSessionRef.current = session;
+        if (product) activeProductRef.current = product;
+        setBootstrap((prev) => {
+          if (!prev && !session && !product) return prev;
+          return {
+            ...prev!,
+            activeSession: session ?? prev?.activeSession ?? (null as any),
+            activeProduct: product ?? prev?.activeProduct ?? null,
+          };
+        });
         if (session?.id) {
-          setFeed(buildLocalFeed(session.id, session.revision));
+          setFeed(buildLocalFeed(session.id, session.revision, product));
         }
       }
     };
@@ -341,7 +366,24 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
           }));
           storageService.addCommentRecords(records);
         }
-        setFeed(buildLocalFeed(sessionId, activeSessionRef.current?.revision));
+        // P1-7: 활성 상품 및 세션 revision도 원격 피드에서 받아서 동기화
+        let currentProd = activeProductRef.current;
+        if (remoteFeed.activeProduct) {
+          const hydrated = await hydrateProduct(remoteFeed.activeProduct);
+          currentProd = hydrated;
+          activeProductRef.current = hydrated;
+          storageService.saveActiveProduct(hydrated);
+          setBootstrap((prev) => prev ? { ...prev, activeProduct: hydrated } : prev);
+        }
+        if (remoteFeed.sessionRevision && activeSessionRef.current) {
+          if (remoteFeed.sessionRevision > activeSessionRef.current.revision) {
+            const updatedSession = { ...activeSessionRef.current, revision: remoteFeed.sessionRevision };
+            activeSessionRef.current = updatedSession;
+            storageService.saveActiveSession(updatedSession);
+            setBootstrap((prev) => prev ? { ...prev, activeSession: updatedSession } : prev);
+          }
+        }
+        setFeed(buildLocalFeed(sessionId, remoteFeed.sessionRevision || activeSessionRef.current?.revision, currentProd));
       } catch {
         // 백그라운드 헬스체크 실패는 조용히 무시
       }
@@ -388,8 +430,11 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
               recognizedAt: new Date().toISOString(),
               rawTranscript: '',
               revision: s.revision || 1,
+              syncStatus: 'SYNCED',
             });
           }
+          // P1-6: SalesContext 등 동일 탭 내 다른 컨텍스트에도 저장소 변경 알림 발생
+          window.dispatchEvent(new CustomEvent('voicecap_sales_updated'));
         }
         if (cand.sessionId) {
           setFeed(buildLocalFeed(cand.sessionId, cand.sessionRevision));
@@ -583,8 +628,11 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
             recognizedAt: new Date().toISOString(),
             rawTranscript: '',
             revision: s.revision || 1,
+            syncStatus: 'SYNCED',
           });
         }
+        // P1-6: SalesContext 등 동일 탭 내 다른 컨텍스트에도 저장소 변경 알림 발생
+        window.dispatchEvent(new CustomEvent('voicecap_sales_updated'));
       }
 
       // 판매 확정 후 로컬 피드 즉시 갱신

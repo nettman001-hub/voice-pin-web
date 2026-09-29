@@ -63,10 +63,25 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return salesRef.current;
     }
 
-    // 서버 원본과 로컬 최신 판매 병합 (서버에 아직 반영 대기 중인 로컬 판매 보존 - Critical 5 해결)
+    const localMap = new Map<string, SaleRecord>(salesRef.current.map((s) => [s.id, s]));
     const serverIds = new Set(rows.map((r) => r.id));
-    const localUnsynced = salesRef.current.filter((s) => !serverIds.has(s.id));
-    const merged = [...localUnsynced, ...rows];
+
+    // P1-6: 서버 row와 로컬 항목 병합 시 revision 비교하여 조회 경쟁 조건 해결
+    const mergedServerRows: SaleRecord[] = rows.map((serverRow) => {
+      const local = localMap.get(serverRow.id);
+      if (local && (local.revision || 1) > (serverRow.revision || 1)) {
+        // 로컬에서 사용자가 더 높은 revision으로 수정한 내용이 아직 서버에 전송 중인 경우 로컬 버전 유지
+        return local;
+      }
+      return { ...serverRow, syncStatus: 'SYNCED' as const };
+    });
+
+    // P1-5: 서버 목록에 없고 로컬에만 있는 항목 중, 오직 아직 서버 미전송/전송중인 PENDING 항목만 보존!
+    // 이미 SYNCED 상태였던 항목은 서버에서 삭제(DELETE/CANCELLED)된 것이므로 로컬에서도 정상 제거
+    const pendingLocalSales = salesRef.current.filter(
+      (s) => !serverIds.has(s.id) && s.syncStatus === 'PENDING'
+    );
+    const merged = [...pendingLocalSales, ...mergedServerRows];
 
     // [1회 동기화]
     storageService.saveSales(merged);
@@ -74,6 +89,17 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setSales(merged);
     return merged;
   }, [isRemoteAuth, workspaceId]);
+
+  // 동일 창의 다른 컨텍스트(예: ProductSalesContext 후보 확정)에서 판매가 추가/수정된 경우 즉시 동기화
+  useEffect(() => {
+    const handleSalesUpdated = () => {
+      const local = storageService.getSales();
+      salesRef.current = local;
+      setSales(local);
+    };
+    window.addEventListener('voicecap_sales_updated', handleSalesUpdated);
+    return () => window.removeEventListener('voicecap_sales_updated', handleSalesUpdated);
+  }, []);
 
   useEffect(() => {
     if (!isRemoteAuth || !workspaceId) {
@@ -101,7 +127,13 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     storageService.updateSale(sale);
     // [동시 쓰기: Supabase]
     if (isRemoteAuth && workspaceId) {
-      void remoteWorkspaceService.saveSale(workspaceId, sale).catch((error) => console.error('[Sales] remote save failed', error));
+      void remoteWorkspaceService.saveSale(workspaceId, sale)
+        .then(() => {
+          const syncedSale: SaleRecord = { ...sale, syncStatus: 'SYNCED' };
+          storageService.updateSale(syncedSale);
+          setSales((prev) => prev.map((s) => s.id === sale.id ? syncedSale : s));
+        })
+        .catch((error) => console.error('[Sales] remote save failed', error));
     }
   };
 
@@ -181,6 +213,8 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       id: `s-${crypto.randomUUID()}`,
       printStatus: saleData.printStatus || 'NOT_REQUESTED',
       printRevision: saleData.printRevision || 0,
+      syncStatus: 'PENDING',
+      revision: saleData.revision || 1,
     };
     const newSale = isPrintableSale(baseSale)
       ? { ...baseSale, printStatus: 'QUEUED' as const, printRevision: Math.max(1, baseSale.printRevision || 0) }
@@ -194,7 +228,13 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // [동시 쓰기 2: Supabase]
     if (isRemoteAuth && workspaceId) {
-      void remoteWorkspaceService.saveSale(workspaceId, newSale).catch((error) => console.error('[Sales] remote add failed', error));
+      void remoteWorkspaceService.saveSale(workspaceId, newSale)
+        .then(() => {
+          const syncedSale: SaleRecord = { ...newSale, syncStatus: 'SYNCED' };
+          storageService.updateSale(syncedSale);
+          setSales((prev) => prev.map((s) => s.id === newSale.id ? syncedSale : s));
+        })
+        .catch((error) => console.error('[Sales] remote add failed', error));
     }
     if (newSale.printStatus === 'QUEUED') sendToPrinter(newSale);
     return newSale;
