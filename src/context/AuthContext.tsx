@@ -71,9 +71,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLocked, setIsLocked] = useState(false);
   const [lockUntil, setLockUntil] = useState<number | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
-  const identitySyncRef = React.useRef<Promise<void> | null>(null);
+  const identitySyncRef = React.useRef<{ userId: string; promise: Promise<void> } | null>(null);
+  const identityGenerationRef = React.useRef(0);
+  const requestedUserRef = React.useRef<string | null>(null);
 
   const setRemoteIdentity = useCallback(async (authUser: Parameters<typeof formatUser>[0], accessToken?: string | null) => {
+    const generation = identityGenerationRef.current;
     try {
       const { data: onboarding, error } = await requireSupabase().functions.invoke('voicecap-onboard');
       if (error || !onboarding?.ok) {
@@ -86,18 +89,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!identity.workspaceId) {
       throw new Error('VoiceCAP 작업공간을 찾지 못했습니다. 관리자에게 문의하세요.');
     }
+    await storageService.restoreWorkspace(identity.workspaceId);
+    if (generation !== identityGenerationRef.current || requestedUserRef.current !== authUser.id) return;
+    storageService.setWorkspaceId(identity.workspaceId);
     setUser(identity.user);
     setWorkspaceId(identity.workspaceId);
     setToken(accessToken ?? null);
   }, []);
 
   const syncRemoteIdentity = useCallback((authUser: Parameters<typeof formatUser>[0], accessToken?: string | null) => {
-    if (identitySyncRef.current) return identitySyncRef.current;
-
-    identitySyncRef.current = setRemoteIdentity(authUser, accessToken).finally(() => {
-      identitySyncRef.current = null;
+    if (requestedUserRef.current !== authUser.id) {
+      requestedUserRef.current = authUser.id;
+      identityGenerationRef.current += 1;
+    }
+    if (identitySyncRef.current?.userId === authUser.id) return identitySyncRef.current.promise;
+    const promise = setRemoteIdentity(authUser, accessToken).finally(() => {
+      if (identitySyncRef.current?.promise === promise) identitySyncRef.current = null;
     });
-    return identitySyncRef.current;
+    identitySyncRef.current = { userId: authUser.id, promise };
+    return promise;
   }, [setRemoteIdentity]);
 
   useEffect(() => {
@@ -134,6 +144,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
       if (!active) return;
       if (!session?.user) {
+        requestedUserRef.current = null;
+        identityGenerationRef.current += 1;
+        identitySyncRef.current = null;
+        storageService.setWorkspaceId(null);
         rememberSessionRefreshToken(null);
         setUser(null); setWorkspaceId(null); setToken(null);
         return;
@@ -231,6 +245,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    requestedUserRef.current = null;
+    identityGenerationRef.current += 1;
+    identitySyncRef.current = null;
     rememberSessionRefreshToken(null);
     if (isSupabaseConfigured) await requireSupabase().auth.signOut();
     try {

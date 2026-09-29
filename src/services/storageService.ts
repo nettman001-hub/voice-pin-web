@@ -6,6 +6,8 @@ import { ReportItem, SystemErrorLog, NotificationSetting } from '../types/admin'
 import { CommentRecord, CommentCaptureConfig, DEFAULT_COMMENT_CAPTURE_CONFIG, DEFAULT_COMMENT_SERVER_URL } from '../types/comment';
 import { CommerceState } from '../types/commerce';
 import type { ProductSalesProduct, ProductSalesSession, ProductSalesBootstrapData, BuyerStats, SessionSummary } from '../types/productSales';
+import type { SalesLocalState } from './salesSyncController';
+import { durableStorage } from './durableStorage';
 
 export interface CaptureAreaSnapshot {
   imageUrl: string;
@@ -270,9 +272,95 @@ const KEYS = {
 export class StorageService {
   private captureAreaSnapshotCache: CaptureAreaSnapshot | null | undefined;
   private currentWorkspaceId: string | null = null;
+  private memoryFallback = new Map<string, unknown>();
+  private failures = new Set<string>();
+  private writeVersion = 0;
+  private latestWrites = new Map<string, number>();
+
+  public getPersistenceError(): boolean {
+    const owner = this.currentWorkspaceId;
+    return owner !== null && [...this.failures].some((key) => key.endsWith(`:${encodeURIComponent(owner)}`));
+  }
+
+  public retryPersistence(): void {
+    for (const key of [...this.failures]) {
+      if (this.currentWorkspaceId && key.endsWith(`:${encodeURIComponent(this.currentWorkspaceId)}`) && this.memoryFallback.has(key)) {
+        this.saveRecoverable(key, this.memoryFallback.get(key));
+      }
+    }
+  }
+
+  private notifyPersistence() {
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('voicecap_persistence_changed'));
+  }
+
+  private saveRecoverable(key: string, value: unknown) {
+    const version = Math.max(Date.now() * 1000, this.writeVersion + 1);
+    this.writeVersion = version;
+    this.latestWrites.set(key, version);
+    const envelope = { __voicecapRecovery: 1, updatedAt: version, data: value };
+    this.memoryFallback.set(key, value);
+    const saved = this.setItem(key, envelope);
+    if (saved) {
+      this.memoryFallback.delete(key);
+      this.failures.delete(key);
+    } else {
+      this.failures.add(key);
+    }
+    // Mirror critical data even on a successful Web Storage write. This gives
+    // reloads a complete recovery copy and preserves the pending operation log.
+    void durableStorage.set(key, envelope).then(() => {
+      if (this.latestWrites.get(key) !== version) return;
+      this.failures.delete(key);
+      this.notifyPersistence();
+    }).catch(() => {
+      if (this.latestWrites.get(key) !== version) return;
+      if (!saved) this.failures.add(key);
+      this.notifyPersistence();
+    });
+    this.notifyPersistence();
+  }
+
+  public async restoreWorkspace(workspaceId: string): Promise<void> {
+    for (const baseKey of ['voicecap_sales_state', 'voicecap_comment_outbox']) {
+      const key = this.scopedKey(baseKey, workspaceId);
+      if (this.memoryFallback.has(key)) continue;
+      let before: string | null = null;
+      try { before = localStorage.getItem(key); } catch {}
+      try {
+        const recovered = await durableStorage.get<any>(key);
+        let current: string | null = null;
+        try { current = localStorage.getItem(key); } catch {}
+        if (this.memoryFallback.has(key) || current !== before) continue;
+        const local = current ? JSON.parse(current) : null;
+        if (recovered !== null && (!local || (recovered.updatedAt || 0) > (local.updatedAt || 0))) {
+          this.memoryFallback.set(key, recovered.__voicecapRecovery === 1 ? recovered.data : recovered);
+        }
+      } catch { /* Empty/new databases can still operate from Web Storage. */ }
+    }
+  }
+
+  public getSalesLocalState(workspaceId: string): SalesLocalState {
+    return this.getItem<SalesLocalState>(this.scopedKey('voicecap_sales_state', workspaceId), {
+      records: this.getSales(workspaceId), pending: [],
+    });
+  }
+
+  public saveSalesLocalState(workspaceId: string, state: SalesLocalState): void {
+    this.saveRecoverable(this.scopedKey('voicecap_sales_state', workspaceId), state);
+  }
+
+  public getCommentOutbox<T>(workspaceId: string): T[] {
+    return this.getItem<T[]>(this.scopedKey('voicecap_comment_outbox', workspaceId), []);
+  }
+
+  public saveCommentOutbox<T>(workspaceId: string, entries: T[]): void {
+    this.saveRecoverable(this.scopedKey('voicecap_comment_outbox', workspaceId), entries);
+  }
 
   public setWorkspaceId(workspaceId: string | null) {
     this.currentWorkspaceId = workspaceId;
+    this.notifyPersistence();
   }
 
   public getWorkspaceId(): string | null {
@@ -285,9 +373,12 @@ export class StorageService {
   }
 
   private getItem<T>(key: string, defaultValue: T): T {
+    if (this.memoryFallback.has(key)) return this.memoryFallback.get(key) as T;
     try {
       const data = localStorage.getItem(key);
-      return data ? JSON.parse(data) : defaultValue;
+      if (!data) return defaultValue;
+      const parsed = JSON.parse(data);
+      return parsed?.__voicecapRecovery === 1 ? parsed.data : parsed;
     } catch {
       return defaultValue;
     }
@@ -453,6 +544,10 @@ export class StorageService {
   // 판매 내역 (workspace별 격리 지원)
   public getSales(workspaceIdOverride?: string | null): SaleRecord[] {
     const ws = workspaceIdOverride !== undefined ? workspaceIdOverride : this.currentWorkspaceId;
+    if (ws) {
+      const state = this.getItem<SalesLocalState | null>(this.scopedKey('voicecap_sales_state', ws), null);
+      if (state) return state.records;
+    }
     const key = this.scopedKey(KEYS.SALES, workspaceIdOverride);
     const data = this.getItem<SaleRecord[] | null>(key, null);
     if (data) return data;
@@ -465,36 +560,11 @@ export class StorageService {
   }
   public saveSales(sales: SaleRecord[], workspaceIdOverride?: string | null) {
     const key = this.scopedKey(KEYS.SALES, workspaceIdOverride);
-    const success = this.setItem(key, sales);
-    if (!success) {
-      console.warn('[Storage] 판매 데이터 용량 초과로 비필수 캐시 정리 후 재시도...');
-      // 1단계: 캡처 영역 스냅샷 캐시 삭제
-      localStorage.removeItem(KEYS.CAPTURE_AREA_SNAPSHOT);
-      this.captureAreaSnapshotCache = null;
-
-      // 2단계: 댓글 캐시 50% 절삭
-      const comments = this.getCommentRecords(workspaceIdOverride);
-      if (comments.length > 50) {
-        this.saveCommentRecords(comments.slice(0, Math.floor(comments.length / 2)), workspaceIdOverride);
-      }
-
-      // 3단계: 부트스트랩 캐시 삭제
-      localStorage.removeItem(this.scopedKey(KEYS.BOOTSTRAP, workspaceIdOverride));
-
-      // 재시도
-      const retrySuccess = this.setItem(key, sales);
-      if (!retrySuccess) {
-        // 최후의 수단: 댓글 캐시 전체 삭제 후 판매 기록 100% 보존
-        localStorage.removeItem(this.scopedKey(KEYS.COMMENT_RECORDS, workspaceIdOverride));
-        const finalRetry = this.setItem(key, sales);
-        if (!finalRetry) {
-          console.error('[Storage] 치명적 오류: 비필수 캐시 전체 정리 후에도 판매 데이터 저장 실패');
-        } else {
-          console.warn('[Storage] 댓글 캐시 정리 후 판매 데이터 저장 성공');
-        }
-      } else {
-        console.info('[Storage] 비필수 캐시 정리 후 판매 데이터 저장 성공');
-      }
+    this.saveRecoverable(key, sales);
+    const ws = workspaceIdOverride !== undefined ? workspaceIdOverride : this.currentWorkspaceId;
+    if (ws) {
+      const state = this.getItem<SalesLocalState | null>(this.scopedKey('voicecap_sales_state', ws), null);
+      if (state) this.saveSalesLocalState(ws, { ...state, records: sales });
     }
   }
 
@@ -628,8 +698,10 @@ export class StorageService {
     return this.getItem<CommentRecord[]>(KEYS.COMMENT_RECORDS, []);
   }
   public saveCommentRecords(records: CommentRecord[], workspaceIdOverride?: string | null) {
-    // 댓글은 비필수 캐시이므로 용량 초과 시 과거 데이터 50% 절삭 허용 (allowEviction: true)
-    this.setItem(this.scopedKey(KEYS.COMMENT_RECORDS, workspaceIdOverride), records, { allowEviction: true });
+    // Comments are live-sale evidence: never discard them to make room for sales.
+    const key = this.scopedKey(KEYS.COMMENT_RECORDS, workspaceIdOverride);
+    if (!this.setItem(key, records)) this.memoryFallback.set(key, records);
+    else this.memoryFallback.delete(key);
   }
 
   // 중복 제거(upsert), 정식 buyerId 보존, 최대 1,000건 안전 제한
@@ -639,14 +711,18 @@ export class StorageService {
     const map = new Map<string, CommentRecord>();
 
     for (const item of list) {
-      const key = item.platformMessageId ? `msg:${item.platformMessageId}` : item.id;
+      const key = `${item.sessionId}:${item.platformMessageId || item.id}`;
       map.set(key, item);
     }
     for (const item of records) {
-      const key = item.platformMessageId ? `msg:${item.platformMessageId}` : item.id;
+      const key = `${item.sessionId}:${item.platformMessageId || item.id}`;
       const existing = map.get(key);
       if (existing) {
-        map.set(key, { ...existing, ...item, buyerId: item.buyerId || existing.buyerId });
+        const canonical = !item.id.startsWith('stream-');
+        map.set(key, { ...existing, ...item,
+          id: canonical ? item.id : existing.id,
+          buyerId: item.buyerId !== undefined ? item.buyerId : existing.buyerId,
+        });
       } else {
         map.set(key, item);
       }
@@ -755,6 +831,13 @@ export class StorageService {
     let sessionQuantity = 0;
     let sessionAmount = 0;
     const buyerMap = new Map<string, { quantity: number; amount: number; count: number; displayNickname: string }>();
+    const totals = new Map<string, { count: number; amount: number }>();
+    for (const sale of sales) {
+      if (sale.status === '보류' || sale.status === '취소' || sale.recordState === 'CANCELLED') continue;
+      const key = sale.buyerId || (sale.buyerNickname || '익명').trim();
+      const total = totals.get(key) || { count: 0, amount: 0 };
+      totals.set(key, { count: total.count + 1, amount: total.amount + (Number(sale.amount) || 0) });
+    }
 
     for (const sale of sessionSales) {
       // 보류 건 및 취소 건 제외 (서버의 record_state === 'ACTIVE' 및 status !== '보류'와 완벽 일치)
@@ -789,8 +872,8 @@ export class StorageService {
         displayNickname: stat.displayNickname,
         sessionQuantity: stat.quantity,
         sessionAmount: stat.amount,
-        totalPurchaseCount: stat.count,
-        totalPurchaseAmount: stat.amount,
+        totalPurchaseCount: totals.get(key)?.count || 0,
+        totalPurchaseAmount: totals.get(key)?.amount || 0,
       };
     }
 

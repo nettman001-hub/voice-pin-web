@@ -8,6 +8,7 @@ import { AppDataProvider } from './context/AppDataContext';
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
 import { MobileBottomNav } from './components/common/MobileBottomNav';
+import { SyncStatusNotice } from './components/common/SyncStatusNotice';
 import { PanelLeftOpen } from 'lucide-react';
 import { hasAutoLoginCredentials } from './services/authCredentialsService';
 
@@ -109,6 +110,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           </button>
         )}
         <main className={`flex-1 overflow-x-hidden min-h-[calc(100vh-4rem)] ${showNav ? 'pb-20 lg:pb-0' : ''}`}>
+          {showNav && <SyncStatusNotice />}
           {children}
         </main>
       </div>

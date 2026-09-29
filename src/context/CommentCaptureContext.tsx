@@ -4,7 +4,7 @@ import { useAuth } from './AuthContext';
 import { useLive } from './LiveContext';
 import { storageService, isTemporarySessionId } from '../services/storageService';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
-import { productSalesApi } from '../services/productSalesApi';
+import { enqueueCloudComment, flushPendingComments, promoteCommentOutbox, QueuedCloudComment } from '../services/commentSyncService';
 import { useProductSales } from './ProductSalesContext';
 import {
   commentDedupeKey,
@@ -20,17 +20,6 @@ export interface CommentAlert {
   word: string;
   content: string;
   firedAt: string;
-}
-
-interface QueuedCloudComment {
-  sessionId: string;
-  platformMessageId: string;
-  platformUserId?: string;
-  platformUniqueId?: string;
-  nickname: string;
-  content: string;
-  capturedAt: string;
-  ingestSequence: number;
 }
 
 interface CommentCaptureContextType {
@@ -62,9 +51,9 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   const [serverMessage, setServerMessage] = useState<string>('VoiceCAP 댓글 도우미 미연결');
   const [newCount, setNewCount] = useState<number>(0);
   const [liveComments, setLiveComments] = useState<CommentRecord[]>(() => {
-    const session = storageService.getActiveSession();
+    const session = storageService.getActiveSession(workspaceId);
     const sid = session?.id || currentSessionId;
-    return storageService.getSessionCommentRecords(sid).slice(-100);
+    return storageService.getSessionCommentRecords(sid, workspaceId).slice(-100);
   });
   const [activeAlert, setActiveAlert] = useState<CommentAlert | null>(null);
   const [config, setConfig] = useState<CommentCaptureConfig>(() => storageService.getCommentCaptureConfig());
@@ -75,7 +64,14 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   const isActiveRef = useRef<boolean>(false);
   const sessionIdRef = useRef<string>(currentSessionId);
   const pendingCommentsRef = useRef<Map<string, CommentRecord>>(new Map());
-  const cloudQueueRef = useRef<QueuedCloudComment[]>([]);
+  const workspaceRef = useRef(workspaceId);
+  if (workspaceRef.current !== workspaceId) {
+    seenKeysRef.current.clear();
+    pendingCommentsRef.current.clear();
+    isActiveRef.current = false;
+    sessionIdRef.current = activeSession?.id || currentSessionId;
+  }
+  workspaceRef.current = workspaceId;
   const cloudFlushTimerRef = useRef<number | null>(null);
   const cloudFlushInFlightRef = useRef(false);
   const cloudIngestSequenceRef = useRef(0);
@@ -98,35 +94,31 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       // P1-3: prevSessionId가 임시 세션 ID(날짜명 등)일 때만 정식 세션 UUID로 승격!
       if (isTemporarySessionId(prevSessionId)) {
         // 로컬 스토리지에 이미 저장된 댓글들의 sessionId도 일괄 승격
-        storageService.promoteSessionComments(prevSessionId, nextSessionId);
+        storageService.promoteSessionComments(prevSessionId, nextSessionId, workspaceId);
+        if (workspaceId) promoteCommentOutbox(workspaceId, prevSessionId, nextSessionId);
 
         for (const [key, comment] of pendingCommentsRef.current.entries()) {
           if (comment.sessionId === prevSessionId) {
             pendingCommentsRef.current.set(key, { ...comment, sessionId: nextSessionId });
           }
         }
-        for (const item of cloudQueueRef.current) {
-          if (item.sessionId === prevSessionId) {
-            item.sessionId = nextSessionId;
-          }
-        }
         setLiveComments((prev) => {
           const updated = prev.map((c) => (c.sessionId === prevSessionId ? { ...c, sessionId: nextSessionId } : c));
           // 로컬DB에 이미 저장되어 있는 해당 세션의 댓글도 합산
-          const localComments = storageService.getSessionCommentRecords(nextSessionId);
+          const localComments = storageService.getSessionCommentRecords(nextSessionId, workspaceId);
           const idSet = new Set(updated.map((item) => item.platformMessageId || item.id));
           const missing = localComments.filter((item) => !idSet.has(item.platformMessageId || item.id));
           return [...updated, ...missing].slice(-100);
         });
       } else {
-        // 정식 세션 간 전환인 경우: 이전 세션 댓글 큐/상태를 비우고 새 세션의 로컬 댓글 로드
+        // 화면만 전환한다. 이전 회차의 미전송 댓글은 영속 큐에 보존한다.
         pendingCommentsRef.current.clear();
-        cloudQueueRef.current = [];
-        const localComments = storageService.getSessionCommentRecords(nextSessionId);
+        const localComments = storageService.getSessionCommentRecords(nextSessionId, workspaceId);
         setLiveComments(localComments.slice(-100));
       }
     }
-  }, [activeSession?.id, currentSessionId]);
+    void flushCloudQueueRef.current();
+  }, [activeSession?.id, currentSessionId, workspaceId]);
 
   useEffect(() => {
     isActiveRef.current = isActive;
@@ -244,32 +236,18 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   // 설치 버전에 상관없이 로그인한 웹 세션이 댓글을 cloud live_comments에 적재한다.
   // 화면에는 소켓 댓글을 즉시 보여주고, 클라우드 반영 뒤 판매 피드를 다시 읽는다.
   const flushCloudQueue = useCallback(async () => {
-    if (cloudFlushInFlightRef.current || cloudQueueRef.current.length === 0) return;
-
-    const sessionId = cloudQueueRef.current[0].sessionId;
-    let batchSize = 0;
-    while (
-      batchSize < cloudQueueRef.current.length
-      && batchSize < 50
-      && cloudQueueRef.current[batchSize].sessionId === sessionId
-    ) {
-      batchSize += 1;
-    }
-    const batch = cloudQueueRef.current.splice(0, batchSize);
+    const owner = workspaceRef.current;
+    if (!owner || cloudFlushInFlightRef.current) return;
     cloudFlushInFlightRef.current = true;
-
     try {
-      await productSalesApi.ingestComments({
-        sessionId,
-        comments: batch.map(({ sessionId: _sessionId, ...comment }) => comment),
-      });
-      await pollFeed();
+      await flushPendingComments(owner);
+      if (workspaceRef.current === owner) await pollFeed();
     } catch (error) {
-      cloudQueueRef.current.unshift(...batch);
       console.warn('[CommentCaptureContext] 클라우드 댓글 적재 재시도:', error);
     } finally {
       cloudFlushInFlightRef.current = false;
-      if (cloudQueueRef.current.length > 0) {
+      const nextOwner = workspaceRef.current;
+      if (nextOwner && storageService.getCommentOutbox<QueuedCloudComment>(nextOwner).some((item) => !isTemporarySessionId(item.sessionId))) {
         scheduleCloudFlush(1_000);
       }
     }
@@ -277,10 +255,23 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
   flushCloudQueueRef.current = flushCloudQueue;
 
+  useEffect(() => {
+    seenKeysRef.current.clear();
+    pendingCommentsRef.current.clear();
+    setLiveComments([]);
+    setNewCount(0);
+    setIsActive(false);
+    const retry = () => scheduleCloudFlush();
+    retry();
+    window.addEventListener('online', retry);
+    return () => window.removeEventListener('online', retry);
+  }, [workspaceId, scheduleCloudFlush]);
+
   // 댓글 도우미가 중계한 실시간 댓글 유입 처리
   const ingestComment = useCallback(
     (incoming: StreamedComment) => {
-      if (!isActiveRef.current) return;
+      const owner = workspaceRef.current;
+      if (!isActiveRef.current || !owner) return;
 
       const nickname = (incoming.nickname || incoming.uniqueId || '알 수 없음').trim();
       const content = String(incoming.content || '').trim();
@@ -290,7 +281,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         || `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
       // 메시지 ID 기반 중복 검사 (동일 시청자가 같은 내용의 댓글을 여러 번 남겨도 모두 정상 수신됨)
-      const key = commentDedupeKey(nickname, content, platformMessageId, incoming.receivedAt);
+      const key = `${sessionIdRef.current}:${commentDedupeKey(nickname, content, platformMessageId, incoming.receivedAt)}`;
       if (seenKeysRef.current.has(key)) return;
       seenKeysRef.current.add(key);
 
@@ -317,7 +308,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       };
 
       // [동시 쓰기 1: 로컬DB] 로컬 댓글 테이블에 즉시 INSERT
-      storageService.addCommentRecords([record]);
+      storageService.addCommentRecords([record], owner);
 
       pendingCommentsRef.current.set(platformMessageId, record);
 
@@ -332,7 +323,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
       if (record.sessionId) {
         cloudIngestSequenceRef.current += 1;
-        cloudQueueRef.current.push({
+        enqueueCloudComment(owner, {
           sessionId: record.sessionId,
           platformMessageId,
           platformUserId: incoming.userId || incoming.uniqueId || undefined,
@@ -414,9 +405,9 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       .filter((comment) => comment.sessionId === cloudSessionId);
 
     for (const comment of sessionComments) {
-      if (comment.platformMessageId) {
+      if (comment.platformMessageId && !comment.id.startsWith('stream-')) {
         pendingCommentsRef.current.delete(comment.platformMessageId);
-        seenKeysRef.current.add(`msg:${comment.platformMessageId}`);
+        seenKeysRef.current.add(`${cloudSessionId}:msg:${comment.platformMessageId}`);
       }
     }
 
@@ -425,15 +416,10 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       platformMessageId: comment.platformMessageId,
       sessionId: comment.sessionId,
       nickname: comment.nicknameSnapshot,
-      buyerId: comment.buyerId || undefined,
+      buyerId: comment.buyerId,
       content: comment.content,
       capturedAt: comment.capturedAt,
     }));
-
-    // 클라우드 피드에서 전달받은 정식 레코드 ID 및 buyerId를 로컬 스토리지 댓글에도 즉시 반영
-    if (sessionRecords.length > 0) {
-      storageService.addCommentRecords(sessionRecords);
-    }
 
     setLiveComments((prevComments) => {
       const byMsgId = new Map<string, CommentRecord>();
@@ -463,7 +449,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
             id: cloudRec.id,
             sessionId: cloudRec.sessionId,
             nickname: cloudRec.nickname || existing.nickname,
-            buyerId: cloudRec.buyerId || existing.buyerId,
+            buyerId: cloudRec.buyerId,
             content: cloudRec.content || existing.content,
             capturedAt: cloudRec.capturedAt || existing.capturedAt,
           });

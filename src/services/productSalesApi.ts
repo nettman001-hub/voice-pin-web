@@ -26,7 +26,17 @@ async function invokeSalesApi<T>(action: string, payload: Record<string, unknown
   });
 
   if (error) {
-    throw new Error(error.message || 'sales-api invocation error');
+    const context = (error as unknown as { context?: Response }).context;
+    let envelope = data;
+    if (!envelope?.error && context && typeof context.clone === 'function') {
+      try { envelope = await context.clone().json(); } catch { /* Non-JSON network failures have no API envelope. */ }
+    }
+    const failure = new Error(envelope?.error?.message || error.message || 'sales-api invocation error');
+    Object.assign(failure, {
+      code: envelope?.error?.code || (context?.status === 401 ? 'AUTH_REQUIRED' : context?.status === 403 ? 'CAPABILITY_DENIED' : undefined),
+      details: envelope?.error?.details,
+    });
+    throw failure;
   }
 
   if (!data?.ok) {
@@ -142,6 +152,7 @@ export const productSalesApi = {
   },
 
   async getSalesFeed(params: {
+    workspaceId?: string;
     sessionId: string;
     cursor?: string;
     limit?: number;
@@ -159,6 +170,7 @@ export const productSalesApi = {
   },
 
   async ingestComments(params: {
+    workspaceId?: string;
     sessionId: string;
     collectorId?: string;
     comments: Array<{
@@ -175,6 +187,7 @@ export const productSalesApi = {
       acceptedIds: string[];
       duplicateIds: string[];
       nextIngestCursor: string;
+      comments?: LiveComment[];
     }>('ingest-comments', params);
   },
 
@@ -182,7 +195,7 @@ export const productSalesApi = {
     return invokeSalesApi<{ sessions: LiveSession[] }>('list-sessions');
   },
 
-  async listLiveComments(params: { sessionId?: string; limit?: number } = {}) {
+  async listLiveComments(params: { workspaceId?: string; sessionId?: string; limit?: number } = {}) {
     return invokeSalesApi<{ comments: LiveComment[] }>('list-live-comments', params);
   },
 

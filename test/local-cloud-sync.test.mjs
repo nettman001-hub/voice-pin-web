@@ -1,0 +1,427 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import ts from 'typescript';
+
+const quiet = { log() {}, warn() {}, error() {} };
+function load(path, dependencies = {}, globals = {}) {
+  const source = fs.readFileSync(new URL(path, import.meta.url), 'utf8');
+  const { outputText } = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
+  });
+  const module = { exports: {} };
+  vm.runInNewContext(outputText, {
+    module, exports: module.exports, console: quiet, crypto: globalThis.crypto, Event, ...globals,
+    require(name) { if (!(name in dependencies)) throw new Error(`Unexpected import ${name}`); return dependencies[name]; },
+  }, { filename: path });
+  return module.exports;
+}
+const clone = (value) => JSON.parse(JSON.stringify(value));
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+const sale = (id = 'sale-1', amount = 100) => ({
+  id, sessionId: 'session-1', buyerNickname: '구매자', amount, status: '확정',
+  recognizedAt: '2026-09-29T01:00:00Z', rawTranscript: '', revision: 1, syncStatus: 'SYNCED',
+});
+const { SalesSyncController } = load('../src/services/salesSyncController.ts');
+function controller(options = {}) {
+  let state = clone(options.state || { records: [], pending: [] });
+  const saved = [], removed = [], errors = [];
+  let active = true;
+  const sync = new SalesSyncController({
+    scope: options.scope,
+    read: () => state, persist: (next) => { state = clone(next); },
+    save: async (record) => { saved.push(clone(record)); await options.save?.(record); },
+    remove: async (id) => { removed.push(id); await options.remove?.(id); },
+    load: options.load || (async () => []), changed() {}, error: (message) => errors.push(message), active: () => active,
+  });
+  return { sync, saved, removed, errors, state: () => state, deactivate() { active = false; } };
+}
+
+test('older save acknowledgement cannot roll back a newer edit; writes stay ordered', async () => {
+  const first = deferred(), second = deferred();
+  let calls = 0;
+  const ctx = controller({ save: () => (++calls === 1 ? first.promise : second.promise) });
+  const before = ctx.sync.upsert(sale());
+  ctx.sync.upsert({ ...before, amount: 200 });
+  assert.equal(ctx.saved.length, 1);
+  first.resolve(); await tick();
+  assert.equal(ctx.saved.length, 2);
+  assert.equal(ctx.sync.records[0].amount, 200);
+  assert.equal(ctx.sync.records[0].revision, 2);
+  assert.equal(ctx.sync.records[0].syncStatus, 'PENDING');
+  second.resolve(); await ctx.sync.flush();
+  assert.equal(ctx.sync.records[0].syncStatus, 'SYNCED');
+  assert.equal(ctx.state().pending.length, 0);
+});
+
+test('a snapshot requested before a completed edit cannot overwrite the edit', async () => {
+  const snapshot = deferred();
+  const ctx = controller({ state: { records: [sale()], pending: [] }, load: () => snapshot.promise });
+  const refresh = ctx.sync.refresh();
+  ctx.sync.upsert(sale('sale-1', 300)); await ctx.sync.flush();
+  snapshot.resolve([sale()]); await refresh;
+  assert.equal(ctx.sync.records[0].amount, 300);
+});
+
+test('a snapshot requested before a completed deletion cannot resurrect the sale', async () => {
+  const snapshot = deferred();
+  const ctx = controller({ state: { records: [sale()], pending: [] }, load: () => snapshot.promise });
+  const refresh = ctx.sync.refresh();
+  ctx.sync.delete('sale-1'); await ctx.sync.flush();
+  snapshot.resolve([sale()]); await refresh;
+  assert.equal(ctx.sync.records.length, 0);
+});
+
+test('server-committed sales are protected from an already-running empty snapshot', async () => {
+  const snapshot = deferred();
+  const ctx = controller({ load: () => snapshot.promise });
+  const refresh = ctx.sync.refresh();
+  ctx.sync.applyConfirmed([sale()]);
+  snapshot.resolve([]); await refresh;
+  assert.equal(ctx.sync.records.length, 1);
+  assert.equal(ctx.saved.length, 0);
+});
+
+test('fresh snapshots still remove genuinely deleted remote records', async () => {
+  const ctx = controller({ state: { records: [sale()], pending: [] } });
+  await ctx.sync.refresh();
+  assert.equal(ctx.sync.records.length, 0);
+});
+
+test('failed deletes remain durable tombstones and resume after reload', async () => {
+  const ctx = controller({ state: { records: [sale()], pending: [] }, remove: async () => { throw new Error('offline'); } });
+  ctx.sync.delete('sale-1'); await ctx.sync.flush();
+  assert.equal(ctx.state().records.length, 0);
+  assert.equal(ctx.state().pending[0].kind, 'DELETE');
+  const restarted = controller({ state: ctx.state() });
+  await restarted.sync.flush();
+  assert.deepEqual(restarted.removed, ['sale-1']);
+  assert.equal(restarted.state().pending.length, 0);
+});
+
+test('account changes stop retries and discard old snapshots', async () => {
+  const snapshot = deferred(), write = deferred();
+  const ctx = controller({ load: () => snapshot.promise, save: () => write.promise });
+  const refresh = ctx.sync.refresh();
+  const first = ctx.sync.upsert(sale());
+  ctx.sync.upsert({ ...first, amount: 200 });
+  ctx.deactivate(); write.resolve(); snapshot.resolve([sale('other')]);
+  await refresh; await ctx.sync.flush();
+  assert.equal(ctx.saved.length, 1);
+  assert.equal(ctx.state().pending[0].sale.amount, 200);
+  assert.equal(ctx.sync.records[0].amount, 200);
+});
+
+function storageFixture({ quota = false, durableFailure = false } = {}) {
+  const local = new Map(), durable = new Map();
+  const events = [];
+  const globals = {
+    localStorage: { getItem: (key) => local.get(key) ?? null, setItem(key, value) { if (quota) throw new Error('QuotaExceededError'); local.set(key, value); }, removeItem: (key) => local.delete(key) },
+    window: { dispatchEvent: (event) => { events.push(event.type); } },
+  };
+  const commentTypes = load('../src/types/comment.ts');
+  const { StorageService, isTemporarySessionId } = load('../src/services/storageService.ts', {
+    '../types/comment': commentTypes,
+    './durableStorage': { durableStorage: {
+      async set(key, value) { if (durableFailure) throw new Error('IndexedDB unavailable'); durable.set(key, clone(value)); },
+      async get(key) { return durable.get(key) ?? null; },
+    } },
+  }, globals);
+  const storage = new StorageService(); storage.setWorkspaceId('workspace-1');
+  return { storage, StorageService, isTemporarySessionId, local, durable, events, globals, setQuota(value) { quota = value; } };
+}
+
+test('quota fallback preserves all sales and comment evidence without destructive cleanup', async () => {
+  const ctx = storageFixture({ quota: true });
+  const rows = Array.from({ length: 120 }, (_, index) => sale(`sale-${index}`));
+  const comments = [{ id: 'stream-1', sessionId: 'session-1', nickname: '구매자', content: '저요', capturedAt: '2026-09-29T01:00:00Z' }];
+  ctx.storage.addCommentRecords(comments, 'workspace-1');
+  ctx.storage.saveSalesLocalState('workspace-1', { records: rows, pending: [] });
+  assert.equal(ctx.storage.getSales('workspace-1').length, 120);
+  assert.equal(ctx.storage.getCommentRecords('workspace-1').length, 1);
+  await tick();
+  assert.equal(ctx.storage.getPersistenceError(), false); // IndexedDB safely holds the fallback.
+  const reloaded = new ctx.StorageService();
+  await reloaded.restoreWorkspace('workspace-1');
+  assert.equal(reloaded.getSales('workspace-1').length, 120);
+});
+
+test('reload prefers newer IndexedDB data over stale localStorage after quota failures', async () => {
+  const ctx = storageFixture();
+  ctx.storage.saveSalesLocalState('workspace-1', { records: [sale()], pending: [] });
+  await tick(); ctx.setQuota(true);
+  ctx.storage.saveSalesLocalState('workspace-1', { records: [sale('sale-1', 500)], pending: [{ id: 'sale-1', token: 'latest', kind: 'UPSERT', sale: sale('sale-1', 500) }] });
+  await tick();
+  const reloaded = new ctx.StorageService();
+  await reloaded.restoreWorkspace('workspace-1');
+  assert.equal(reloaded.getSales('workspace-1')[0].amount, 500);
+  assert.equal(reloaded.getSalesLocalState('workspace-1').pending[0].token, 'latest');
+});
+
+test('failure of both stores is reported; in-memory sales remain available', async () => {
+  const ctx = storageFixture({ quota: true, durableFailure: true });
+  ctx.storage.saveSalesLocalState('workspace-1', { records: [sale()], pending: [] }); await tick();
+  assert.equal(ctx.storage.getPersistenceError(), true);
+  assert.equal(ctx.storage.getSales('workspace-1').length, 1);
+  ctx.storage.setWorkspaceId('workspace-2');
+  assert.equal(ctx.storage.getPersistenceError(), false);
+  assert.equal(ctx.storage.getSales('workspace-2').length, 0);
+});
+
+const session1 = '11111111-1111-1111-1111-111111111111';
+const session2 = '22222222-2222-2222-2222-222222222222';
+const queued = (sessionId = session1, platformMessageId = 'message-1') => ({ sessionId, platformMessageId, nickname: '구매자', content: '저요', capturedAt: '2026-09-29T01:00:00Z', ingestSequence: 1 });
+const canonical = (item) => ({ ...item, id: '33333333-3333-3333-3333-333333333333', buyerId: '44444444-4444-4444-4444-444444444444', nicknameSnapshot: item.nickname, collectorId: 'collector' });
+function commentSyncFixture(ingest, list = async () => { throw new Error('Canonical acknowledgements must not need extra reads'); }) {
+  const ctx = storageFixture();
+  const api = { ingestComments: ingest, listLiveComments: list };
+  const CustomEvent = class extends Event { constructor(name, options) { super(name); this.detail = options.detail; } };
+  const sync = load('../src/services/commentSyncService.ts', {
+    './productSalesApi': { productSalesApi: api }, './storageService': { storageService: ctx.storage, isTemporarySessionId: ctx.isTemporarySessionId },
+  }, { window: ctx.globals.window, CustomEvent });
+  return { ...ctx, ...sync };
+}
+
+test('canonical comment acknowledgements replace stream IDs and restore verified buyers without another read', async () => {
+  let writes = 0;
+  const ctx = commentSyncFixture(async (request) => { writes++; return { comments: request.comments.map((item) => canonical({ ...item, sessionId: request.sessionId })) }; });
+  ctx.storage.addCommentRecords([{ ...queued(), id: 'stream-message-1', buyerId: null }], 'workspace-1');
+  ctx.enqueueCloudComment('workspace-1', queued());
+  await ctx.flushPendingComments('workspace-1');
+  assert.equal(writes, 1);
+  assert.equal(ctx.storage.getCommentRecords('workspace-1')[0].id, canonical(queued()).id);
+  assert.equal(ctx.storage.getCommentRecords('workspace-1')[0].buyerId, canonical(queued()).buyerId);
+  assert.equal(ctx.storage.getCommentOutbox('workspace-1').length, 0);
+});
+
+test('old-session comments survive transition and are drained separately from new-session comments', async () => {
+  const sessions = [];
+  const ctx = commentSyncFixture(async (request) => { sessions.push(request.sessionId); return { comments: request.comments.map((item) => canonical({ ...item, sessionId: request.sessionId })) }; });
+  ctx.enqueueCloudComment('workspace-1', queued(session1));
+  ctx.enqueueCloudComment('workspace-1', queued(session2));
+  await ctx.flushPendingComments('workspace-1');
+  assert.deepEqual(sessions, [session1, session2]);
+  assert.equal(ctx.storage.getCommentRecords('workspace-1').length, 2);
+});
+
+test('a failed comment batch survives reload; provisional sessions do not call Supabase', async () => {
+  let writes = 0;
+  const ctx = commentSyncFixture(async () => { writes++; throw new Error('offline'); });
+  ctx.enqueueCloudComment('workspace-1', queued('temporary-session'));
+  await ctx.flushPendingComments('workspace-1');
+  assert.equal(writes, 0);
+  ctx.promoteCommentOutbox('workspace-1', 'temporary-session', session1);
+  await assert.rejects(ctx.flushPendingComments('workspace-1'), /offline/); await tick();
+  const reloaded = new ctx.StorageService();
+  await reloaded.restoreWorkspace('workspace-1');
+  assert.equal(reloaded.getCommentOutbox('workspace-1')[0].sessionId, session1);
+});
+
+test('an acknowledgement after account switch updates only its original workspace', async () => {
+  const reply = deferred();
+  const ctx = commentSyncFixture(() => reply.promise);
+  ctx.enqueueCloudComment('workspace-1', queued());
+  const pending = ctx.flushPendingComments('workspace-1');
+  ctx.storage.setWorkspaceId('workspace-2');
+  reply.resolve({ comments: [canonical(queued())] }); await pending;
+  assert.equal(ctx.storage.getCommentRecords('workspace-1').length, 1);
+  assert.equal(ctx.storage.getCommentRecords('workspace-2').length, 0);
+  assert.equal(ctx.storage.getCommentOutbox('workspace-2').length, 0);
+});
+
+test('rolling deployment reconciles the old API once after a write', async () => {
+  let reads = 0;
+  const ctx = commentSyncFixture(async () => ({ acceptedIds: [canonical(queued()).id] }), async () => { reads++; return { comments: [canonical(queued())] }; });
+  ctx.enqueueCloudComment('workspace-1', queued()); await ctx.flushPendingComments('workspace-1');
+  assert.equal(reads, 1);
+  assert.equal(ctx.storage.getCommentOutbox('workspace-1').length, 0);
+});
+
+test('duplicate ingestion returns the existing canonical row and buyer ID', async () => {
+  const row = { id: canonical(queued()).id, session_id: session1, platform_message_id: 'message-1', buyer_id: canonical(queued()).buyerId, nickname_snapshot: '구매자', content: '저요', captured_at: queued().capturedAt, ingest_sequence: 1 };
+  const admin = { from() { return { insert: async () => ({ error: { code: '23505' } }), select() { return this; }, eq() { return this; }, single: async () => ({ data: row, error: null }) }; } };
+  const { handleIngestComments } = load('../supabase/functions/sales-api/handlers/comments.ts', {
+    '../../_shared/productSales.ts': { admin, successResponse: (data) => data, errorResponse: (code) => { throw new Error(code); } },
+    './common.ts': {},
+  });
+  const reply = await handleIngestComments('workspace-1', 'actor', { sessionId: session1, comments: [queued()] });
+  assert.equal(reply.duplicateIds[0], 'message-1');
+  assert.equal(reply.comments[0].id, row.id);
+  assert.equal(reply.comments[0].buyerId, row.buyer_id);
+});
+
+function providerFixture({ bootstrapApi, hydrate = async (path) => path, feedApi, flush = async () => {} } = {}) {
+  const cells = [], effects = [], intervals = new Map(), writes = [];
+  let index = 0, timer = 0;
+  const depsEqual = (left, right) => left && right && left.length === right.length && left.every((value, i) => Object.is(value, right[i]));
+  const react = {
+    createContext: () => ({ Provider: 'provider' }), createElement: (_type, props) => ({ props }),
+    useRef(value) { const i = index++; cells[i] ||= { current: value }; return cells[i]; },
+    useState(initial) { const i = index++; if (!(i in cells)) cells[i] = typeof initial === 'function' ? initial() : initial;
+      return [cells[i], (next) => { cells[i] = typeof next === 'function' ? next(cells[i]) : next; }]; },
+    useCallback(callback, deps) { const i = index++; if (!depsEqual(cells[i]?.deps, deps)) cells[i] = { deps, callback }; return cells[i].callback; },
+    useEffect(callback, deps) { const i = index++; if (!depsEqual(cells[i]?.deps, deps)) {
+      const previous = cells[i]; cells[i] = { deps, cleanup: null };
+      effects.push(() => { previous?.cleanup?.(); cells[i].cleanup = callback(); });
+    } },
+  };
+  let auth = { workspaceId: 'workspace-1', user: { id: 'user-1' }, isAuthenticated: true };
+  let currentData = { workspaceId: 'workspace-1', settings: { revision: 1 }, activeSession: { id: session1, revision: 1 }, activeProduct: { id: 'product-1', imagePath: 'image-1', revision: 1, salesRevision: 1 }, permissions: [], printerStatus: {} };
+  let comments = [];
+  let feedCalls = 0;
+  const storage = {
+    setWorkspaceId() {}, getSessionSalesSummary: () => ({ summary: { sessionAmount: 0, sessionQuantity: 0 }, buyerStats: {} }),
+    getSessionCommentRecords: () => comments, getCommentRecords: () => comments,
+    saveActiveProduct: (product, owner) => writes.push({ kind: 'product', product, owner }),
+    saveActiveSession: (session, owner) => writes.push({ kind: 'session', session, owner }),
+    saveBootstrapCache: (bootstrap, owner) => writes.push({ kind: 'bootstrap', bootstrap, owner }),
+    getBootstrapCache: () => null, addCommentRecords() {},
+  };
+  const emptyFeed = () => ({ comments: [], activeProduct: currentData.activeProduct, sessionRevision: currentData.activeSession.revision });
+  const api = {
+    getBootstrap: bootstrapApi || (async () => currentData),
+    getSalesFeed: async (params) => { feedCalls++; return await (feedApi ? feedApi(params) : emptyFeed()); },
+    commitSales: async (request) => { writes.push({ kind: 'saleRequest', request }); return { sales: [], status: 'SUCCEEDED' }; },
+  };
+  const window = {
+    addEventListener() {}, removeEventListener() {},
+    setTimeout: () => ++timer, clearTimeout() {},
+    setInterval: (fn, ms) => { const id = ++timer; intervals.set(id, { fn, ms }); return id; },
+    clearInterval: (id) => intervals.delete(id),
+  };
+  const { ProductSalesProvider } = load('../src/context/ProductSalesContext.tsx', {
+    react: { ...react, default: react }, 'react-router-dom': { useLocation: () => ({ pathname: '/live' }) },
+    '../services/productSalesApi': { productSalesApi: api }, '../services/storageService': { storageService: storage },
+    '../services/remoteWorkspaceService': { resolvePrivateImageUrl: hydrate },
+    '../services/productImageService': {}, './AuthContext': { useAuth: () => auth },
+    './SalesContext': { useSales: () => ({ applyCommittedSales: (_owner, rows) => writes.push({ kind: 'confirmed', rows }) }) },
+    '../services/commentSyncService': { flushPendingComments: flush },
+    '../services/voiceSaleCandidate': { VoiceCandidateController: class { cancel() {} }, parseVoiceCommand() {} },
+  }, { window });
+  return {
+    writes, api, intervals,
+    setAuth(next) { auth = next; }, setData(next) { currentData = next; }, data: () => currentData,
+    setComments(next) { comments = next; }, feedCalls: () => feedCalls,
+    render() { index = 0; const value = ProductSalesProvider({ children: null }).props.value; effects.splice(0).forEach((effect) => effect()); return value; },
+  };
+}
+
+test('account switch during image hydration discards the entire old bootstrap', async () => {
+  const hydration = deferred(), newBootstrap = deferred();
+  let first = true;
+  const ctx = providerFixture({ hydrate: () => hydration.promise, bootstrapApi: async () => first ? ctx.data() : await newBootstrap.promise });
+  ctx.render(); await tick();
+  first = false;
+  ctx.setAuth({ workspaceId: 'workspace-2', user: { id: 'user-2' }, isAuthenticated: true });
+  ctx.render(); hydration.resolve('signed-old-image'); await tick();
+  assert.equal(ctx.writes.length, 0);
+  assert.equal(ctx.render().activeProduct, null);
+});
+
+test('a new bootstrap with no active product clears the old product and offline cache', async () => {
+  const ctx = providerFixture(); ctx.render(); await tick();
+  const before = ctx.render(); assert.equal(before.activeProduct.id, 'product-1');
+  ctx.setData({ ...ctx.data(), activeSession: { id: session2, revision: 1 }, activeProduct: null });
+  await before.loadBootstrap();
+  const after = ctx.render();
+  assert.equal(after.activeProduct, null);
+  assert.equal(after.feed.activeProduct, null);
+  assert.equal(ctx.writes.filter((row) => row.kind === 'bootstrap').at(-1).bootstrap.activeProduct, null);
+});
+
+test('two-second local feed refresh performs zero additional Supabase requests', async () => {
+  const ctx = providerFixture(); ctx.render(); await tick(); const value = ctx.render();
+  const initialCalls = ctx.feedCalls();
+  for (let i = 0; i < 20; i++) await value.pollFeed();
+  assert.equal(ctx.feedCalls(), initialCalls);
+});
+
+test('heartbeat null product is applied, but a late heartbeat cannot overwrite a newer session', async () => {
+  const response = deferred(); let heartbeat = false;
+  const ctx = providerFixture({ feedApi: async () => heartbeat ? await response.promise : { comments: [], sessionRevision: 1, activeProduct: ctx.data().activeProduct } });
+  ctx.render(); await tick();
+  const value = ctx.render(); value.setFeedPollingEnabled(true); ctx.render();
+  heartbeat = true;
+  const timer = [...ctx.intervals.values()].find((item) => item.ms === 60_000);
+  timer.fn(); await tick();
+  ctx.setData({ ...ctx.data(), activeSession: { id: session2, revision: 1 }, activeProduct: null });
+  // The bootstrap's own initial feed is also in flight; it is irrelevant to product clearing.
+  const reload = value.loadBootstrap(); await tick();
+  response.resolve({ comments: [], sessionRevision: 10, activeProduct: { ...ctx.data().activeProduct, id: 'stale-product' } });
+  await reload; await tick();
+  const after = ctx.render();
+  assert.equal(after.activeSession.id, session2);
+  assert.equal(after.activeProduct, null);
+  assert.equal(ctx.writes.some((row) => row.kind === 'product' && row.product?.id === 'stale-product'), false);
+});
+
+test('non-2xx permission errors keep their code so bootstrap cannot masquerade as offline success', async () => {
+  const { productSalesApi } = load('../src/services/productSalesApi.ts', {
+    './supabaseClient': { isSupabaseConfigured: true, requireSupabase: () => ({ functions: { invoke: async () => ({ data: null, error: { message: 'Forbidden', context: new Response(JSON.stringify({ ok: false, error: { code: 'CAPABILITY_DENIED', message: '권한 없음' } }), { status: 403 }) } }) } }) },
+  });
+  await assert.rejects(productSalesApi.getBootstrap('workspace-1'), (error) => error.code === 'CAPABILITY_DENIED');
+});
+
+test('a same-workspace remount serializes writes and an obsolete acknowledgement cannot rewrite storage', async () => {
+  const response = deferred();
+  const first = controller({ scope: 'shared-workspace', save: () => response.promise });
+  first.sync.upsert(sale()); await tick();
+  first.deactivate();
+  const second = controller({ scope: 'shared-workspace', state: first.state() });
+  second.sync.upsert(sale('sale-1', 700)); await tick();
+  assert.equal(second.saved.length, 0);
+  response.resolve(); await first.sync.flush(); await second.sync.flush();
+  assert.equal(first.state().pending.length, 1); // No stale publish after the identity changed.
+  assert.equal(second.saved[0].amount, 700);
+  assert.equal(second.state().records[0].amount, 700);
+});
+
+test('heartbeat with no active product clears the product rather than retaining an old one', async () => {
+  let heartbeat = false;
+  const ctx = providerFixture({ feedApi: async () => ({ comments: [], sessionRevision: 2, activeProduct: heartbeat ? null : ctx.data().activeProduct }) });
+  ctx.render(); await tick(); const before = ctx.render();
+  before.setFeedPollingEnabled(true); ctx.render(); heartbeat = true;
+  [...ctx.intervals.values()].find((item) => item.ms === 60_000).fn(); await tick();
+  assert.equal(ctx.render().activeProduct, null);
+  assert.equal(ctx.writes.filter((row) => row.kind === 'bootstrap').at(-1).bootstrap.activeProduct, null);
+});
+
+test('selecting a provisional comment waits for acknowledgement and sends canonical IDs to commitSales', async () => {
+  const ctx = providerFixture({ flush: async () => ctx.setComments([{ ...queued(), ...canonical(queued()) }]) });
+  ctx.render(); await tick(); const value = ctx.render();
+  await value.commitSales([{ buyerId: '구매자', quantity: 1, sourceCommentIds: ['stream-message-1'] }]);
+  const request = ctx.writes.find((row) => row.kind === 'saleRequest').request;
+  assert.equal(request.buyers[0].buyerId, canonical(queued()).buyerId);
+  assert.equal(request.buyers[0].sourceCommentIds[0], canonical(queued()).id);
+});
+
+test('session statistics and lifetime buyer statistics are computed over their respective scopes', () => {
+  const ctx = storageFixture();
+  ctx.storage.saveSalesLocalState('workspace-1', { records: [
+    { ...sale('sale-1', 100), buyerId: 'buyer-1', quantity: 2 },
+    { ...sale('sale-2', 400), buyerId: 'buyer-1', sessionId: 'older-session' },
+    { ...sale('cancelled', 900), buyerId: 'buyer-1', recordState: 'CANCELLED' },
+    { ...sale('pending', 900), buyerId: 'buyer-1', status: '보류' },
+  ], pending: [] });
+  const { summary, buyerStats } = ctx.storage.getSessionSalesSummary('session-1', 'workspace-1');
+  assert.equal(summary.sessionQuantity, 2);
+  assert.equal(summary.sessionAmount, 100);
+  assert.equal(buyerStats['buyer-1'].totalPurchaseCount, 2);
+  assert.equal(buyerStats['buyer-1'].totalPurchaseAmount, 500);
+});
+
+test('bootstrap sale loading paginates beyond the PostgREST row cap', async () => {
+  const requested = [];
+  const rows = Array.from({ length: 1001 }, (_, index) => ({ id: `sale-${index}`, amount: 1, capture_image_paths: [] }));
+  const client = { from() { return { select() { return this; }, eq() { return this; }, order() { return this; },
+    async range(from, to) { requested.push([from, to]); return { data: rows.slice(from, to + 1), error: null }; },
+  }; } };
+  const { remoteWorkspaceService } = load('../src/services/remoteWorkspaceService.ts', {
+    './supabaseClient': { isSupabaseConfigured: true, requireSupabase: () => client }, './commerceChanges': {},
+  });
+  const loaded = await remoteWorkspaceService.loadSales('workspace-1');
+  assert.equal(loaded.length, 1001);
+  assert.deepEqual(requested, [[0, 999], [1000, 1999]]);
+});

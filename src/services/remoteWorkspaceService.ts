@@ -485,9 +485,18 @@ export const remoteWorkspaceService = {
   },
 
   async loadSales(workspaceId: string) {
-    const { data, error } = await ensureEnabled().from('sales').select('*').eq('workspace_id', workspaceId).order('recognized_at', { ascending: false });
-    if (error) throw error;
-    return Promise.all((data || []).map(mapSale));
+    // A complete snapshot is required before calculating totals locally. The
+    // PostgREST row cap must not silently drop older sales or pending evidence.
+    const rows: any[] = [];
+    const pageSize = 1000;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await ensureEnabled().from('sales').select('*').eq('workspace_id', workspaceId)
+        .order('recognized_at', { ascending: false }).order('id').range(offset, offset + pageSize - 1);
+      if (error) throw error;
+      rows.push(...(data || []));
+      if (!data || data.length < pageSize) break;
+    }
+    return Promise.all(rows.map(mapSale));
   },
 
   async saveSale(workspaceId: string, sale: SaleRecord) {
