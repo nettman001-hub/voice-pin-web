@@ -262,8 +262,11 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
             workspaceId: request.workspaceId!,
             sessionId: data.activeSession.id,
             limit: 50,
+            knownCommentIds: storageService.getCommentRecords(request.workspaceId).filter((comment) =>
+              comment.sessionId === data.activeSession!.id && !comment.id.startsWith('stream-')).map((comment) => comment.id),
           });
           if (!isCurrentRequest(request) || requestId !== bootstrapRequestRef.current) return null;
+          storageService.deleteCommentRecords(initialFeed.deletedCommentIds || [], request.workspaceId);
           if (initialFeed.comments && initialFeed.comments.length > 0) {
             const commentRecords = initialFeed.comments.map((c) => ({
               id: c.id,
@@ -387,13 +390,16 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
         e.key.includes('voicecap_active_product') ||
         e.key.includes('voicecap_active_session') ||
         e.key.includes('voicecap_comment_records')
+        || e.key.includes('voicecap_comment_tombstones')
       ) {
         // P1-7: 활성 상품 및 세션도 로컬 저장소 최신값으로 동기화
         if (e.key.includes('voicecap_active_')) {
           const session = storageService.getActiveSession(owner);
           const product = storageService.getActiveProduct(owner);
           applyProductState(owner, session, product, false);
-        } else void pollFeed();
+        } else void storageService.restoreWorkspace(owner).then(() => {
+          if (owner === workspaceIdRef.current) void pollFeed();
+        });
       }
     };
     window.addEventListener('storage', handleStorageChange);
@@ -420,11 +426,16 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if (!request.workspaceId || activeSessionRef.current?.id !== sessionId) return;
       inFlight = true;
       try {
-        const remoteFeed = await productSalesApi.getSalesFeed({ workspaceId: request.workspaceId, sessionId, limit: 50 });
+        const remoteFeed = await productSalesApi.getSalesFeed({
+          workspaceId: request.workspaceId, sessionId, limit: 50,
+          knownCommentIds: storageService.getCommentRecords(request.workspaceId).filter((comment) =>
+            comment.sessionId === sessionId && !comment.id.startsWith('stream-')).map((comment) => comment.id),
+        });
         if (disposed || !isCurrentRequest(request) || activeSessionRef.current?.id !== sessionId) return;
         if (remoteFeed.sessionRevision < (activeSessionRef.current?.revision || 0)) return;
         const hydrated = await hydrateProduct(remoteFeed.activeProduct);
         if (disposed || !isCurrentRequest(request) || activeSessionRef.current?.id !== sessionId) return;
+        storageService.deleteCommentRecords(remoteFeed.deletedCommentIds || [], request.workspaceId);
         if (remoteFeed.comments && remoteFeed.comments.length > 0) {
           const records = remoteFeed.comments.map((c) => ({
             id: c.id,

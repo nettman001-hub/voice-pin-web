@@ -16,6 +16,7 @@ interface SalesSyncDependencies {
   scope?: string;
   read: () => SalesLocalState;
   persist: (state: SalesLocalState) => void;
+  update?: (change: (current: SalesLocalState) => SalesLocalState) => Promise<SalesLocalState>;
   save: (sale: SaleRecord) => Promise<void>;
   remove: (id: string) => Promise<void>;
   load: () => Promise<SaleRecord[]>;
@@ -35,6 +36,8 @@ export class SalesSyncController {
   private generation = 0;
   private request = 0;
   private draining: Promise<void> | null = null;
+  private persistence: Promise<void> = Promise.resolve();
+  private publishedState: SalesLocalState;
 
   constructor(private dependencies: SalesSyncDependencies) {
     const state = dependencies.read();
@@ -50,11 +53,74 @@ export class SalesSyncController {
       this.records = this.records.filter((sale) => sale.id !== operation.id);
       if (operation.sale && operation.kind === 'UPSERT') this.records.unshift(operation.sale);
     }
+    this.publishedState = { records: [...this.records], pending: [...this.pending.values()] };
   }
 
   private publish() {
-    this.dependencies.persist({ records: this.records, pending: [...this.pending.values()] });
+    const previous = this.publishedState;
+    const next = { records: [...this.records], pending: [...this.pending.values()] };
+    this.publishedState = next;
+    const update = this.dependencies.update;
+    if (!update) this.dependencies.persist(next);
+    else {
+      const generation = this.generation;
+      const beforeRows = new Map(previous.records.map((sale) => [sale.id, sale]));
+      const afterRows = new Map(next.records.map((sale) => [sale.id, sale]));
+      const beforePending = new Map(previous.pending.map((operation) => [operation.id, operation]));
+      const afterPending = new Map(next.pending.map((operation) => [operation.id, operation]));
+      const equal = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+      this.persistence = this.persistence.then(() => update((current) => {
+        const rows = new Map(current.records.map((sale) => [sale.id, sale]));
+        const pending = new Map(current.pending.map((operation) => [operation.id, operation]));
+        const ids = new Set([...beforeRows.keys(), ...afterRows.keys(), ...beforePending.keys(), ...afterPending.keys()]);
+        for (const id of ids) {
+          const before = beforePending.get(id), after = afterPending.get(id);
+          const newOperation = after && after.token !== before?.token;
+          const concurrentOperation = pending.get(id);
+          if (newOperation) pending.set(id, after);
+          else if (before && !after && concurrentOperation?.token === before.token) pending.delete(id);
+          // An ACK/refresh must not replace another tab's newer edit. Explicit
+          // local operations apply only their own entity, preserving other rows.
+          if (!newOperation && concurrentOperation && concurrentOperation.token !== before?.token) continue;
+          if (newOperation || (!pending.has(id) && equal(rows.get(id), beforeRows.get(id)))) {
+            if (afterRows.has(id)) rows.set(id, afterRows.get(id)!);
+            else rows.delete(id);
+          }
+        }
+        return { records: [...rows.values()].sort((a, b) => Date.parse(b.recognizedAt) - Date.parse(a.recognizedAt)), pending: [...pending.values()] };
+      })).then((state) => {
+        if (!this.dependencies.active() || this.generation !== generation) return;
+        this.trackExternalChanges(state);
+        this.records = state.records;
+        this.pending = new Map(state.pending.map((operation) => [operation.id, operation]));
+        this.publishedState = state;
+        this.dependencies.changed(this.records);
+      }).catch((error) => {
+        if (this.dependencies.active()) this.dependencies.error(error instanceof Error ? error.message : '로컬 저장 실패');
+      });
+    }
     if (this.dependencies.active()) this.dependencies.changed(this.records);
+    return this.persistence;
+  }
+
+  async reloadState() {
+    const generation = this.generation;
+    await this.persistence;
+    if (!this.dependencies.active() || generation !== this.generation) return;
+    const state = this.dependencies.read();
+    this.trackExternalChanges(state);
+    this.records = state.records;
+    this.pending = new Map(state.pending.map((operation) => [operation.id, operation]));
+    this.publishedState = state;
+    this.dependencies.changed(this.records);
+  }
+
+  private trackExternalChanges(state: SalesLocalState) {
+    const before = new Map(this.records.map((sale) => [sale.id, JSON.stringify(sale)]));
+    const after = new Map(state.records.map((sale) => [sale.id, JSON.stringify(sale)]));
+    for (const id of new Set([...before.keys(), ...after.keys()])) {
+      if (before.get(id) !== after.get(id)) this.changes.set(id, ++this.generation);
+    }
   }
 
   upsert(sale: SaleRecord): SaleRecord {
@@ -91,6 +157,7 @@ export class SalesSyncController {
   }
 
   async refresh(): Promise<SaleRecord[]> {
+    if (this.dependencies.update) await this.persistence;
     const generation = this.generation;
     const request = ++this.request;
     const rows = await this.dependencies.load();
@@ -110,7 +177,7 @@ export class SalesSyncController {
       }
     }
     this.records = [...merged.values()].sort((a, b) => Date.parse(b.recognizedAt) - Date.parse(a.recognizedAt));
-    this.publish();
+    await this.publish();
     return this.records;
   }
 
@@ -121,6 +188,7 @@ export class SalesSyncController {
   }
 
   private async drain() {
+    if (this.dependencies.update) await this.persistence;
     while (this.dependencies.active() && this.pending.size) {
       const operation = this.pending.values().next().value as SaleSyncOperation;
       try {
@@ -144,10 +212,13 @@ export class SalesSyncController {
       }
       if (!this.dependencies.active()) return; // An obsolete controller must not rewrite a restored outbox.
       if (this.pending.get(operation.id)?.token === operation.token) {
+        // The snapshot may have started while this operation was pending. Its
+        // ACK must protect the committed row (or deletion) from that snapshot.
+        this.changes.set(operation.id, ++this.generation);
         this.pending.delete(operation.id);
         this.records = this.records.map((sale) => sale.id === operation.id ? { ...sale, syncStatus: 'SYNCED' } : sale);
       }
-      this.publish();
+      await this.publish();
       if (this.dependencies.active()) this.dependencies.error(null);
     }
   }

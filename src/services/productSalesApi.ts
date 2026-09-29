@@ -156,6 +156,7 @@ export const productSalesApi = {
     sessionId: string;
     cursor?: string;
     limit?: number;
+    knownCommentIds?: string[];
     watchedBuyerIds?: string[];
   }) {
     return invokeSalesApi<{
@@ -166,6 +167,7 @@ export const productSalesApi = {
       sessionRevision: number;
       nextCursor: string | null;
       hasMore: boolean;
+      deletedCommentIds?: string[];
     }>('get-sales-feed', params);
   },
 

@@ -276,6 +276,31 @@ export class StorageService {
   private failures = new Set<string>();
   private writeVersion = 0;
   private latestWrites = new Map<string, number>();
+  private channel = typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined'
+    ? new BroadcastChannel('voicecap-local-sync') : null;
+
+  constructor() {
+    if (this.channel) this.channel.onmessage = (event) => {
+      const owner = event.data?.workspaceId;
+      if (owner && owner === this.currentWorkspaceId) {
+        void this.restoreWorkspace(owner).then(() => {
+          this.notifySales(owner);
+          if (event.data.kind === 'comments') {
+            const tombstones = this.getCommentTombstones(owner);
+            this.notifyCommentDeletion(owner, tombstones.map((item) => item.id), tombstones.flatMap((item) => item.key ? [item.key] : []));
+          }
+        });
+      }
+    };
+  }
+
+  private notifySales(workspaceId: string) {
+    if (typeof window !== 'undefined') {
+      const event = new Event('voicecap_sales_updated');
+      Object.assign(event, { detail: { workspaceId } });
+      window.dispatchEvent(event);
+    }
+  }
 
   public getPersistenceError(): boolean {
     const owner = this.currentWorkspaceId;
@@ -313,6 +338,9 @@ export class StorageService {
       if (this.latestWrites.get(key) !== version) return;
       this.failures.delete(key);
       this.notifyPersistence();
+      if (key.startsWith(`${KEYS.COMMENT_RECORDS}:`) || key.startsWith('voicecap_comment_tombstones:')) {
+        this.channel?.postMessage({ workspaceId: decodeURIComponent(key.slice(key.lastIndexOf(':') + 1)), kind: 'comments' });
+      }
     }).catch(() => {
       if (this.latestWrites.get(key) !== version) return;
       if (!saved) this.failures.add(key);
@@ -322,19 +350,26 @@ export class StorageService {
   }
 
   public async restoreWorkspace(workspaceId: string): Promise<void> {
-    for (const baseKey of ['voicecap_sales_state', 'voicecap_comment_outbox']) {
+    for (const baseKey of ['voicecap_sales_state', 'voicecap_comment_outbox', KEYS.COMMENT_RECORDS, 'voicecap_comment_tombstones']) {
       const key = this.scopedKey(baseKey, workspaceId);
-      if (this.memoryFallback.has(key)) continue;
+      const beforeVersion = this.latestWrites.get(key) || 0;
       let before: string | null = null;
       try { before = localStorage.getItem(key); } catch {}
       try {
         const recovered = await durableStorage.get<any>(key);
         let current: string | null = null;
         try { current = localStorage.getItem(key); } catch {}
-        if (this.memoryFallback.has(key) || current !== before) continue;
+        if ((this.latestWrites.get(key) || 0) !== beforeVersion || current !== before) continue;
         const local = current ? JSON.parse(current) : null;
-        if (recovered !== null && (!local || (recovered.updatedAt || 0) > (local.updatedAt || 0))) {
+        const memoryVersion = this.memoryFallback.has(key) ? beforeVersion : 0;
+        if (local && (local.updatedAt || 0) >= memoryVersion && this.memoryFallback.has(key)) {
+          this.memoryFallback.delete(key);
+          this.latestWrites.set(key, local.updatedAt || 0);
+        }
+        if (recovered !== null && (!local || (recovered.updatedAt || 0) > (local.updatedAt || 0))
+          && (!this.memoryFallback.has(key) || (recovered.updatedAt || 0) > memoryVersion)) {
           this.memoryFallback.set(key, recovered.__voicecapRecovery === 1 ? recovered.data : recovered);
+          this.latestWrites.set(key, recovered.updatedAt || 0);
         }
       } catch { /* Empty/new databases can still operate from Web Storage. */ }
     }
@@ -348,6 +383,44 @@ export class StorageService {
 
   public saveSalesLocalState(workspaceId: string, state: SalesLocalState): void {
     this.saveRecoverable(this.scopedKey('voicecap_sales_state', workspaceId), state);
+  }
+
+  public async updateSalesLocalState(workspaceId: string, change: (current: SalesLocalState) => SalesLocalState): Promise<SalesLocalState> {
+    const key = this.scopedKey('voicecap_sales_state', workspaceId);
+    const update = async () => {
+      let envelope: { __voicecapRecovery: number; updatedAt: number; data: SalesLocalState };
+      try {
+        envelope = await durableStorage.update<typeof envelope>(key, (recovered) => {
+          let local: typeof envelope | null = null;
+          try { const raw = localStorage.getItem(key); if (raw) local = JSON.parse(raw); } catch {}
+          const memoryVersion = this.memoryFallback.has(key) ? this.latestWrites.get(key) || 0 : 0;
+          const latest = recovered && (!local || recovered.updatedAt >= local.updatedAt) ? recovered : local;
+          const current = memoryVersion > (latest?.updatedAt || 0)
+            ? this.memoryFallback.get(key) as SalesLocalState
+            : latest?.data || this.getSalesLocalState(workspaceId);
+          const version = Math.max(Date.now() * 1000, this.writeVersion + 1, (latest?.updatedAt || 0) + 1);
+          return { __voicecapRecovery: 1, updatedAt: version, data: change(current) };
+        });
+      } catch {
+        // Web Locks still serialize the Web Storage fallback between tabs.
+        const next = change(this.getSalesLocalState(workspaceId));
+        this.saveSalesLocalState(workspaceId, next);
+        this.notifySales(workspaceId);
+        this.channel?.postMessage({ workspaceId });
+        return next;
+      }
+      this.writeVersion = Math.max(this.writeVersion, envelope.updatedAt);
+      this.latestWrites.set(key, envelope.updatedAt);
+      if (this.setItem(key, envelope)) this.memoryFallback.delete(key);
+      else this.memoryFallback.set(key, envelope.data);
+      this.failures.delete(key); // The transaction completed durably, even if Web Storage failed.
+      this.notifyPersistence();
+      this.notifySales(workspaceId);
+      this.channel?.postMessage({ workspaceId });
+      return envelope.data;
+    };
+    return typeof navigator !== 'undefined' && navigator.locks
+      ? navigator.locks.request(key, update) : update();
   }
 
   public getCommentOutbox<T>(workspaceId: string): T[] {
@@ -689,19 +762,27 @@ export class StorageService {
     const ws = workspaceIdOverride !== undefined ? workspaceIdOverride : this.currentWorkspaceId;
     const key = this.scopedKey(KEYS.COMMENT_RECORDS, workspaceIdOverride);
     const data = this.getItem<CommentRecord[] | null>(key, null);
-    if (data) return data;
+    if (data) return data.filter((record) => !this.isCommentDeleted(record, workspaceIdOverride));
     // workspace가 지정된 경우 타 계정/공용 데이터가 혼입되지 않도록 빈 배열 반환 (P1-4 해결)
     if (ws) {
       return [];
     }
     // workspace가 아예 없는 비로그인/단독 상태일 때만 공용 키 조회
-    return this.getItem<CommentRecord[]>(KEYS.COMMENT_RECORDS, []);
+    return this.getItem<CommentRecord[]>(KEYS.COMMENT_RECORDS, []).filter((record) => !this.isCommentDeleted(record, workspaceIdOverride));
   }
   public saveCommentRecords(records: CommentRecord[], workspaceIdOverride?: string | null) {
     // Comments are live-sale evidence: never discard them to make room for sales.
     const key = this.scopedKey(KEYS.COMMENT_RECORDS, workspaceIdOverride);
-    if (!this.setItem(key, records)) this.memoryFallback.set(key, records);
-    else this.memoryFallback.delete(key);
+    this.saveRecoverable(key, records);
+  }
+
+  private getCommentTombstones(workspaceIdOverride?: string | null): { id: string; key?: string }[] {
+    return this.getItem(this.scopedKey('voicecap_comment_tombstones', workspaceIdOverride), []);
+  }
+
+  public isCommentDeleted(comment: { id: string; sessionId: string; platformMessageId?: string }, workspaceIdOverride?: string | null): boolean {
+    return this.getCommentTombstones(workspaceIdOverride).some((item) => item.id === comment.id
+      || (item.key && item.key === `${comment.sessionId}:${comment.platformMessageId}`));
   }
 
   // 중복 제거(upsert), 정식 buyerId 보존, 최대 1,000건 안전 제한
@@ -715,6 +796,7 @@ export class StorageService {
       map.set(key, item);
     }
     for (const item of records) {
+      if (this.isCommentDeleted(item, workspaceIdOverride)) continue;
       const key = `${item.sessionId}:${item.platformMessageId || item.id}`;
       const existing = map.get(key);
       if (existing) {
@@ -737,11 +819,33 @@ export class StorageService {
   }
 
   public deleteCommentRecord(id: string, workspaceIdOverride?: string | null) {
-    this.saveCommentRecords(this.getCommentRecords(workspaceIdOverride).filter((r) => r.id !== id), workspaceIdOverride);
+    this.deleteCommentRecords([id], workspaceIdOverride);
   }
   public deleteCommentRecords(ids: string[], workspaceIdOverride?: string | null) {
+    if (!ids.length) return;
     const idSet = new Set(ids);
-    this.saveCommentRecords(this.getCommentRecords(workspaceIdOverride).filter((r) => !idSet.has(r.id)), workspaceIdOverride);
+    const records = this.getCommentRecords(workspaceIdOverride);
+    const deleted = records.filter((record) => idSet.has(record.id));
+    const tombstones = new Map(this.getCommentTombstones(workspaceIdOverride).map((item) => [item.id, item]));
+    for (const id of ids) {
+      const record = deleted.find((item) => item.id === id);
+      tombstones.set(id, { id, key: record?.platformMessageId ? `${record.sessionId}:${record.platformMessageId}` : undefined });
+    }
+    this.saveRecoverable(this.scopedKey('voicecap_comment_tombstones', workspaceIdOverride), [...tombstones.values()]);
+    this.saveCommentRecords(records.filter((record) => !idSet.has(record.id)), workspaceIdOverride);
+    const workspaceId = workspaceIdOverride !== undefined ? workspaceIdOverride : this.currentWorkspaceId;
+    this.notifyCommentDeletion(workspaceId, ids, deleted.map((item) => `${item.sessionId}:${item.platformMessageId}`));
+  }
+
+  private notifyCommentDeletion(workspaceId: string | null, ids: string[], keys: string[]) {
+    if (typeof window !== 'undefined') {
+      const event = new Event('voicecap_comments_deleted');
+      Object.assign(event, { detail: { workspaceId, ids, keys } });
+      window.dispatchEvent(event);
+      const updated = new Event('voicecap_comments_updated');
+      Object.assign(updated, { detail: { workspaceId } });
+      window.dispatchEvent(updated);
+    }
   }
 
   // 최근 100건을 올바른 UI 순서(오래된 것 -> 최신 것)로 복원 (정렬 버그 수정)

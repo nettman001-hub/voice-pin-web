@@ -267,6 +267,22 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     return () => window.removeEventListener('online', retry);
   }, [workspaceId, scheduleCloudFlush]);
 
+  useEffect(() => {
+    const handleDeleted = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.workspaceId !== workspaceRef.current) return;
+      const ids = new Set<string>(detail.ids || []);
+      const keys = new Set<string>(detail.keys || []);
+      const removed = (comment: CommentRecord) => ids.has(comment.id) || keys.has(`${comment.sessionId}:${comment.platformMessageId}`);
+      for (const [key, comment] of pendingCommentsRef.current) {
+        if (removed(comment)) pendingCommentsRef.current.delete(key);
+      }
+      setLiveComments((comments) => comments.filter((comment) => !removed(comment)));
+    };
+    window.addEventListener('voicecap_comments_deleted', handleDeleted);
+    return () => window.removeEventListener('voicecap_comments_deleted', handleDeleted);
+  }, []);
+
   // 댓글 도우미가 중계한 실시간 댓글 유입 처리
   const ingestComment = useCallback(
     (incoming: StreamedComment) => {
@@ -427,6 +443,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
       // 1. 기존 화면에 표시 중이던 댓글 보존
       for (const item of prevComments) {
+        if (storageService.isCommentDeleted(item, workspaceId)) continue;
         const isCurrentOrActive = !cloudSessionId || item.sessionId === cloudSessionId || item.sessionId === currentSessionId;
         if (isCurrentOrActive) {
           const migratedItem = cloudSessionId && item.sessionId !== cloudSessionId
@@ -442,6 +459,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
       // 2. 클라우드 판매 피드에서 반환된 최신 댓글 반영 (정식 레코드 ID 및 buyerId로 갱신)
       for (const cloudRec of sessionRecords) {
+        if (storageService.isCommentDeleted(cloudRec, workspaceId)) continue;
         if (cloudRec.platformMessageId && byMsgId.has(cloudRec.platformMessageId)) {
           const existing = byMsgId.get(cloudRec.platformMessageId)!;
           byMsgId.set(cloudRec.platformMessageId, {
@@ -462,6 +480,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
       // 3. 아직 클라우드 피드에 반영 대기 중인 로컬 댓글 반영
       for (const pending of pendingCommentsRef.current.values()) {
+        if (storageService.isCommentDeleted(pending, workspaceId)) continue;
         const isCurrentOrActive = !cloudSessionId || pending.sessionId === cloudSessionId || pending.sessionId === currentSessionId;
         if (isCurrentOrActive) {
           const migratedPending = cloudSessionId && pending.sessionId !== cloudSessionId

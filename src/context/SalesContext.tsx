@@ -63,6 +63,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       scope: workspaceId,
       read: () => storageService.getSalesLocalState(workspaceId),
       persist: (state) => storageService.saveSalesLocalState(workspaceId, state),
+      update: (change) => storageService.updateSalesLocalState(workspaceId, change),
       save: (sale) => isRemoteAuth ? remoteWorkspaceService.saveSale(workspaceId, sale) : Promise.resolve(),
       remove: (id) => isRemoteAuth ? remoteWorkspaceService.deleteSale(workspaceId, id) : Promise.resolve(),
       load: () => isRemoteAuth ? remoteWorkspaceService.loadSales(workspaceId) : Promise.resolve(storageService.getSales(workspaceId)),
@@ -122,9 +123,26 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }) : () => {};
     const retryTimer = window.setInterval(retrySync, 10_000);
     window.addEventListener('online', retrySync);
+    const reloadLocal = () => {
+      void storageService.restoreWorkspace(workspaceId).then(async () => {
+        if (!active) return;
+        await getController()?.reloadState();
+        retrySync();
+      });
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === `voicecap_sales_state:${encodeURIComponent(workspaceId)}`) reloadLocal();
+    };
+    const handleLocal = (event: Event) => {
+      if ((event as CustomEvent).detail?.workspaceId === workspaceId) reloadLocal();
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('voicecap_sales_updated', handleLocal);
     return () => {
       active = false; window.clearTimeout(timer); window.clearInterval(retryTimer);
       window.removeEventListener('online', retrySync); unsubscribe();
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('voicecap_sales_updated', handleLocal);
     };
   }, [getController, isRemoteAuth, workspaceId, refreshSales, retrySync]);
 

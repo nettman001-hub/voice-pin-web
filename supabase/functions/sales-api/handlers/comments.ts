@@ -90,8 +90,11 @@ export async function handleIngestComments(workspaceId: string, actorId: string,
 }
 
 export async function handleGetSalesFeed(workspaceId: string, body: any) {
-  const { sessionId, watchedBuyerIds = [], limit = 50 } = body
+  const { sessionId, watchedBuyerIds = [], limit = 50, knownCommentIds = [] } = body
   if (!sessionId) return errorResponse('VALIDATION_ERROR', 'sessionId는 필수입니다.', 400)
+  if (!Array.isArray(knownCommentIds) || knownCommentIds.length > 1000) {
+    return errorResponse('VALIDATION_ERROR', '확인할 댓글 ID는 최대 1000건입니다.', 400)
+  }
 
   const { data: session } = await admin
     .from('live_sessions')
@@ -132,6 +135,20 @@ export async function handleGetSalesFeed(workspaceId: string, body: any) {
     .order('ingest_sequence', { ascending: false })
     .limit(limit)
 
+  // A latest-50 feed cannot prove deletion of older comments. Confirm only the
+  // explicit canonical IDs held by this client, within its workspace/session.
+  const knownIds: string[] = [...new Set<string>(knownCommentIds.filter((id: unknown): id is string =>
+    typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)))]
+  const deletedCommentIds: string[] = []
+  for (let offset = 0; offset < knownIds.length; offset += 100) {
+    const batch = knownIds.slice(offset, offset + 100)
+    const { data: existing, error } = await admin.from('live_comments').select('id')
+      .eq('workspace_id', workspaceId).eq('session_id', sessionId).in('id', batch)
+    if (error) return errorResponse('DATABASE_ERROR', '댓글 삭제 상태를 확인하지 못했습니다.', 500)
+    const existingIds = new Set((existing || []).map((comment: any) => comment.id))
+    deletedCommentIds.push(...batch.filter((id) => !existingIds.has(id)))
+  }
+
   const summary = await calculateSummary(workspaceId, sessionId)
   const buyerStats = await calculateBuyerStats(workspaceId, sessionId, watchedBuyerIds.slice(0, 100))
 
@@ -153,6 +170,7 @@ export async function handleGetSalesFeed(workspaceId: string, body: any) {
     sessionRevision: session?.revision || 1,
     nextCursor: comments?.length ? `cursor-seq-${comments[0].ingest_sequence}` : null,
     hasMore: false,
+    deletedCommentIds,
   })
 }
 

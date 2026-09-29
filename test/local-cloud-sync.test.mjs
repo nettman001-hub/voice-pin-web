@@ -31,7 +31,9 @@ function controller(options = {}) {
   let active = true;
   const sync = new SalesSyncController({
     scope: options.scope,
-    read: () => state, persist: (next) => { state = clone(next); },
+    read: () => options.read ? options.read() : state,
+    persist: (next) => { state = clone(next); options.persist?.(next); },
+    update: options.update,
     save: async (record) => { saved.push(clone(record)); await options.save?.(record); },
     remove: async (id) => { removed.push(id); await options.remove?.(id); },
     load: options.load || (async () => []), changed() {}, error: (message) => errors.push(message), active: () => active,
@@ -90,6 +92,39 @@ test('fresh snapshots still remove genuinely deleted remote records', async () =
   assert.equal(ctx.sync.records.length, 0);
 });
 
+for (const restored of [false, true]) {
+  test(`a snapshot started during ${restored ? 'recovered' : 'new'} pending work cannot erase its acknowledged sale`, async () => {
+    const write = deferred(), snapshot = deferred();
+    const row = { ...sale(), syncStatus: 'PENDING' };
+    const ctx = controller({ save: () => write.promise, load: () => snapshot.promise,
+      state: restored ? { records: [row], pending: [{ id: row.id, token: 'recovered', kind: 'UPSERT', sale: row }] } : undefined });
+    if (restored) void ctx.sync.flush(); else ctx.sync.upsert(row);
+    const refresh = ctx.sync.refresh();
+    write.resolve(); await ctx.sync.flush();
+    snapshot.resolve([]); await refresh;
+    assert.equal(ctx.sync.records.length, 1);
+    assert.equal(ctx.sync.records[0].syncStatus, 'SYNCED');
+  });
+}
+
+test('a snapshot started during a pending edit cannot roll it back after its ACK', async () => {
+  const write = deferred(), snapshot = deferred();
+  const ctx = controller({ state: { records: [sale()], pending: [] }, save: () => write.promise, load: () => snapshot.promise });
+  ctx.sync.upsert(sale('sale-1', 300));
+  const refresh = ctx.sync.refresh();
+  write.resolve(); await ctx.sync.flush(); snapshot.resolve([sale()]); await refresh;
+  assert.equal(ctx.sync.records[0].amount, 300);
+});
+
+test('a snapshot started during a pending deletion cannot resurrect it after its ACK', async () => {
+  const write = deferred(), snapshot = deferred();
+  const ctx = controller({ state: { records: [sale()], pending: [] }, remove: () => write.promise, load: () => snapshot.promise });
+  ctx.sync.delete('sale-1');
+  const refresh = ctx.sync.refresh();
+  write.resolve(); await ctx.sync.flush(); snapshot.resolve([sale()]); await refresh;
+  assert.equal(ctx.sync.records.length, 0);
+});
+
 test('failed deletes remain durable tombstones and resume after reload', async () => {
   const ctx = controller({ state: { records: [sale()], pending: [] }, remove: async () => { throw new Error('offline'); } });
   ctx.sync.delete('sale-1'); await ctx.sync.flush();
@@ -117,20 +152,37 @@ test('account changes stop retries and discard old snapshots', async () => {
 function storageFixture({ quota = false, durableFailure = false } = {}) {
   const local = new Map(), durable = new Map();
   const events = [];
+  const eventTarget = new EventTarget();
+  let durableQueue = Promise.resolve();
   const globals = {
     localStorage: { getItem: (key) => local.get(key) ?? null, setItem(key, value) { if (quota) throw new Error('QuotaExceededError'); local.set(key, value); }, removeItem: (key) => local.delete(key) },
-    window: { dispatchEvent: (event) => { events.push(event.type); } },
+    window: {
+      dispatchEvent: (event) => { events.push(event.type); return eventTarget.dispatchEvent(event); },
+      addEventListener: (...args) => eventTarget.addEventListener(...args),
+      removeEventListener: (...args) => eventTarget.removeEventListener(...args),
+    },
   };
   const commentTypes = load('../src/types/comment.ts');
   const { StorageService, isTemporarySessionId } = load('../src/services/storageService.ts', {
     '../types/comment': commentTypes,
     './durableStorage': { durableStorage: {
       async set(key, value) { if (durableFailure) throw new Error('IndexedDB unavailable'); durable.set(key, clone(value)); },
-      async get(key) { return durable.get(key) ?? null; },
+      async get(key) { await durableQueue; return durable.get(key) ?? null; },
+      update(key, change) {
+        const flight = durableQueue.then(async () => {
+          if (durableFailure) throw new Error('IndexedDB unavailable');
+          const next = change(clone(durable.get(key) ?? null));
+          await tick(); // Two callers can overlap, but read/write stays one transaction.
+          durable.set(key, clone(next)); return clone(next);
+        });
+        durableQueue = flight.catch(() => {});
+        return flight;
+      },
     } },
   }, globals);
   const storage = new StorageService(); storage.setWorkspaceId('workspace-1');
-  return { storage, StorageService, isTemporarySessionId, local, durable, events, globals, setQuota(value) { quota = value; } };
+  return { storage, StorageService, isTemporarySessionId, local, durable, events, globals,
+    setQuota(value) { quota = value; }, setDurableFailure(value) { durableFailure = value; } };
 }
 
 test('quota fallback preserves all sales and comment evidence without destructive cleanup', async () => {
@@ -146,6 +198,68 @@ test('quota fallback preserves all sales and comment evidence without destructiv
   const reloaded = new ctx.StorageService();
   await reloaded.restoreWorkspace('workspace-1');
   assert.equal(reloaded.getSales('workspace-1').length, 120);
+  assert.equal(reloaded.getCommentRecords('workspace-1').length, 1);
+});
+
+test('two tabs preserve distinct offline sales and pending operations through a shared transaction', async () => {
+  const ctx = storageFixture();
+  const other = new ctx.StorageService(); other.setWorkspaceId('workspace-1');
+  const make = (storage) => controller({ scope: 'two-tabs',
+    read: () => storage.getSalesLocalState('workspace-1'),
+    update: (change) => storage.updateSalesLocalState('workspace-1', change),
+    save: async () => { throw new Error('offline'); },
+  });
+  const first = make(ctx.storage), second = make(other);
+  first.sync.upsert(sale('tab-A')); second.sync.upsert(sale('tab-B'));
+  await Promise.all([first.sync.flush(), second.sync.flush()]);
+  const reloaded = new ctx.StorageService(); await reloaded.restoreWorkspace('workspace-1');
+  assert.deepEqual(clone(reloaded.getSales('workspace-1')).map((item) => item.id).sort(), ['tab-A', 'tab-B']);
+  assert.deepEqual(clone(reloaded.getSalesLocalState('workspace-1').pending).map((item) => item.id).sort(), ['tab-A', 'tab-B']);
+});
+
+test('two tabs preserve distinct operations when Web Storage is full and recover from IndexedDB alone', async () => {
+  const ctx = storageFixture({ quota: true }), other = new ctx.StorageService();
+  const make = (storage) => controller({
+    read: () => storage.getSalesLocalState('workspace-1'),
+    update: (change) => storage.updateSalesLocalState('workspace-1', change),
+    save: async () => { throw new Error('offline'); },
+  });
+  const first = make(ctx.storage), second = make(other);
+  first.sync.upsert(sale('tab-A')); second.sync.upsert(sale('tab-B'));
+  await Promise.all([first.sync.flush(), second.sync.flush()]);
+  const reloaded = new ctx.StorageService(); await reloaded.restoreWorkspace('workspace-1');
+  assert.equal(reloaded.getSales('workspace-1').length, 2);
+  assert.equal(reloaded.getSalesLocalState('workspace-1').pending.length, 2);
+});
+
+test('one tab ACK cannot remove another tab pending sale', async () => {
+  const ctx = storageFixture(), write = deferred();
+  const other = new ctx.StorageService(); other.setWorkspaceId('workspace-1');
+  const make = (storage, save) => controller({ scope: 'two-tabs-ack',
+    read: () => storage.getSalesLocalState('workspace-1'),
+    update: (change) => storage.updateSalesLocalState('workspace-1', change), save });
+  const first = make(ctx.storage, (row) => row.id === 'tab-A' ? write.promise : Promise.reject(new Error('offline')));
+  const second = make(other, async () => { throw new Error('offline'); });
+  first.sync.upsert(sale('tab-A')); await tick(); await tick();
+  second.sync.upsert(sale('tab-B')); await tick(); await tick();
+  write.resolve(); await Promise.all([first.sync.flush(), second.sync.flush()]);
+  const state = ctx.storage.getSalesLocalState('workspace-1');
+  assert.equal(state.records.find((row) => row.id === 'tab-A').syncStatus, 'SYNCED');
+  assert.equal(state.pending.some((operation) => operation.id === 'tab-B'), true);
+  assert.equal(state.records.length, 2);
+});
+
+test('a stale snapshot from another tab cannot discard a newly committed local record', async () => {
+  const ctx = storageFixture(), snapshot = deferred();
+  const other = new ctx.StorageService(); other.setWorkspaceId('workspace-1');
+  const make = (storage, load) => controller({
+    read: () => storage.getSalesLocalState('workspace-1'),
+    update: (change) => storage.updateSalesLocalState('workspace-1', change), load });
+  const first = make(ctx.storage), second = make(other, () => snapshot.promise);
+  const refresh = second.sync.refresh(); await tick();
+  first.sync.applyConfirmed([sale('new-confirmed')]); await first.sync.flush(); await tick();
+  snapshot.resolve([]); await refresh;
+  assert.equal(ctx.storage.getSales('workspace-1').some((row) => row.id === 'new-confirmed'), true);
 });
 
 test('reload prefers newer IndexedDB data over stale localStorage after quota failures', async () => {
@@ -160,6 +274,16 @@ test('reload prefers newer IndexedDB data over stale localStorage after quota fa
   assert.equal(reloaded.getSalesLocalState('workspace-1').pending[0].token, 'latest');
 });
 
+test('a restored memory copy yields to a newer storage event from another tab', async () => {
+  const ctx = storageFixture({ quota: true });
+  ctx.storage.saveSalesLocalState('workspace-1', { records: [sale()], pending: [] }); await tick();
+  const reloaded = new ctx.StorageService(); await reloaded.restoreWorkspace('workspace-1');
+  ctx.setQuota(false);
+  ctx.storage.saveSalesLocalState('workspace-1', { records: [sale('sale-1', 500)], pending: [] }); await tick();
+  await reloaded.restoreWorkspace('workspace-1');
+  assert.equal(reloaded.getSales('workspace-1')[0].amount, 500);
+});
+
 test('failure of both stores is reported; in-memory sales remain available', async () => {
   const ctx = storageFixture({ quota: true, durableFailure: true });
   ctx.storage.saveSalesLocalState('workspace-1', { records: [sale()], pending: [] }); await tick();
@@ -168,6 +292,17 @@ test('failure of both stores is reported; in-memory sales remain available', asy
   ctx.storage.setWorkspaceId('workspace-2');
   assert.equal(ctx.storage.getPersistenceError(), false);
   assert.equal(ctx.storage.getSales('workspace-2').length, 0);
+});
+
+test('comment-only persistence failures are reported and can be retried durably', async () => {
+  const ctx = storageFixture({ quota: true, durableFailure: true });
+  ctx.storage.addCommentRecords([{ id: 'comment-1', sessionId: 'session-1', nickname: '구매자', content: '저요', capturedAt: sale().recognizedAt }], 'workspace-1');
+  await tick();
+  assert.equal(ctx.storage.getPersistenceError(), true);
+  ctx.setDurableFailure(false); ctx.storage.retryPersistence(); await tick();
+  assert.equal(ctx.storage.getPersistenceError(), false);
+  const reloaded = new ctx.StorageService(); await reloaded.restoreWorkspace('workspace-1');
+  assert.equal(reloaded.getCommentRecords('workspace-1').length, 1);
 });
 
 const session1 = '11111111-1111-1111-1111-111111111111';
@@ -194,6 +329,28 @@ test('canonical comment acknowledgements replace stream IDs and restore verified
   assert.equal(ctx.storage.getCommentRecords('workspace-1')[0].id, canonical(queued()).id);
   assert.equal(ctx.storage.getCommentRecords('workspace-1')[0].buyerId, canonical(queued()).buyerId);
   assert.equal(ctx.storage.getCommentOutbox('workspace-1').length, 0);
+});
+
+test('acknowledged comment evidence survives quota failure and reload with an empty outbox', async () => {
+  const ctx = commentSyncFixture(async (request) => ({ comments: request.comments.map((item) => canonical({ ...item, sessionId: request.sessionId })) }));
+  ctx.setQuota(true);
+  ctx.storage.addCommentRecords([{ ...queued(), id: 'stream-message-1', buyerId: null }], 'workspace-1');
+  ctx.enqueueCloudComment('workspace-1', queued()); await ctx.flushPendingComments('workspace-1'); await tick();
+  const reloaded = new ctx.StorageService(); await reloaded.restoreWorkspace('workspace-1');
+  assert.equal(reloaded.getCommentOutbox('workspace-1').length, 0);
+  assert.equal(reloaded.getCommentRecords('workspace-1')[0].id, canonical(queued()).id);
+  assert.equal(reloaded.getCommentRecords('workspace-1')[0].buyerId, canonical(queued()).buyerId);
+});
+
+test('comment deletion tombstones survive reload and reject stale canonical or provisional records', async () => {
+  const ctx = storageFixture({ quota: true });
+  const row = { ...queued(), id: canonical(queued()).id };
+  ctx.storage.addCommentRecords([row], 'workspace-1');
+  ctx.storage.deleteCommentRecords([row.id], 'workspace-1'); await tick();
+  const reloaded = new ctx.StorageService(); await reloaded.restoreWorkspace('workspace-1');
+  reloaded.addCommentRecords([row, { ...row, id: 'stream-message-1' }], 'workspace-1');
+  assert.equal(reloaded.getCommentRecords('workspace-1').length, 0);
+  assert.equal(ctx.events.includes('voicecap_comments_deleted'), true);
 });
 
 test('old-session comments survive transition and are drained separately from new-session comments', async () => {
@@ -252,9 +409,9 @@ test('duplicate ingestion returns the existing canonical row and buyer ID', asyn
   assert.equal(reply.comments[0].buyerId, row.buyer_id);
 });
 
-function providerFixture({ bootstrapApi, hydrate = async (path) => path, feedApi, flush = async () => {} } = {}) {
-  const cells = [], effects = [], intervals = new Map(), writes = [];
-  let index = 0, timer = 0;
+function reactFixture() {
+  const cells = [], effects = [];
+  let index = 0;
   const depsEqual = (left, right) => left && right && left.length === right.length && left.every((value, i) => Object.is(value, right[i]));
   const react = {
     createContext: () => ({ Provider: 'provider' }), createElement: (_type, props) => ({ props }),
@@ -267,6 +424,79 @@ function providerFixture({ bootstrapApi, hydrate = async (path) => path, feedApi
       effects.push(() => { previous?.cleanup?.(); cells[i].cleanup = callback(); });
     } },
   };
+  return { react,
+    render(component) { index = 0; const value = component({ children: null }).props.value; effects.splice(0).forEach((effect) => effect()); return value; },
+  };
+}
+
+test('SalesProvider receives other-tab changes without losing either offline operation', async () => {
+  const ctx = storageFixture(), other = new ctx.StorageService(); other.setWorkspaceId('workspace-1');
+  const window = { ...ctx.globals.window, setTimeout: () => 1, clearTimeout() {}, setInterval: () => 2, clearInterval() {} };
+  const remote = { subscribe: () => () => {}, loadSales: async () => [], saveSale: async () => { throw new Error('offline'); } };
+  const make = (storage) => {
+    const hooks = reactFixture(), { react } = hooks;
+    const { SalesProvider } = load('../src/context/SalesContext.tsx', {
+      react: { ...react, default: react }, '../services/storageService': { storageService: storage },
+      '../services/csvExporter': {}, './AuthContext': { useAuth: () => ({ workspaceId: 'workspace-1', isRemoteAuth: true, user: { id: 'user-1' } }) },
+      '../services/remoteWorkspaceService': { remoteWorkspaceService: remote },
+      '../services/commentStreamService': {}, '../services/aiSettingsApi': {},
+      '../services/salesSyncController': { SalesSyncController },
+    }, { window });
+    return { render: () => hooks.render(SalesProvider) };
+  };
+  const first = make(ctx.storage), second = make(other);
+  first.render(); second.render(); await tick(); await tick();
+  first.render().addSale({ ...sale('unused'), productCode: '1', status: '보류' });
+  second.render().addSale({ ...sale('unused'), productCode: '2', status: '보류' });
+  for (let i = 0; i < 12; i++) await tick();
+  assert.equal(ctx.storage.getSalesLocalState('workspace-1').pending.length, 2);
+  assert.equal(first.render().sales.length, 2);
+  assert.equal(second.render().sales.length, 2);
+});
+
+test('DurableStorage read/write transactions serialize updates from independent instances', async () => {
+  const values = new Map(), modes = [];
+  let tail = Promise.resolve();
+  const database = { transaction(_name, mode = 'readonly') {
+    modes.push(mode);
+    let finish, completeScheduled = false, aborted = false;
+    const finished = new Promise((resolve) => { finish = resolve; });
+    const start = tail; tail = finished;
+    const staged = new Map();
+    const complete = () => {
+      if (completeScheduled) return;
+      completeScheduled = true;
+      queueMicrotask(() => {
+        if (aborted) transaction.onabort?.();
+        else { for (const [key, value] of staged) values.set(key, value); transaction.oncomplete?.(); }
+        finish();
+      });
+    };
+    const transaction = { error: null, abort() { aborted = true; complete(); }, objectStore() { return {
+      get(key) { const request = {}; start.then(() => {
+        request.result = values.get(key); request.onsuccess?.(); complete();
+      }); return request; },
+      put(value, key) { staged.set(key, value); start.then(complete); },
+    }; } };
+    return transaction;
+  } };
+  const indexedDB = { open() { const request = {}; queueMicrotask(() => { request.result = database; request.onsuccess(); }); return request; } };
+  const { DurableStorage } = load('../src/services/durableStorage.ts', {}, { indexedDB });
+  const first = new DurableStorage(), second = new DurableStorage();
+  await Promise.all([
+    first.update('workspace-1', (state) => [...(state || []), 'operation-A']),
+    second.update('workspace-1', (state) => [...(state || []), 'operation-B']),
+  ]);
+  assert.deepEqual(JSON.parse(values.get('workspace-1')), ['operation-A', 'operation-B']);
+  assert.deepEqual(modes, ['readwrite', 'readwrite']);
+  await assert.rejects(first.update('workspace-1', () => { throw new Error('aborted write'); }), /aborted write/);
+  assert.deepEqual(JSON.parse(values.get('workspace-1')), ['operation-A', 'operation-B']);
+});
+
+function providerFixture({ bootstrapApi, hydrate = async (path) => path, feedApi, flush = async () => {} } = {}) {
+  const hooks = reactFixture(), { react } = hooks;
+  const intervals = new Map(), writes = [];
+  let timer = 0;
   let auth = { workspaceId: 'workspace-1', user: { id: 'user-1' }, isAuthenticated: true };
   let currentData = { workspaceId: 'workspace-1', settings: { revision: 1 }, activeSession: { id: session1, revision: 1 }, activeProduct: { id: 'product-1', imagePath: 'image-1', revision: 1, salesRevision: 1 }, permissions: [], printerStatus: {} };
   let comments = [];
@@ -278,6 +508,9 @@ function providerFixture({ bootstrapApi, hydrate = async (path) => path, feedApi
     saveActiveSession: (session, owner) => writes.push({ kind: 'session', session, owner }),
     saveBootstrapCache: (bootstrap, owner) => writes.push({ kind: 'bootstrap', bootstrap, owner }),
     getBootstrapCache: () => null, addCommentRecords() {},
+    deleteCommentRecords: (ids, owner) => {
+      if (ids.length) { comments = comments.filter((comment) => !ids.includes(comment.id)); writes.push({ kind: 'deletedComments', ids, owner }); }
+    },
   };
   const emptyFeed = () => ({ comments: [], activeProduct: currentData.activeProduct, sessionRevision: currentData.activeSession.revision });
   const api = {
@@ -304,7 +537,7 @@ function providerFixture({ bootstrapApi, hydrate = async (path) => path, feedApi
     writes, api, intervals,
     setAuth(next) { auth = next; }, setData(next) { currentData = next; }, data: () => currentData,
     setComments(next) { comments = next; }, feedCalls: () => feedCalls,
-    render() { index = 0; const value = ProductSalesProvider({ children: null }).props.value; effects.splice(0).forEach((effect) => effect()); return value; },
+    render: () => hooks.render(ProductSalesProvider),
   };
 }
 
@@ -386,6 +619,82 @@ test('heartbeat with no active product clears the product rather than retaining 
   [...ctx.intervals.values()].find((item) => item.ms === 60_000).fn(); await tick();
   assert.equal(ctx.render().activeProduct, null);
   assert.equal(ctx.writes.filter((row) => row.kind === 'bootstrap').at(-1).bootstrap.activeProduct, null);
+});
+
+test('heartbeat reconciles explicit comment deletions without discarding older comments outside its latest page', async () => {
+  const deleted = canonical(queued()), retained = { ...canonical(queued(session1, 'message-2')), id: '55555555-5555-5555-5555-555555555555' };
+  let heartbeat = false, requested;
+  const ctx = providerFixture({ feedApi: async (params) => {
+    requested = params;
+    return { comments: [], deletedCommentIds: heartbeat ? [deleted.id] : [], sessionRevision: 1, activeProduct: ctx.data().activeProduct };
+  } });
+  ctx.setComments([deleted, retained]); ctx.render(); await tick();
+  const before = ctx.render(); assert.equal(before.feed.comments.length, 2);
+  before.setFeedPollingEnabled(true); ctx.render(); heartbeat = true;
+  [...ctx.intervals.values()].find((item) => item.ms === 60_000).fn(); await tick();
+  assert.equal(requested.knownCommentIds.length, 2);
+  const after = ctx.render();
+  assert.equal(after.feed.comments.length, 1);
+  assert.equal(after.feed.comments[0].id, retained.id);
+  assert.equal(ctx.writes.filter((row) => row.kind === 'deletedComments').at(-1).owner, 'workspace-1');
+});
+
+test('comment capture removes deleted rows and does not resurrect them from a stale feed', async () => {
+  const ctx = storageFixture(), hooks = reactFixture(), { react } = hooks;
+  const row = { ...canonical(queued()), nickname: '구매자' };
+  ctx.storage.addCommentRecords([row], 'workspace-1');
+  let feed = { comments: [row] };
+  const commentTypes = load('../src/types/comment.ts');
+  const stream = { onStatus: () => () => {}, onComment: () => () => {}, connect() {}, stopCollecting() {}, disconnect() {} };
+  const { CommentCaptureProvider } = load('../src/context/CommentCaptureContext.tsx', {
+    react: { ...react, default: react }, 'lucide-react': {},
+    './AuthContext': { useAuth: () => ({ workspaceId: 'workspace-1' }) },
+    './LiveContext': { useLive: () => ({ isListening: false, currentSessionId: session1, transcriptLogs: [] }) },
+    './ProductSalesContext': { useProductSales: () => ({ activeSession: { id: session1 }, feed, pollFeed: async () => {} }) },
+    '../services/storageService': { storageService: ctx.storage, isTemporarySessionId: ctx.isTemporarySessionId },
+    '../services/remoteWorkspaceService': { remoteWorkspaceService: { loadCommentCaptureConfig: async () => null, saveCommentCaptureConfig: async () => {} } },
+    '../services/commentSyncService': { flushPendingComments: async () => {}, promoteCommentOutbox() {} },
+    '../services/commentStreamService': { commentStreamService: stream }, '../types/comment': commentTypes,
+  }, { window: { ...ctx.globals.window, setTimeout: () => 1, clearTimeout() {} } });
+  hooks.render(CommentCaptureProvider); await tick();
+  assert.equal(hooks.render(CommentCaptureProvider).liveComments.length, 1);
+  ctx.storage.deleteCommentRecords([row.id], 'workspace-1');
+  assert.equal(hooks.render(CommentCaptureProvider).liveComments.length, 0);
+  feed = { comments: [row] }; hooks.render(CommentCaptureProvider);
+  assert.equal(hooks.render(CommentCaptureProvider).liveComments.length, 0);
+});
+
+test('feed deletion reconciliation checks known IDs in scope and keeps older existing rows outside the newest page', async () => {
+  const existingId = canonical(queued()).id, deletedId = '55555555-5555-5555-5555-555555555555';
+  const probes = [];
+  const admin = { from(table) {
+    const filters = [];
+    return { select() { return this; }, eq(key, value) { filters.push([key, value]); return this; }, order() { return this; },
+      single: async () => ({ data: { id: session1, revision: 1, active_product_id: null } }),
+      limit: async () => ({ data: [], error: null }),
+      async in(key, ids) { probes.push({ table, key, ids, filters }); return { data: [{ id: existingId }], error: null }; },
+    };
+  } };
+  const { handleGetSalesFeed } = load('../supabase/functions/sales-api/handlers/comments.ts', {
+    '../../_shared/productSales.ts': { admin, successResponse: (data) => data, errorResponse: (code) => { throw new Error(code); } },
+    './common.ts': { calculateSummary: async () => ({}), calculateBuyerStats: async () => ({}) },
+  });
+  const response = await handleGetSalesFeed('workspace-1', { sessionId: session1, knownCommentIds: [existingId, deletedId, 'stream-message-1'] });
+  assert.deepEqual(clone(response.deletedCommentIds), [deletedId]);
+  assert.deepEqual(probes[0].filters, [['workspace_id', 'workspace-1'], ['session_id', session1]]);
+  assert.equal(probes[0].ids.length, 2);
+});
+
+test('failed deletion probes cannot be interpreted as successful deletion', async () => {
+  const admin = { from() { return { select() { return this; }, eq() { return this; }, order() { return this; },
+    single: async () => ({ data: { revision: 1 } }), limit: async () => ({ data: [], error: null }),
+    in: async () => ({ data: null, error: { message: 'offline' } }),
+  }; } };
+  const { handleGetSalesFeed } = load('../supabase/functions/sales-api/handlers/comments.ts', {
+    '../../_shared/productSales.ts': { admin, successResponse: (data) => data, errorResponse: (code) => { throw new Error(code); } },
+    './common.ts': {},
+  });
+  await assert.rejects(handleGetSalesFeed('workspace-1', { sessionId: session1, knownCommentIds: [canonical(queued()).id] }), /DATABASE_ERROR/);
 });
 
 test('selecting a provisional comment waits for acknowledgement and sends canonical IDs to commitSales', async () => {

@@ -160,9 +160,10 @@ export const CommentRecordsPage: React.FC = () => {
 
   const deleteRecords = async (ids: string[]) => {
     if (ids.length === 0) return;
+    const owner = storageService.getWorkspaceId();
     try {
       await productSalesApi.deleteLiveComments(ids);
-      storageService.deleteCommentRecords(ids);
+      storageService.deleteCommentRecords(ids, owner);
       setSelectedIds((prev) => {
         const next = new Set(prev);
         ids.forEach((id) => next.delete(id));
