@@ -1,4 +1,4 @@
-export type SaleStatus = '자동저장' | '수동수정' | '확정' | '보류';
+export type SaleStatus = '자동저장' | '수동수정' | '확정' | '보류' | '취소';
 export type SalePrintStatus = 'NOT_REQUESTED' | 'QUEUED' | 'PRINTED' | 'FAILED';
 export type SaleSource = 'WEB_VOICE' | 'ANDROID_COMMENTS' | 'MANUAL' | 'LEGACY';
 
@@ -7,10 +7,11 @@ export interface SaleRecord {
   sessionId: string;           // 방송 회차 ID (예: 20260824_02)
   buyerNickname: string;       // 구매자 닉네임
   buyerId?: string;            // 구매자 고유 ID (등록 구매자 연결 시)
+  recordState?: 'ACTIVE' | 'CANCELLED'; // 서버 sales.record_state 동기화
   amount: number;              // 판매 금액 (원)
   recognizedAt: string;        // 인식 일시 (ISO string)
   rawTranscript: string;       // 원본 전사 문장
-  status: SaleStatus;          // 상태 (자동저장, 수동수정, 확정, 보류)
+  status: SaleStatus;          // 상태 (자동저장, 수동수정, 확정, 보류, 취소)
   productName?: string;        // 판매 상품명 (판매자 직접 입력 또는 음성 추출)
   productId?: string;          // products.id — 웹/모바일 공통 상품 키
   productCode?: string;        // 판매 당시 상품번호 스냅샷

@@ -39,6 +39,11 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // 쓰기는 Supabase와 로컬DB에 동시 기록하며, 조회 및 초기 화면 렌더링은 로컬DB에서 0ms 즉시 읽기
   const [sales, setSales] = useState<SaleRecord[]>(() => storageService.getSales());
   const salesRef = useRef<SaleRecord[]>(sales);
+  const refreshRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    storageService.setWorkspaceId(workspaceId || null);
+  }, [workspaceId]);
 
   useEffect(() => {
     salesRef.current = sales;
@@ -52,12 +57,22 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return local;
     }
 
+    const reqId = ++refreshRequestIdRef.current;
     const rows = await remoteWorkspaceService.loadSales(workspaceId);
-    // [1회 동기화] Supabase 최신 판매 목록을 로컬DB에도 저장
-    storageService.saveSales(rows);
-    salesRef.current = rows;
-    setSales(rows);
-    return rows;
+    if (reqId !== refreshRequestIdRef.current) {
+      return salesRef.current;
+    }
+
+    // 서버 원본과 로컬 최신 판매 병합 (서버에 아직 반영 대기 중인 로컬 판매 보존 - Critical 5 해결)
+    const serverIds = new Set(rows.map((r) => r.id));
+    const localUnsynced = salesRef.current.filter((s) => !serverIds.has(s.id));
+    const merged = [...localUnsynced, ...rows];
+
+    // [1회 동기화]
+    storageService.saveSales(merged);
+    salesRef.current = merged;
+    setSales(merged);
+    return merged;
   }, [isRemoteAuth, workspaceId]);
 
   useEffect(() => {

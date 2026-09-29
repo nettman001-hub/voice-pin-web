@@ -7,6 +7,7 @@ import {
   restoreSupabaseSession,
   supabase,
 } from '../services/supabaseClient';
+import { storageService } from '../services/storageService';
 
 interface AuthResult {
   success: boolean;
@@ -234,6 +235,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (isSupabaseConfigured) await requireSupabase().auth.signOut();
     try {
       localStorage.removeItem('voicecap_local_user');
+      storageService.clearWorkspaceSessionData(workspaceId || undefined);
+      storageService.setWorkspaceId(null);
     } catch (e) {}
     setUser(null); setWorkspaceId(null); setToken(null);
   };

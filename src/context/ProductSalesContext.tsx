@@ -100,7 +100,7 @@ async function hydrateProduct(product: ProductSalesProduct | null): Promise<Prod
 }
 
 export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, workspaceId } = useAuth();
   const location = useLocation();
   const [bootstrap, setBootstrap] = useState<ProductSalesBootstrapData | null>(null);
   const [feed, setFeed] = useState<ProductSalesFeedData | null>(null);
@@ -119,6 +119,11 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const normalizedPath = location.pathname.replace(/\/+$/, '') || '/';
   const shouldPollSalesFeed = isAuthenticated && feedPollingEnabled && SALES_FEED_POLL_PATHS.has(normalizedPath);
 
+  // 워크스페이스 변경 시 storageService 스코프 동기화
+  useEffect(() => {
+    storageService.setWorkspaceId(workspaceId || null);
+  }, [workspaceId]);
+
   useEffect(() => {
     activeSessionRef.current = activeSession;
   }, [activeSession]);
@@ -136,14 +141,14 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
     // 1. 로컬DB 판매 테이블에서 현재 세션 누적 판매 통계 SUM / COUNT 집계
     const { summary, buyerStats } = storageService.getSessionSalesSummary(sessionId);
 
-    // 2. 로컬DB 댓글 테이블에서 현재 세션 댓글 읽기
+    // 2. 로컬DB 댓글 테이블에서 현재 세션 댓글 읽기 (정식 buyerId 보존)
     const localRecords = storageService.getSessionCommentRecords(sessionId);
     const comments: LiveComment[] = localRecords.slice(0, 50).map((r, index) => ({
       id: r.id,
       sessionId: r.sessionId,
       collectorId: 'local-helper',
       platformMessageId: r.platformMessageId || r.id,
-      buyerId: null,
+      buyerId: r.buyerId || null,
       nicknameSnapshot: r.nickname,
       content: r.content,
       capturedAt: r.capturedAt,
@@ -200,6 +205,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
               platformMessageId: c.platformMessageId,
               sessionId: c.sessionId,
               nickname: c.nicknameSnapshot,
+              buyerId: c.buyerId || null,
               content: c.content,
               capturedAt: c.capturedAt,
             }));
@@ -218,7 +224,8 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
     } catch (err: any) {
       console.warn('[ProductSalesContext] 부트스트랩 API 실패, 로컬 캐시 복원 시도:', err);
       const cached = storageService.getBootstrapCache();
-      if (cached) {
+      // 타 계정/타 워크스페이스 캐시 오염 원천 차단
+      if (cached && (!workspaceId || cached.workspaceId === workspaceId)) {
         activeSessionRef.current = cached.activeSession;
         activeProductRef.current = cached.activeProduct;
         setBootstrap(cached);
@@ -232,7 +239,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
     } finally {
       setIsLoading(false);
     }
-  }, [buildLocalFeed]);
+  }, [buildLocalFeed, workspaceId]);
 
   const startNewSession = useCallback(async (): Promise<ProductSalesSession> => {
     await productSalesApi.startSession(crypto.randomUUID());
@@ -294,6 +301,55 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
     };
   }, [activeSession?.id, pollFeed, shouldPollSalesFeed]);
 
+  // 멀티 탭(다른 창) 변경 실시간 감지 동기화
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (!e.key) return;
+      if (
+        e.key.includes('dadryeo_sales') ||
+        e.key.includes('voicecap_active_product') ||
+        e.key.includes('voicecap_active_session') ||
+        e.key.includes('voicecap_comment_records')
+      ) {
+        const session = activeSessionRef.current || storageService.getActiveSession();
+        if (session?.id) {
+          setFeed(buildLocalFeed(session.id, session.revision));
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [buildLocalFeed]);
+
+  // 저빈도(60초) 백그라운드 헬스체크 (서버와 로컬의 정합성 자동 보정)
+  useEffect(() => {
+    const sessionId = activeSession?.id;
+    if (!isAuthenticated || !sessionId || !shouldPollSalesFeed) return;
+
+    const interval = window.setInterval(async () => {
+      try {
+        const remoteFeed = await productSalesApi.getSalesFeed({ sessionId, limit: 50 });
+        if (remoteFeed.comments && remoteFeed.comments.length > 0) {
+          const records = remoteFeed.comments.map((c) => ({
+            id: c.id,
+            platformMessageId: c.platformMessageId,
+            sessionId: c.sessionId,
+            nickname: c.nicknameSnapshot,
+            buyerId: c.buyerId || null,
+            content: c.content,
+            capturedAt: c.capturedAt,
+          }));
+          storageService.addCommentRecords(records);
+        }
+        setFeed(buildLocalFeed(sessionId, activeSessionRef.current?.revision));
+      } catch {
+        // 백그라운드 헬스체크 실패는 조용히 무시
+      }
+    }, 60_000);
+
+    return () => window.clearInterval(interval);
+  }, [activeSession?.id, isAuthenticated, shouldPollSalesFeed, buildLocalFeed]);
+
   // Handle automatic candidate commit
   const handleCommitCandidate = useCallback(
     async (cand: VoiceSaleCandidate) => {
@@ -306,7 +362,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
             sourceCommentIds: cand.sourceCommentId ? [cand.sourceCommentId] : [],
           },
         ];
-        await productSalesApi.commitSales({
+        const resp = await productSalesApi.commitSales({
           operationId,
           sessionId: cand.sessionId,
           productId: cand.productId,
@@ -314,6 +370,27 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
           expectedSessionRevision: cand.sessionRevision,
           buyers,
         });
+        if (resp.sales && resp.sales.length > 0) {
+          for (const s of resp.sales) {
+            storageService.addSale({
+              id: s.id,
+              sessionId: cand.sessionId,
+              buyerNickname: s.buyerNickname,
+              buyerId: s.buyerId,
+              amount: s.amount,
+              quantity: s.quantity,
+              unitPrice: s.unitPrice,
+              status: '확정',
+              recordState: s.recordState || 'ACTIVE',
+              productCode: s.productCodeSnapshot,
+              productName: s.productNameSnapshot,
+              productId: s.productId,
+              recognizedAt: new Date().toISOString(),
+              rawTranscript: '',
+              revision: s.revision || 1,
+            });
+          }
+        }
         if (cand.sessionId) {
           setFeed(buildLocalFeed(cand.sessionId, cand.sessionRevision));
         }
@@ -487,6 +564,28 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
           sourceCommentIds: b.sourceCommentIds || [],
         })),
       });
+
+      if (resp.sales && resp.sales.length > 0) {
+        for (const s of resp.sales) {
+          storageService.addSale({
+            id: s.id,
+            sessionId: activeSession.id,
+            buyerNickname: s.buyerNickname,
+            buyerId: s.buyerId,
+            amount: s.amount,
+            quantity: s.quantity,
+            unitPrice: s.unitPrice,
+            status: '확정',
+            recordState: s.recordState || 'ACTIVE',
+            productCode: s.productCodeSnapshot || activeProduct.productCode,
+            productName: s.productNameSnapshot || activeProduct.name || undefined,
+            productId: s.productId || activeProduct.id,
+            recognizedAt: new Date().toISOString(),
+            rawTranscript: '',
+            revision: s.revision || 1,
+          });
+        }
+      }
 
       // 판매 확정 후 로컬 피드 즉시 갱신
       setFeed(buildLocalFeed(activeSession.id, activeSession.revision));

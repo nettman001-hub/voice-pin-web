@@ -1,10 +1,11 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
 import { useSales } from './SalesContext';
 import { buildClaimFromMessage, compareClaimWithSales } from '../services/customerMessageParser';
 import { smsBridgeService } from '../services/smsBridgeService';
 import { storageService } from '../services/storageService';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
+import { areCommerceValuesEqual, getCommerceChanges, hasCommerceChanges } from '../services/commerceChanges';
 import {
   CommerceState,
   CustomerPurchaseClaim,
@@ -51,7 +52,7 @@ const normalizePhone = (value: string) => {
 const intersects = (left: string[], right: string[]) => left.some((id) => right.includes(id));
 
 const mergeById = <T extends { id: string }>(local: T[], remote: T[]): T[] => {
-  const map = new Map(local.map((item) => [item.id, item]));
+  const map = new Map(local.map((item) => [item.id, { ...item }]));
   remote.forEach((item) => map.set(item.id, { ...map.get(item.id), ...item }));
   return Array.from(map.values());
 };
@@ -66,20 +67,42 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>('CHECKING');
   const [bridgeMessage, setBridgeMessage] = useState('연동 서버 확인 중');
   const [remoteReady, setRemoteReady] = useState(false);
+  const stateRef = useRef(state);
+  const remoteSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const currentWorkspaceRef = useRef<string | null>(null);
+  currentWorkspaceRef.current = isRemoteAuth ? workspaceId : null;
+
+  const applyRemoteState = useCallback((remote: CommerceState) => {
+    stateRef.current = remote;
+    setState(remote);
+    storageService.saveCommerceState(remote);
+  }, []);
 
   const commit = useCallback((updater: (previous: CommerceState) => CommerceState) => {
-    setState((previous) => {
-      const next = updater(previous);
-      storageService.saveCommerceState(next);
-      if (isRemoteAuth && workspaceId && remoteReady) {
-        void remoteWorkspaceService.saveCommerce(workspaceId, next).catch((error) => {
+    const previous = stateRef.current;
+    const next = updater(previous);
+    if (next === previous) return;
+    const changes = getCommerceChanges(previous, next);
+    if (!hasCommerceChanges(changes)) return;
+
+    // Keep consecutive actions current even before React renders. Persistence
+    // stays outside a React state updater, which can run more than once.
+    stateRef.current = next;
+    setState(next);
+    storageService.saveCommerceState(next);
+    if (isRemoteAuth && workspaceId && remoteReady) {
+      remoteSaveQueueRef.current = remoteSaveQueueRef.current
+        .then(async () => {
+          if (currentWorkspaceRef.current !== workspaceId) return;
+          await remoteWorkspaceService.saveCommerceChanges(workspaceId, changes);
+        })
+        .catch((error) => {
           console.error('[Commerce] remote save failed', error);
+          if (currentWorkspaceRef.current !== workspaceId) return;
           setBridgeStatus('OFFLINE');
           setBridgeMessage('클라우드 저장에 실패했습니다. 네트워크를 확인해 주세요.');
         });
-      }
-      return next;
-    });
+    }
   }, [isRemoteAuth, remoteReady, workspaceId]);
 
   useEffect(() => {
@@ -101,8 +124,7 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       try {
         const remote = await remoteWorkspaceService.loadCommerce(workspaceId);
         if (!active) return;
-        setState(remote);
-        storageService.saveCommerceState(remote);
+        applyRemoteState(remote);
         setRemoteReady(true);
         setBridgeStatus('ONLINE');
         setBridgeMessage('VoiceCAP 클라우드 연동 정상');
@@ -123,7 +145,7 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       window.clearTimeout(timer);
       unsubscribe();
     };
-  }, [isRemoteAuth, workspaceId]);
+  }, [applyRemoteState, isRemoteAuth, workspaceId]);
 
   useEffect(() => {
     if (sales.length === 0) return;
@@ -162,8 +184,7 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (isRemoteAuth && workspaceId) {
       try {
         const remote = await remoteWorkspaceService.loadCommerce(workspaceId);
-        setState(remote);
-        storageService.saveCommerceState(remote);
+        applyRemoteState(remote);
         setRemoteReady(true);
         setBridgeStatus('ONLINE');
         setBridgeMessage('VoiceCAP 클라우드 연동 정상');
@@ -221,7 +242,7 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setBridgeMessage(error instanceof Error ? error.message : '연동 서버에 연결할 수 없습니다.');
       return false;
     }
-  }, [bridgeConfig, commit, isRemoteAuth, matchPayments, sales, workspaceId]);
+  }, [applyRemoteState, bridgeConfig, commit, isRemoteAuth, matchPayments, sales, workspaceId]);
 
   useEffect(() => {
     void syncBridge();
@@ -270,11 +291,18 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const updateClaim = (claim: CustomerPurchaseClaim) => {
     const linkedSales = sales.filter((sale) => claim.saleIds.includes(sale.id));
     const comparison = compareClaimWithSales(claim, linkedSales);
-    const updated = { ...claim, matchStatus: comparison.status, fieldMatches: comparison.fields, updatedAt: new Date().toISOString() };
-    commit((previous) => ({
-      ...previous,
-      claims: previous.claims.map((item) => item.id === updated.id ? updated : item)
-    }));
+    commit((previous) => {
+      const existing = previous.claims.find((item) => item.id === claim.id);
+      if (!existing) return previous;
+      const updated = { ...claim, matchStatus: comparison.status, fieldMatches: comparison.fields, updatedAt: existing.updatedAt };
+      if (areCommerceValuesEqual(existing, updated)) return previous;
+      return {
+        ...previous,
+        claims: previous.claims.map((item) => item.id === updated.id
+          ? { ...updated, updatedAt: new Date().toISOString() }
+          : item)
+      };
+    });
   };
 
   const sendSms = async (phoneNumber: string, body: string, category: SmsCategory, saleIds: string[]) => {

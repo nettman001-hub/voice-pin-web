@@ -7,6 +7,7 @@ import { SaleRecord, SttTranscriptLog } from '../types/live';
 import { User } from '../types/auth';
 import { AdminSaleItem, SellerSttUsageSummary, SttUsageLogItem, SttUsageRecordPayload } from '../types/admin';
 import { isSupabaseConfigured, requireSupabase } from './supabaseClient';
+import { hasCommerceChanges, type CommerceChanges } from './commerceChanges';
 
 export interface CloudSessionTranscriptsPayload {
   sessionId: string;
@@ -51,6 +52,8 @@ const mapSale = async (row: Row): Promise<SaleRecord> => {
     id: row.id,
     sessionId: row.session_id,
     buyerNickname: row.buyer_nickname,
+    buyerId: row.buyer_id || undefined,
+    recordState: (row.record_state as 'ACTIVE' | 'CANCELLED') || 'ACTIVE',
     amount: row.amount,
     recognizedAt: row.recognized_at,
     rawTranscript: row.raw_transcript,
@@ -69,6 +72,7 @@ const mapSale = async (row: Row): Promise<SaleRecord> => {
     printRevision: Number(row.print_revision || 0),
     printedAt: row.printed_at || undefined,
     printError: row.print_error || undefined,
+    revision: Number(row.revision || 1),
     __voicecapStoragePaths: storagePaths,
   } as SaleRecord;
 };
@@ -93,6 +97,7 @@ const toSaleRow = async (workspaceId: string, sale: SaleRecord) => ({
   workspace_id: workspaceId,
   session_id: sale.sessionId,
   buyer_nickname: sale.buyerNickname,
+  buyer_id: sale.buyerId || null,
   amount: sale.amount,
   recognized_at: sale.recognizedAt,
   raw_transcript: sale.rawTranscript,
@@ -104,7 +109,8 @@ const toSaleRow = async (workspaceId: string, sale: SaleRecord) => ({
   product_code_snapshot: sale.productCode || null,
   product_name_snapshot: sale.productName || null,
   product_image_path_snapshot: sale.productImagePath || null,
-  record_state: 'ACTIVE',
+  record_state: sale.recordState || (sale.status === '취소' ? 'CANCELLED' : 'ACTIVE'),
+  revision: sale.revision || 1,
   source: sale.source || 'LEGACY',
   capture_image_paths: await persistImages(
     workspaceId,
@@ -525,9 +531,10 @@ export const remoteWorkspaceService = {
     };
   },
 
-  async saveCommerce(workspaceId: string, state: CommerceState) {
+  async saveCommerceChanges(workspaceId: string, changes: CommerceChanges) {
+    if (!hasCommerceChanges(changes)) return;
     const client = ensureEnabled();
-    const messages = state.messages.map((message) => ({
+    const messages = changes.messages.map((message) => ({
       id: message.id, workspace_id: workspaceId, external_id: message.externalId || null,
       phone_number: message.phoneNumber, body: message.body, direction: message.direction, category: message.category,
       status: message.status, sale_ids: message.saleIds, attachments: message.attachments.map((attachment) => ({
@@ -535,7 +542,7 @@ export const remoteWorkspaceService = {
       })), received_at: message.receivedAt || null, sent_at: message.sentAt || null,
       error: message.error || null, created_at: message.createdAt,
     }));
-    const claims = await Promise.all(state.claims.map(async (claim) => ({
+    const claims = await Promise.all(changes.claims.map(async (claim) => ({
       id: claim.id, workspace_id: workspaceId, message_id: claim.messageId, phone_number: claim.phoneNumber,
       nickname: claim.nickname, address: claim.address, product_name: claim.productName, amount: claim.amount,
       capture_image_paths: await persistImages(
@@ -548,18 +555,18 @@ export const remoteWorkspaceService = {
       match_status: claim.matchStatus, field_matches: claim.fieldMatches, seller_note: claim.sellerNote,
       created_at: claim.createdAt, updated_at: claim.updatedAt,
     })));
-    const invoices = state.invoices.map((invoice) => ({
+    const invoices = changes.invoices.map((invoice) => ({
       id: invoice.id, workspace_id: workspaceId, sale_ids: invoice.saleIds, customer_nickname: invoice.customerNickname,
       phone_number: invoice.phoneNumber, address: invoice.address, amount: invoice.amount, bank_account: invoice.bankAccount,
       due_date: invoice.dueDate, status: invoice.status, sent_at: invoice.sentAt || null, sms_message_id: invoice.smsMessageId || null,
       created_at: invoice.createdAt,
     }));
-    const payments = state.payments.map((payment) => ({
+    const payments = changes.payments.map((payment) => ({
       id: payment.id, workspace_id: workspaceId, external_id: payment.externalId || null, payer_name: payment.payerName,
       amount: payment.amount, paid_at: payment.paidAt, memo: payment.memo || null, sale_ids: payment.saleIds,
       invoice_id: payment.invoiceId || null, match_status: payment.matchStatus, created_at: payment.createdAt,
     }));
-    const shipments = state.shipments.map((shipment) => ({
+    const shipments = changes.shipments.map((shipment) => ({
       id: shipment.id, workspace_id: workspaceId, sale_ids: shipment.saleIds, recipient_name: shipment.recipientName,
       phone_number: shipment.phoneNumber, address: shipment.address, carrier: shipment.carrier,
       tracking_number: shipment.trackingNumber, status: shipment.status, memo: shipment.memo,
@@ -572,15 +579,11 @@ export const remoteWorkspaceService = {
     if (invoices.length) writes.push(client.from('invoices').upsert(invoices));
     if (payments.length) writes.push(client.from('payment_receipts').upsert(payments));
     if (shipments.length) writes.push(client.from('shipments').upsert(shipments));
-    if (state.verifiedSaleIds.length) writes.push(client.from('verified_sales').upsert(state.verifiedSaleIds.map((saleId) => ({ workspace_id: workspaceId, sale_id: saleId }))));
-    const { data: existingVerified, error: existingVerifiedError } = await client
-      .from('verified_sales')
-      .select('sale_id')
-      .eq('workspace_id', workspaceId);
-    if (existingVerifiedError) throw existingVerifiedError;
-    const desiredVerified = new Set(state.verifiedSaleIds);
-    const staleVerified = (existingVerified || []).map((row) => row.sale_id).filter((saleId) => !desiredVerified.has(saleId));
-    if (staleVerified.length) writes.push(client.from('verified_sales').delete().eq('workspace_id', workspaceId).in('sale_id', staleVerified));
+    if (changes.verifiedSaleIdsToAdd.length) writes.push(client.from('verified_sales').upsert(
+      changes.verifiedSaleIdsToAdd.map((saleId) => ({ workspace_id: workspaceId, sale_id: saleId }))
+    ));
+    if (changes.verifiedSaleIdsToRemove.length) writes.push(client.from('verified_sales')
+      .delete().eq('workspace_id', workspaceId).in('sale_id', changes.verifiedSaleIdsToRemove));
     const results: any[] = await Promise.all(writes);
     const error = results.find((result) => result?.error)?.error;
     if (error) throw error;

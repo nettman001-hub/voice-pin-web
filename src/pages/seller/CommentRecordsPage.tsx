@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useCommentCapture } from '../../context/CommentCaptureContext';
 import { productSalesApi } from '../../services/productSalesApi';
+import { storageService } from '../../services/storageService';
 import { CommentRecord } from '../../types/comment';
 import { LiveSession } from '../../types/productSales';
 import { formatSessionDisplay } from '../../utils/sessionFormatter';
@@ -161,6 +162,7 @@ export const CommentRecordsPage: React.FC = () => {
     if (ids.length === 0) return;
     try {
       await productSalesApi.deleteLiveComments(ids);
+      storageService.deleteCommentRecords(ids);
       setSelectedIds((prev) => {
         const next = new Set(prev);
         ids.forEach((id) => next.delete(id));

@@ -95,6 +95,9 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
     // 임시 세션 ID에서 정식 활성 세션 UUID로 전환된 경우 기존 메모리 댓글의 세션 ID를 자동 승격
     if (nextSessionId && prevSessionId && prevSessionId !== nextSessionId) {
+      // 로컬 스토리지에 이미 저장된 댓글들의 sessionId도 일괄 승격
+      storageService.promoteSessionComments(prevSessionId, nextSessionId);
+
       for (const [key, comment] of pendingCommentsRef.current.entries()) {
         if (comment.sessionId === prevSessionId) {
           pendingCommentsRef.current.set(key, { ...comment, sessionId: nextSessionId });
@@ -298,6 +301,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         sessionId: currentSession,
         nickname,
         uniqueId: incoming.uniqueId || undefined,
+        buyerId: incoming.userId || incoming.uniqueId || undefined,
         content,
         capturedAt: incoming.receivedAt || new Date().toISOString(),
         ...(matchedWord ? { matchedAlertWord: matchedWord } : {})

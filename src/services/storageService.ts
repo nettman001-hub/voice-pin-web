@@ -259,6 +259,20 @@ const KEYS = {
 
 export class StorageService {
   private captureAreaSnapshotCache: CaptureAreaSnapshot | null | undefined;
+  private currentWorkspaceId: string | null = null;
+
+  public setWorkspaceId(workspaceId: string | null) {
+    this.currentWorkspaceId = workspaceId;
+  }
+
+  public getWorkspaceId(): string | null {
+    return this.currentWorkspaceId;
+  }
+
+  private scopedKey(baseKey: string, workspaceIdOverride?: string | null): string {
+    const ws = workspaceIdOverride !== undefined ? workspaceIdOverride : this.currentWorkspaceId;
+    return ws ? `${baseKey}:${encodeURIComponent(ws)}` : baseKey;
+  }
 
   private getItem<T>(key: string, defaultValue: T): T {
     try {
@@ -269,11 +283,24 @@ export class StorageService {
     }
   }
 
-  private setItem<T>(key: string, value: T): void {
+  private setItem<T>(key: string, value: T): boolean {
     try {
       localStorage.setItem(key, JSON.stringify(value));
+      return true;
     } catch (e) {
       console.error(`[Storage] Failed to save key: ${key}`, e);
+      // QuotaExceededError 자동 대응: 배열 데이터인 경우 과거 데이터 50% 절삭 후 재시도
+      if (Array.isArray(value) && value.length > 50) {
+        try {
+          const trimmed = value.slice(0, Math.floor(value.length / 2));
+          localStorage.setItem(key, JSON.stringify(trimmed));
+          console.warn(`[Storage] 용량 초과 자동 대응: ${key} 데이터 50% 절삭 저장 완료`);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      return false;
     }
   }
 
@@ -412,24 +439,32 @@ export class StorageService {
   public getTrainingSentences(): TrainingSentence[] { return this.getItem(KEYS.TRAINING, DEFAULT_TRAINING_SENTENCES); }
   public saveTrainingSentences(sentences: TrainingSentence[]) { this.setItem(KEYS.TRAINING, sentences); }
 
-  // 판매 내역
-  public getSales(): SaleRecord[] { return this.getItem(KEYS.SALES, INITIAL_SALES); }
-  public saveSales(sales: SaleRecord[]) { this.setItem(KEYS.SALES, sales); }
-
-  public addSale(sale: SaleRecord) {
-    const list = this.getSales();
-    list.unshift(sale);
-    this.saveSales(list);
+  // 판매 내역 (workspace별 격리 지원)
+  public getSales(workspaceIdOverride?: string | null): SaleRecord[] {
+    const key = this.scopedKey(KEYS.SALES, workspaceIdOverride);
+    const data = this.getItem<SaleRecord[] | null>(key, null);
+    if (data) return data;
+    // 이전 버전 전역 키 마이그레이션 호환
+    return this.getItem<SaleRecord[]>(KEYS.SALES, INITIAL_SALES);
+  }
+  public saveSales(sales: SaleRecord[], workspaceIdOverride?: string | null) {
+    this.setItem(this.scopedKey(KEYS.SALES, workspaceIdOverride), sales);
   }
 
-  public updateSale(updated: SaleRecord) {
-    const list = this.getSales().map(s => s.id === updated.id ? updated : s);
-    this.saveSales(list);
+  public addSale(sale: SaleRecord, workspaceIdOverride?: string | null) {
+    const list = this.getSales(workspaceIdOverride);
+    const withoutSame = list.filter((s) => s.id !== sale.id);
+    this.saveSales([sale, ...withoutSame], workspaceIdOverride);
   }
 
-  public deleteSale(id: string) {
-    const list = this.getSales().filter(s => s.id !== id);
-    this.saveSales(list);
+  public updateSale(updated: SaleRecord, workspaceIdOverride?: string | null) {
+    const list = this.getSales(workspaceIdOverride).map((s) => s.id === updated.id ? updated : s);
+    this.saveSales(list, workspaceIdOverride);
+  }
+
+  public deleteSale(id: string, workspaceIdOverride?: string | null) {
+    const list = this.getSales(workspaceIdOverride).filter((s) => s.id !== id);
+    this.saveSales(list, workspaceIdOverride);
   }
 
   // 캡처 목록
@@ -532,103 +567,168 @@ export class StorageService {
   }
 
   // 댓글 캡처 기록
-  public getCommentRecords(): CommentRecord[] {
+  // 댓글 캡처 기록 (workspace별 격리 지원)
+  public getCommentRecords(workspaceIdOverride?: string | null): CommentRecord[] {
+    const key = this.scopedKey(KEYS.COMMENT_RECORDS, workspaceIdOverride);
+    const data = this.getItem<CommentRecord[] | null>(key, null);
+    if (data) return data;
+    // 이전 버전 전역 키 마이그레이션 호환
     return this.getItem<CommentRecord[]>(KEYS.COMMENT_RECORDS, []);
   }
-  public saveCommentRecords(records: CommentRecord[]) {
-    this.setItem(KEYS.COMMENT_RECORDS, records);
+  public saveCommentRecords(records: CommentRecord[], workspaceIdOverride?: string | null) {
+    this.setItem(this.scopedKey(KEYS.COMMENT_RECORDS, workspaceIdOverride), records);
   }
-  public addCommentRecords(records: CommentRecord[]) {
+
+  // 중복 제거(upsert), 정식 buyerId 보존, 최대 1,000건 안전 제한
+  public addCommentRecords(records: CommentRecord[], workspaceIdOverride?: string | null) {
     if (records.length === 0) return;
-    const list = this.getCommentRecords();
-    this.saveCommentRecords([...records, ...list].slice(0, 5000));
+    const list = this.getCommentRecords(workspaceIdOverride);
+    const map = new Map<string, CommentRecord>();
+
+    for (const item of list) {
+      const key = item.platformMessageId ? `msg:${item.platformMessageId}` : item.id;
+      map.set(key, item);
+    }
+    for (const item of records) {
+      const key = item.platformMessageId ? `msg:${item.platformMessageId}` : item.id;
+      const existing = map.get(key);
+      if (existing) {
+        map.set(key, { ...existing, ...item, buyerId: item.buyerId || existing.buyerId });
+      } else {
+        map.set(key, item);
+      }
+    }
+
+    // 최신순 정렬 후 최대 1,000건 제한 (localStorage 5MB 쿼터 안전 방어)
+    const merged = Array.from(map.values())
+      .sort((a, b) => new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime())
+      .slice(0, 1000);
+
+    this.saveCommentRecords(merged, workspaceIdOverride);
   }
-  public deleteCommentRecord(id: string) {
-    this.saveCommentRecords(this.getCommentRecords().filter((r) => r.id !== id));
+
+  public deleteCommentRecord(id: string, workspaceIdOverride?: string | null) {
+    this.saveCommentRecords(this.getCommentRecords(workspaceIdOverride).filter((r) => r.id !== id), workspaceIdOverride);
   }
-  public deleteCommentRecords(ids: string[]) {
+  public deleteCommentRecords(ids: string[], workspaceIdOverride?: string | null) {
     const idSet = new Set(ids);
-    this.saveCommentRecords(this.getCommentRecords().filter((r) => !idSet.has(r.id)));
+    this.saveCommentRecords(this.getCommentRecords(workspaceIdOverride).filter((r) => !idSet.has(r.id)), workspaceIdOverride);
   }
 
-  public getSessionCommentRecords(sessionId: string): CommentRecord[] {
+  // 최근 100건을 올바른 UI 순서(오래된 것 -> 최신 것)로 복원 (정렬 버그 수정)
+  public getSessionCommentRecords(sessionId: string, workspaceIdOverride?: string | null): CommentRecord[] {
     if (!sessionId) return [];
-    return this.getCommentRecords().filter((r) => r.sessionId === sessionId);
+    const all = this.getCommentRecords(workspaceIdOverride).filter((r) => r.sessionId === sessionId);
+    // all은 newest-first이므로 최근 100건은 all.slice(0, 100)이고, UI는 시간 오름차순으로 렌더링
+    return all.slice(0, 100).sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime());
   }
 
-  // 1. 활성 상품 로컬 동시 쓰기 / 로컬 읽기
-  public getActiveProduct(): ProductSalesProduct | null {
-    return this.getItem<ProductSalesProduct | null>(KEYS.ACTIVE_PRODUCT, null);
+  // 임시 세션 ID에서 정식 UUID로 전환 시 로컬 스토리지 댓글 세션 ID 승격
+  public promoteSessionComments(fromSessionId: string, toSessionId: string, workspaceIdOverride?: string | null) {
+    if (!fromSessionId || !toSessionId || fromSessionId === toSessionId) return;
+    const list = this.getCommentRecords(workspaceIdOverride);
+    let changed = false;
+    const updated = list.map((item) => {
+      if (item.sessionId === fromSessionId) {
+        changed = true;
+        return { ...item, sessionId: toSessionId };
+      }
+      return item;
+    });
+    if (changed) {
+      this.saveCommentRecords(updated, workspaceIdOverride);
+    }
   }
-  public saveActiveProduct(product: ProductSalesProduct | null): void {
+
+  // 1. 활성 상품 로컬 동시 쓰기 / 로컬 읽기 (workspace 격리)
+  public getActiveProduct(workspaceIdOverride?: string | null): ProductSalesProduct | null {
+    return this.getItem<ProductSalesProduct | null>(this.scopedKey(KEYS.ACTIVE_PRODUCT, workspaceIdOverride), null);
+  }
+  public saveActiveProduct(product: ProductSalesProduct | null, workspaceIdOverride?: string | null): void {
+    const key = this.scopedKey(KEYS.ACTIVE_PRODUCT, workspaceIdOverride);
     if (product) {
-      this.setItem(KEYS.ACTIVE_PRODUCT, product);
+      this.setItem(key, product);
     } else {
-      localStorage.removeItem(KEYS.ACTIVE_PRODUCT);
+      localStorage.removeItem(key);
     }
   }
 
   // 1-1. 활성 방송 회차(세션) 로컬 동시 쓰기 / 로컬 읽기
-  public getActiveSession(): ProductSalesSession | null {
-    return this.getItem<ProductSalesSession | null>(KEYS.ACTIVE_SESSION, null);
+  public getActiveSession(workspaceIdOverride?: string | null): ProductSalesSession | null {
+    return this.getItem<ProductSalesSession | null>(this.scopedKey(KEYS.ACTIVE_SESSION, workspaceIdOverride), null);
   }
-  public saveActiveSession(session: ProductSalesSession | null): void {
+  public saveActiveSession(session: ProductSalesSession | null, workspaceIdOverride?: string | null): void {
+    const key = this.scopedKey(KEYS.ACTIVE_SESSION, workspaceIdOverride);
     if (session) {
-      this.setItem(KEYS.ACTIVE_SESSION, session);
+      this.setItem(key, session);
     } else {
-      localStorage.removeItem(KEYS.ACTIVE_SESSION);
+      localStorage.removeItem(key);
     }
   }
 
   // 1-2. 부트스트랩 초기 데이터 로컬 캐시 (네트워크 장애/재부팅 안전장치)
-  public getBootstrapCache(): ProductSalesBootstrapData | null {
-    return this.getItem<ProductSalesBootstrapData | null>(KEYS.BOOTSTRAP, null);
+  public getBootstrapCache(workspaceIdOverride?: string | null): ProductSalesBootstrapData | null {
+    return this.getItem<ProductSalesBootstrapData | null>(this.scopedKey(KEYS.BOOTSTRAP, workspaceIdOverride), null);
   }
-  public saveBootstrapCache(data: ProductSalesBootstrapData | null): void {
+  public saveBootstrapCache(data: ProductSalesBootstrapData | null, workspaceIdOverride?: string | null): void {
+    const key = this.scopedKey(KEYS.BOOTSTRAP, workspaceIdOverride);
     if (data) {
-      this.setItem(KEYS.BOOTSTRAP, data);
+      this.setItem(key, data);
     } else {
-      localStorage.removeItem(KEYS.BOOTSTRAP);
+      localStorage.removeItem(key);
     }
   }
 
-  // 3. 방송 누적 판매 통계 로컬 SUM / COUNT 집계 (Supabase 2초 집계 쿼리 부하 제거)
-  public getSessionSalesSummary(sessionId: string): {
+  // 계정 변경/로그아웃 시 세션 캐시 정리
+  public clearWorkspaceSessionData(workspaceIdOverride?: string | null): void {
+    localStorage.removeItem(this.scopedKey(KEYS.ACTIVE_PRODUCT, workspaceIdOverride));
+    localStorage.removeItem(this.scopedKey(KEYS.ACTIVE_SESSION, workspaceIdOverride));
+    localStorage.removeItem(this.scopedKey(KEYS.BOOTSTRAP, workspaceIdOverride));
+  }
+
+  // 3. 방송 누적 판매 통계 로컬 SUM / COUNT 집계 (서버 record_state === 'ACTIVE' 규칙과 100% 일치)
+  public getSessionSalesSummary(sessionId: string, workspaceIdOverride?: string | null): {
     summary: SessionSummary;
     buyerStats: Record<string, BuyerStats>;
   } {
-    const sales = this.getSales();
+    const sales = this.getSales(workspaceIdOverride);
     const sessionSales = sessionId ? sales.filter((s) => s.sessionId === sessionId) : sales;
 
     let sessionQuantity = 0;
     let sessionAmount = 0;
-    const buyerMap = new Map<string, { quantity: number; amount: number; count: number }>();
+    const buyerMap = new Map<string, { quantity: number; amount: number; count: number; displayNickname: string }>();
 
     for (const sale of sessionSales) {
-      // 보류 건은 집계에서 제외하고 유효 판매만 집계
-      if (sale.status === '보류') continue;
+      // 보류 건 및 취소 건 제외 (서버의 record_state === 'ACTIVE' 및 status !== '보류'와 완벽 일치)
+      if (sale.status === '보류' || sale.status === '취소' || sale.recordState === 'CANCELLED') continue;
 
       const qty = sale.quantity && sale.quantity > 0 ? sale.quantity : 1;
       const amt = Number(sale.amount) || 0;
       sessionQuantity += qty;
       sessionAmount += amt;
 
-      const buyer = (sale.buyerNickname || '익명').trim();
-      if (!buyer || buyer === '미확인' || buyer === '미확인(보류)') continue;
+      const buyerKey = sale.buyerId || (sale.buyerNickname || '익명').trim();
+      if (!buyerKey || buyerKey === '미확인' || buyerKey === '미확인(보류)') continue;
 
-      const existing = buyerMap.get(buyer) || { quantity: 0, amount: 0, count: 0 };
-      buyerMap.set(buyer, {
+      const existing = buyerMap.get(buyerKey) || {
+        quantity: 0,
+        amount: 0,
+        count: 0,
+        displayNickname: sale.buyerNickname || buyerKey,
+      };
+      buyerMap.set(buyerKey, {
         quantity: existing.quantity + qty,
         amount: existing.amount + amt,
         count: existing.count + 1,
+        displayNickname: sale.buyerNickname || existing.displayNickname,
       });
     }
 
     const buyerStats: Record<string, BuyerStats> = {};
-    for (const [nickname, stat] of buyerMap.entries()) {
-      buyerStats[nickname] = {
-        buyerId: nickname,
-        displayNickname: nickname,
+    for (const [key, stat] of buyerMap.entries()) {
+      buyerStats[key] = {
+        buyerId: key,
+        displayNickname: stat.displayNickname,
         sessionQuantity: stat.quantity,
         sessionAmount: stat.amount,
         totalPurchaseCount: stat.count,

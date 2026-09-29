@@ -7,6 +7,7 @@ export interface CommentRecord {
   uniqueId?: string;          // 틱톡 고유 ID (@ 제외)
   content: string;            // 댓글 내용
   capturedAt: string;         // 수집 시각 (ISO)
+  buyerId?: string | null;    // 정식 구매자 ID (서버 buyers.id)
   matchedAlertWord?: string;  // 알림 단어에 걸린 경우 해당 단어
 }
 
