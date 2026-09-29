@@ -722,31 +722,28 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     requiredListeningGeneration?: number
   ) => {
     const recognizedAt = new Date().toISOString();
-    // 판매 판정은 로컬 브라우저 캐시가 아닌 sales-api가 반환한 live_comments만 사용한다.
-    // 댓글 도우미가 클라우드 적재를 완료하기 전에는 안전하게 보류로 남긴다.
-    const cachedCloudComments = (productSalesRef.current.feed?.comments || []).map((comment) => ({
+    // 판매 판정 시 로컬DB에 동시 기록된 최신 실시간 댓글 및 피드 활용 (Supabase 네트워크 왕복 지연 0)
+    const targetSessionId = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
+    const localCommentRecords = storageService.getSessionCommentRecords(targetSessionId);
+    const feedComments = (productSalesRef.current.feed?.comments || []).map((comment) => ({
       id: comment.id,
       sessionId: comment.sessionId,
       nickname: comment.nicknameSnapshot,
       content: comment.content,
       capturedAt: comment.capturedAt,
     }));
-    const activeSessionId = productSalesRef.current.activeSession?.id;
-    let cloudComments = cachedCloudComments;
-    if (activeSessionId) {
-      try {
-        const latestFeed = await productSalesApi.getSalesFeed({ sessionId: activeSessionId, limit: 50 });
-        cloudComments = latestFeed.comments.map((comment) => ({
-          id: comment.id,
-          sessionId: comment.sessionId,
-          nickname: comment.nicknameSnapshot,
-          content: comment.content,
-          capturedAt: comment.capturedAt,
-        }));
-      } catch (error) {
-        console.warn('[Live] 클라우드 댓글 최신 조회 실패, 마지막 동기화본으로 검증합니다.', error);
-      }
-    }
+    const localMappedComments = localCommentRecords.map((comment) => ({
+      id: comment.id,
+      sessionId: comment.sessionId,
+      nickname: comment.nickname,
+      content: comment.content,
+      capturedAt: comment.capturedAt,
+    }));
+
+    const commentMap = new Map<string, { id: string; sessionId: string; nickname: string; content: string; capturedAt: string }>();
+    for (const item of feedComments) commentMap.set(item.id, item);
+    for (const item of localMappedComments) commentMap.set(item.id, item);
+    const cloudComments = Array.from(commentMap.values());
     const nicknameVerification = verifyNicknameFromComments({
       transcript: fullText,
       spokenNickname: saleResult.buyerNickname,

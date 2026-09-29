@@ -61,7 +61,11 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   const [serverStatus, setServerStatus] = useState<CommentStreamStatus>('DISCONNECTED');
   const [serverMessage, setServerMessage] = useState<string>('VoiceCAP 댓글 도우미 미연결');
   const [newCount, setNewCount] = useState<number>(0);
-  const [liveComments, setLiveComments] = useState<CommentRecord[]>([]);
+  const [liveComments, setLiveComments] = useState<CommentRecord[]>(() => {
+    const session = storageService.getActiveSession();
+    const sid = session?.id || currentSessionId;
+    return storageService.getSessionCommentRecords(sid).slice(-100);
+  });
   const [activeAlert, setActiveAlert] = useState<CommentAlert | null>(null);
   const [config, setConfig] = useState<CommentCaptureConfig>(() => storageService.getCommentCaptureConfig());
 
@@ -101,9 +105,14 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
           item.sessionId = nextSessionId;
         }
       }
-      setLiveComments((prev) =>
-        prev.map((c) => (c.sessionId === prevSessionId ? { ...c, sessionId: nextSessionId } : c))
-      );
+      setLiveComments((prev) => {
+        const updated = prev.map((c) => (c.sessionId === prevSessionId ? { ...c, sessionId: nextSessionId } : c));
+        // 로컬DB에 이미 저장되어 있는 해당 세션의 댓글도 합산
+        const localComments = storageService.getSessionCommentRecords(nextSessionId);
+        const idSet = new Set(updated.map((item) => item.platformMessageId || item.id));
+        const missing = localComments.filter((item) => !idSet.has(item.platformMessageId || item.id));
+        return [...updated, ...missing].slice(-100);
+      });
     }
   }, [activeSession?.id, currentSessionId]);
 
@@ -293,6 +302,9 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         capturedAt: incoming.receivedAt || new Date().toISOString(),
         ...(matchedWord ? { matchedAlertWord: matchedWord } : {})
       };
+
+      // [동시 쓰기 1: 로컬DB] 로컬 댓글 테이블에 즉시 INSERT
+      storageService.addCommentRecords([record]);
 
       pendingCommentsRef.current.set(platformMessageId, record);
 

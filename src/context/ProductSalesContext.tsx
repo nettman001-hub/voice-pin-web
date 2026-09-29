@@ -10,8 +10,10 @@ import {
   ProductSalesResult,
   ProductSalesDraft,
   ImageKind,
+  LiveComment,
 } from '../types/productSales';
 import { productSalesApi } from '../services/productSalesApi';
+import { storageService } from '../services/storageService';
 import { resolvePrivateImageUrl } from '../services/remoteWorkspaceService';
 import { createNumberProductImage, uploadProductImageDataUrl } from '../services/productImageService';
 import { useAuth } from './AuthContext';
@@ -109,9 +111,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const controllerRef = useRef<VoiceCandidateController | null>(null);
   const activeSessionRef = useRef<ProductSalesSession | null>(null);
-  const feedPollInFlightRef = useRef(false);
-  const feedPollRequestIdRef = useRef(0);
-  const feedPollFailureCountRef = useRef(0);
+  const activeProductRef = useRef<ProductSalesProduct | null>(null);
 
   const activeProduct = bootstrap?.activeProduct || null;
   const activeSession = bootstrap?.activeSession || null;
@@ -123,23 +123,116 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
     activeSessionRef.current = activeSession;
   }, [activeSession]);
 
+  useEffect(() => {
+    activeProductRef.current = activeProduct;
+  }, [activeProduct]);
+
+  // 로컬DB(로컬 스토리지 & 메모리)로부터 피드 데이터를 즉시(0ms) 조립하는 헬퍼
+  const buildLocalFeed = useCallback((
+    sessionId: string,
+    sessionRevision?: number,
+    overrideActiveProduct?: ProductSalesProduct | null
+  ): ProductSalesFeedData => {
+    // 1. 로컬DB 판매 테이블에서 현재 세션 누적 판매 통계 SUM / COUNT 집계
+    const { summary, buyerStats } = storageService.getSessionSalesSummary(sessionId);
+
+    // 2. 로컬DB 댓글 테이블에서 현재 세션 댓글 읽기
+    const localRecords = storageService.getSessionCommentRecords(sessionId);
+    const comments: LiveComment[] = localRecords.slice(0, 50).map((r, index) => ({
+      id: r.id,
+      sessionId: r.sessionId,
+      collectorId: 'local-helper',
+      platformMessageId: r.platformMessageId || r.id,
+      buyerId: null,
+      nicknameSnapshot: r.nickname,
+      content: r.content,
+      capturedAt: r.capturedAt,
+      ingestSequence: index + 1,
+    }));
+
+    // 3. 로컬DB 활성 상품 읽기
+    const currentActive = overrideActiveProduct !== undefined
+      ? overrideActiveProduct
+      : (activeProductRef.current || storageService.getActiveProduct());
+
+    const currentSession = activeSessionRef.current || storageService.getActiveSession();
+
+    return {
+      comments,
+      buyerStats,
+      summary,
+      activeProduct: currentActive,
+      sessionRevision: sessionRevision ?? currentSession?.revision ?? 1,
+      nextCursor: null,
+      hasMore: false,
+    };
+  }, []);
+
+  // [안전장치 1회 동기화 (Bootstrap)]
+  // 방송 시작 또는 화면 새로고침 시 1회만 Supabase에서 최신 상태를 받아와 로컬DB를 초기화/동기화
   const loadBootstrap = useCallback(async (): Promise<ProductSalesBootstrapData | null> => {
     setIsLoading(true);
     try {
       const data = await productSalesApi.getBootstrap();
       const hydratedProduct = await hydrateProduct(data.activeProduct);
       activeSessionRef.current = data.activeSession;
+      activeProductRef.current = hydratedProduct;
       const hydratedData = { ...data, activeProduct: hydratedProduct };
+
+      // 로컬DB에 동시 기록하여 초기화
+      storageService.saveActiveProduct(hydratedProduct);
+      storageService.saveActiveSession(data.activeSession);
+      storageService.saveBootstrapCache(hydratedData);
+
       setBootstrap(hydratedData);
       setError(null);
+
+      // 세션이 있다면 초기 1회 서버 피드/댓글도 동기화하여 로컬DB 채우기
+      if (data.activeSession?.id) {
+        try {
+          const initialFeed = await productSalesApi.getSalesFeed({
+            sessionId: data.activeSession.id,
+            limit: 50,
+          });
+          if (initialFeed.comments && initialFeed.comments.length > 0) {
+            const commentRecords = initialFeed.comments.map((c) => ({
+              id: c.id,
+              platformMessageId: c.platformMessageId,
+              sessionId: c.sessionId,
+              nickname: c.nicknameSnapshot,
+              content: c.content,
+              capturedAt: c.capturedAt,
+            }));
+            storageService.addCommentRecords(commentRecords);
+          }
+        } catch (feedErr) {
+          console.warn('[ProductSalesContext] 초기 피드 서버 동기화 실패 (로컬DB로 시작):', feedErr);
+        }
+
+        // 초기 로컬 피드 즉시 설정
+        const localFeed = buildLocalFeed(data.activeSession.id, data.activeSession.revision, hydratedProduct);
+        setFeed(localFeed);
+      }
+
       return hydratedData;
     } catch (err: any) {
+      console.warn('[ProductSalesContext] 부트스트랩 API 실패, 로컬 캐시 복원 시도:', err);
+      const cached = storageService.getBootstrapCache();
+      if (cached) {
+        activeSessionRef.current = cached.activeSession;
+        activeProductRef.current = cached.activeProduct;
+        setBootstrap(cached);
+        if (cached.activeSession?.id) {
+          setFeed(buildLocalFeed(cached.activeSession.id, cached.activeSession.revision, cached.activeProduct));
+        }
+        return cached;
+      }
       setError(err.message || '부트스트랩 로딩 실패');
       return null;
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [buildLocalFeed]);
 
   const startNewSession = useCallback(async (): Promise<ProductSalesSession> => {
     await productSalesApi.startSession(crypto.randomUUID());
@@ -154,62 +247,15 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setFeedPollingEnabledState(enabled);
   }, []);
 
+  // [2초 주기 조회(읽기)]
+  // Supabase에 2초마다 HTTP 쿼리를 날리지 않고, 이미 완벽 동기화된 로컬DB에서 0ms 즉각 읽기 수행!
   const pollFeed = useCallback(async () => {
     const session = activeSessionRef.current;
-    if (!session || feedPollInFlightRef.current) return;
+    if (!session) return;
 
-    const requestId = ++feedPollRequestIdRef.current;
-    const sessionId = session.id;
-    try {
-      feedPollInFlightRef.current = true;
-      const feedData = await productSalesApi.getSalesFeed({
-        sessionId,
-        limit: 50,
-      });
-      const hydratedProduct = await hydrateProduct(feedData.activeProduct);
-
-      // A newer request, session switch, or local write has made this response obsolete.
-      if (
-        requestId !== feedPollRequestIdRef.current
-        || activeSessionRef.current?.id !== sessionId
-        || (activeSessionRef.current?.revision ?? 0) > feedData.sessionRevision
-      ) {
-        return;
-      }
-
-      feedPollFailureCountRef.current = 0;
-      setFeed({ ...feedData, activeProduct: hydratedProduct });
-
-      setBootstrap((previous) => {
-        if (!previous?.activeSession || previous.activeSession.id !== sessionId) return previous;
-        if (previous.activeSession.revision > feedData.sessionRevision) return previous;
-
-        const sessionChanged = previous.activeSession.activeProductId !== (hydratedProduct?.id || null)
-          || previous.activeSession.revision !== feedData.sessionRevision;
-        const productChanged = !isSameProduct(previous.activeProduct, hydratedProduct);
-
-        if (!sessionChanged && !productChanged) return previous;
-
-        return {
-          ...previous,
-          activeProduct: productChanged ? hydratedProduct : previous.activeProduct,
-          activeSession: sessionChanged
-            ? {
-              ...previous.activeSession,
-              activeProductId: hydratedProduct?.id || null,
-              revision: feedData.sessionRevision,
-            }
-            : previous.activeSession,
-        };
-      });
-    } catch {
-      if (requestId === feedPollRequestIdRef.current && activeSessionRef.current?.id === sessionId) {
-        feedPollFailureCountRef.current = Math.min(feedPollFailureCountRef.current + 1, 10);
-      }
-    } finally {
-      feedPollInFlightRef.current = false;
-    }
-  }, []);
+    const localFeed = buildLocalFeed(session.id, session.revision);
+    setFeed(localFeed);
+  }, [buildLocalFeed]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -222,38 +268,29 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
     void loadBootstrap();
   }, [isAuthenticated, user?.id, loadBootstrap]);
 
+  // 2초 주기 로컬 피드 갱신 루프
   useEffect(() => {
     const sessionId = activeSession?.id;
     if (!shouldPollSalesFeed || !sessionId) {
-      feedPollRequestIdRef.current += 1;
-      feedPollFailureCountRef.current = 0;
       return;
     }
 
     let disposed = false;
     let timer: number | undefined;
 
-    const scheduleNextPoll = async () => {
-      const startedAt = Date.now();
-      await pollFeed();
-      if (disposed || activeSessionRef.current?.id !== sessionId) return;
-
-      const failures = feedPollFailureCountRef.current;
-      const delay = failures > 0
-        ? Math.min(SALES_FEED_RETRY_BASE_MS * (2 ** (failures - 1)), SALES_FEED_RETRY_MAX_MS)
-        : Math.max(0, SALES_FEED_POLL_INTERVAL_MS - (Date.now() - startedAt));
+    const scheduleNextPoll = () => {
+      if (disposed) return;
+      void pollFeed();
 
       timer = window.setTimeout(() => {
-        void scheduleNextPoll();
-      }, delay);
+        scheduleNextPoll();
+      }, SALES_FEED_POLL_INTERVAL_MS);
     };
 
-    void scheduleNextPoll();
+    scheduleNextPoll();
     return () => {
       disposed = true;
       if (timer !== undefined) window.clearTimeout(timer);
-      feedPollRequestIdRef.current += 1;
-      feedPollFailureCountRef.current = 0;
     };
   }, [activeSession?.id, pollFeed, shouldPollSalesFeed]);
 
@@ -277,10 +314,12 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
           expectedSessionRevision: cand.sessionRevision,
           buyers,
         });
-        await loadBootstrap();
+        if (cand.sessionId) {
+          setFeed(buildLocalFeed(cand.sessionId, cand.sessionRevision));
+        }
       }
     },
-    [loadBootstrap]
+    [buildLocalFeed]
   );
 
   useEffect(() => {
@@ -297,7 +336,12 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if (!settings) return;
       const operationId = crypto.randomUUID();
       const resp = await productSalesApi.updateSettings(operationId, settings.revision, newSettings);
-      setBootstrap((prev) => (prev ? { ...prev, settings: resp.settings } : null));
+      setBootstrap((prev) => {
+        if (!prev) return null;
+        const next = { ...prev, settings: resp.settings };
+        storageService.saveBootstrapCache(next);
+        return next;
+      });
     },
     [settings]
   );
@@ -347,14 +391,23 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
       const product = await hydrateProduct(response.product);
       const nextSession = { ...session, ...response.session };
       activeSessionRef.current = nextSession;
+      activeProductRef.current = product;
+
+      // [동시 쓰기] Supabase 업데이트와 동시에 로컬DB에도 활성 상품 및 세션 저장
+      storageService.saveActiveProduct(product);
+      storageService.saveActiveSession(nextSession);
+
       setBootstrap((previous) => previous ? {
         ...previous,
         activeProduct: product,
         activeSession: nextSession,
       } : previous);
+
+      // 로컬 피드 즉시 갱신
+      setFeed(buildLocalFeed(nextSession.id, nextSession.revision, product));
       return product;
     },
-    []
+    [buildLocalFeed]
   );
 
   const registerProduct = useCallback(
@@ -397,14 +450,23 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
       const nextSession = { ...session, ...commitResponse.session };
       activeSessionRef.current = nextSession;
+      activeProductRef.current = product;
+
+      // [동시 쓰기] Supabase 업데이트와 동시에 로컬DB에도 기록
+      storageService.saveActiveProduct(product);
+      storageService.saveActiveSession(nextSession);
+
       setBootstrap((previous) => previous ? {
         ...previous,
         activeProduct: product,
         activeSession: nextSession,
       } : previous);
+
+      // 로컬 피드 즉시 갱신
+      setFeed(buildLocalFeed(nextSession.id, nextSession.revision, product));
       return product;
     },
-    []
+    [buildLocalFeed]
   );
 
   const commitSales = useCallback(
@@ -425,10 +487,12 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
           sourceCommentIds: b.sourceCommentIds || [],
         })),
       });
-      await loadBootstrap();
+
+      // 판매 확정 후 로컬 피드 즉시 갱신
+      setFeed(buildLocalFeed(activeSession.id, activeSession.revision));
       return resp;
     },
-    [activeSession, activeProduct, loadBootstrap]
+    [activeSession, activeProduct, buildLocalFeed]
   );
 
   const processVoiceUtterance = useCallback(

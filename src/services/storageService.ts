@@ -5,6 +5,7 @@ import { PaymentHistoryItem, PaymentCard } from '../types/subscription';
 import { ReportItem, SystemErrorLog, NotificationSetting } from '../types/admin';
 import { CommentRecord, CommentCaptureConfig, DEFAULT_COMMENT_CAPTURE_CONFIG, DEFAULT_COMMENT_SERVER_URL } from '../types/comment';
 import { CommerceState } from '../types/commerce';
+import type { ProductSalesProduct, ProductSalesSession, ProductSalesBootstrapData, BuyerStats, SessionSummary } from '../types/productSales';
 
 export interface CaptureAreaSnapshot {
   imageUrl: string;
@@ -250,7 +251,10 @@ const KEYS = {
   CAPTURE_AREA_SNAPSHOT: 'voicecap_capture_area_snapshot',
   COMMENT_RECORDS: 'voicecap_comment_records',
   COMMENT_CAPTURE_CONFIG: 'voicecap_comment_capture_config',
-  COMMERCE_STATE: 'voicecap_commerce_state'
+  COMMERCE_STATE: 'voicecap_commerce_state',
+  ACTIVE_PRODUCT: 'voicecap_active_product',
+  ACTIVE_SESSION: 'voicecap_active_session',
+  BOOTSTRAP: 'voicecap_bootstrap_cache'
 };
 
 export class StorageService {
@@ -545,6 +549,100 @@ export class StorageService {
   public deleteCommentRecords(ids: string[]) {
     const idSet = new Set(ids);
     this.saveCommentRecords(this.getCommentRecords().filter((r) => !idSet.has(r.id)));
+  }
+
+  public getSessionCommentRecords(sessionId: string): CommentRecord[] {
+    if (!sessionId) return [];
+    return this.getCommentRecords().filter((r) => r.sessionId === sessionId);
+  }
+
+  // 1. 활성 상품 로컬 동시 쓰기 / 로컬 읽기
+  public getActiveProduct(): ProductSalesProduct | null {
+    return this.getItem<ProductSalesProduct | null>(KEYS.ACTIVE_PRODUCT, null);
+  }
+  public saveActiveProduct(product: ProductSalesProduct | null): void {
+    if (product) {
+      this.setItem(KEYS.ACTIVE_PRODUCT, product);
+    } else {
+      localStorage.removeItem(KEYS.ACTIVE_PRODUCT);
+    }
+  }
+
+  // 1-1. 활성 방송 회차(세션) 로컬 동시 쓰기 / 로컬 읽기
+  public getActiveSession(): ProductSalesSession | null {
+    return this.getItem<ProductSalesSession | null>(KEYS.ACTIVE_SESSION, null);
+  }
+  public saveActiveSession(session: ProductSalesSession | null): void {
+    if (session) {
+      this.setItem(KEYS.ACTIVE_SESSION, session);
+    } else {
+      localStorage.removeItem(KEYS.ACTIVE_SESSION);
+    }
+  }
+
+  // 1-2. 부트스트랩 초기 데이터 로컬 캐시 (네트워크 장애/재부팅 안전장치)
+  public getBootstrapCache(): ProductSalesBootstrapData | null {
+    return this.getItem<ProductSalesBootstrapData | null>(KEYS.BOOTSTRAP, null);
+  }
+  public saveBootstrapCache(data: ProductSalesBootstrapData | null): void {
+    if (data) {
+      this.setItem(KEYS.BOOTSTRAP, data);
+    } else {
+      localStorage.removeItem(KEYS.BOOTSTRAP);
+    }
+  }
+
+  // 3. 방송 누적 판매 통계 로컬 SUM / COUNT 집계 (Supabase 2초 집계 쿼리 부하 제거)
+  public getSessionSalesSummary(sessionId: string): {
+    summary: SessionSummary;
+    buyerStats: Record<string, BuyerStats>;
+  } {
+    const sales = this.getSales();
+    const sessionSales = sessionId ? sales.filter((s) => s.sessionId === sessionId) : sales;
+
+    let sessionQuantity = 0;
+    let sessionAmount = 0;
+    const buyerMap = new Map<string, { quantity: number; amount: number; count: number }>();
+
+    for (const sale of sessionSales) {
+      // 보류 건은 집계에서 제외하고 유효 판매만 집계
+      if (sale.status === '보류') continue;
+
+      const qty = sale.quantity && sale.quantity > 0 ? sale.quantity : 1;
+      const amt = Number(sale.amount) || 0;
+      sessionQuantity += qty;
+      sessionAmount += amt;
+
+      const buyer = (sale.buyerNickname || '익명').trim();
+      if (!buyer || buyer === '미확인' || buyer === '미확인(보류)') continue;
+
+      const existing = buyerMap.get(buyer) || { quantity: 0, amount: 0, count: 0 };
+      buyerMap.set(buyer, {
+        quantity: existing.quantity + qty,
+        amount: existing.amount + amt,
+        count: existing.count + 1,
+      });
+    }
+
+    const buyerStats: Record<string, BuyerStats> = {};
+    for (const [nickname, stat] of buyerMap.entries()) {
+      buyerStats[nickname] = {
+        buyerId: nickname,
+        displayNickname: nickname,
+        sessionQuantity: stat.quantity,
+        sessionAmount: stat.amount,
+        totalPurchaseCount: stat.count,
+        totalPurchaseAmount: stat.amount,
+      };
+    }
+
+    return {
+      summary: {
+        sessionQuantity,
+        sessionAmount,
+      },
+      buyerStats,
+    };
   }
 }
 

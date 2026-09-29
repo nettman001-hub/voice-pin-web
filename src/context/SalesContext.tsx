@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { SaleRecord, SaleStatus } from '../types/live';
-import { getNextProductCodeForSession } from '../services/storageService';
+import { storageService, getNextProductCodeForSession } from '../services/storageService';
 import { exportSalesToCsv } from '../services/csvExporter';
 import { useAuth } from './AuthContext';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
@@ -36,10 +36,9 @@ const SalesContext = createContext<SalesContextType | undefined>(undefined);
 
 export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { workspaceId, isRemoteAuth } = useAuth();
-  // 판매 내역은 로그인한 작업공간의 Supabase sales 테이블만 원본으로 사용한다.
-  // 로컬 저장소에는 판매 이력을 복제하지 않아 다른 PC에서도 같은 목록을 바로 조회한다.
-  const [sales, setSales] = useState<SaleRecord[]>([]);
-  const salesRef = useRef<SaleRecord[]>([]);
+  // 쓰기는 Supabase와 로컬DB에 동시 기록하며, 조회 및 초기 화면 렌더링은 로컬DB에서 0ms 즉시 읽기
+  const [sales, setSales] = useState<SaleRecord[]>(() => storageService.getSales());
+  const salesRef = useRef<SaleRecord[]>(sales);
 
   useEffect(() => {
     salesRef.current = sales;
@@ -47,12 +46,15 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const refreshSales = useCallback(async (): Promise<SaleRecord[]> => {
     if (!isRemoteAuth || !workspaceId) {
-      salesRef.current = [];
-      setSales([]);
-      return [];
+      const local = storageService.getSales();
+      salesRef.current = local;
+      setSales(local);
+      return local;
     }
 
     const rows = await remoteWorkspaceService.loadSales(workspaceId);
+    // [1회 동기화] Supabase 최신 판매 목록을 로컬DB에도 저장
+    storageService.saveSales(rows);
     salesRef.current = rows;
     setSales(rows);
     return rows;
@@ -80,6 +82,9 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [isRemoteAuth, workspaceId, refreshSales]);
 
   const persist = (sale: SaleRecord) => {
+    // [동시 쓰기: 로컬DB]
+    storageService.updateSale(sale);
+    // [동시 쓰기: Supabase]
     if (isRemoteAuth && workspaceId) {
       void remoteWorkspaceService.saveSale(workspaceId, sale).catch((error) => console.error('[Sales] remote save failed', error));
     }
@@ -168,6 +173,11 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const nextSales = [newSale, ...salesRef.current];
     salesRef.current = nextSales;
     setSales(nextSales);
+
+    // [동시 쓰기 1: 로컬DB]
+    storageService.addSale(newSale);
+
+    // [동시 쓰기 2: Supabase]
     if (isRemoteAuth && workspaceId) {
       void remoteWorkspaceService.saveSale(workspaceId, newSale).catch((error) => console.error('[Sales] remote add failed', error));
     }
@@ -197,6 +207,11 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const nextSales = salesRef.current.filter((sale) => sale.id !== id);
     salesRef.current = nextSales;
     setSales(nextSales);
+
+    // [동시 쓰기 1: 로컬DB]
+    storageService.deleteSale(id);
+
+    // [동시 쓰기 2: Supabase]
     if (isRemoteAuth && workspaceId) {
       void remoteWorkspaceService.deleteSale(workspaceId, id).catch((error) => console.error('[Sales] remote delete failed', error));
     }
