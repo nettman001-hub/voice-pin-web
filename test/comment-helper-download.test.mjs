@@ -50,11 +50,11 @@ test('Comment Helper Download: UI components use COMMENT_HELPER_DOWNLOAD_URL', (
     'LiveHomePage.tsx should not use generic releases list for download button'
   );
 
-  const recognitionRulesPath = path.join(rootDir, 'src', 'pages', 'seller', 'RecognitionRulesPage.tsx');
-  const recognitionRulesContent = fs.readFileSync(recognitionRulesPath, 'utf8');
+  const captureSettingsPath = path.join(rootDir, 'src', 'components', 'helper', 'CommentCaptureSettings.tsx');
+  const captureSettingsContent = fs.readFileSync(captureSettingsPath, 'utf8');
 
   assert.ok(
-    recognitionRulesContent.includes('href={COMMENT_HELPER_DOWNLOAD_URL}'),
-    'RecognitionRulesPage.tsx must use COMMENT_HELPER_DOWNLOAD_URL for download link'
+    captureSettingsContent.includes('href={COMMENT_HELPER_DOWNLOAD_URL}'),
+    'CommentCaptureSettings.tsx must use COMMENT_HELPER_DOWNLOAD_URL for download link'
   );
 });

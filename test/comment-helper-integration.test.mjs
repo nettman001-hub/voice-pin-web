@@ -88,8 +88,9 @@ test('Comment Helper: Routing and Navigation integration', () => {
   const liveHomePageContent = fs.readFileSync(liveHomePagePath, 'utf8');
   assert.ok(liveHomePageContent.includes('CommentHelperModal'), 'LiveHomePage must include CommentHelperModal');
 
-  // RecognitionRulesPage integration
+  // Comment collection and alerts now live with the helper rather than voice rules.
   const rulesPath = path.join(rootDir, 'src', 'pages', 'seller', 'RecognitionRulesPage.tsx');
   const rulesContent = fs.readFileSync(rulesPath, 'utf8');
-  assert.ok(rulesContent.includes('CommentHelperModal'), 'RecognitionRulesPage must include CommentHelperModal');
+  assert.ok(rulesContent.includes('/seller/helper'), 'RecognitionRulesPage must link to the moved settings');
+  assert.ok(!rulesContent.includes('useCommentCapture'), 'RecognitionRulesPage must not own comment collection settings');
 });

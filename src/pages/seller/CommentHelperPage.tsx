@@ -1,4 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
+import { CommentCaptureSettings } from '../../components/helper/CommentCaptureSettings';
 import {
   CommentHelperStatus,
   PaperSize,
@@ -15,11 +18,14 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
-  Sparkles,
-  Bot
+  Bot,
+  ArrowRight,
+  MessageSquareText
 } from 'lucide-react';
 
 export const CommentHelperPage: React.FC = () => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === '관리자';
   const [status, setStatus] = useState<CommentHelperStatus | null>(null);
   const [printers, setPrinters] = useState<PrinterDevice[]>([]);
   const [selectedPrinter, setSelectedPrinter] = useState('');
@@ -49,18 +55,18 @@ export const CommentHelperPage: React.FC = () => {
         setSelectedPrinter(newStatus.print.printerName);
       }
       setAutoStart(Boolean(newStatus.autoStart));
-      if (newStatus.stt?.device) {
+      if (isAdmin && newStatus.stt?.device) {
         setSelectedSttDevice(newStatus.stt.device);
       }
     });
 
     void loadPrinters();
-    void loadSttDevices();
+    if (isAdmin) void loadSttDevices();
 
     return () => {
       unsubscribe();
     };
-  }, []);
+  }, [isAdmin]);
 
   const loadPrinters = async () => {
     try {
@@ -158,7 +164,8 @@ export const CommentHelperPage: React.FC = () => {
   };
 
   const getStatusTone = () => {
-    if (!status || status.helper === 'error') return { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200', dot: 'bg-rose-500', label: '연결 오류' };
+    if (!status) return { bg: 'bg-slate-50', text: 'text-slate-700', border: 'border-slate-200', dot: 'bg-slate-400', label: '연결 확인 중' };
+    if (status.helper === 'error') return { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200', dot: 'bg-rose-500', label: '연결 오류' };
     if (status.helper !== 'running') return { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', dot: 'bg-amber-500', label: '시작하는 중' };
     if (status.tiktokState === 'collecting') return { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', dot: 'bg-emerald-500', label: '댓글 수집 중' };
     if (status.tiktokState === 'connecting') return { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', dot: 'bg-blue-500', label: '틱톡 연결 중' };
@@ -169,10 +176,11 @@ export const CommentHelperPage: React.FC = () => {
   const tone = getStatusTone();
 
   return (
-    <div className="max-w-4xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+    <div className="mx-auto max-w-6xl space-y-5 p-3.5 sm:space-y-6 sm:p-6 lg:p-8">
       {/* 헤더 */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div>
+          <span className="text-[11px] font-bold uppercase tracking-wider text-brand-600">방송 준비 · 장치 운영</span>
           <div className="flex items-center space-x-2">
             <div className="p-2 rounded-xl bg-brand-50 text-brand-600">
               <Bot className="w-5 h-5" />
@@ -180,14 +188,24 @@ export const CommentHelperPage: React.FC = () => {
             <h1 className="text-2xl font-black text-slate-900 tracking-tight">댓글 도우미 & 장치 설정</h1>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            틱톡 라이브 댓글 실시간 수집, Windows 감열식 영수증 자동 인쇄, 오프라인 STT 하드웨어 가속을 중앙 관제합니다.
+            연결 상태를 확인한 뒤 댓글 수집·알림, 전표 출력, 자동 실행 순서로 설정하세요.
           </p>
         </div>
-
+        <Link to="/comments" className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-cyan-200 bg-cyan-50 px-3.5 py-2.5 text-xs font-bold text-cyan-800 hover:bg-cyan-100">
+          <MessageSquareText className="h-4 w-4" />댓글/판매멘트 기록<ArrowRight className="h-3.5 w-3.5" />
+        </Link>
       </div>
 
-      {/* 1. 실시간 작동 상태 요약 카드 */}
-      <div className={`p-5 rounded-3xl border ${tone.border} ${tone.bg} space-y-4 shadow-sm`}>
+      <nav aria-label="장치 설정 바로가기" className="flex flex-wrap gap-2 text-xs font-bold">
+        <a href="#helper-status" className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-700 hover:border-brand-200 hover:text-brand-700">연결 상태</a>
+        <a href="#comment-capture-settings" className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-700 hover:border-brand-200 hover:text-brand-700">댓글 수집·알림</a>
+        <a href="#helper-print-settings" className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-700 hover:border-brand-200 hover:text-brand-700">전표 출력</a>
+        <a href="#helper-system-settings" className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-700 hover:border-brand-200 hover:text-brand-700">실행·진단</a>
+      </nav>
+
+      {/* 연결 상태는 모든 설정의 출발점이다. */}
+      <section id="helper-status" aria-labelledby="helper-status-title" className={`scroll-mt-24 space-y-4 rounded-3xl border p-4 shadow-sm sm:p-6 ${tone.border} ${tone.bg}`}>
+        <h2 id="helper-status-title" className="text-sm font-black text-slate-900">댓글 도우미 연결 상태</h2>
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
             <span className={`w-3 h-3 rounded-full ${tone.dot} animate-pulse`} />
@@ -199,10 +217,10 @@ export const CommentHelperPage: React.FC = () => {
           </span>
         </div>
         <p className="text-xs text-slate-700 font-medium">
-          {status?.message || '댓글 서버가 정상 작동 중입니다.'}
+          {status?.message || '댓글 도우미 연결 상태를 확인하고 있습니다.'}
         </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-200/60 text-xs">
+        <div className={`grid grid-cols-1 gap-3 border-t border-slate-200/60 pt-2 text-xs sm:grid-cols-2 ${isAdmin ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
           <div className="bg-white/90 p-3 rounded-2xl border border-slate-200/80 shadow-xs">
             <span className="text-[10px] text-slate-500 block font-semibold">틱톡 방송 계정</span>
             <strong className="text-slate-900 text-sm truncate block mt-0.5">
@@ -216,23 +234,31 @@ export const CommentHelperPage: React.FC = () => {
             </strong>
           </div>
           <div className="bg-white/90 p-3 rounded-2xl border border-slate-200/80 shadow-xs">
-            <span className="text-[10px] text-slate-500 block font-semibold">STT 가속 장치</span>
+            <span className="text-[10px] text-slate-500 block font-semibold">전표 자동 출력</span>
             <strong className="text-slate-900 text-sm block truncate mt-0.5">
-              {status?.stt?.deviceName || '준비 완료'}
+              {status?.print?.enabled ? '사용 중' : '꺼짐'}
             </strong>
           </div>
+          {isAdmin && (
+            <div className="bg-white/90 p-3 rounded-2xl border border-slate-200/80 shadow-xs">
+              <span className="text-[10px] text-slate-500 block font-semibold">STT 가속 장치 · 관리자</span>
+              <strong className="text-slate-900 text-sm block truncate mt-0.5">{status?.stt?.deviceName || '준비 완료'}</strong>
+            </div>
+          )}
         </div>
-      </div>
+      </section>
 
-      {/* 2. 판매 전표 자동 출력 (Windows 프린터) 설정 */}
-      <div className="p-6 rounded-3xl bg-white border border-slate-200 shadow-sm space-y-5">
+      <CommentCaptureSettings />
+
+      {/* 댓글 수집 다음으로 출력 경로를 구성한다. */}
+      <section id="helper-print-settings" aria-labelledby="helper-print-title" className="scroll-mt-24 space-y-5 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
             <div className="p-2 rounded-xl bg-brand-50 text-brand-600">
               <Printer className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900">판매 전표 자동 출력 설정</h2>
+              <h2 id="helper-print-title" className="text-base font-bold text-slate-900">판매 전표 자동 출력</h2>
               <p className="text-xs text-slate-500">음성인식으로 확정된 주문을 Windows 프린터로 자동 Silent 인쇄합니다.</p>
             </div>
           </div>
@@ -320,10 +346,10 @@ export const CommentHelperPage: React.FC = () => {
             {isSavingPrinter ? '저장 중...' : '프린터 설정 저장'}
           </button>
         </div>
-      </div>
+      </section>
 
-      {/* 3. 오프라인 음성인식(STT) 가속 장치 설정 */}
-      <div className="p-6 rounded-3xl bg-white border border-slate-200 shadow-sm space-y-5">
+      {/* 전문가용 STT 장치 선택은 관리자에게만 노출한다. */}
+      {isAdmin && <section aria-label="관리자 STT 장치 설정" className="space-y-5 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
             <div className="p-2 rounded-xl bg-brand-50 text-brand-600">
@@ -373,10 +399,11 @@ export const CommentHelperPage: React.FC = () => {
             <span>{sttFeedback}</span>
           </div>
         )}
-      </div>
+      </section>}
 
-      {/* 4. 부팅 시 자동 실행 및 시스템 제어 */}
-      <div className="p-6 rounded-3xl bg-white border border-slate-200 shadow-sm space-y-5">
+      {/* 운영 중 재시작과 진단 기능은 마지막에 둔다. */}
+      <section id="helper-system-settings" aria-labelledby="helper-system-title" className="scroll-mt-24 space-y-5 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <h2 id="helper-system-title" className="text-base font-bold text-slate-900">자동 실행과 진단</h2>
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-sm font-bold text-slate-900">컴퓨터를 켤 때 자동 실행</h3>
@@ -415,7 +442,7 @@ export const CommentHelperPage: React.FC = () => {
             진단 로그 파일 열기
           </button>
         </div>
-      </div>
+      </section>
     </div>
   );
 };

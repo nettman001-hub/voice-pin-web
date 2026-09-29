@@ -141,8 +141,8 @@ VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLIC_CLIENT_KEY
 | `/live` | [LiveHomePage](../../src/pages/seller/LiveHomePage.tsx): 방송 회차, STT, 자막, 댓글, 캡처, 실시간 판매 | 로그인 |
 | `/seller/product-sales`, `/sales/product` | [ProductSalesPage](../../src/pages/seller/ProductSalesPage.tsx): 수동 상품 등록·댓글 선택 판매 | 로그인 |
 | `/voice-training`, `/training` | [VoiceTrainingPage](../../src/pages/seller/VoiceTrainingPage.tsx): 훈련 UI | 로그인 |
-| `/recognition-rules`, `/rules` | [RecognitionRulesPage](../../src/pages/seller/RecognitionRulesPage.tsx): 인식 단어·캡처 영역·댓글 설정 | 로그인 |
-| `/comments` | [CommentRecordsPage](../../src/pages/seller/CommentRecordsPage.tsx): 댓글 기록 | 로그인 |
+| `/recognition-rules`, `/rules` | [RecognitionRulesPage](../../src/pages/seller/RecognitionRulesPage.tsx): 인식 단어·캡처 영역 설정 | 로그인 |
+| `/comments` | [CommentRecordsPage](../../src/pages/seller/CommentRecordsPage.tsx): 댓글/판매멘트 기록 | 로그인 |
 | `/sales` | [SalesListPage](../../src/pages/seller/SalesListPage.tsx): 판매 목록·필터·일괄 작업 | 로그인 |
 | `/sales/:id` | [SalesDetailPage](../../src/pages/seller/SalesDetailPage.tsx): 판매 상세·수정·인쇄·AI 관련 보기 | 로그인 |
 | `/sales/:id/capture` | [CaptureViewerModal](../../src/pages/seller/CaptureViewerModal.tsx): 판매 캡처 보기 | 로그인 |
@@ -151,7 +151,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLIC_CLIENT_KEY
 | `/shipments` | [ShipmentManagementPage](../../src/pages/seller/ShipmentManagementPage.tsx): 배송 정보·안내 문자 | 로그인 |
 | `/settlement` | [SettlementPage](../../src/pages/seller/SettlementPage.tsx): 기간별 판매 합계·내보내기 | 로그인 |
 | `/seller/devices`, `/devices` | [DeviceManagementPage](../../src/pages/seller/DeviceManagementPage.tsx): 기기 연결·권한·출력 기기 | 로그인 |
-| `/seller/helper`, `/helper` | [CommentHelperPage](../../src/pages/seller/CommentHelperPage.tsx): 댓글 도우미 안내 | 로그인 |
+| `/seller/helper`, `/helper` | [CommentHelperPage](../../src/pages/seller/CommentHelperPage.tsx): 연결 상태·댓글 수집/알림·전표 출력·자동 실행/진단 설정. STT 하드웨어 가속은 관리자만 표시 | 로그인 |
 | `/subscription` | `/subscription/plans`로 이동 | 로그인 |
 | `/subscription/plans` | [PlanSelectionPage](../../src/pages/subscription/PlanSelectionPage.tsx): 플랜 선택 | 로그인 |
 | `/subscription/payment` | [PaymentPage](../../src/pages/subscription/PaymentPage.tsx): 결제 UI | 로그인 |

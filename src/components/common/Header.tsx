@@ -189,7 +189,7 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               onClick={() => setShowHelperModal(true)}
               className="flex items-center space-x-1.5 p-2 sm:px-3 sm:py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition border border-slate-200 active:scale-95 group"
-              title="VoiceCAP 내장 댓글 도우미 (프린터·STT 가속) 설정 열기"
+              title="VoiceCAP 댓글 도우미와 프린터 설정 열기"
             >
               <Bot className="w-4 h-4 text-brand-600 flex-shrink-0 group-hover:rotate-12 transition-transform" />
               <span className="hidden sm:inline">댓글 도우미</span>

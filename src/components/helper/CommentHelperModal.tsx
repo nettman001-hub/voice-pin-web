@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import {
   CommentHelperStatus,
   PaperSize,
@@ -17,7 +19,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
-  Sparkles
+  Sparkles,
+  ArrowRight
 } from 'lucide-react';
 
 interface CommentHelperModalProps {
@@ -26,6 +29,8 @@ interface CommentHelperModalProps {
 }
 
 export const CommentHelperModal: React.FC<CommentHelperModalProps> = ({ isOpen, onClose }) => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === '관리자';
   const [status, setStatus] = useState<CommentHelperStatus | null>(null);
   const [printers, setPrinters] = useState<PrinterDevice[]>([]);
   const [selectedPrinter, setSelectedPrinter] = useState('');
@@ -58,20 +63,19 @@ export const CommentHelperModal: React.FC<CommentHelperModalProps> = ({ isOpen, 
         setSelectedPrinter(newStatus.print.printerName);
       }
       setAutoStart(Boolean(newStatus.autoStart));
-      if (newStatus.stt?.device) {
+      if (isAdmin && newStatus.stt?.device) {
         setSelectedSttDevice(newStatus.stt.device);
       }
     });
 
     // 프린터 목록 조회
     void loadPrinters();
-    // STT 장치 목록 조회
-    void loadSttDevices();
+    if (isAdmin) void loadSttDevices();
 
     return () => {
       unsubscribe();
     };
-  }, [isOpen]);
+  }, [isOpen, isAdmin]);
 
   const loadPrinters = async () => {
     try {
@@ -200,7 +204,7 @@ export const CommentHelperModal: React.FC<CommentHelperModalProps> = ({ isOpen, 
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                틱톡 실시간 댓글 수집 · 영수증 프린터 자동 출력 · 오프라인 STT 가속
+                틱톡 실시간 댓글 수집 · 키워드 알림 · 영수증 자동 출력
               </p>
             </div>
           </div>
@@ -235,7 +239,7 @@ export const CommentHelperModal: React.FC<CommentHelperModalProps> = ({ isOpen, 
               {status?.message || '댓글 서버가 정상 작동 중입니다.'}
             </p>
 
-            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200/60 text-xs">
+            <div className={`grid gap-2 border-t border-slate-200/60 pt-2 text-xs ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
               <div className="bg-white/80 p-2.5 rounded-xl border border-slate-200/80">
                 <span className="text-[10px] text-slate-500 block font-semibold">틱톡 계정</span>
                 <strong className="text-slate-800 text-xs truncate block">
@@ -248,12 +252,12 @@ export const CommentHelperModal: React.FC<CommentHelperModalProps> = ({ isOpen, 
                   {status?.totalComments?.toLocaleString() || 0}개
                 </strong>
               </div>
-              <div className="bg-white/80 p-2.5 rounded-xl border border-slate-200/80">
+              {isAdmin && <div className="bg-white/80 p-2.5 rounded-xl border border-slate-200/80">
                 <span className="text-[10px] text-slate-500 block font-semibold">STT 엔진</span>
                 <strong className="text-slate-800 text-xs block truncate">
                   {status?.stt?.deviceName || '준비 완료'}
                 </strong>
-              </div>
+              </div>}
             </div>
           </div>
 
@@ -350,8 +354,8 @@ export const CommentHelperModal: React.FC<CommentHelperModalProps> = ({ isOpen, 
             </div>
           </div>
 
-          {/* 3. 오프라인 음성인식(STT) 가속 장치 설정 섹션 */}
-          <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-4">
+          {/* 관리자 전용 고급 장치 선택. 판매자에게는 표시하지 않는다. */}
+          {isAdmin && <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <Cpu className="w-4 h-4 text-brand-600" />
@@ -396,7 +400,7 @@ export const CommentHelperModal: React.FC<CommentHelperModalProps> = ({ isOpen, 
                 <span>{sttFeedback}</span>
               </div>
             )}
-          </div>
+          </div>}
 
           {/* 4. 부팅 시 자동 실행 및 시스템 제어 */}
           <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-4">
@@ -442,10 +446,10 @@ export const CommentHelperModal: React.FC<CommentHelperModalProps> = ({ isOpen, 
         </div>
 
         {/* 모달 하단 푸터 */}
-        <div className="flex-shrink-0 px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
-          <span className="text-[11px] text-slate-400">
-            VoiceCAP All-in-One Desktop Runtime
-          </span>
+        <div className="flex-shrink-0 px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+          <Link to="/seller/helper" onClick={onClose} className="inline-flex items-center gap-1 text-xs font-bold text-brand-700 hover:text-brand-600">
+            댓글 수집·알림 설정 열기 <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
           <button
             type="button"
             onClick={onClose}

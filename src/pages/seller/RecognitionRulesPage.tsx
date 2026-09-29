@@ -2,9 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppData } from '../../context/AppDataContext';
 import { useLive } from '../../context/LiveContext';
-import { useCommentCapture, getCommentStatusBadge } from '../../context/CommentCaptureContext';
 import { RecognitionWordRule, RuleAction, CaptureAreaPreset, CaptureAreaConfig } from '../../types/rules';
-import { COMMENT_HELPER_DOWNLOAD_URL, DEFAULT_COMMENT_SERVER_URL } from '../../types/comment';
 import { screenCaptureService } from '../../services/screenCaptureService';
 import { storageService } from '../../services/storageService';
 import {
@@ -20,14 +18,8 @@ import {
   AlertCircle,
   Monitor,
   Camera,
-  MessageSquareText,
-  BellRing,
-  Play,
-  Square,
-  ArrowRight,
-  Download
+  ArrowRight
 } from 'lucide-react';
-import { CommentHelperModal } from '../../components/helper/CommentHelperModal';
 
 export const RecognitionRulesPage: React.FC = () => {
   const {
@@ -40,27 +32,6 @@ export const RecognitionRulesPage: React.FC = () => {
     setCaptureAreaConfig
   } = useAppData();
   const { isListening, stopListening, disconnectScreenShare } = useLive();
-  const {
-    config: commentConfig,
-    saveConfig: saveCommentConfig,
-    isActive: isCommentActive,
-    isRunning: isCommentRunning,
-    serverStatus: commentServerStatus,
-    serverMessage: commentServerMessage,
-    newCount: commentNewCount,
-    startCapture: startCommentCapture,
-    stopCapture: stopCommentCapture
-  } = useCommentCapture();
-
-  const [commentUsername, setCommentUsername] = useState(commentConfig.tiktokUsername);
-  const [commentAlertWords, setCommentAlertWords] = useState(commentConfig.alertWords.join(', '));
-  const [commentAlertDuration, setCommentAlertDuration] = useState(String(commentConfig.alertDurationSec));
-  const [commentAlertCommand, setCommentAlertCommand] = useState(commentConfig.alertVoiceCommand);
-  const [commentHelperCheckComplete, setCommentHelperCheckComplete] = useState(
-    commentServerStatus !== 'DISCONNECTED'
-  );
-  const [showHelperModal, setShowHelperModal] = useState(false);
-
   const [newWord, setNewWord] = useState('');
   const [newAction, setNewAction] = useState<RuleAction>('DB_SAVE');
 
@@ -110,15 +81,6 @@ export const RecognitionRulesPage: React.FC = () => {
     });
   }, [captureAreaConfig]);
 
-  useEffect(() => {
-    if (commentConfig.tiktokUsername) {
-      setCommentUsername(commentConfig.tiktokUsername);
-    }
-    setCommentAlertWords(commentConfig.alertWords.join(', '));
-    setCommentAlertDuration(String(commentConfig.alertDurationSec));
-    setCommentAlertCommand(commentConfig.alertVoiceCommand);
-  }, [commentConfig]);
-
   useEffect(() => screenCaptureService.subscribeConnection((state) => {
     setIsScreenConnected(state.isConnected);
     if (!state.isConnected) setPreviewStream(null);
@@ -133,20 +95,6 @@ export const RecognitionRulesPage: React.FC = () => {
       void video.play().catch(() => {});
     }
   }, [previewStream]);
-
-  // 페이지 진입 직후에는 도우미가 시작되는 시간을 잠시 기다린다.
-  // 브라우저는 '미설치'와 '설치됐지만 꺼짐'을 구분할 수 없으므로 연결 실패가
-  // 일정 시간 지속될 때 실행 안내와 다운로드 버튼을 함께 표시한다.
-  useEffect(() => {
-    if (commentServerStatus !== 'DISCONNECTED') {
-      setCommentHelperCheckComplete(true);
-      return;
-    }
-
-    setCommentHelperCheckComplete(false);
-    const timer = window.setTimeout(() => setCommentHelperCheckComplete(true), 2500);
-    return () => window.clearTimeout(timer);
-  }, [commentServerStatus]);
 
   // 화면 스트림 변경 요청
   const handleChangeScreen = async () => {
@@ -376,42 +324,8 @@ export const RecognitionRulesPage: React.FC = () => {
     setCaptureAreaConfig(updated);
   };
 
-  const handleSaveCommentSettings = (options?: { customUsername?: string; notify?: boolean }) => {
-    const rawUsername = options?.customUsername !== undefined ? options.customUsername : commentUsername;
-    const username = rawUsername.trim().replace(/^@/, '');
-    const duration = Math.max(3, parseInt(commentAlertDuration, 10) || 15);
-    const words = commentAlertWords.split(',').map((w) => w.trim()).filter(Boolean);
-    const commands = Array.from(new Set(
-      commentAlertCommand.split(',').map((command) => command.trim()).filter(Boolean)
-    ));
-    const command = commands.length > 0 ? commands.join(', ') : '닫아';
-    saveCommentConfig({
-      tiktokUsername: username,
-      serverUrl: DEFAULT_COMMENT_SERVER_URL,
-      alertWords: words,
-      alertDurationSec: duration,
-      alertVoiceCommand: command
-    });
-    setCommentUsername(username);
-    setCommentAlertDuration(String(duration));
-    setCommentAlertCommand(command);
-    if (options?.notify) {
-      showNotice(
-        `댓글 수집 설정이 클라우드에 영구 저장되었습니다. (@${username || '미설정'} · 알림 단어 ${words.length}개 · 알림 ${duration}초)`,
-        '💬 댓글 수집 설정 저장 완료',
-        'success'
-      );
-    }
-  };
-
   const handleSaveCaptureArea = () => {
     setCaptureAreaConfig(currentArea);
-
-    // 윈도우 영역 설정 저장 시 현재 입력된 틱톡 ID 및 댓글 설정도 함께 클라우드에 영구 저장
-    const cleanUser = commentUsername.trim().replace(/^@/, '');
-    if (cleanUser !== commentConfig.tiktokUsername) {
-      handleSaveCommentSettings({ customUsername: cleanUser, notify: false });
-    }
 
     const video = previewVideoRef.current;
     if (previewStream && isScreenConnected && video?.videoWidth && video.videoHeight) {
@@ -463,10 +377,6 @@ export const RecognitionRulesPage: React.FC = () => {
   const pixelH = Math.round(currentArea.heightRatio * desktopResolution.height);
   const hasLivePreview = !!(previewStream && isScreenConnected);
   const hasDisplayedScreen = hasLivePreview || !!savedPreview;
-  const localServerStatusLabel = getCommentStatusBadge(commentServerStatus).label;
-  const shouldShowCommentHelperInstall =
-    commentHelperCheckComplete && commentServerStatus === 'DISCONNECTED';
-
   return (
     <div className="p-3.5 sm:p-6 max-w-7xl mx-auto space-y-6 sm:space-y-8">
       {/* 상단 타이틀 */}
@@ -483,7 +393,9 @@ export const RecognitionRulesPage: React.FC = () => {
             윈도우 PC(16:9 모니터)에서 실행 중인 틱톡 라이브 스튜디오 / OBS 화면 위의 댓글창·주문창 캡처 영역을 정밀하게 지정합니다.
           </p>
         </div>
-
+        <Link to="/seller/helper" className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-cyan-200 bg-cyan-50 px-3.5 py-2.5 text-xs font-bold text-cyan-800 transition hover:bg-cyan-100">
+          댓글 수집·알림 설정 <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
       </div>
 
       {/* 1. 윈도우 데스크톱 화면 캡처 영역 설정 스튜디오 (핵심) */}
@@ -761,196 +673,6 @@ export const RecognitionRulesPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 1-5. 댓글 자동 캡처 & 키워드 알림 설정 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 sm:space-y-5">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-          <div>
-            <h3 className="text-sm sm:text-base font-black text-slate-900 flex items-center space-x-2">
-              <MessageSquareText className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-600" />
-              <span>댓글 자동 캡처 & 키워드 알림</span>
-            </h3>
-            <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
-              VoiceCAP 댓글 도우미가 틱톡 라이브 댓글을 실시간으로 받아 닉네임과 내용을 자동 기록합니다. 설정 단어가 잡히면 큰 알림창이 뜹니다.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold border ${
-              isCommentRunning
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                : isCommentActive
-                ? 'bg-amber-50 text-amber-800 border-amber-200'
-                : 'bg-slate-100 text-slate-600 border-slate-200'
-            }`}>
-              {isCommentRunning ? '실시간 수집 동작 중' : isCommentActive ? '대기 중 (라이브 청취 필요)' : '중지됨'}
-            </span>
-
-            <button
-              onClick={() => (isCommentActive ? stopCommentCapture() : startCommentCapture())}
-              className={`px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md flex items-center space-x-1.5 transition active:scale-95 ${
-                isCommentActive
-                  ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-500/20'
-                  : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20'
-              }`}
-            >
-              {isCommentActive ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-              <span>{isCommentActive ? '댓글 수집 정지' : '댓글 수집 시작'}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* 상태 요약 */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
-            <div className="text-slate-500 text-[10px] font-bold">신규 누적</div>
-            <div className="text-lg font-black text-slate-900">{commentNewCount} <span className="text-[10px] font-normal text-slate-400">건</span></div>
-          </div>
-          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
-            <div className="text-slate-500 text-[10px] font-bold">댓글 도우미 상태</div>
-            <div className="text-sm font-black text-slate-900 truncate">{localServerStatusLabel}</div>
-          </div>
-          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
-            <div className="text-slate-500 text-[10px] font-bold">수집 대상</div>
-            <div className="text-sm font-black text-slate-900 truncate">{commentConfig.tiktokUsername ? `@${commentConfig.tiktokUsername}` : '-'}</div>
-          </div>
-          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-            <div className="text-slate-500 text-[10px] font-bold">캡처 기록</div>
-            <Link to="/comments" className="text-brand-600 hover:underline font-bold text-[11px] flex items-center">
-              보기 <ArrowRight className="w-3 h-3 ml-0.5" />
-            </Link>
-          </div>
-        </div>
-
-        {shouldShowCommentHelperInstall && (
-            <div className="px-3.5 py-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-amber-900 text-[11px] font-black break-words">
-                  댓글 받기 프로그램을 확인해 주세요.
-                </p>
-                <p className="mt-1 text-amber-800/90 text-[10px] leading-relaxed break-words">
-                  먼저 Windows 시작 메뉴에서 <strong>VoiceCAP 댓글 도우미</strong>를 실행해 주세요. 프로그램이 없다면 다운로드하여 한 번만 설치하면 됩니다.
-                </p>
-                <p className="mt-1 text-amber-700/80 text-[10px] break-words">
-                  실행 또는 설치 후에는 이 페이지를 새로고침해 주세요.
-                </p>
-              </div>
-              <a
-                href={COMMENT_HELPER_DOWNLOAD_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="shrink-0 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-black shadow-sm transition"
-              >
-                <Download className="w-3.5 h-3.5" />
-                프로그램 다운로드
-              </a>
-            </div>
-        )}
-
-        {isCommentActive && commentServerStatus === 'ERROR' && (
-          <p className="px-3.5 py-2.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-bold break-words">
-            ⚠️ 댓글 받기 프로그램은 연결됐지만 수집 중 문제가 발생했습니다. {commentServerMessage}
-          </p>
-        )}
-
-        {/* 세부 설정 폼 */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="font-bold text-slate-700 flex items-center space-x-1">
-                <MessageSquareText className="w-3.5 h-3.5 text-cyan-600" />
-                <span>수집 대상 틱톡 ID (@ 제외)</span>
-              </label>
-              {commentConfig.tiktokUsername ? (
-                <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                  클라우드 저장됨: @{commentConfig.tiktokUsername}
-                </span>
-              ) : (
-                <span className="text-[10px] text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                  미설정
-                </span>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={commentUsername}
-                onChange={(e) => setCommentUsername(e.target.value.replace(/^@/, '').trim())}
-                onBlur={() => {
-                  const clean = commentUsername.trim().replace(/^@/, '');
-                  if (clean !== commentConfig.tiktokUsername) {
-                    handleSaveCommentSettings({ customUsername: clean, notify: false });
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleSaveCommentSettings({ customUsername: commentUsername, notify: true });
-                  }
-                }}
-                placeholder="예: my_shop_official"
-                className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-200 font-mono text-slate-900 focus:outline-none focus:border-brand-500"
-              />
-              <button
-                type="button"
-                onClick={() => handleSaveCommentSettings({ customUsername: commentUsername, notify: true })}
-                className="px-3.5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-sm transition active:scale-95 flex-shrink-0"
-              >
-                ID 저장
-              </button>
-            </div>
-            <p className="text-[11px] text-slate-400">
-              입력 후 [ID 저장] 버튼을 누르거나 Enter를 치면 다른 기기에서도 로그인 시 그대로 유지되도록 클라우드에 즉시 저장됩니다.
-            </p>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="font-bold text-slate-700 flex items-center space-x-1">
-              <BellRing className="w-3.5 h-3.5 text-rose-400" />
-              <span>알림 단어 (쉼표 구분, 예: 저요, 구매)</span>
-            </label>
-            <input
-              type="text"
-              value={commentAlertWords}
-              onChange={(e) => setCommentAlertWords(e.target.value)}
-              placeholder="저요, 구매"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="font-bold text-slate-700">알림창 자동 닫힘 시간 (초)</label>
-            <input
-              type="number"
-              min={3}
-              value={commentAlertDuration}
-              onChange={(e) => setCommentAlertDuration(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 font-mono text-slate-900 focus:outline-none focus:border-brand-500"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="font-bold text-slate-700">알림창 닫는 음성 명령 (쉼표 구분)</label>
-            <input
-              type="text"
-              value={commentAlertCommand}
-              onChange={(e) => setCommentAlertCommand(e.target.value)}
-              placeholder="닫아, 알림 닫기"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={() => handleSaveCommentSettings({ notify: true })}
-            className="px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-500/20 transition"
-          >
-            댓글 수집 설정 저장하기
-          </button>
-        </div>
-      </div>
-
       {/* 2. 단어 인식 규칙 목록 & 추가 */}
       <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4 sm:space-y-6">
         <div className="border-b border-slate-100 pb-3 sm:pb-4">
@@ -1109,8 +831,6 @@ export const RecognitionRulesPage: React.FC = () => {
         </div>
       )}
 
-      {/* 댓글 도우미 및 장치 설정 모달 */}
-      <CommentHelperModal isOpen={showHelperModal} onClose={() => setShowHelperModal(false)} />
     </div>
   );
 };
