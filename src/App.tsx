@@ -21,7 +21,7 @@ import { PricingPage } from './pages/auth/PricingPage';
 import { PrivacyPolicyPage } from './pages/legal/PrivacyPolicyPage';
 
 import { LiveHomePage } from './pages/seller/LiveHomePage';
-import { VoiceTrainingPage } from './pages/seller/VoiceTrainingPage';
+import { SttVocabularyPage } from './pages/seller/SttVocabularyPage';
 import { RecognitionRulesPage } from './pages/seller/RecognitionRulesPage';
 import { CommentRecordsPage } from './pages/seller/CommentRecordsPage';
 import { SalesListPage } from './pages/seller/SalesListPage';
@@ -36,6 +36,7 @@ import { ProductSalesPage } from './pages/seller/ProductSalesPage';
 import { CommentHelperPage } from './pages/seller/CommentHelperPage';
 import { CommerceProvider } from './context/CommerceContext';
 import { ProductSalesProvider } from './context/ProductSalesContext';
+import { SttVocabularyProvider } from './context/SttVocabularyContext';
 
 import { PlanSelectionPage } from './pages/subscription/PlanSelectionPage';
 import { PaymentPage } from './pages/subscription/PaymentPage';
@@ -161,11 +162,12 @@ export const App: React.FC = () => {
         <SalesProvider>
           <CommerceProvider>
             <ProductSalesProvider>
-              <LiveProvider>
-                <CommentCaptureProvider>
-                  <AppDataProvider>
-                    <AppLayout>
-                      <Routes>
+              <SttVocabularyProvider>
+                <LiveProvider>
+                  <CommentCaptureProvider>
+                    <AppDataProvider>
+                      <AppLayout>
+                        <Routes>
                         {/* 루트 리다이렉트 */}
                         <Route path="/" element={<RootRedirect />} />
 
@@ -182,8 +184,9 @@ export const App: React.FC = () => {
                           <Route path="/live" element={<LiveHomePage />} />
                           <Route path="/seller/product-sales" element={<ProductSalesPage />} />
                           <Route path="/sales/product" element={<ProductSalesPage />} />
-                          <Route path="/voice-training" element={<VoiceTrainingPage />} />
-                          <Route path="/training" element={<VoiceTrainingPage />} />
+                          <Route path="/stt-vocabulary" element={<SttVocabularyPage />} />
+                          <Route path="/voice-training" element={<Navigate to="/stt-vocabulary" replace />} />
+                          <Route path="/training" element={<Navigate to="/stt-vocabulary" replace />} />
                           <Route path="/recognition-rules" element={<RecognitionRulesPage />} />
                           <Route path="/rules" element={<RecognitionRulesPage />} />
                           <Route path="/comments" element={<CommentRecordsPage />} />
@@ -234,12 +237,13 @@ export const App: React.FC = () => {
 
                   {/* 일치하지 않는 경로는 홈으로 리다이렉트 */}
                   <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-              </AppLayout>
-              </AppDataProvider>
-            </CommentCaptureProvider>
-          </LiveProvider>
-          </ProductSalesProvider>
+                        </Routes>
+                      </AppLayout>
+                    </AppDataProvider>
+                  </CommentCaptureProvider>
+                </LiveProvider>
+              </SttVocabularyProvider>
+            </ProductSalesProvider>
           </CommerceProvider>
         </SalesProvider>
       </AuthProvider>

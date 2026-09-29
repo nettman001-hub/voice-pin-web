@@ -1,5 +1,4 @@
 import { RecognitionWordRule, CaptureAreaConfig } from '../types/rules';
-import { TrainingSentence } from '../types/training';
 import { CommentCaptureConfig } from '../types/comment';
 import { SttMode, LocalSttModel } from '../types/stt';
 import { CommerceState, CustomerPurchaseClaim, PaymentReceipt, SettlementInvoice, Shipment, SmsMessage } from '../types/commerce';
@@ -8,6 +7,7 @@ import { User } from '../types/auth';
 import { AdminSaleItem, SellerSttUsageSummary, SttUsageLogItem, SttUsageRecordPayload } from '../types/admin';
 import { isSupabaseConfigured, requireSupabase } from './supabaseClient';
 import { hasCommerceChanges, type CommerceChanges } from './commerceChanges';
+import { normalizeSttVocabulary } from './sttVocabularyService';
 
 export interface CloudSessionTranscriptsPayload {
   sessionId: string;
@@ -648,9 +648,9 @@ export const remoteWorkspaceService = {
   },
 
   /**
-   * 워크스페이스별 설정 저장 (단어 규칙, 훈련 문장, 개인 설정 등)
+   * 워크스페이스별 설정 저장 (단어 규칙, 발음 힌트, 개인 설정 등)
    */
-  async saveWorkspaceSettings<T>(workspaceId: string, namespace: string, value: T): Promise<void> {
+  async saveWorkspaceSettings<T>(workspaceId: string, namespace: string, value: T, options?: { throwOnError?: boolean }): Promise<void> {
     if (!isSupabaseConfigured || !workspaceId) return;
     const client = requireSupabase();
 
@@ -678,7 +678,19 @@ export const remoteWorkspaceService = {
       }
     } catch (efErr) {
       console.error(`[RemoteWorkspace] saveWorkspaceSettings failed completely for ${namespace}:`, efErr);
+      if (options?.throwOnError) throw efErr;
     }
+  },
+
+  async loadSttVocabulary(workspaceId: string): Promise<string[] | null> {
+    const value = await this.fetchWorkspaceSettings<{ words?: unknown }>(workspaceId, 'stt_vocabulary');
+    return value && Array.isArray(value.words) ? normalizeSttVocabulary(value.words) : null;
+  },
+
+  async saveSttVocabulary(workspaceId: string, words: string[]): Promise<void> {
+    await this.saveWorkspaceSettings(workspaceId, 'stt_vocabulary', {
+      words: normalizeSttVocabulary(words),
+    }, { throwOnError: true });
   },
 
   // 1순위 보물 ①: 단어 치환 규칙
@@ -688,15 +700,6 @@ export const remoteWorkspaceService = {
   },
   async saveRecognitionRules(workspaceId: string, rules: RecognitionWordRule[]): Promise<void> {
     await this.saveWorkspaceSettings(workspaceId, 'recognition_rules', { rules });
-  },
-
-  // 1순위 보물 ②: 음성 학습 문장 목록
-  async loadVoiceTraining(workspaceId: string): Promise<TrainingSentence[] | null> {
-    const res = await this.fetchWorkspaceSettings<{ sentences: TrainingSentence[] }>(workspaceId, 'voice_training');
-    return res?.sentences || null;
-  },
-  async saveVoiceTraining(workspaceId: string, sentences: TrainingSentence[]): Promise<void> {
-    await this.saveWorkspaceSettings(workspaceId, 'voice_training', { sentences });
   },
 
   // 추천 개인 설정: STT 모드 및 로컬 모델, 틱톡 사용자명

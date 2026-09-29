@@ -32,6 +32,8 @@ import {
 } from '../services/voiceCorrectionService';
 import type { PendingCorrectionRequest } from '../types/voiceCorrection';
 import { aiSettingsApi } from '../services/aiSettingsApi';
+import { useSttVocabulary } from './SttVocabularyContext';
+import { buildCloudSttTerms } from '../services/sttVocabularyService';
 
 const SONIOX_SALE_TIMEOUT_MS = 10000;
 const SONIOX_BUFFER_LIMIT = 600;
@@ -139,6 +141,7 @@ const LiveContext = createContext<LiveContextType | undefined>(undefined);
 export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { addSale, updateSale, sales } = useSales();
   const { isAuthenticated, user, workspaceId, isRemoteAuth } = useAuth();
+  const { getWordsForConnection } = useSttVocabulary();
   const productSales = useProductSales();
 
   const [isListening, setIsListening] = useState<boolean>(false);
@@ -1617,7 +1620,17 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSttEngineMessage(mode === 'TAB_AUDIO' ? '방송 탭 오디오 연결 확인 중' : '마이크 연결 확인 중');
 
       const rules = storageService.getRules().filter((r) => r.isEnabled);
-      const keyterms = rules.map((r) => r.word.trim()).filter(Boolean);
+      const ruleTerms = rules.map((r) => r.word.trim()).filter(Boolean);
+      const cloudKeyterms = sttModeRef.current === 'LOCAL'
+        ? []
+        : buildCloudSttTerms(await getWordsForConnection(), ruleTerms);
+
+      if (
+        listeningGenerationRef.current !== listeningGeneration ||
+        !isListeningRef.current ||
+        currentUserIdRef.current !== requestedUserId ||
+        authBoundaryGenerationRef.current !== requestedAuthGeneration
+      ) return;
 
       const chunkCallback = (chunk: ArrayBuffer) => {
         if (
@@ -1685,7 +1698,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localSttService.startListening(
           newSessionId,
           listeningGeneration,
-          keyterms.join(', '),
+          ruleTerms.join(', '),
           (data) => {
             handleTranscript(data, listeningGeneration, requestedUserId);
           },
@@ -1752,7 +1765,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
             apiKey: activeApiKey,
             model: 'nova-3',
             language: 'ko',
-            keyterms,
+            keyterms: cloudKeyterms,
             punctuate: true,
             interimResults: true,
             endpointing: 300,

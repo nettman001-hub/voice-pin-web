@@ -165,6 +165,7 @@ function storageFixture({ quota = false, durableFailure = false } = {}) {
   const commentTypes = load('../src/types/comment.ts');
   const { StorageService, isTemporarySessionId } = load('../src/services/storageService.ts', {
     '../types/comment': commentTypes,
+    './sttVocabularyService': { normalizeSttVocabulary: (words) => words },
     './durableStorage': { durableStorage: {
       async set(key, value) { if (durableFailure) throw new Error('IndexedDB unavailable'); durable.set(key, clone(value)); },
       async get(key) { await durableQueue; return durable.get(key) ?? null; },
@@ -729,6 +730,7 @@ test('bootstrap sale loading paginates beyond the PostgREST row cap', async () =
   }; } };
   const { remoteWorkspaceService } = load('../src/services/remoteWorkspaceService.ts', {
     './supabaseClient': { isSupabaseConfigured: true, requireSupabase: () => client }, './commerceChanges': {},
+    './sttVocabularyService': { normalizeSttVocabulary: (words) => words },
   });
   const loaded = await remoteWorkspaceService.loadSales('workspace-1');
   assert.equal(loaded.length, 1001);

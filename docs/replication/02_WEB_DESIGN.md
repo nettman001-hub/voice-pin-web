@@ -140,7 +140,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLIC_CLIENT_KEY
 | `/privacy` | [PrivacyPolicyPage](../../src/pages/legal/PrivacyPolicyPage.tsx): 개인정보 문서 | 공개 |
 | `/live` | [LiveHomePage](../../src/pages/seller/LiveHomePage.tsx): 방송 회차, STT, 자막, 댓글, 캡처, 실시간 판매 | 로그인 |
 | `/seller/product-sales`, `/sales/product` | [ProductSalesPage](../../src/pages/seller/ProductSalesPage.tsx): 수동 상품 등록·댓글 선택 판매 | 로그인 |
-| `/voice-training`, `/training` | [VoiceTrainingPage](../../src/pages/seller/VoiceTrainingPage.tsx): 훈련 UI | 로그인 |
+| `/stt-vocabulary` | [SttVocabularyPage](../../src/pages/seller/SttVocabularyPage.tsx): 클라우드 STT 발음 힌트(최대 50개) 등록·저장 | 로그인 |
 | `/recognition-rules`, `/rules` | [RecognitionRulesPage](../../src/pages/seller/RecognitionRulesPage.tsx): 인식 단어·캡처 영역 설정 | 로그인 |
 | `/comments` | [CommentRecordsPage](../../src/pages/seller/CommentRecordsPage.tsx): 댓글/판매멘트 기록 | 로그인 |
 | `/sales` | [SalesListPage](../../src/pages/seller/SalesListPage.tsx): 판매 목록·필터·일괄 작업 | 로그인 |
@@ -186,10 +186,11 @@ BrowserRouter
    └─ SalesProvider
       └─ CommerceProvider
          └─ ProductSalesProvider
-            └─ LiveProvider
-               └─ CommentCaptureProvider
-                  └─ AppDataProvider
-                     └─ AppLayout + Routes
+            └─ SttVocabularyProvider
+               └─ LiveProvider
+                  └─ CommentCaptureProvider
+                     └─ AppDataProvider
+                        └─ AppLayout + Routes
 ```
 
 안쪽 Provider는 바깥쪽 Provider의 값을 읽을 수 있다. 예를 들어 `LiveProvider`는 `useSales`, `useAuth`, `useProductSales`를 사용한다. 이 순서를 바꾸면 `use... must be used within ...Provider` 오류가 발생할 수 있다.
@@ -200,9 +201,10 @@ BrowserRouter
 | [SalesContext](../../src/context/SalesContext.tsx) | `SaleRecord[]`, 저장·수정·확정·CSV·인쇄 상태 | Supabase `sales` 직접 조회/저장, 실시간 변경 구독, 로컬 도우미 인쇄 |
 | [CommerceContext](../../src/context/CommerceContext.tsx) | 문자, 고객 구매 주장, 정산서, 입금, 배송, 확인 상태 | 로컬 캐시 + Supabase 관련 테이블 + SMS bridge |
 | [ProductSalesContext](../../src/context/ProductSalesContext.tsx) | bootstrap, 활성 회차·상품, 댓글 feed, 음성 후보 | `sales-api` Edge Function |
+| [SttVocabularyContext](../../src/context/SttVocabularyContext.tsx) | 판매자별 클라우드 STT 발음 힌트(최대 50개) | [sttVocabularyService](../../src/services/sttVocabularyService.ts)를 통한 작업공간별 로컬 보관 + Supabase `workspace_settings`의 `stt_vocabulary` namespace 동기화 |
 | [LiveContext](../../src/context/LiveContext.tsx) | 청취, 오디오 파형, 전사, 캡처, 음성 명령·정정 | 오디오/STT/화면 서비스, 판매·상품 Context |
 | [CommentCaptureContext](../../src/context/CommentCaptureContext.tsx) | 수집 토글, 연결 상태, 최근 댓글, 알림 | 댓글 도우미 Socket.IO + `ingest-comments` + 판매 feed |
-| [AppDataContext](../../src/context/AppDataContext.tsx) | 규칙, 훈련 UI, 구독 UI, 알림, 관리자 목록 | 로컬 저장 + 일부 workspace settings/관리 Edge API |
+| [AppDataContext](../../src/context/AppDataContext.tsx) | 규칙, 구독 UI, 알림, 관리자 목록 | 로컬 저장 + 일부 workspace settings/관리 Edge API |
 
 React 상태와 `useRef`를 혼동하지 않는다. 상태는 화면을 다시 그리기 위한 값이고, ref는 비동기 콜백이 최신 값·진행 중 여부·세대 번호를 읽는 데 사용한다. 음성 처리에서 ref를 단순한 state로 교체하면 중지 후 늦은 STT 결과가 판매로 저장되는 등의 문제가 생길 수 있다.
 
@@ -318,6 +320,8 @@ MediaStream
 | 브라우저 SpeechRecognition fallback | `deepgramService.ts` | 허용된 마이크 모드의 fallback; 탭 소리를 대신 읽는 기능이 아님 |
 
 클라우드 STT는 관리자 지정 공급자·키를 받아 사용하며 `allowAdminSttKey` 권한을 확인한다. 로컬 STT 모드와 모델 선택(`large-v3-turbo`, `small`, `base`)은 별도로 존재한다. 관리자의 LLM 슬롯 설정은 이 STT 공급자 선택과 같은 설정이 아니다.
+
+`/stt-vocabulary`의 발음 힌트는 음성 모델을 훈련하지 않는다. 판매자가 최대 50개(각 40자 이내)의 상품명·브랜드명·고유명사를 저장하면 다음 클라우드 STT WebSocket 연결을 열 때 초기 요청 설정으로 함께 보낸다. Deepgram Nova-3의 `keyterm`과 Soniox v5의 `context.terms`를 사용하며 이미 열린 연결에는 소급 적용하지 않는다. 로컬 Whisper에는 적용되지 않는다. 인식률 향상은 보장되지 않으므로 실제 자막으로 확인한다.
 
 ### 8.3 중간 전사와 확정 전사
 
@@ -589,7 +593,8 @@ AI 설정은 [types/aiSettings.ts](../../src/types/aiSettings.ts)와 [AdminAiSet
 | 실제 판매 목록 | `SalesContext`가 Supabase `sales`를 조회 | DB와 권한을 준비하고 재조회 |
 | 상품·회차·구매자·공식 댓글 | `sales-api`와 DB | 서버/스토리지 복제 또는 동일 프로젝트 연결 |
 | 판매/상품 이미지 | `voicecap-private` 저장소 | 객체와 경로 함께 유지 |
-| 규칙·훈련 횟수·캡처 영역 | 로컬 캐시 + workspace settings 동기화 | 작업공간 설정 조회 확인 |
+| STT 발음 힌트 | 작업공간별 로컬 캐시 + Supabase `workspace_settings`의 `stt_vocabulary` namespace | 새 PC에서 작업공간 설정 동기화·다음 클라우드 연결 적용 확인 |
+| 규칙·캡처 영역 | 로컬 캐시 + workspace settings 동기화 | 작업공간 설정 조회 확인 |
 | 댓글 수집 설정 | 로컬 + 일부 원격 설정 | TikTok ID와 새 PC 도우미 연결 확인 |
 | Commerce 자료 | 로컬 캐시 + 원격 테이블 | 원격 초기화 완료 및 동기화 확인 |
 | 전체 전사 로그 | `voicecap_transcripts:*` 로컬 자료 | 필요 시 회차 TXT/CSV를 별도 내보내기 |
@@ -611,7 +616,7 @@ AI 설정은 [types/aiSettings.ts](../../src/types/aiSettings.ts)와 [AdminAiSet
 | 댓글 수집 | 실제 도우미 소켓과 cloud ingest | 도우미 연결, TikTok 방송, 회차 |
 | 상품·댓글 선택 판매 | 실제 `sales-api` | migrations/functions/storage/기기 권한 |
 | 라이브 시연 데모 | `salesDemoService`의 시간표·가상 댓글·가상 전사·가상 출력 상태 | 화면 시연용. 실제 DB/STT/프린터 시험으로 계산하지 않음 |
-| 음성 학습 화면 | 카운트다운, 타이머, 횟수·예상 정확도 갱신 | 실제 오디오 녹음·모델 미세학습 파이프라인은 없음 |
+| 발음 힌트 설정 | 판매자 단어 최대 50개를 클라우드 STT 연결 설정에 전송 | 새 연결에서 공급자 요청에 포함되는지 확인. 모델 학습이나 정확도 보장은 아님 |
 | 플랜/카드 결제 | 로컬 상태·결제 이력 시뮬레이션 | 실제 결제대행사 승인·정기청구 연동은 없음 |
 | 알림 설정 | 로컬 토글·브라우저 Notification 시험 | 푸시 서버/이메일 전달 구현과 구분 |
 | 일부 관리자 KPI | 고정 수치 또는 실제 목록+상수 조합 | 운영 통계 전체를 의미하지 않음 |
@@ -620,7 +625,7 @@ AI 설정은 [types/aiSettings.ts](../../src/types/aiSettings.ts)와 [AdminAiSet
 | AI 증거 장기 보존 | 타입/로컬 흐름은 있으나 직접 판매 매핑 누락 | 다른 PC/새로고침 후 보존 여부 별도 검증 |
 | 비밀번호 재설정 | 이메일 링크 요청 | 새 비밀번호 저장 단계 추가 검증 필요 |
 
-예를 들어 `AppDataContext`의 훈련은 3회 이상이면 완료로 바꾸고 계산식으로 예상 정확도를 올린다. 이는 음성 인식 엔진의 실제 평가 점수가 아니다. 관리자 KPI 중 `dailyNewUsers`, `sttAccuracyAvg`, `totalSalesToday`에도 고정 값이 있다. 재현 문서에서 이런 값을 실제 운영 측정치로 사용하면 안 된다.
+로컬 백업에 남아 있을 수 있는 과거 훈련 횟수와 예상 정확도는 실제 음성 모델을 개선한 증거가 아니며, 현재 판매자 메뉴에서는 사용하지 않는다. 관리자 KPI 중 `dailyNewUsers`, `sttAccuracyAvg`, `totalSalesToday`에도 고정 값이 있다. 재현 문서에서 이런 값을 실제 운영 측정치로 사용하면 안 된다.
 
 ## 15. 초보 개발자의 권장 구현 순서
 

@@ -181,6 +181,7 @@ function localStorageFixture() {
   };
   const { StorageService } = load('../src/services/storageService.ts', {
     '../types/comment': load('../src/types/comment.ts'), './durableStorage': { durableStorage: {} },
+    './sttVocabularyService': { normalizeSttVocabulary: (words) => words },
   }, { localStorage });
   return { storage: new StorageService(), entries };
 }
@@ -218,6 +219,7 @@ function remoteFixture(rows, fail = false) {
   const { remoteWorkspaceService: service } = load('../src/services/remoteWorkspaceService.ts', {
     './supabaseClient': { isSupabaseConfigured: true, requireSupabase: () => client },
     './commerceChanges': { hasCommerceChanges: () => false },
+    './sttVocabularyService': { normalizeSttVocabulary: (words) => words },
   });
   return { service, calls };
 }

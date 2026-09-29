@@ -23,7 +23,8 @@ import {
   ReceiptText,
   Truck,
   PanelLeftClose,
-  Bot
+  Bot,
+  BookOpenText
 } from 'lucide-react';
 
 interface NavItem {
@@ -62,7 +63,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: [
         { name: '라이브 청취 홈', path: '/live', icon: Radio, badge: isListening ? 'ON AIR' : undefined },
         { name: '상품 판매 관리', path: '/seller/product-sales', icon: ShoppingBag },
-        { name: '음성인식 훈련 (학습)', path: '/voice-training', icon: Sparkles },
+        { name: '음성인식 발음 힌트', path: '/stt-vocabulary', icon: BookOpenText },
         { name: '캡처 영역 & 단어 규칙', path: '/recognition-rules', icon: Sliders },
         { name: '댓글 도우미 & 장치 설정', path: '/seller/helper', icon: Bot, badge: '내장' },
       ]

@@ -183,7 +183,8 @@ export class DeepgramSttService {
               num_channels: 1,
               language_hints: ['ko'],
               language_hints_strict: true,
-              enable_speaker_diarization: false
+              enable_speaker_diarization: false,
+              ...(config.keyterms.length > 0 ? { context: { terms: config.keyterms } } : {})
             }));
 
             this.currentEngine = 'SONIOX';
@@ -295,7 +296,8 @@ export class DeepgramSttService {
         ].filter(Boolean).join('&');
 
         const url = `wss://api.deepgram.com/v1/listen?${queryParams}`;
-        console.log('[Deepgram] WebSocket 연결 시도:', url);
+        // The URL contains seller-entered vocabulary; never log the full query string.
+        console.log('[Deepgram] WebSocket 연결 시도 (발음 힌트 개수):', config.keyterms?.length || 0);
         const socket = new WebSocket(url, ['token', cleanApiKey]);
         this.ws = socket;
         this.socketProvider = 'DEEPGRAM';

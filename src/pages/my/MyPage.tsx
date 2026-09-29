@@ -86,7 +86,7 @@ export const MyPage: React.FC = () => {
   };
 
   const handleDeleteAccount = () => {
-    if (window.confirm('정말 회원 탈퇴를 진행하시겠습니까? 저장된 판매 내역과 음성 훈련 데이터가 영구 삭제됩니다.')) {
+    if (window.confirm('정말 회원 탈퇴를 신청하시겠습니까? 필요한 데이터는 먼저 백업해 주세요.')) {
       disconnectScreenShare();
       alert('회원 탈퇴가 접수되었습니다.');
       logout();
@@ -295,7 +295,7 @@ export const MyPage: React.FC = () => {
           <span>전체 데이터 백업 & 기기 간 복원</span>
         </h3>
         <p className="text-[11px] sm:text-xs text-slate-500">
-          현재까지 누적된 모든 판매 내역, 캡처 이미지, 단어 규칙, 음성 학습 데이터를 안전하게 JSON 파일로 백업하거나 다른 컴퓨터/스마트폰으로 이전할 수 있습니다.
+          이 브라우저에 저장된 판매 기록 일부, 캡처 이미지와 단어 규칙 등의 로컬 데이터를 JSON 파일로 백업할 수 있습니다. 클라우드 계정 설정과 전체 서버 데이터는 포함되지 않습니다.
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 pt-1">

@@ -9,7 +9,7 @@ export const OnboardingPage: React.FC = () => {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 pb-16 text-center">
         <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-brand-50 border border-brand-200 text-brand-700 text-xs font-bold mb-6 shadow-sm">
           <Sparkles className="w-3.5 h-3.5 text-brand-600" />
-          <span>Deepgram Nova-3 실시간 한국어 STT 엔진 탑재</span>
+          <span>클라우드 실시간 한국어 음성 인식</span>
         </div>
 
         <h1 className="text-4xl sm:text-6xl font-black tracking-tight leading-tight text-slate-900">
@@ -21,7 +21,7 @@ export const OnboardingPage: React.FC = () => {
         </h1>
 
         <p className="mt-6 text-base sm:text-xl text-slate-600 max-w-3xl mx-auto leading-relaxed">
-          방송 중에 말하는 <strong className="text-slate-900">"구매확정, 닉네임, 금액"</strong>을 AI가 0.1초 만에 캐치하여 DB에 자동 저장하고, 지정된 댓글창 영역까지 원클릭으로 캡처합니다.
+          방송 중에 말하는 <strong className="text-slate-900">"구매확정, 닉네임, 금액"</strong>을 음성 인식으로 확인하고 판매 내역으로 기록하며, 지정된 댓글창 영역도 캡처할 수 있습니다.
         </p>
 
         {/* 메인 CTA */}
@@ -55,7 +55,7 @@ export const OnboardingPage: React.FC = () => {
             </div>
             <h3 className="text-lg font-bold text-slate-900 mb-2">실시간 음성 인식</h3>
             <p className="text-xs text-slate-500 leading-relaxed">
-              Deepgram Nova-3와 키워드 바이어싱으로 판매자 특유의 빠른 말투와 닉네임도 정확히 인식합니다.
+              클라우드 STT와 발음 힌트 설정을 활용해 상품명과 고유명사 인식에 도움을 줍니다.
             </p>
           </div>
 
@@ -83,9 +83,9 @@ export const OnboardingPage: React.FC = () => {
             <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4">
               <Mic className="w-6 h-6" />
             </div>
-            <h3 className="text-lg font-bold text-slate-900 mb-2">나만의 음성 학습</h3>
+            <h3 className="text-lg font-bold text-slate-900 mb-2">음성인식 발음 힌트</h3>
             <p className="text-xs text-slate-500 leading-relaxed">
-              판매자의 자주 쓰는 멘트를 3회 반복 훈련하여 인식률을 98% 이상으로 개인화합니다.
+              자주 잘못 인식되는 상품명이나 브랜드명 등 최대 50개를 등록해 다음 클라우드 STT 연결에 함께 보냅니다.
             </p>
           </div>
         </div>

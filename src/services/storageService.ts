@@ -8,6 +8,7 @@ import { CommerceState } from '../types/commerce';
 import type { ProductSalesProduct, ProductSalesSession, ProductSalesBootstrapData, BuyerStats, SessionSummary } from '../types/productSales';
 import type { SalesLocalState } from './salesSyncController';
 import { durableStorage } from './durableStorage';
+import { normalizeSttVocabulary } from './sttVocabularyService';
 
 export interface CaptureAreaSnapshot {
   imageUrl: string;
@@ -87,17 +88,6 @@ export const DEFAULT_RULES: RecognitionWordRule[] = [
   { id: 'r4', word: '금액', action: 'DB_SAVE', isEnabled: true, isEssential: true, priority: 4, description: '결제 금액 파싱' },
   { id: 'r5', word: '캡처하세요', action: 'SCREEN_CAPTURE', isEnabled: true, isEssential: false, priority: 5, description: '고객 상품 확인 및 화면 영역 자동 캡처' },
   { id: 'r6', word: '결제완료', action: 'DB_SAVE_AND_CAPTURE', isEnabled: true, isEssential: false, priority: 6, description: 'DB 저장 및 화면 캡처 동시 실행' },
-];
-
-// 초기 음성 학습 문장
-export const DEFAULT_TRAINING_SENTENCES: TrainingSentence[] = [
-  { id: 't1', sentence: '구매 확정됐습니다', category: '멘트', recordCount: 3, isCompleted: true, expectedAccuracy: 98, lastTrainedAt: '2026-08-20' },
-  { id: 't2', sentence: '구매하신 분은 닉네임님입니다', category: '닉네임', recordCount: 3, isCompleted: true, expectedAccuracy: 96, lastTrainedAt: '2026-08-21' },
-  { id: 't3', sentence: '가격은 삼만 오천원입니다', category: '금액', recordCount: 2, isCompleted: false, expectedAccuracy: 88, lastTrainedAt: '2026-08-22' },
-  { id: 't4', sentence: '결제 완료되셨습니다', category: '멘트', recordCount: 1, isCompleted: false, expectedAccuracy: 82, lastTrainedAt: '2026-08-23' },
-  { id: 't5', sentence: '캡처 부탁드립니다', category: '명령', recordCount: 0, isCompleted: false, expectedAccuracy: 75 },
-  { id: 't6', sentence: '수정 시작', category: '명령', recordCount: 0, isCompleted: false, expectedAccuracy: 70 },
-  { id: 't7', sentence: '수정 완료', category: '명령', recordCount: 0, isCompleted: false, expectedAccuracy: 70 },
 ];
 
 // 초기 기본 판매 내역 목업 데이터
@@ -250,6 +240,7 @@ export const INITIAL_COMMERCE_STATE: CommerceState = {
 const KEYS = {
   RULES: 'dadryeo_rules',
   TRAINING: 'dadryeo_training',
+  STT_VOCABULARY: 'voicecap_stt_vocabulary',
   SALES: 'dadryeo_sales',
   CAPTURES: 'dadryeo_captures',
   PAYMENTS: 'dadryeo_payments',
@@ -522,9 +513,6 @@ export class StorageService {
     if (!localStorage.getItem(KEYS.RULES)) {
       this.setItem(KEYS.RULES, DEFAULT_RULES);
     }
-    if (!localStorage.getItem(KEYS.TRAINING)) {
-      this.setItem(KEYS.TRAINING, DEFAULT_TRAINING_SENTENCES);
-    }
     if (!localStorage.getItem(KEYS.SALES)) {
       this.setItem(KEYS.SALES, INITIAL_SALES);
     }
@@ -591,6 +579,7 @@ export class StorageService {
       captures: this.getCaptures(),
       rules: this.getRules(),
       trainingSentences: this.getTrainingSentences(),
+      sttVocabulary: this.currentWorkspaceId ? this.getSttVocabulary(this.currentWorkspaceId) : [],
       payments: this.getPayments(),
       notifications: this.getNotifications(),
       commerce: this.getCommerceState(),
@@ -609,6 +598,9 @@ export class StorageService {
       if (data.captures) localStorage.setItem(KEYS.CAPTURES, JSON.stringify(data.captures));
       if (data.rules) this.saveRules(data.rules);
       if (data.trainingSentences) this.saveTrainingSentences(data.trainingSentences);
+      if (Array.isArray(data.sttVocabulary) && this.currentWorkspaceId) {
+        this.saveSttVocabulary(this.currentWorkspaceId, data.sttVocabulary, true);
+      }
       if (data.payments) localStorage.setItem(KEYS.PAYMENTS, JSON.stringify(data.payments));
       if (data.notifications) localStorage.setItem(KEYS.NOTIFICATIONS, JSON.stringify(data.notifications));
       if (data.commerce) this.saveCommerceState(data.commerce);
@@ -632,9 +624,38 @@ export class StorageService {
   public getRules(): RecognitionWordRule[] { return this.getItem(KEYS.RULES, DEFAULT_RULES); }
   public saveRules(rules: RecognitionWordRule[]) { this.setItem(KEYS.RULES, rules); }
 
-  // 음성 학습
-  public getTrainingSentences(): TrainingSentence[] { return this.getItem(KEYS.TRAINING, DEFAULT_TRAINING_SENTENCES); }
+  // 이전 버전의 모의 훈련 기록은 기존 백업 복원 호환용으로만 읽고 저장한다.
+  public getTrainingSentences(): TrainingSentence[] { return this.getItem(KEYS.TRAINING, []); }
   public saveTrainingSentences(sentences: TrainingSentence[]) { this.setItem(KEYS.TRAINING, sentences); }
+
+  // STT 발음 힌트는 계정/작업공간별로 분리해 다른 판매자의 단어가 섞이지 않게 한다.
+  private getSttVocabularyRecord(workspaceId: string): { words: string[]; pending: boolean } {
+    if (!workspaceId) return { words: [], pending: false };
+    const saved = this.getItem<unknown>(this.scopedKey(KEYS.STT_VOCABULARY, workspaceId), []);
+    if (Array.isArray(saved)) return { words: normalizeSttVocabulary(saved), pending: false };
+    if (saved && typeof saved === 'object' && 'words' in saved) {
+      const record = saved as { words?: unknown; pending?: unknown };
+      return { words: normalizeSttVocabulary(record.words), pending: record.pending === true };
+    }
+    return { words: [], pending: false };
+  }
+
+  public getSttVocabulary(workspaceId: string): string[] {
+    return this.getSttVocabularyRecord(workspaceId).words;
+  }
+
+  public isSttVocabularyPending(workspaceId: string): boolean {
+    return this.getSttVocabularyRecord(workspaceId).pending;
+  }
+
+  public saveSttVocabulary(workspaceId: string, words: string[], pending = false): boolean {
+    if (!workspaceId) return false;
+    const saved = this.setItem(this.scopedKey(KEYS.STT_VOCABULARY, workspaceId), {
+      words: normalizeSttVocabulary(words), pending,
+    });
+    if (saved && typeof window !== 'undefined') window.dispatchEvent(new Event('voicecap_stt_vocabulary_updated'));
+    return saved;
+  }
 
   // 판매 내역 (workspace별 격리 지원)
   public getSales(workspaceIdOverride?: string | null): SaleRecord[] {

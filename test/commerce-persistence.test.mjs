@@ -93,6 +93,7 @@ function remoteService(client) {
   return loadModule('../src/services/remoteWorkspaceService.ts', {
     './supabaseClient': { isSupabaseConfigured: true, requireSupabase: () => client },
     './commerceChanges': changesModule,
+    './sttVocabularyService': { normalizeSttVocabulary: (words) => words },
   }).remoteWorkspaceService;
 }
 
