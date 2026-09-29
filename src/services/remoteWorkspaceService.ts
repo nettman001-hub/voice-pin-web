@@ -3,7 +3,7 @@ import { TrainingSentence } from '../types/training';
 import { CommentCaptureConfig } from '../types/comment';
 import { SttMode, LocalSttModel } from '../types/stt';
 import { CommerceState, CustomerPurchaseClaim, PaymentReceipt, SettlementInvoice, Shipment, SmsMessage } from '../types/commerce';
-import { SaleRecord, SttTranscriptLog } from '../types/live';
+import { SaleRecord, SttTranscriptLog, SellerTranscriptRecord } from '../types/live';
 import { User } from '../types/auth';
 import { AdminSaleItem, SellerSttUsageSummary, SttUsageLogItem, SttUsageRecordPayload } from '../types/admin';
 import { isSupabaseConfigured, requireSupabase } from './supabaseClient';
@@ -803,5 +803,30 @@ export const remoteWorkspaceService = {
       console.warn(`[RemoteWorkspace] 세션 발화 로그 클라우드 조회 실패 (${sessionId}):`, err);
       return null;
     }
+  },
+
+  async fetchSessionTranscriptHistory(workspaceId: string, sessionId?: string): Promise<SellerTranscriptRecord[]> {
+    if (!isSupabaseConfigured || !isValidUuid(workspaceId)) return [];
+    const client = requireSupabase();
+    const prefix = 'session_transcripts_';
+    const records: SellerTranscriptRecord[] = [];
+    const pageSize = 100;
+    for (let offset = 0; ; offset += pageSize) {
+      let query = client.from('workspace_settings').select('namespace,value').eq('workspace_id', workspaceId);
+      query = sessionId
+        ? query.eq('namespace', `${prefix}${sessionId}`)
+        : query.like('namespace', 'session\\_transcripts\\_%');
+      const { data, error } = await query.order('namespace').range(offset, offset + pageSize - 1);
+      if (error) throw new Error('클라우드 판매멘트 기록을 불러오지 못했습니다. 이 PC에 저장된 기록만 표시합니다.');
+      for (const row of data || []) {
+        const payload = row.value as CloudSessionTranscriptsPayload | null;
+        const recordSessionId = String(row.namespace).slice(prefix.length);
+        if (!String(row.namespace).startsWith(prefix) || !recordSessionId || payload?.workspaceId !== workspaceId
+          || payload.sessionId !== recordSessionId || !Array.isArray(payload.logs)) continue;
+        records.push(...payload.logs.map((log) => ({ ...log, sessionId: recordSessionId })));
+      }
+      if (!data || data.length < pageSize || sessionId) break;
+    }
+    return records;
   },
 };

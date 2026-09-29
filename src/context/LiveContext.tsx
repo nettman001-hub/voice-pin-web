@@ -100,6 +100,7 @@ interface LiveContextType {
   lastMatchedRuleItem: MatchedRuleItem | null;
   transcriptLogs: SttTranscriptLog[];
   totalSessionTranscriptCount: number;
+  getCurrentSessionTranscripts: () => SttTranscriptLog[];
   downloadSessionTranscripts: (format?: 'txt' | 'csv') => void;
   recentCaptures: CaptureItem[];
   isVoiceEditing: boolean;
@@ -249,11 +250,33 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [currentSessionId]);
 
   useEffect(() => {
-    transcriptWorkspaceIdRef.current = workspaceId || user?.id || 'local';
+    const nextOwner = workspaceId || user?.id || 'local';
+    if (transcriptWorkspaceIdRef.current !== nextOwner) {
+      const sessionId = currentSessionIdRef.current;
+      const previousLogs = sessionTranscriptsRef.current.get(sessionId) || allSessionTranscriptsRef.current;
+      if (previousLogs.length > 0) storageService.saveSessionTranscripts(transcriptWorkspaceIdRef.current, sessionId, previousLogs);
+      if (transcriptPersistTimerRef.current !== null) {
+        window.clearTimeout(transcriptPersistTimerRef.current);
+        transcriptPersistTimerRef.current = null;
+      }
+      sessionTranscriptsRef.current.clear();
+      const restored = storageService.getSessionTranscripts(nextOwner, sessionId);
+      if (restored.length > 0) sessionTranscriptsRef.current.set(sessionId, restored);
+      allSessionTranscriptsRef.current = restored;
+      lastSavedCloudTranscriptCountRef.current.clear();
+      setTranscriptLogs([...restored].reverse().slice(0, 300));
+      setTotalSessionTranscriptCount(restored.length);
+    }
+    transcriptWorkspaceIdRef.current = nextOwner;
   }, [user?.id, workspaceId]);
 
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const lastSavedCloudTranscriptCountRef = useRef<Map<string, number>>(new Map());
+
+  const getCurrentSessionTranscripts = useCallback((): SttTranscriptLog[] => {
+    if (transcriptWorkspaceIdRef.current !== (workspaceId || user?.id || 'local')) return [];
+    return [...(sessionTranscriptsRef.current.get(currentSessionIdRef.current) || allSessionTranscriptsRef.current)];
+  }, [workspaceId, user?.id]);
 
   const persistCurrentSessionTranscripts = useCallback(() => {
     if (transcriptPersistTimerRef.current !== null) {
@@ -262,7 +285,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     const sessionId = currentSessionIdRef.current;
     const logs = sessionTranscriptsRef.current.get(sessionId) || allSessionTranscriptsRef.current;
-    storageService.saveSessionTranscripts(transcriptWorkspaceIdRef.current, sessionId, logs);
+    if (logs.length > 0) storageService.saveSessionTranscripts(transcriptWorkspaceIdRef.current, sessionId, logs);
   }, []);
 
   /**
@@ -270,6 +293,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * 방송 종료 시점이나 세션 전환 시점에 호출됩니다.
    */
   const syncSessionTranscriptsToCloud = useCallback(async (sessionIdOverride?: string): Promise<boolean> => {
+    const targetWorkspaceId = workspaceId || user?.id;
+    if (!targetWorkspaceId || transcriptWorkspaceIdRef.current !== targetWorkspaceId) return false;
     const targetSessionId = sessionIdOverride || currentSessionIdRef.current;
     if (!targetSessionId) return false;
 
@@ -284,7 +309,6 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return true;
     }
 
-    const targetWorkspaceId = workspaceId || user?.id;
     if (!isSupabaseConfigured || !targetWorkspaceId) {
       return false;
     }
@@ -1420,6 +1444,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const newLog: SttTranscriptLog = {
       id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       timestamp: nowTime,
+      recognizedAt: new Date().toISOString(),
       text: fullText,
       isFinal: true,
       confidence: data.confidence,
@@ -1567,7 +1592,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (restoredSessionLogs.length === 0 && isSupabaseConfigured && (workspaceId || user?.id)) {
         const targetWs = workspaceId || user?.id || '';
         void remoteWorkspaceService.fetchCloudSessionTranscripts(targetWs, newSessionId).then((cloudLogs) => {
-          if (cloudLogs && cloudLogs.length > 0 && currentSessionIdRef.current === newSessionId) {
+          if (cloudLogs && cloudLogs.length > 0 && currentSessionIdRef.current === newSessionId
+            && transcriptWorkspaceIdRef.current === targetWs) {
             sessionTranscriptsRef.current.set(newSessionId, cloudLogs);
             allSessionTranscriptsRef.current = cloudLogs;
             setTranscriptLogs([...cloudLogs].reverse().slice(0, 300));
@@ -1915,6 +1941,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         lastMatchedRuleItem,
         transcriptLogs,
         totalSessionTranscriptCount,
+        getCurrentSessionTranscripts,
         downloadSessionTranscripts,
         recentCaptures,
         isVoiceEditing,

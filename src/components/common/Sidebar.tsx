@@ -71,7 +71,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       groupName: '판매 & 정산 관리',
       items: [
         { name: '판매 내역 목록', path: '/sales', icon: ShoppingBag },
-        { name: '댓글 캡처 기록', path: '/comments', icon: MessageSquareText },
+        { name: '댓글/판매멘트 기록', path: '/comments', icon: MessageSquareText },
         { name: '방송 후 일괄 확인', path: '/sales/review', icon: CheckSquare },
         { name: '정산서 관리 & 발송', path: '/invoices', icon: ReceiptText },
         { name: '택배발송 관리', path: '/shipments', icon: Truck },

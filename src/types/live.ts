@@ -66,6 +66,7 @@ export interface LiveSession {
 export interface SttTranscriptLog {
   id: string;
   timestamp: string;
+  recognizedAt?: string;       // 날짜 필터/이력용 ISO 시각 (timestamp는 기존 화면 표시용)
   text: string;
   isFinal: boolean;
   confidence: number;
@@ -84,6 +85,10 @@ export interface SttTranscriptLog {
     | 'CORRECTION_PENDING'
     | 'CORRECTION_UNMATCHED'
     | 'NONE';
+}
+
+export interface SellerTranscriptRecord extends SttTranscriptLog {
+  sessionId: string;
 }
 
 export type VoiceEditState = 'IDLE' | 'LISTENING_FIELD' | 'CONFIRMING';

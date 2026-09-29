@@ -1,4 +1,4 @@
-import { SaleRecord, CaptureItem, LiveSession, SttTranscriptLog } from '../types/live';
+import { SaleRecord, CaptureItem, LiveSession, SttTranscriptLog, SellerTranscriptRecord } from '../types/live';
 import { RecognitionWordRule, CaptureAreaConfig } from '../types/rules';
 import { TrainingSentence } from '../types/training';
 import { PaymentHistoryItem, PaymentCard } from '../types/subscription';
@@ -492,6 +492,28 @@ export class StorageService {
   public saveSessionTranscripts(workspaceId: string, sessionId: string, logs: SttTranscriptLog[]): void {
     if (!workspaceId || !sessionId) return;
     this.setItem(this.transcriptSessionKey(workspaceId, sessionId), logs);
+  }
+
+  public getTranscriptHistory(workspaceId: string): SellerTranscriptRecord[] {
+    if (!workspaceId) return [];
+    const prefix = this.transcriptSessionKey(workspaceId, '');
+    const keys = new Set<string>();
+    try {
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (key?.startsWith(prefix)) keys.add(key);
+      }
+    } catch { /* Live in-memory transcripts can still be downloaded. */ }
+    for (const key of this.memoryFallback.keys()) {
+      if (key.startsWith(prefix)) keys.add(key);
+    }
+    return [...keys].flatMap((key) => {
+      try {
+        const sessionId = decodeURIComponent(key.slice(prefix.length));
+        if (!sessionId) return [];
+        return this.getSessionTranscripts(workspaceId, sessionId).map((log) => ({ ...log, sessionId }));
+      } catch { return []; }
+    });
   }
 
   // 초기화 및 시딩
