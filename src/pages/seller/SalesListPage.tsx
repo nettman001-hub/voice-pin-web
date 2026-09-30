@@ -24,6 +24,7 @@ import { areNicknamesSimilar } from '../../services/nicknameMatcher';
 import { formatSessionDisplay } from '../../utils/sessionFormatter';
 import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 import { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults } from '../../services/promiseDefaultService';
+import { calculateSalesListRevenue } from '../../services/salesListRevenue';
 
 interface BuyerGroupedSale {
   groupKey: string;
@@ -245,20 +246,16 @@ export const SalesListPage: React.FC = () => {
 
   const currentSessionSummary = useMemo(() => {
     const targetSales = sessionFilter === 'ALL' ? sales : sales.filter((s) => s.sessionId === sessionFilter);
-    const valid = targetSales.filter((s) => s.status !== '보류' && s.status !== '취소'
-      && s.syncStatus !== 'PENDING');
-    const totalAmount = valid.reduce((sum, item) => sum + item.amount, 0);
-    const uniqueBuyers = new Set(valid.map((s) => s.buyerNickname.trim()).filter(Boolean));
+    const revenue = calculateSalesListRevenue(targetSales, promiseDefaults);
     const pendingCount = targetSales.filter((s) => s.status === '보류').length;
 
     return {
       sessionName: sessionFilter === 'ALL' ? '전체 방송 회차 합산' : `회차: ${selectedSession?.displayCode || sessionFilter}`,
       totalCount: targetSales.length,
-      totalAmount,
-      uniqueBuyerCount: uniqueBuyers.size,
+      ...revenue,
       pendingCount
     };
-  }, [sales, sessionFilter, selectedSession?.displayCode]);
+  }, [sales, promiseDefaults, sessionFilter, selectedSession?.displayCode]);
 
   const toggleBuyerExpand = (groupKey: string) => {
     setExpandedBuyers((prev) =>
@@ -343,13 +340,22 @@ export const SalesListPage: React.FC = () => {
           </select>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 pt-0.5">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2 pt-0.5">
           <div className="p-2 sm:p-2.5 rounded-xl bg-slate-50 border border-slate-200">
             <span className="text-[10px] text-slate-500 font-medium">선택 회차 총 매출액</span>
             <div className="text-base sm:text-lg font-black text-brand-600 mt-0.5 truncate">
               {currentSessionSummary.totalAmount.toLocaleString()}{' '}
               <span className="text-[10px] font-normal text-slate-500">원</span>
             </div>
+          </div>
+
+          <div className="p-2 sm:p-2.5 rounded-xl bg-emerald-50/60 border border-emerald-200">
+            <span className="text-[10px] text-slate-600 font-medium">선택 회차 확정매출액</span>
+            <div className="text-base sm:text-lg font-black text-emerald-700 mt-0.5 truncate">
+              {currentSessionSummary.confirmedAmount.toLocaleString()}{' '}
+              <span className="text-[10px] font-normal text-slate-500">원</span>
+            </div>
+            <span className="text-[10px] text-slate-500">약속 미이행 확정분 제외</span>
           </div>
 
           <div className="p-2 sm:p-2.5 rounded-xl bg-slate-50 border border-slate-200">
