@@ -8,6 +8,7 @@ import { commentStreamService } from '../services/commentStreamService';
 import type { BatchConfirmResult, SaleHistoryRecord } from '../types/pendingSale';
 import { aiSettingsApi } from '../services/aiSettingsApi';
 import { SalesSyncController } from '../services/salesSyncController';
+import type { PromiseDefaultRecord } from '../services/promiseDefaultService';
 
 interface SettlementSummary {
   totalCount: number;
@@ -18,6 +19,9 @@ interface SettlementSummary {
 
 interface SalesContextType {
   sales: SaleRecord[];
+  promiseDefaults: PromiseDefaultRecord[];
+  setPromiseDefault: (buyerKey: string, buyerNickname: string, sessionId: string,
+    status: PromiseDefaultRecord['status']) => Promise<void>;
   addSale: (sale: Omit<SaleRecord, 'id'>) => SaleRecord;
   updateSale: (sale: SaleRecord) => void;
   retrySalePrint: (id: string) => void;
@@ -41,6 +45,10 @@ const SalesContext = createContext<SalesContextType | undefined>(undefined);
 export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { workspaceId, isRemoteAuth, user } = useAuth();
   const [sales, setSales] = useState<SaleRecord[]>(() => workspaceId ? storageService.getSales(workspaceId) : []);
+  const [promiseDefaultsState, setPromiseDefaultsState] = useState<{ workspaceId: string; records: PromiseDefaultRecord[] }>(
+    () => ({ workspaceId: workspaceId || '', records: workspaceId ? storageService.getPromiseDefaults(workspaceId) : [] }),
+  );
+  const promiseDefaultChangeRef = useRef(0);
   const [syncError, setSyncError] = useState<string | null>(null);
   const salesRef = useRef<SaleRecord[]>(sales);
   const identityRef = useRef(workspaceId);
@@ -94,11 +102,39 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const local = workspaceId ? storageService.getSales(workspaceId) : [];
       salesRef.current = local;
       setSales(local);
+      setPromiseDefaultsState({ workspaceId: '', records: [] });
       return local;
     }
 
-    return await getController()?.refresh() || [];
+    const mutationVersion = promiseDefaultChangeRef.current;
+    const [records, decisions] = await Promise.all([
+      getController()?.refresh() || Promise.resolve([]),
+      isRemoteAuth ? remoteWorkspaceService.loadPromiseDefaults(workspaceId)
+        : Promise.resolve(storageService.getPromiseDefaults(workspaceId)),
+    ]);
+    if (identityRef.current === workspaceId && promiseDefaultChangeRef.current === mutationVersion) {
+      setPromiseDefaultsState({ workspaceId, records: decisions });
+      storageService.savePromiseDefaults(decisions, workspaceId);
+    }
+    return records;
   }, [getController, isRemoteAuth, workspaceId]);
+
+  const setPromiseDefault = async (buyerKey: string, buyerNickname: string, sessionId: string,
+    status: PromiseDefaultRecord['status']): Promise<void> => {
+    if (!workspaceId || !buyerKey || !buyerNickname.trim() || !sessionId) throw new Error('구매자와 방송 회차가 필요합니다.');
+    const decision: PromiseDefaultRecord = {
+      buyerKey, buyerNickname: buyerNickname.trim(), sessionId, status, updatedAt: new Date().toISOString(),
+    };
+    if (isRemoteAuth) await remoteWorkspaceService.savePromiseDefault(workspaceId, decision);
+    if (identityRef.current !== workspaceId) return;
+    promiseDefaultChangeRef.current += 1;
+    storageService.savePromiseDefault(decision, workspaceId);
+    setPromiseDefaultsState((current) => ({
+      workspaceId,
+      records: [decision, ...current.records.filter((record) =>
+        record.buyerKey !== buyerKey || record.sessionId !== sessionId)],
+    }));
+  };
 
   const applyCommittedSales = useCallback((owner: string, records: SaleRecord[]) => {
     if (owner !== identityRef.current) return;
@@ -111,6 +147,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!workspaceId) {
       salesRef.current = [];
       setSales([]);
+      setPromiseDefaultsState({ workspaceId: '', records: [] });
       controllerRef.current = null;
       setSyncError(null);
       return;
@@ -415,7 +452,10 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const visibleSales = controllerRef.current?.workspaceId === workspaceId && controllerRef.current.generation === identityGenerationRef.current ? sales : [];
-  return <SalesContext.Provider value={{ sales: visibleSales, addSale, updateSale, retrySalePrint, deleteSale, confirmBatchSales, exportCsv, refreshSales, applyCommittedSales, syncError, retrySync, getSalesBySession, getSettlementSummary }}>
+  const visiblePromiseDefaults = promiseDefaultsState.workspaceId === workspaceId ? promiseDefaultsState.records : [];
+  return <SalesContext.Provider value={{ sales: visibleSales, promiseDefaults: visiblePromiseDefaults, setPromiseDefault,
+    addSale, updateSale, retrySalePrint, deleteSale, confirmBatchSales, exportCsv, refreshSales, applyCommittedSales,
+    syncError, retrySync, getSalesBySession, getSettlementSummary }}>
     {children}
   </SalesContext.Provider>;
 };

@@ -200,6 +200,7 @@ export const SalesDetailPage: React.FC = () => {
         {/* 구매자 누적 거래 및 신용 이력 */}
         <CustomerStatsBadge
           nickname={buyerNickname || sale.buyerNickname}
+          buyerId={sale.buyerId}
           variant="detailed"
           currentSessionId={sale.sessionId}
         />

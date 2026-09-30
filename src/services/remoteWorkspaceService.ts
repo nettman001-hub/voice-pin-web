@@ -8,6 +8,7 @@ import { AdminSaleItem, SellerSttUsageSummary, SttUsageLogItem, SttUsageRecordPa
 import { isSupabaseConfigured, requireSupabase } from './supabaseClient';
 import { hasCommerceChanges, type CommerceChanges } from './commerceChanges';
 import { normalizeSttVocabulary } from './sttVocabularyService';
+import type { PromiseDefaultRecord } from './promiseDefaultService';
 
 export interface CloudSessionTranscriptsPayload {
   sessionId: string;
@@ -511,6 +512,35 @@ export const remoteWorkspaceService = {
     return Promise.all(rows.map(mapSale));
   },
 
+  async loadPromiseDefaults(workspaceId: string): Promise<PromiseDefaultRecord[]> {
+    const rows: PromiseDefaultRecord[] = [];
+    const pageSize = 1000;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await ensureEnabled().from('buyer_promise_defaults').select('*')
+        .eq('workspace_id', workspaceId).order('updated_at', { ascending: false })
+        .range(offset, offset + pageSize - 1);
+      if (error) throw error;
+      rows.push(...(data || []).map((row: any) => ({
+        buyerKey: row.buyer_key, buyerNickname: row.buyer_nickname,
+        sessionId: row.session_id, status: row.status, updatedAt: row.updated_at,
+      })));
+      if (!data || data.length < pageSize) break;
+    }
+    return rows;
+  },
+
+  async savePromiseDefault(workspaceId: string, decision: PromiseDefaultRecord): Promise<void> {
+    const { error } = await ensureEnabled().from('buyer_promise_defaults').upsert({
+      workspace_id: workspaceId,
+      buyer_key: decision.buyerKey,
+      buyer_nickname: decision.buyerNickname,
+      session_id: decision.sessionId,
+      status: decision.status,
+      updated_at: decision.updatedAt,
+    }, { onConflict: 'workspace_id,buyer_key,session_id' });
+    if (error) throw error;
+  },
+
   async saveSale(workspaceId: string, sale: SaleRecord) {
     if (sale.source === 'WEB_VOICE' && sale.status === '자동저장'
         && sale.purchaseRequestId && sale.printStatus === 'QUEUED' && (sale.printRevision || 0) === 1) {
@@ -646,6 +676,7 @@ export const remoteWorkspaceService = {
   subscribe(workspaceId: string, callback: () => void) {
     const channel = ensureEnabled().channel(`workspace:${workspaceId}:commerce:${crypto.randomUUID()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sales', filter: `workspace_id=eq.${workspaceId}` }, callback)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'buyer_promise_defaults', filter: `workspace_id=eq.${workspaceId}` }, callback)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'customer_messages', filter: `workspace_id=eq.${workspaceId}` }, callback)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_claims', filter: `workspace_id=eq.${workspaceId}` }, callback)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices', filter: `workspace_id=eq.${workspaceId}` }, callback)

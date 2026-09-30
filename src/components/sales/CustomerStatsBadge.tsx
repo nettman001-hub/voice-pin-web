@@ -6,9 +6,11 @@ import { useProductSales } from '../../context/ProductSalesContext';
 import { SaleRecord } from '../../types/live';
 import { CustomerPurchaseClaim, SettlementInvoice, Shipment } from '../../types/commerce';
 import { areNicknamesSimilar, normalizeNickname } from '../../services/nicknameMatcher';
+import { promiseDefaultBuyerKey, summarizePromiseDefaults, type PromiseDefaultRecord } from '../../services/promiseDefaultService';
 
 interface CustomerStatsBadgeProps {
   nickname?: string;
+  buyerId?: string;
   variant?: 'compact' | 'pill' | 'detailed';
   className?: string;
   currentSessionId?: string | null;
@@ -30,7 +32,9 @@ export interface CustomerStats {
 
 export interface CalculateCustomerStatsParams {
   nickname?: string;
+  buyerId?: string;
   sales: SaleRecord[];
+  promiseDefaults?: PromiseDefaultRecord[];
   claims?: CustomerPurchaseClaim[];
   invoices?: SettlementInvoice[];
   shipments?: Shipment[];
@@ -42,7 +46,9 @@ export interface CalculateCustomerStatsParams {
 /** 고객 거래 통계 순수 계산 함수 (단위 테스트 및 재사용 가능) */
 export const calculateCustomerStats = ({
   nickname,
+  buyerId,
   sales,
+  promiseDefaults = [],
   claims = [],
   invoices = [],
   shipments = [],
@@ -56,7 +62,10 @@ export const calculateCustomerStats = ({
   }
 
   // 해당 고객의 모든 주문 건 매칭 (정규화 일치 및 규칙 1, 2, 3 비교 적용)
+  const buyerKey = promiseDefaultBuyerKey(buyerId, nickname || '');
+  const explicit = summarizePromiseDefaults(promiseDefaults, buyerKey);
   const customerSales = sales.filter((s) => {
+    if (buyerId && s.buyerId) return s.buyerId === buyerId;
     const saleNorm = normalizeBuyerNickname(s.buyerNickname);
     if (!saleNorm || saleNorm === '미확인' || saleNorm === '미확인(보류)') return false;
     if (saleNorm === normalizedTarget) return true;
@@ -64,7 +73,9 @@ export const calculateCustomerStats = ({
   });
 
   if (customerSales.length === 0) {
-    return { purchaseCount: 0, totalPurchaseCount: 0, totalRevenue: 0, defaultCount: 0, isFirstTimeBuyer: false, validSales: [] };
+    return { purchaseCount: 0, totalPurchaseCount: 0, totalRevenue: 0,
+      defaultCount: explicit.confirmedCount,
+      isFirstTimeBuyer: false, validSales: [] };
   }
 
   // 1) 이번 판매회차(현재 방송 세션) 주문 여부 판정 함수:
@@ -87,15 +98,16 @@ export const calculateCustomerStats = ({
   const totalPurchaseCount = customerSales.length;
 
   // 2. 누적 매출 및 미이행 건수 계산
-  // * 사용자 명시 규칙: 미이행 횟수는 이번 판매회차에서는 완전히 제외하고, 지난 누적회차(과거 세션)에서만 계산함.
+  // Existing automatic inference uses past sessions only. A seller's explicit
+  // confirmation counts immediately, including during the current session.
   let totalRevenue = 0;
-  let defaultCount = 0;
+  let defaultCount = explicit.confirmedCount;
 
   customerSales.forEach((sale) => {
     const isPastSessionSale = !isCurrentSessionSale(sale);
 
-    // [미이행 횟수] 이번 판매회차는 완전히 제외하고, '지난 누적회차'에서만 계산
-    if (isPastSessionSale) {
+    // Automatic inference only applies to past sessions without a seller decision.
+    if (isPastSessionSale && !explicit.decidedSessionIds.has(sale.sessionId)) {
       let isDefaulted = false;
 
       // A. 과거 주문 취소 / 반품 / 환불 / 노쇼
@@ -181,9 +193,10 @@ export const calculateCustomerStats = ({
 
 export const useCustomerStats = (
   nickname?: string,
-  overrideCurrentSessionId?: string | null
+  overrideCurrentSessionId?: string | null,
+  buyerId?: string,
 ): CustomerStats => {
-  const { sales } = useSales();
+  const { sales, promiseDefaults } = useSales();
   const { claims, invoices, shipments, isPaid } = useCommerce();
   const { currentSessionId } = useLive();
   const { activeSession } = useProductSales();
@@ -194,7 +207,9 @@ export const useCustomerStats = (
   return useMemo(() => {
     return calculateCustomerStats({
       nickname,
+      buyerId,
       sales,
+      promiseDefaults,
       claims,
       invoices,
       shipments,
@@ -202,19 +217,20 @@ export const useCustomerStats = (
       currentSessionId: effectiveSessionId,
       activeSessionId: activeSession?.id
     });
-  }, [nickname, sales, claims, invoices, shipments, isPaid, effectiveSessionId, activeSession?.id]);
+  }, [nickname, buyerId, sales, promiseDefaults, claims, invoices, shipments, isPaid, effectiveSessionId, activeSession?.id]);
 };
 
 export const CustomerStatsBadge: React.FC<CustomerStatsBadgeProps> = ({
   nickname,
+  buyerId,
   variant = 'pill',
   className = '',
   currentSessionId
 }) => {
-  const stats = useCustomerStats(nickname, currentSessionId);
+  const stats = useCustomerStats(nickname, currentSessionId, buyerId);
 
   // 구매 이력이 전혀 없으면 표시하지 않음 (이전 구매 0회라도 이번 회차 첫구매 이력이 있으면 표시)
-  if (stats.validSales.length === 0) {
+  if (stats.validSales.length === 0 && stats.defaultCount === 0) {
     return null;
   }
 

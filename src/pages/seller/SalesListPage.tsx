@@ -23,8 +23,10 @@ import { formatAmountAsDecimal, formatMultiSaleAmount } from '../../services/sal
 import { areNicknamesSimilar } from '../../services/nicknameMatcher';
 import { formatSessionDisplay } from '../../utils/sessionFormatter';
 import { ImageViewerModal } from '../../components/common/ImageViewerModal';
+import { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults } from '../../services/promiseDefaultService';
 
 interface BuyerGroupedSale {
+  groupKey: string;
   buyerNickname: string;
   totalAmount: number;
   orderCount: number;
@@ -38,7 +40,7 @@ interface BuyerGroupedSale {
 }
 
 export const SalesListPage: React.FC = () => {
-  const { sales, exportCsv, refreshSales } = useSales();
+  const { sales, promiseDefaults, setPromiseDefault, exportCsv, refreshSales } = useSales();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -46,6 +48,8 @@ export const SalesListPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [sortOrder, setSortOrder] = useState<'AMOUNT_DESC' | 'COUNT_DESC' | 'LATEST' | 'OLDEST'>('AMOUNT_DESC');
   const [expandedBuyers, setExpandedBuyers] = useState<string[]>([]);
+  const [promiseDefaultBusy, setPromiseDefaultBusy] = useState<string | null>(null);
+  const [promiseDefaultError, setPromiseDefaultError] = useState<{ key: string; message: string } | null>(null);
   const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
   const [viewerModal, setViewerModal] = useState<{
     isOpen: boolean;
@@ -155,10 +159,11 @@ export const SalesListPage: React.FC = () => {
     const map: { [nickname: string]: BuyerGroupedSale } = {};
 
     filteredSales.forEach((sale) => {
-      const key = sale.buyerNickname.trim() || '미확인(보류)';
+      const key = promiseDefaultBuyerKey(sale.buyerId, sale.buyerNickname.trim() || '미확인(보류)');
       if (!map[key]) {
         map[key] = {
-          buyerNickname: key,
+          groupKey: key,
+          buyerNickname: sale.buyerNickname.trim() || '미확인(보류)',
           totalAmount: 0,
           orderCount: 0,
           records: [],
@@ -197,6 +202,23 @@ export const SalesListPage: React.FC = () => {
       }
     });
 
+    // The decision survives deleting the original sale. Keep a small buyer card
+    // so the seller can still find and reverse that explicit decision.
+    if (statusFilter === 'ALL') for (const decision of promiseDefaults) {
+      if (decision.status !== 'CONFIRMED' || (sessionFilter !== 'ALL' && decision.sessionId !== sessionFilter)
+        || !decision.buyerNickname.toLowerCase().includes(searchTerm.toLowerCase())) continue;
+      if (!map[decision.buyerKey]) {
+        map[decision.buyerKey] = {
+          groupKey: decision.buyerKey, buyerNickname: decision.buyerNickname,
+          totalAmount: 0, orderCount: 0, records: [], hasPending: false,
+          hasManualEdited: false, latestRecognizedAt: decision.updatedAt,
+          productImageUrls: [], captureImageUrls: [], sessionIds: [decision.sessionId],
+        };
+      } else if (!map[decision.buyerKey].sessionIds.includes(decision.sessionId)) {
+        map[decision.buyerKey].sessionIds.push(decision.sessionId);
+      }
+    }
+
     const list = Object.values(map);
 
     list.sort((a, b) => {
@@ -208,7 +230,7 @@ export const SalesListPage: React.FC = () => {
     });
 
     return list;
-  }, [filteredSales, sortOrder]);
+  }, [filteredSales, promiseDefaults, searchTerm, sessionFilter, sortOrder, statusFilter]);
 
   const sortedIndividualSales = useMemo(() => {
     const list = [...filteredSales];
@@ -238,10 +260,24 @@ export const SalesListPage: React.FC = () => {
     };
   }, [sales, sessionFilter, selectedSession?.displayCode]);
 
-  const toggleBuyerExpand = (nickname: string) => {
+  const toggleBuyerExpand = (groupKey: string) => {
     setExpandedBuyers((prev) =>
-      prev.includes(nickname) ? prev.filter((n) => n !== nickname) : [...prev, nickname]
+      prev.includes(groupKey) ? prev.filter((key) => key !== groupKey) : [...prev, groupKey]
     );
+  };
+
+  const handlePromiseDefault = async (buyer: BuyerGroupedSale, nextStatus: 'CONFIRMED' | 'CANCELLED') => {
+    if (sessionFilter === 'ALL' || promiseDefaultBusy) return;
+    setPromiseDefaultBusy(buyer.groupKey);
+    setPromiseDefaultError(null);
+    try {
+      await setPromiseDefault(buyer.groupKey, buyer.buyerNickname, sessionFilter, nextStatus);
+    } catch (error) {
+      setPromiseDefaultError({ key: buyer.groupKey,
+        message: error instanceof Error ? error.message : '약속 미이행 기록을 저장하지 못했습니다.' });
+    } finally {
+      setPromiseDefaultBusy(null);
+    }
   };
 
   const handleExportCurrentView = () => {
@@ -425,8 +461,18 @@ export const SalesListPage: React.FC = () => {
               </div>
             ) : (
               buyerGroupedList.map((buyer) => {
-                const isExpanded = expandedBuyers.includes(buyer.buyerNickname);
+                const isExpanded = expandedBuyers.includes(buyer.groupKey);
                 const buyerSaleIds = buyer.records.map((record) => record.id);
+                const promiseDefault = sessionFilter === 'ALL' ? undefined
+                  : getPromiseDefault(promiseDefaults, buyer.groupKey, sessionFilter);
+                const hasConfirmedPromiseDefault = sessionFilter === 'ALL'
+                  ? promiseDefaults.some((decision) => decision.buyerKey === buyer.groupKey && decision.status === 'CONFIRMED')
+                  : promiseDefault?.status === 'CONFIRMED';
+                const promiseDefaultCount = summarizePromiseDefaults(promiseDefaults, buyer.groupKey).confirmedCount;
+                const hasConfirmedSale = sessionFilter !== 'ALL' && buyer.records.some((record) =>
+                  record.sessionId === sessionFilter && record.syncStatus !== 'PENDING'
+                    && record.status !== '보류' && record.status !== '취소'
+                    && record.recordState !== 'CANCELLED' && record.buyerNickname !== '미확인(보류)');
                 const buyerThumbnail = buyer.productImageUrls[0]
                   || buyer.captureImageUrls[0]
                   || buyer.records.find((r) => r.productImageUrl)?.productImageUrl
@@ -434,7 +480,7 @@ export const SalesListPage: React.FC = () => {
 
                 return (
                   <div
-                    key={buyer.buyerNickname}
+                    key={buyer.groupKey}
                     className={`rounded-2xl border transition overflow-hidden ${
                       buyer.hasPending
                         ? 'bg-amber-50/70 border-amber-300'
@@ -443,7 +489,7 @@ export const SalesListPage: React.FC = () => {
                   >
                     <button
                       type="button"
-                      onClick={() => toggleBuyerExpand(buyer.buyerNickname)}
+                      onClick={() => toggleBuyerExpand(buyer.groupKey)}
                       aria-expanded={isExpanded}
                       className="w-full p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left cursor-pointer hover:bg-slate-50/80 transition"
                     >
@@ -489,7 +535,7 @@ export const SalesListPage: React.FC = () => {
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-bold text-base text-slate-900">{buyer.buyerNickname}</span>
                             <span className="text-xs px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 font-bold border border-brand-200">
-                              총 {buyer.orderCount}건 구매
+                              {buyer.orderCount ? `총 ${buyer.orderCount}건 구매` : '원본 판매내역 없음'}
                             </span>
                             {buyer.orderCount > 1 && (
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200">
@@ -501,7 +547,12 @@ export const SalesListPage: React.FC = () => {
                                 보류 포함
                               </span>
                             )}
-                            <BuyerStatusBadges saleIds={buyerSaleIds} />
+                            {hasConfirmedPromiseDefault && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold border border-rose-200">
+                                약속 미이행 확정
+                              </span>
+                            )}
+                            {buyerSaleIds.length > 0 && <BuyerStatusBadges saleIds={buyerSaleIds} />}
                           </div>
                           <div className="text-[11px] text-slate-500 mt-1 flex items-center space-x-2">
                             <span>최근 주문: {new Date(buyer.latestRecognizedAt).toLocaleTimeString('ko-KR')}</span>
@@ -544,12 +595,43 @@ export const SalesListPage: React.FC = () => {
 
                     {isExpanded && (
                       <div className="p-4 border-t border-slate-100 bg-slate-50/70 space-y-4">
-                        <BuyerReconciliationPanel
-                          buyerNickname={buyer.buyerNickname}
-                          records={buyer.records}
-                          captureImageUrls={buyer.captureImageUrls}
-                          availableSessions={availableSessions}
-                        />
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3">
+                          <div>
+                            <p className="text-xs font-bold text-slate-800">{buyer.buyerNickname}님 약속 미이행</p>
+                            <p className="text-[11px] font-semibold text-rose-700 mt-0.5">누적 확정 {promiseDefaultCount}회</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              {sessionFilter === 'ALL' ? '방송 회차를 하나 선택하면 기록할 수 있습니다.'
+                                : '이 회차의 구매가 여러 건이어도 미이행은 1회만 기록합니다. 사유 입력은 필요하지 않습니다.'}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={sessionFilter === 'ALL' || (!hasConfirmedSale && promiseDefault?.status !== 'CONFIRMED') || Boolean(promiseDefaultBusy)}
+                            onClick={() => void handlePromiseDefault(buyer,
+                              promiseDefault?.status === 'CONFIRMED' ? 'CANCELLED' : 'CONFIRMED')}
+                            className={`rounded-lg px-3 py-2 text-xs font-bold border disabled:opacity-50 disabled:cursor-not-allowed ${
+                              promiseDefault?.status === 'CONFIRMED'
+                                ? 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                                : 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700'
+                            }`}
+                          >
+                            {promiseDefaultBusy === buyer.groupKey ? '저장 중…'
+                              : promiseDefault?.status === 'CONFIRMED' ? '약속미이행취소' : '약속미이행확정'}
+                          </button>
+                        </div>
+                        {promiseDefaultError?.key === buyer.groupKey && promiseDefaultBusy === null && (
+                          <p role="alert" className="text-xs font-semibold text-rose-700">{promiseDefaultError.message}</p>
+                        )}
+                        {buyer.records.length > 0 ? (
+                          <BuyerReconciliationPanel
+                            buyerNickname={buyer.buyerNickname}
+                            records={buyer.records}
+                            captureImageUrls={buyer.captureImageUrls}
+                            availableSessions={availableSessions}
+                          />
+                        ) : (
+                          <p className="text-xs text-slate-500">원본 판매내역이 삭제되어도 확정한 미이행 기록은 보존됩니다.</p>
+                        )}
 
                         <div className="text-[11px] font-bold text-slate-600 mb-2 flex items-center justify-between">
                           <span>{buyer.buyerNickname}님의 상세 구매 목록 ({buyer.records.length}건):</span>

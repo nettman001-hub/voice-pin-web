@@ -668,6 +668,7 @@ export const LiveHomePage: React.FC = () => {
                     )}
                     <CustomerStatsBadge
                       nickname={c.nickname}
+                      buyerId={c.buyerId || undefined}
                       variant="compact"
                       currentSessionId={currentSessionId || activeSession?.id}
                     />
@@ -1051,6 +1052,7 @@ export const LiveHomePage: React.FC = () => {
                           )}
                           <CustomerStatsBadge
                             nickname={sale.buyerNickname}
+                            buyerId={sale.buyerId}
                             variant="pill"
                             currentSessionId={sale.sessionId || currentSessionId || activeSession?.id}
                           />

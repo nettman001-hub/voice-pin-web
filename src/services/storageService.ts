@@ -10,6 +10,7 @@ import type { SalesLocalState } from './salesSyncController';
 import { durableStorage } from './durableStorage';
 import { normalizeSttVocabulary } from './sttVocabularyService';
 import type { PurchaseRequest } from './purchaseFirstSales';
+import type { PromiseDefaultRecord } from './promiseDefaultService';
 
 export interface CaptureAreaSnapshot {
   imageUrl: string;
@@ -342,7 +343,7 @@ export class StorageService {
   }
 
   public async restoreWorkspace(workspaceId: string): Promise<void> {
-    for (const baseKey of ['voicecap_sales_state', 'voicecap_comment_outbox', KEYS.COMMENT_RECORDS, 'voicecap_comment_tombstones']) {
+    for (const baseKey of ['voicecap_sales_state', 'voicecap_promise_defaults', 'voicecap_comment_outbox', KEYS.COMMENT_RECORDS, 'voicecap_comment_tombstones']) {
       const key = this.scopedKey(baseKey, workspaceId);
       const beforeVersion = this.latestWrites.get(key) || 0;
       let before: string | null = null;
@@ -699,6 +700,20 @@ export class StorageService {
   public deleteSale(id: string, workspaceIdOverride?: string | null) {
     const list = this.getSales(workspaceIdOverride).filter((s) => s.id !== id);
     this.saveSales(list, workspaceIdOverride);
+  }
+
+  public getPromiseDefaults(workspaceIdOverride?: string | null): PromiseDefaultRecord[] {
+    return this.getItem<PromiseDefaultRecord[]>(this.scopedKey('voicecap_promise_defaults', workspaceIdOverride), []);
+  }
+
+  public savePromiseDefaults(records: PromiseDefaultRecord[], workspaceIdOverride?: string | null): void {
+    this.saveRecoverable(this.scopedKey('voicecap_promise_defaults', workspaceIdOverride), records);
+  }
+
+  public savePromiseDefault(decision: PromiseDefaultRecord, workspaceIdOverride?: string | null): void {
+    const records = this.getPromiseDefaults(workspaceIdOverride)
+      .filter((record) => record.buyerKey !== decision.buyerKey || record.sessionId !== decision.sessionId);
+    this.savePromiseDefaults([decision, ...records], workspaceIdOverride);
   }
 
   // 캡처 목록
