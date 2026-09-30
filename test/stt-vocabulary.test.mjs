@@ -5,6 +5,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import * as voiceSaleValidation from '../src/services/voiceSaleValidation.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -97,6 +98,7 @@ test('workspace cloud vocabulary uses its own namespace and reports failed sync'
     './supabaseClient': { isSupabaseConfigured: true, requireSupabase: () => client },
     './commerceChanges': {},
     './sttVocabularyService': vocabulary,
+    './voiceSaleValidation': voiceSaleValidation,
   });
   await remoteWorkspaceService.saveSttVocabulary('seller-A', ['코듀로이']);
   assert.equal(JSON.stringify(stored.get('seller-A:stt_vocabulary')), JSON.stringify({ words: ['코듀로이'] }));

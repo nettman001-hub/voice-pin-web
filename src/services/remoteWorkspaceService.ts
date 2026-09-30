@@ -9,6 +9,7 @@ import { isSupabaseConfigured, requireSupabase } from './supabaseClient';
 import { hasCommerceChanges, type CommerceChanges } from './commerceChanges';
 import { normalizeSttVocabulary } from './sttVocabularyService';
 import type { PromiseDefaultRecord } from './promiseDefaultService';
+import { invalidVoiceSaleFields, voiceSaleValidationMessage } from './voiceSaleValidation';
 
 export interface CloudSessionTranscriptsPayload {
   sessionId: string;
@@ -544,8 +545,16 @@ export const remoteWorkspaceService = {
   async saveSale(workspaceId: string, sale: SaleRecord) {
     if (sale.source === 'WEB_VOICE' && sale.status === '자동저장'
         && sale.purchaseRequestId && sale.printStatus === 'QUEUED' && (sale.printRevision || 0) === 1) {
+      const operationId = sale.id.slice(2);
+      const invalidFields = invalidVoiceSaleFields(operationId, sale);
+      if (invalidFields.length) {
+        console.error('[VoiceSale] 판매 저장 근거 검증 실패:', { saleId: sale.id, invalidFields });
+        throw Object.assign(new Error(voiceSaleValidationMessage(invalidFields)), {
+          code: 'VALIDATION_ERROR', retryable: false, details: { invalidFields },
+        });
+      }
       const { data, error } = await ensureEnabled().functions.invoke('sales-api', { body: {
-        action: 'commit-voice-sale', operationId: sale.id.slice(2),
+        action: 'commit-voice-sale', operationId,
         sale: {
           id: sale.id, sessionId: sale.sessionId, purchaseRequestId: sale.purchaseRequestId,
           productId: sale.productId, productCode: sale.productCode, productName: sale.productName,
@@ -553,7 +562,29 @@ export const remoteWorkspaceService = {
           rawTranscript: sale.rawTranscript, recognizedAt: sale.recognizedAt,
         },
       } });
-      if (error || !data?.ok) throw new Error(data?.error?.message || error?.message || '음성 판매 서버 확정 실패');
+      if (error || !data?.ok) {
+        let serverError = data?.error;
+        const response = (error as { context?: Response } | null)?.context;
+        if (!serverError && response && typeof response.clone === 'function') {
+          try {
+            const body = await response.clone().json();
+            serverError = body?.error;
+          } catch { /* The HTTP status is still useful when the body is unreadable. */ }
+        }
+        console.error('[VoiceSale] 클라우드 판매 확정 실패:', {
+          status: response?.status ?? null,
+          code: serverError?.code || 'UNKNOWN',
+          message: serverError?.message || error?.message || '응답을 확인할 수 없습니다.',
+          saleId: sale.id,
+          invalidFields: serverError?.details?.invalidFields || [],
+        });
+        // A comment not yet uploaded can become valid on the next retry. Input
+        // validation failures cannot, and must not block unrelated sales.
+        const retryable = !['VALIDATION_ERROR', 'PRICE_OR_INTENT_UNVERIFIED', 'INVALID_EVIDENCE'].includes(serverError?.code);
+        throw Object.assign(new Error(serverError?.message || error?.message || '음성 판매 서버 확정 실패'), {
+          code: serverError?.code, retryable, details: serverError?.details,
+        });
+      }
       return;
     }
     // The first voice allocation is committed by the RPC, which resolves the

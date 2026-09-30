@@ -2,17 +2,15 @@ import { admin, errorResponse, successResponse } from '../../_shared/productSale
 import { extractSpeechPrice } from '../../../../src/services/priceEvidence.ts'
 import { extractSaleFromTranscript } from '../../../../src/services/salesExtractor.ts'
 import { getPurchaseRequests, matchPurchaseRequest } from '../../../../src/services/purchaseFirstSales.ts'
+import { invalidVoiceSaleFields, voiceSaleValidationMessage } from '../../../../src/services/voiceSaleValidation.ts'
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export async function handleCommitVoiceSale(workspaceId: string, actorId: string, body: any) {
   const sale = body?.sale
-  if (!sale || !UUID.test(String(body.operationId || '')) || !UUID.test(String(sale.sessionId || ''))
-      || !/^s-[0-9a-f-]{36}$/i.test(String(sale.id || ''))
-      || typeof sale.purchaseRequestId !== 'string'
-      || !sale.purchaseRequestId.startsWith(`${sale.sessionId}:`)
-      || typeof sale.rawTranscript !== 'string') {
-    return errorResponse('VALIDATION_ERROR', '음성 판매의 회차·구매 댓글·발화 근거가 누락되었습니다.', 400)
+  const invalidFields = invalidVoiceSaleFields(body?.operationId, sale)
+  if (invalidFields.length) {
+    return errorResponse('VALIDATION_ERROR', voiceSaleValidationMessage(invalidFields), 400, { invalidFields })
   }
   const evidence = extractSpeechPrice(sale.rawTranscript)
   const extracted = extractSaleFromTranscript(sale.rawTranscript)

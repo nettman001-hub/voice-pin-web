@@ -49,6 +49,8 @@ async function drain(workspaceId: string) {
     const queue = storageService.getCommentOutbox<QueuedCloudComment>(workspaceId);
     const first = queue.find((item) => !isTemporarySessionId(item.sessionId));
     if (!first) return; // Provisional comments remain queued until the server session is ready.
+    // Do not send a comment before its local outbox write has completed.
+    await storageService.awaitCommentOutboxPersistence(workspaceId);
     const batch = queue.filter((item) => item.sessionId === first.sessionId).slice(0, 50);
     const response = await productSalesApi.ingestComments({
       workspaceId,

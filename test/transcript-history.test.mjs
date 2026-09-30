@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+import * as voiceSaleValidation from '../src/services/voiceSaleValidation.ts';
 
 function load(path, dependencies = {}, globals = {}) {
   const source = fs.readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -220,6 +221,7 @@ function remoteFixture(rows, fail = false) {
     './supabaseClient': { isSupabaseConfigured: true, requireSupabase: () => client },
     './commerceChanges': { hasCommerceChanges: () => false },
     './sttVocabularyService': { normalizeSttVocabulary: (words) => words },
+    './voiceSaleValidation': voiceSaleValidation,
   });
   return { service, calls };
 }

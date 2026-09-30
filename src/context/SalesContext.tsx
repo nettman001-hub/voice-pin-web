@@ -89,7 +89,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         }
       },
-      error: (message) => setSyncError(message ? '클라우드 저장 대기 중입니다. 연결을 확인해 주세요.' : null),
+      error: (message) => setSyncError(message),
       active: () => identityGenerationRef.current === generation && identityRef.current === workspaceId && controllerRef.current?.controller === controller,
     });
     controllerRef.current = { workspaceId, generation, controller };
@@ -141,7 +141,8 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     getController()?.applyConfirmed(records);
   }, [getController]);
 
-  const retrySync = useCallback(() => { void getController()?.flush(); }, [getController]);
+  const retrySync = useCallback(() => { void getController()?.flush({ retryBlocked: true }); }, [getController]);
+  const retryAutomaticSync = useCallback(() => { void getController()?.flush(); }, [getController]);
 
   useEffect(() => {
     if (!workspaceId) {
@@ -164,20 +165,20 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Initialize after recovering the durable outbox; never replace a live controller.
       const controller = getController();
       if (controller) { salesRef.current = controller.records; setSales(controller.records); }
-      retrySync();
+      retryAutomaticSync();
       load();
     });
     const unsubscribe = isRemoteAuth ? remoteWorkspaceService.subscribe(workspaceId, () => {
       window.clearTimeout(timer);
       timer = window.setTimeout(load, 350);
     }) : () => {};
-    const retryTimer = window.setInterval(retrySync, 10_000);
-    window.addEventListener('online', retrySync);
+    const retryTimer = window.setInterval(retryAutomaticSync, 10_000);
+    window.addEventListener('online', retryAutomaticSync);
     const reloadLocal = () => {
       void storageService.restoreWorkspace(workspaceId).then(async () => {
         if (!active) return;
         await getController()?.reloadState();
-        retrySync();
+        retryAutomaticSync();
       });
     };
     const handleStorage = (event: StorageEvent) => {
@@ -190,11 +191,11 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     window.addEventListener('voicecap_sales_updated', handleLocal);
     return () => {
       active = false; window.clearTimeout(timer); window.clearInterval(retryTimer);
-      window.removeEventListener('online', retrySync); unsubscribe();
+      window.removeEventListener('online', retryAutomaticSync); unsubscribe();
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('voicecap_sales_updated', handleLocal);
     };
-  }, [getController, isRemoteAuth, workspaceId, refreshSales, retrySync]);
+  }, [getController, isRemoteAuth, workspaceId, refreshSales, retryAutomaticSync]);
 
   const replaceSale = (sale: SaleRecord) => {
     const controller = getController();

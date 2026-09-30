@@ -269,6 +269,7 @@ export class StorageService {
   private failures = new Set<string>();
   private writeVersion = 0;
   private latestWrites = new Map<string, number>();
+  private pendingWrites = new Map<string, Promise<void>>();
   private channel = typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined'
     ? new BroadcastChannel('voicecap-local-sync') : null;
 
@@ -297,14 +298,19 @@ export class StorageService {
 
   public getPersistenceError(): boolean {
     const owner = this.currentWorkspaceId;
-    return owner !== null && [...this.failures].some((key) => key.endsWith(`:${encodeURIComponent(owner)}`));
+    if (!owner) return false;
+    const encodedOwner = encodeURIComponent(owner);
+    return [...this.failures].some((key) => key.endsWith(`:${encodedOwner}`)
+      || key.startsWith(`voicecap_transcripts:${encodedOwner}:`));
   }
 
   public retryPersistence(): void {
     for (const key of [...this.failures]) {
-      if (this.currentWorkspaceId && key.endsWith(`:${encodeURIComponent(this.currentWorkspaceId)}`) && this.memoryFallback.has(key)) {
-        this.saveRecoverable(key, this.memoryFallback.get(key));
-      }
+      if (!this.currentWorkspaceId || !this.memoryFallback.has(key)) continue;
+      const encodedOwner = encodeURIComponent(this.currentWorkspaceId);
+      if (key.startsWith(`voicecap_transcripts:${encodedOwner}:`)) {
+        this.saveIndexedDbFirst(key, this.memoryFallback.get(key));
+      } else if (key.endsWith(`:${encodedOwner}`)) this.saveRecoverable(key, this.memoryFallback.get(key));
     }
   }
 
@@ -313,6 +319,12 @@ export class StorageService {
   }
 
   private saveRecoverable(key: string, value: unknown) {
+    // Workspace records can be large. Keep Web Storage only as a fallback if
+    // IndexedDB is unavailable; unscoped legacy settings retain their format.
+    if (key.includes(':')) {
+      void this.saveIndexedDbFirst(key, value);
+      return;
+    }
     const version = Math.max(Date.now() * 1000, this.writeVersion + 1);
     this.writeVersion = version;
     this.latestWrites.set(key, version);
@@ -322,28 +334,82 @@ export class StorageService {
     if (saved) {
       this.memoryFallback.delete(key);
       this.failures.delete(key);
-    } else {
-      this.failures.add(key);
     }
     // Mirror critical data even on a successful Web Storage write. This gives
     // reloads a complete recovery copy and preserves the pending operation log.
-    void durableStorage.set(key, envelope).then(() => {
+    void Promise.resolve().then(() => durableStorage.set(key, envelope)).then(() => {
       if (this.latestWrites.get(key) !== version) return;
       this.failures.delete(key);
       this.notifyPersistence();
       if (key.startsWith(`${KEYS.COMMENT_RECORDS}:`) || key.startsWith('voicecap_comment_tombstones:')) {
         this.channel?.postMessage({ workspaceId: decodeURIComponent(key.slice(key.lastIndexOf(':') + 1)), kind: 'comments' });
       }
-    }).catch(() => {
+    }).catch((error) => {
       if (this.latestWrites.get(key) !== version) return;
-      if (!saved) this.failures.add(key);
+      // A failed Web Storage write is recoverable when IndexedDB succeeds.
+      // Report an error only after both stores have failed.
+      if (!saved) {
+        this.failures.add(key);
+        console.error(`[Storage] Both local stores failed for key: ${key}`, error);
+      }
       this.notifyPersistence();
     });
     this.notifyPersistence();
   }
 
+  private saveIndexedDbFirst(key: string, value: unknown): Promise<void> {
+    const version = Math.max(Date.now() * 1000, this.writeVersion + 1);
+    this.writeVersion = version;
+    this.latestWrites.set(key, version);
+    const envelope = { __voicecapRecovery: 1, updatedAt: version, data: value };
+    this.memoryFallback.set(key, value);
+    let previousWebCopy: string | null = null;
+    try { previousWebCopy = localStorage.getItem(key); } catch {}
+    const write = Promise.resolve().then(() => durableStorage.update<typeof envelope>(key, (current) =>
+      current && current.updatedAt > version ? current : envelope
+    )).then((committed) => {
+      if (this.latestWrites.get(key) !== version) return;
+      if (committed.updatedAt > version) {
+        this.memoryFallback.set(key, committed.data);
+        this.latestWrites.set(key, committed.updatedAt);
+        this.writeVersion = Math.max(this.writeVersion, committed.updatedAt);
+      }
+      // Remove only this key's old Web Storage copy after the new copy has
+      // committed. This frees quota without discarding unsynced records.
+      try {
+        if (localStorage.getItem(key) === previousWebCopy) localStorage.removeItem(key);
+      } catch {}
+      this.failures.delete(key);
+      this.notifyPersistence();
+      if (key.startsWith(`${KEYS.COMMENT_RECORDS}:`) || key.startsWith('voicecap_comment_tombstones:')) {
+        this.channel?.postMessage({ workspaceId: decodeURIComponent(key.slice(key.lastIndexOf(':') + 1)), kind: 'comments' });
+      }
+    }).catch((error) => {
+      if (this.latestWrites.get(key) !== version) return;
+      if (this.setItem(key, envelope)) {
+        this.memoryFallback.delete(key);
+        this.failures.delete(key);
+      } else {
+        this.failures.add(key);
+        console.error(`[Storage] Both local stores failed for key: ${key}`, error);
+      }
+      this.notifyPersistence();
+    });
+    this.pendingWrites.set(key, write);
+    void write.finally(() => {
+      if (this.pendingWrites.get(key) === write) this.pendingWrites.delete(key);
+    });
+    return write;
+  }
+
+  public async awaitCommentOutboxPersistence(workspaceId: string): Promise<void> {
+    const key = this.scopedKey('voicecap_comment_outbox', workspaceId);
+    await this.pendingWrites.get(key);
+    if (this.failures.has(key)) throw new Error('댓글 전송 대기열을 이 기기에 저장하지 못했습니다.');
+  }
+
   public async restoreWorkspace(workspaceId: string): Promise<void> {
-    for (const baseKey of ['voicecap_sales_state', 'voicecap_promise_defaults', 'voicecap_comment_outbox', KEYS.COMMENT_RECORDS, 'voicecap_comment_tombstones']) {
+    for (const baseKey of ['voicecap_sales_state', 'voicecap_promise_defaults', 'voicecap_comment_outbox', KEYS.COMMENT_RECORDS, 'voicecap_comment_tombstones', 'voicecap_purchase_requests', KEYS.SALES]) {
       const key = this.scopedKey(baseKey, workspaceId);
       const beforeVersion = this.latestWrites.get(key) || 0;
       let before: string | null = null;
@@ -353,18 +419,62 @@ export class StorageService {
         let current: string | null = null;
         try { current = localStorage.getItem(key); } catch {}
         if ((this.latestWrites.get(key) || 0) !== beforeVersion || current !== before) continue;
-        const local = current ? JSON.parse(current) : null;
-        const memoryVersion = this.memoryFallback.has(key) ? beforeVersion : 0;
-        if (local && (local.updatedAt || 0) >= memoryVersion && this.memoryFallback.has(key)) {
-          this.memoryFallback.delete(key);
-          this.latestWrites.set(key, local.updatedAt || 0);
-        }
-        if (recovered !== null && (!local || (recovered.updatedAt || 0) > (local.updatedAt || 0))
-          && (!this.memoryFallback.has(key) || (recovered.updatedAt || 0) > memoryVersion)) {
-          this.memoryFallback.set(key, recovered.__voicecapRecovery === 1 ? recovered.data : recovered);
-          this.latestWrites.set(key, recovered.updatedAt || 0);
+        const parsed = current ? JSON.parse(current) : null;
+        const local = parsed === null ? null : parsed?.__voicecapRecovery === 1
+          ? parsed : { __voicecapRecovery: 1, updatedAt: 0, data: parsed };
+        const latest = local && (!recovered || (local.updatedAt || 0) >= (recovered.updatedAt || 0))
+          ? await durableStorage.update<typeof local>(key, (existing) =>
+            existing && (existing.updatedAt || 0) > (local.updatedAt || 0) ? existing : local)
+          : recovered;
+        let after: string | null = null;
+        try { after = localStorage.getItem(key); } catch {}
+        if ((this.latestWrites.get(key) || 0) !== beforeVersion || after !== current) continue;
+        if (latest !== null) {
+          // A failed in-flight write may exist only in memory. Never replace it
+          // with an older durable snapshot during another-tab refresh.
+          if (this.memoryFallback.has(key) && beforeVersion > (latest.updatedAt || 0)) continue;
+          this.memoryFallback.set(key, latest.__voicecapRecovery === 1 ? latest.data : latest);
+          this.latestWrites.set(key, latest.updatedAt || 0);
+          if (current !== null) localStorage.removeItem(key);
         }
       } catch { /* Empty/new databases can still operate from Web Storage. */ }
+    }
+    const transcriptPrefix = `voicecap_transcripts:${encodeURIComponent(workspaceId)}:`;
+    const legacyTranscriptKeys: string[] = [];
+    try {
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (key?.startsWith(transcriptPrefix)) legacyTranscriptKeys.push(key);
+      }
+    } catch {}
+    for (const key of legacyTranscriptKeys) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const beforeVersion = this.latestWrites.get(key) || 0;
+        const parsed = JSON.parse(raw);
+        const envelope = parsed?.__voicecapRecovery === 1
+          ? parsed : { __voicecapRecovery: 1, updatedAt: 0, data: parsed };
+        const latest = await durableStorage.update<typeof envelope>(key, (existing) =>
+          existing && (existing.updatedAt || 0) > (envelope.updatedAt || 0) ? existing : envelope
+        );
+        if ((this.latestWrites.get(key) || 0) !== beforeVersion || localStorage.getItem(key) !== raw) continue;
+        this.memoryFallback.set(key, latest.data);
+        this.latestWrites.set(key, latest.updatedAt || 0);
+        localStorage.removeItem(key);
+      } catch (error) {
+        console.warn('[Storage] 판매 멘트 로컬 기록 이전 실패:', error);
+      }
+    }
+    try {
+      const transcripts = await durableStorage.entries<{ __voicecapRecovery?: number; updatedAt?: number; data?: SttTranscriptLog[] }>(transcriptPrefix);
+      for (const [key, envelope] of transcripts) {
+        if (this.latestWrites.has(key)) continue;
+        this.memoryFallback.set(key, envelope?.__voicecapRecovery === 1 ? envelope.data || [] : envelope);
+        this.latestWrites.set(key, envelope?.updatedAt || 0);
+      }
+    } catch (error) {
+      console.warn('[Storage] 판매 멘트 로컬 기록 복원 실패:', error);
     }
   }
 
@@ -397,15 +507,31 @@ export class StorageService {
       } catch {
         // Web Locks still serialize the Web Storage fallback between tabs.
         const next = change(this.getSalesLocalState(workspaceId));
-        this.saveSalesLocalState(workspaceId, next);
+        const version = Math.max(Date.now() * 1000, this.writeVersion + 1);
+        this.writeVersion = version;
+        this.latestWrites.set(key, version);
+        const fallback = { __voicecapRecovery: 1, updatedAt: version, data: next };
+        if (this.setItem(key, fallback)) {
+          this.memoryFallback.delete(key);
+          this.failures.delete(key);
+        } else {
+          this.memoryFallback.set(key, next);
+          this.failures.add(key);
+        }
+        this.notifyPersistence();
         this.notifySales(workspaceId);
         this.channel?.postMessage({ workspaceId });
         return next;
       }
       this.writeVersion = Math.max(this.writeVersion, envelope.updatedAt);
       this.latestWrites.set(key, envelope.updatedAt);
-      if (this.setItem(key, envelope)) this.memoryFallback.delete(key);
-      else this.memoryFallback.set(key, envelope.data);
+      this.memoryFallback.set(key, envelope.data);
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw && (JSON.parse(raw)?.updatedAt || 0) <= envelope.updatedAt && localStorage.getItem(key) === raw) {
+          localStorage.removeItem(key);
+        }
+      } catch {}
       this.failures.delete(key); // The transaction completed durably, even if Web Storage failed.
       this.notifyPersistence();
       this.notifySales(workspaceId);
@@ -484,7 +610,7 @@ export class StorageService {
 
   public saveSessionTranscripts(workspaceId: string, sessionId: string, logs: SttTranscriptLog[]): void {
     if (!workspaceId || !sessionId) return;
-    this.setItem(this.transcriptSessionKey(workspaceId, sessionId), logs);
+    void this.saveIndexedDbFirst(this.transcriptSessionKey(workspaceId, sessionId), logs);
   }
 
   public getTranscriptHistory(workspaceId: string): SellerTranscriptRecord[] {

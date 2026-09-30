@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+import * as voiceSaleValidation from '../src/services/voiceSaleValidation.ts';
 
 // Execute the application modules with a local Supabase stub; never connect to
 // the real database or browser storage during these persistence checks.
@@ -94,6 +95,7 @@ function remoteService(client) {
     './supabaseClient': { isSupabaseConfigured: true, requireSupabase: () => client },
     './commerceChanges': changesModule,
     './sttVocabularyService': { normalizeSttVocabulary: (words) => words },
+    './voiceSaleValidation': voiceSaleValidation,
   }).remoteWorkspaceService;
 }
 

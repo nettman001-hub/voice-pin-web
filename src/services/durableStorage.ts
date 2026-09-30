@@ -76,6 +76,29 @@ export class DurableStorage {
       request.onerror = () => reject(request.error);
     });
   }
+
+  async entries<T>(prefix: string): Promise<Array<[string, T]>> {
+    await this.queue.catch(() => {});
+    const database = await this.open();
+    return new Promise((resolve, reject) => {
+      const result: Array<[string, T]> = [];
+      const request = database.transaction('entries').objectStore('entries').openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve(result);
+          return;
+        }
+        const key = String(cursor.key);
+        if (key.startsWith(prefix)) {
+          try { result.push([key, JSON.parse(cursor.value) as T]); }
+          catch { /* A corrupt entry must not hide other recoverable sessions. */ }
+        }
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
 }
 
 export const durableStorage = new DurableStorage();

@@ -5,6 +5,7 @@ export interface SaleSyncOperation {
   token: string;
   kind: 'UPSERT' | 'DELETE';
   sale?: SaleRecord;
+  blockedError?: { code?: string; message: string };
 }
 
 export interface SalesLocalState {
@@ -78,6 +79,7 @@ export class SalesSyncController {
           const newOperation = after && after.token !== before?.token;
           const concurrentOperation = pending.get(id);
           if (newOperation) pending.set(id, after);
+          else if (after && concurrentOperation?.token === before?.token && !equal(after, before)) pending.set(id, after);
           else if (before && !after && concurrentOperation?.token === before.token) pending.delete(id);
           // An ACK/refresh must not replace another tab's newer edit. Explicit
           // local operations apply only their own entity, preserving other rows.
@@ -181,16 +183,32 @@ export class SalesSyncController {
     return this.records;
   }
 
-  flush(): Promise<void> {
+  flush(options: { retryBlocked?: boolean } = {}): Promise<void> {
     if (this.draining) return this.draining;
-    this.draining = this.drain().finally(() => { this.draining = null; });
+    this.draining = this.drain(options.retryBlocked === true).finally(() => { this.draining = null; });
     return this.draining;
   }
 
-  private async drain() {
+  private blockedMessage(): string | null {
+    const blocked = [...this.pending.values()].filter((operation) => operation.blockedError);
+    return blocked.length ? `저장 근거 확인이 필요한 판매 ${blocked.length}건: ${blocked[0].blockedError!.message}` : null;
+  }
+
+  private async drain(retryBlocked: boolean) {
     if (this.dependencies.update) await this.persistence;
+    if (retryBlocked && [...this.pending.values()].some((operation) => operation.blockedError)) {
+      this.pending = new Map([...this.pending].map(([id, operation]) => {
+        const { blockedError: _blocked, ...retry } = operation;
+        return [id, retry];
+      }));
+      await this.publish();
+    }
     while (this.dependencies.active() && this.pending.size) {
-      const operation = this.pending.values().next().value as SaleSyncOperation;
+      const operation = [...this.pending.values()].find((item) => !item.blockedError);
+      if (!operation) {
+        this.dependencies.error(this.blockedMessage());
+        return;
+      }
       try {
         const write = async () => {
           if (!this.dependencies.active()) return;
@@ -207,6 +225,20 @@ export class SalesSyncController {
           await next;
         } else await write();
       } catch (error) {
+        if (!this.dependencies.active()) return;
+        if ((error as { retryable?: boolean } | null)?.retryable === false) {
+          if (this.pending.get(operation.id)?.token === operation.token) {
+            this.pending.set(operation.id, {
+              ...operation,
+              blockedError: {
+                code: (error as { code?: string }).code,
+                message: error instanceof Error ? error.message : '판매 저장 근거를 확인해 주세요.',
+              },
+            });
+          }
+          await this.publish();
+          continue; // Preserve this row, but let later valid sales reach the server.
+        }
         if (this.dependencies.active()) this.dependencies.error(error instanceof Error ? error.message : '클라우드 저장 실패');
         return; // The durable pending entry remains available for reconnect/retry.
       }
@@ -219,7 +251,7 @@ export class SalesSyncController {
         this.records = this.records.map((sale) => sale.id === operation.id ? { ...sale, syncStatus: 'SYNCED' } : sale);
       }
       await this.publish();
-      if (this.dependencies.active()) this.dependencies.error(null);
+      if (this.dependencies.active()) this.dependencies.error(this.blockedMessage());
     }
   }
 }
