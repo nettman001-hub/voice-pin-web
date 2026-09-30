@@ -44,6 +44,7 @@ import {
   handleGetOperation,
   handleGetProductSales,
 } from './handlers/sales.ts'
+import { handleCommitVoiceSale } from './handlers/voiceSales.ts'
 
 import {
   handleClaimPrintJobs,
@@ -203,6 +204,9 @@ serve(async (req: Request) => {
       case 'commit-sales':
         requireCapability('SALES_WRITE')
         return await handleCommitSales(workspaceId, actorId, body)
+      case 'commit-voice-sale':
+        requireCapability('SALES_WRITE')
+        return await handleCommitVoiceSale(workspaceId, actorId, body)
       case 'get-product-sales':
         requireCapability('SALES_READ')
         return await handleGetProductSales(workspaceId, body)

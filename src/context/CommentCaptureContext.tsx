@@ -13,6 +13,7 @@ import {
 } from '../services/commentStreamService';
 import type { CommentStreamStatus } from '../services/commentStreamService';
 import { CommentCaptureConfig, CommentRecord, DEFAULT_COMMENT_CAPTURE_CONFIG, DEFAULT_COMMENT_SERVER_URL } from '../types/comment';
+import { commentWithdrawsPurchase, purchaseRequestFromComment } from '../services/purchaseFirstSales';
 
 export interface CommentAlert {
   id: string;
@@ -95,6 +96,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       if (isTemporarySessionId(prevSessionId)) {
         // 로컬 스토리지에 이미 저장된 댓글들의 sessionId도 일괄 승격
         storageService.promoteSessionComments(prevSessionId, nextSessionId, workspaceId);
+        storageService.promotePurchaseRequests(prevSessionId, nextSessionId, workspaceId);
         if (workspaceId) promoteCommentOutbox(workspaceId, prevSessionId, nextSessionId);
 
         for (const [key, comment] of pendingCommentsRef.current.entries()) {
@@ -317,6 +319,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         sessionId: currentSession,
         nickname,
         uniqueId: incoming.uniqueId || undefined,
+        platformUserId: incoming.userId || undefined,
         buyerId: undefined, // P1-2: 서버 buyers.id는 서버가 발급한 UUID여야 하므로 틱톡 ID 대입 중단
         content,
         capturedAt: incoming.receivedAt || new Date().toISOString(),
@@ -325,6 +328,9 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
       // [동시 쓰기 1: 로컬DB] 로컬 댓글 테이블에 즉시 INSERT
       storageService.addCommentRecords([record], owner);
+      const purchaseRequest = purchaseRequestFromComment(record);
+      if (purchaseRequest) storageService.addPurchaseRequest(purchaseRequest, owner);
+      else if (commentWithdrawsPurchase(record.content)) storageService.withdrawPurchaseRequestsForComment(record, owner);
 
       pendingCommentsRef.current.set(platformMessageId, record);
 

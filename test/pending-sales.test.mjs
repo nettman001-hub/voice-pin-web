@@ -209,6 +209,7 @@ test('Server Validation: AI가 제안한 닉네임이 실제 방송 댓글에 �
     id: 'sale_001',
     buyerNickname: '미확인(보류)',
     amount: 10000,
+    rawTranscript: '판매자 가격 1.2',
   };
 
   const validAiResult = {
@@ -246,6 +247,20 @@ test('Server Validation: AI가 제안한 닉네임이 실제 방송 댓글에 �
   assert.equal(validation.changes?.amount, 12000);
   assert.ok(validation.resolvedReasonCodes.includes('MISSING_NICKNAME'));
   assert.ok(validation.resolvedReasonCodes.includes('MISSING_AMOUNT'));
+});
+
+test('AI cannot substitute an invented price or another sale ID', () => {
+  const sale = { id: 'sale_001', rawTranscript: '햇살언니께 1.2 드리겠습니다', amount: 0 };
+  const base = {
+    resolvable: true, targetSaleId: sale.id, action: 'UPDATE_SALE',
+    changes: { amount: { to: 12000, unitPrice: 12000, quantity: 1 } },
+    evidenceIds: [], evidenceSummary: '', missingInfo: [], conflictReason: null,
+  };
+  assert.equal(validateAiResolutionForSale(base, sale, { sessionComments: [] }).valid, true);
+  assert.equal(validateAiResolutionForSale({ ...base, changes: { amount: { to: 77777 } } }, sale,
+    { sessionComments: [] }).valid, false);
+  assert.equal(validateAiResolutionForSale({ ...base, targetSaleId: 'sale_other' }, sale,
+    { sessionComments: [] }).valid, false);
 });
 
 // 9. 남은 보류 건 일괄 확정: 필수값 및 미해결 보류 사유가 없어야만 확정 가능

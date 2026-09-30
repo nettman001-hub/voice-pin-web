@@ -1,4 +1,5 @@
 import type { SaleRecord, SaleStatus } from '../types/live.ts';
+import { extractSpeechPrice } from './priceEvidence.ts';
 
 /**
  * 한국어 금액 표현(예: "35,000원", "3만 5천원", "3만원", "42000원", "5천원")을 숫자(number)로 변환
@@ -23,6 +24,9 @@ const KOREAN_DIGIT_WORDS: Record<string, number> = {
 
 export function parseKoreanAmount(text: string): number | null {
   if (!text) return null;
+  const evidenced = extractSpeechPrice(text);
+  if (evidenced) return evidenced.amount;
+  if (/\d+\s*(?:\.|점)\s*\d+|[영공일이삼사오육칠팔구]\s*점\s*[영공일이삼사오육칠팔구]/u.test(text)) return null;
 
   // 0. 사용자 명시 규칙: "소숫점 숫자가 나오면 무조건 가격을 말하는 것으로 확정한다. 예를 들어 '1.7' 이면 17,000원 이다."
   // 0-1) 한글 발음 소수 표현 (예: "일점칠", "이점오", "삼점오", "영점팔" 등)
@@ -113,6 +117,14 @@ export function parseKoreanAmount(text: string): number | null {
 export function parseBuyerNickname(text: string): string | null {
   if (!text) return null;
 
+  // Live allocation: "네, 햇살언니께 드리겠습니다" / "뒷자리1234언니께".
+  // Preserve the position word so the account matcher can verify the suffix.
+  const allocationName = text.match(/(?:^|[\s,，])((?:뒷\s*자리|뒷\s*번호|끝\s*번호)?\s*[가-힣a-zA-Z0-9_]{2,20})\s*(?:언니|님|씨)(?:께|에게|한테|는|은|도|을|를)?(?=\s|[,.!?]|드리|챙겨|$)/u);
+  if (allocationName?.[1]) {
+    const candidate = allocationName[1].trim();
+    if (!['보여', '입어', '설명', '안내', '말씀', '네'].includes(candidate)) return candidate;
+  }
+
   // 패턴 0: 접미부/접두부 위치 호칭 (예: "뒷번호 0517님", "뒷자리 에스엠디아이님", "끝번호 smdi님", "앞자리 지아이이님")
   const p0 = text.match(
     /(?:마지막\s*자리|마지막\s*번호|전화\s*번호\s*뒤|핸드폰\s*뒤|폰\s*뒤|전화\s*뒤|뒷\s*자리|뒷\s*번호|뒤\s*번호|끝\s*자리|끝\s*번호|마지막|처음\s*자리|앞\s*자리|앞\s*번호|첫\s*자리|첫\s*번호|처음)\s*[:：#]?\s*([가-힣a-zA-Z0-9_]{1,16})(?:\s*번)?(?:\s*님|\s*이|\s*씨|\s*고객)?/u
@@ -169,11 +181,14 @@ export function extractSaleFromTranscript(transcript: string, activeKeywords: st
   const hasDecimal = /(?<!\d\.)(?<!\d)\d{1,3}\s*(?:[.]|점)\s*\d{1,2}(?!\.\d)(?!\s*(?:월|일|시|분|초|버전|ver))\b/u.test(text) ||
     /([영공일이삼사오육칠팔구십]+)\s*(?:[.]|점)\s*([영공일이삼사오육칠팔구]+)/u.test(text);
 
-  const hasTrigger = saleTriggers.some(trigger => text.includes(trigger)) ||
+  const allocationAction = /(?:드리겠습니다|드릴게요|드릴께요|챙겨드릴게요|챙겨드리겠습니다|구매\s*확정(?:입니다|할게요)?|낙찰(?:입니다)?)/u.test(text);
+  const isNonSale = /(?:드릴까요|드릴\s*수\s*있|드리는\s*거\s*아니|안\s*드리|못\s*드리|입금하시면|결제하시면|아까\s*.*(?:드렸|드린)|보여드리|입어드리|설명드리|안내드리)/u.test(text);
+  const hasAllocationName = /[가-힣a-zA-Z0-9_]{2,20}\s*(?:언니|님|씨)(?:께|에게|한테)?/u.test(text);
+  const hasTrigger = (!isNonSale && allocationAction && hasAllocationName) || saleTriggers.some(trigger => text.includes(trigger)) ||
     (text.includes('닉네임') && (hasDecimal || text.includes('원') || text.includes('금액') || text.includes('가격'))) ||
     (hasDecimal && /(?:[가-힣a-zA-Z0-9_]{2,12}\s*님|뒷번호|끝번호|구매자)/u.test(text));
 
-  if (!hasTrigger) {
+  if (!hasTrigger || isNonSale) {
     return null;
   }
 

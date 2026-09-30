@@ -83,7 +83,8 @@ export const SettlementPage: React.FC = () => {
     return sales.filter((s) => s.sessionId === sessionFilter);
   }, [sales, sessionFilter]);
 
-  const validSales = useMemo(() => filteredSalesBySession.filter((sale) => sale.status !== '보류'), [filteredSalesBySession]);
+  const validSales = useMemo(() => filteredSalesBySession.filter((sale) => sale.status !== '보류'
+    && sale.status !== '취소' && sale.syncStatus !== 'PENDING'), [filteredSalesBySession]);
   const groups = useMemo<SettlementGroup[]>(() => {
     const grouped = new Map<string, SettlementGroup>();
     validSales.forEach((sale) => {

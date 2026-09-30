@@ -86,8 +86,8 @@ test('Health Status: computeOverallStatus correctly maps to the 8 required state
   assert.equal(available.overallStatus, 'AVAILABLE');
   assert.equal(available.isExpired, false);
 
-  // 3. 지연 (DEGRADED) - 추론 시간이 10초를 초과한 경우
-  const slowTier3 = { ...goodTier3, totalLatencyMs: 12000 };
+  // 3. 지연 (DEGRADED) - 현재 운영 기준인 합성 추론 총 25초를 초과한 경우
+  const slowTier3 = { ...goodTier3, totalLatencyMs: 26000 };
   const degraded = computeOverallStatus(dummySlot, goodTier1, goodTier2, slowTier3, 0, 1, new Date().toISOString());
   assert.equal(degraded.overallStatus, 'DEGRADED');
 

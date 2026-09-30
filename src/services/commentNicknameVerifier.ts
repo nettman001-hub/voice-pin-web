@@ -1,9 +1,9 @@
-import type { CommentRecord } from '../types/comment';
+import type { CommentRecord } from '../types/comment.ts';
 import {
   compareNicknames,
   extractPhoneSuffix4Digits,
   normalizeNickname
-} from './nicknameMatcher';
+} from './nicknameMatcher.ts';
 
 const COMMENT_TIME_WINDOW_MS = 3 * 60 * 1000;
 

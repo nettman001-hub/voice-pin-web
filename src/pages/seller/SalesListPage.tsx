@@ -172,7 +172,9 @@ export const SalesListPage: React.FC = () => {
       }
 
       const group = map[key];
-      group.totalAmount += sale.amount || 0;
+      if (sale.status !== '보류' && sale.status !== '취소' && sale.syncStatus !== 'PENDING') {
+        group.totalAmount += sale.amount || 0;
+      }
       group.orderCount += 1;
       group.records.push(sale);
       if (sale.status === '보류') group.hasPending = true;
@@ -221,7 +223,8 @@ export const SalesListPage: React.FC = () => {
 
   const currentSessionSummary = useMemo(() => {
     const targetSales = sessionFilter === 'ALL' ? sales : sales.filter((s) => s.sessionId === sessionFilter);
-    const valid = targetSales.filter((s) => s.status !== '보류');
+    const valid = targetSales.filter((s) => s.status !== '보류' && s.status !== '취소'
+      && s.syncStatus !== 'PENDING');
     const totalAmount = valid.reduce((sum, item) => sum + item.amount, 0);
     const uniqueBuyers = new Set(valid.map((s) => s.buyerNickname.trim()).filter(Boolean));
     const pendingCount = targetSales.filter((s) => s.status === '보류').length;

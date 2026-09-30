@@ -9,6 +9,7 @@ import type { SaleRecord } from '../types/live.ts';
 import type { AiResolutionResult } from '../types/aiResolution.ts';
 import { findMatchingNickname, extractPhoneSuffix4Digits, normalizeNickname, areNicknamesSame } from './nicknameMatcher.ts';
 import { parseKoreanAmount } from './salesExtractor.ts';
+import { extractSpeechPrice } from './priceEvidence.ts';
 
 export interface RuleEvaluationInput {
   sale: Partial<SaleRecord>;
@@ -335,6 +336,16 @@ export function validateAiResolutionForSale(
       resolvedReasonCodes: [],
     };
   }
+  if (!sale.id || aiResult.targetSaleId !== sale.id || aiResult.action !== 'UPDATE_SALE'
+    || aiResult.conflictReason || (aiResult.missingInfo || []).length > 0) {
+    return { valid: false, reason: 'AI 결과의 판매 대상·행동·미해결 정보가 현재 보류 건과 일치하지 않습니다.', resolvedReasonCodes: [] };
+  }
+  // Voice allocations must pass the comment-first atomic commit. This legacy
+  // pending-sale updater does not consume a request or compare competing
+  // accounts, so an AI suggestion here is advisory until seller confirmation.
+  if (sale.source === 'WEB_VOICE') {
+    return { valid: false, reason: '음성 판매 AI 제안은 구매요청 원자 확정 경로 또는 판매자 확인이 필요합니다.', resolvedReasonCodes: [] };
+  }
 
   const changes: {
     buyerNickname?: string;
@@ -351,13 +362,17 @@ export function validateAiResolutionForSale(
   const aiBuyerNick = aiResult.changes?.buyerNickname?.to;
   if (aiBuyerNick) {
     const normAiNick = normalizeNickname(aiBuyerNick);
-    const matchingComment = options.sessionComments.find(
+    const matchingComments = options.sessionComments.filter(
       (c) => normalizeNickname(c.nickname) === normAiNick || areNicknamesSame(c.nickname, aiBuyerNick)
     );
+    const matchingComment = matchingComments.length === 1 ? matchingComments[0] : undefined;
     const matchingBuyer = options.sessionBuyers?.find(
       (b) => normalizeNickname(b.display_nickname) === normAiNick || areNicknamesSame(b.display_nickname, aiBuyerNick)
     );
 
+    if (matchingComments.length > 1 || (matchingComment && !aiResult.evidenceIds.includes(matchingComment.id))) {
+      return { valid: false, reason: 'AI 구매자 후보가 중복되거나 해당 댓글 ID 근거가 없습니다.', resolvedReasonCodes: [] };
+    }
     if (!matchingComment && !matchingBuyer) {
       return {
         valid: false,
@@ -390,6 +405,12 @@ export function validateAiResolutionForSale(
   // 4-3. 금액 및 수량 근거 검증
   const aiAmount = aiResult.changes?.amount?.to;
   if (typeof aiAmount === 'number' && aiAmount > 0) {
+    const speechPrice = extractSpeechPrice(sale.rawTranscript || '');
+    if (!speechPrice || speechPrice.amount !== aiAmount
+      || (aiResult.changes?.amount?.quantity || 1) !== 1
+      || (aiResult.changes?.amount?.unitPrice || aiAmount) !== aiAmount) {
+      return { valid: false, reason: 'AI가 제안한 금액·수량에 판매자 발화의 가격 근거가 없습니다.', resolvedReasonCodes: [] };
+    }
     changes.amount = aiAmount;
     changes.unitPrice = aiResult.changes?.amount?.unitPrice || aiAmount;
     changes.quantity = aiResult.changes?.amount?.quantity || 1;

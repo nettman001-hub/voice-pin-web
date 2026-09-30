@@ -656,6 +656,7 @@ test('comment capture removes deleted rows and does not resurrect them from a st
     '../services/remoteWorkspaceService': { remoteWorkspaceService: { loadCommentCaptureConfig: async () => null, saveCommentCaptureConfig: async () => {} } },
     '../services/commentSyncService': { flushPendingComments: async () => {}, promoteCommentOutbox() {} },
     '../services/commentStreamService': { commentStreamService: stream }, '../types/comment': commentTypes,
+    '../services/purchaseFirstSales': { purchaseRequestFromComment: () => null, commentWithdrawsPurchase: () => false },
   }, { window: { ...ctx.globals.window, setTimeout: () => 1, clearTimeout() {} } });
   hooks.render(CommentCaptureProvider); await tick();
   assert.equal(hooks.render(CommentCaptureProvider).liveComments.length, 1);

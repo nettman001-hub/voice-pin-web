@@ -5,7 +5,8 @@ import { audioCaptureService } from '../services/audioCaptureService';
 import { screenCaptureService } from '../services/screenCaptureService';
 import { extractSaleFromTranscript, parseKoreanAmount } from '../services/salesExtractor';
 import { parseVoiceCommand } from '../services/voiceCommandParser';
-import { nicknameVerificationNote, verifyNicknameFromComments } from '../services/commentNicknameVerifier';
+import { getPurchaseRequests, matchPurchaseRequest } from '../services/purchaseFirstSales';
+import type { CommentRecord } from '../types/comment';
 import { storageService, generateSessionId, getNextProductCodeForSession } from '../services/storageService';
 import { generateSequentialProductName } from '../utils/productNaming';
 import { useSales } from './SalesContext';
@@ -18,9 +19,7 @@ import { User } from '../types/auth';
 import { isSupabaseConfigured } from '../services/supabaseClient';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
 import { useProductSales } from './ProductSalesContext';
-import { ProductSalesProduct } from '../types/productSales';
 import { productSalesApi } from '../services/productSalesApi';
-import { createNumberProductImage } from '../services/productImageService';
 import { InterimStreamChunker } from '../services/captionStreamService';
 import { buildPendingReasons, buildEvidenceSnapshot, evaluatePendingRules } from '../services/pendingSalesService';
 import {
@@ -48,7 +47,11 @@ const SONIOX_SALE_START_PATTERNS = [
   '주문확정',
   '낙찰',
   '판매완료',
-  '닉네임'
+  '닉네임',
+  '드리겠습니다',
+  '드릴게요',
+  '드릴께요',
+  '챙겨드릴게요'
 ];
 const SONIOX_COMMAND_PATTERNS = [
   '방금 건 삭제',
@@ -63,7 +66,6 @@ const SONIOX_COMMAND_PATTERNS = [
   '캡처'
 ];
 const VOICE_PRODUCT_DRAFT_TIMEOUT_MS = 30_000;
-const NEARBY_CAPTURE_WINDOW_MS = 90_000;
 
 interface VoiceProductDraft {
   id: string;
@@ -167,6 +169,9 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sonioxSaleBufferRef = useRef<string>('');
   const sonioxSaleTimeoutRef = useRef<number | null>(null);
   const sonioxCommandTailRef = useRef<string>('');
+  const recentFinalFragmentRef = useRef<{ text: string; at: number } | null>(null);
+  const recentVoiceDecisionsRef = useRef<Map<string, number>>(new Map());
+  const reservedPurchaseRequestsRef = useRef<Set<string>>(new Set());
   const productSalesRef = useRef(productSales);
   const voiceProductDraftRef = useRef<VoiceProductDraft | null>(null);
   const interimStreamChunkerRef = useRef<InterimStreamChunker>(new InterimStreamChunker());
@@ -683,65 +688,6 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return null;
   };
 
-  const ensureProductForVoiceSale = async (): Promise<{
-    product: ProductSalesProduct | null;
-    fallbackCode?: string;
-    fallbackImageDataUrl?: string;
-  }> => {
-    const currentProduct = productSalesRef.current.activeProduct;
-    if (currentProduct) return { product: currentProduct };
-
-    const targetSessionId = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
-    const autoCode = getNextProductCodeForSession(
-      targetSessionId,
-      sales,
-      productSalesRef.current.activeProduct?.productCode
-    );
-
-    const draft = voiceProductDraftRef.current;
-    const recentCapture = storageService.getCaptures().find((capture) => {
-      const capturedAt = new Date(capture.capturedAt).getTime();
-      return capture.sessionId === currentSessionIdRef.current
-        && Number.isFinite(capturedAt)
-        && Date.now() - capturedAt <= NEARBY_CAPTURE_WINDOW_MS;
-    });
-    const fallbackImageDataUrl = draft?.imageDataUrl || recentCapture?.imageUrl;
-    const requestedCode = draft?.requestedProductCode || autoCode;
-    const unitPrice = draft?.unitPrice ?? 0;
-    const codeWasGenerated = !draft?.requestedProductCode;
-
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const numericBase = parseInt(requestedCode, 10);
-      const productCode = attempt === 0
-        ? requestedCode
-        : (!isNaN(numericBase) ? String(numericBase + attempt) : `${requestedCode}_${attempt}`);
-
-      try {
-        const product = await productSalesRef.current.registerProduct({
-          requestedProductCode: productCode,
-          unitPrice,
-          imageDataUrl: fallbackImageDataUrl,
-          imageKind: fallbackImageDataUrl ? 'PHOTO' : 'NUMBER_IMAGE',
-          source: 'WEB_VOICE',
-        });
-        voiceProductDraftRef.current = null;
-        return { product };
-      } catch (error) {
-        const code = (error as Error & { code?: string }).code;
-        if (!(codeWasGenerated && code === 'PRODUCT_CODE_EXISTS' && attempt < 2)) {
-          console.error('[Live] 판매용 임시 상품 생성 실패:', error);
-          break;
-        }
-      }
-    }
-
-    return {
-      product: null,
-      fallbackCode: requestedCode,
-      fallbackImageDataUrl: fallbackImageDataUrl || createNumberProductImage(requestedCode),
-    };
-  };
-
   const persistVoiceSale = async (
     saleResult: NonNullable<ReturnType<typeof extractSaleFromTranscript>>,
     fullText: string,
@@ -749,47 +695,69 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     requiredListeningGeneration?: number
   ) => {
     const recognizedAt = new Date().toISOString();
+    const sessionSnapshot = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
+    const decisionKey = `${sessionSnapshot}:${fullText.replace(/\s+/gu, '')}`;
+    const previousDecisionAt = recentVoiceDecisionsRef.current.get(decisionKey) || 0;
+    if (Date.now() - previousDecisionAt < 5_000) return;
+    recentVoiceDecisionsRef.current.set(decisionKey, Date.now());
+    for (const [key, at] of recentVoiceDecisionsRef.current) {
+      if (Date.now() - at > 30_000) recentVoiceDecisionsRef.current.delete(key);
+    }
+    const activeProductSnapshot = productSalesRef.current.activeProduct;
     // 판매 판정 시 로컬DB에 동시 기록된 최신 실시간 댓글 및 피드 활용 (Supabase 네트워크 왕복 지연 0)
-    const targetSessionId = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
-    const localCommentRecords = storageService.getSessionCommentRecords(targetSessionId);
-    const feedComments = (productSalesRef.current.feed?.comments || []).map((comment) => ({
+    const targetSessionId = sessionSnapshot;
+    const localCommentRecords = storageService.getCommentRecords(workspaceId).filter((comment) => comment.sessionId === targetSessionId);
+    const feedComments: CommentRecord[] = (productSalesRef.current.feed?.comments || []).map((comment) => ({
       id: comment.id,
       sessionId: comment.sessionId,
+      platformMessageId: comment.platformMessageId,
+      buyerId: comment.buyerId,
       nickname: comment.nicknameSnapshot,
       content: comment.content,
       capturedAt: comment.capturedAt,
     }));
-    const localMappedComments = localCommentRecords.map((comment) => ({
-      id: comment.id,
-      sessionId: comment.sessionId,
-      nickname: comment.nickname,
-      content: comment.content,
-      capturedAt: comment.capturedAt,
-    }));
+    const localMappedComments = localCommentRecords;
 
-    const commentMap = new Map<string, { id: string; sessionId: string; nickname: string; content: string; capturedAt: string }>();
-    for (const item of feedComments) commentMap.set(item.id, item);
-    for (const item of localMappedComments) commentMap.set(item.id, item);
+    const commentMap = new Map<string, CommentRecord>();
+    for (const item of feedComments) commentMap.set(`${item.sessionId}:${item.platformMessageId || item.id}`, item);
+    for (const item of localMappedComments) {
+      const key = `${item.sessionId}:${item.platformMessageId || item.id}`;
+      const existing = commentMap.get(key);
+      commentMap.set(key, existing?.buyerId && !item.buyerId ? existing : item);
+    }
     const cloudComments = Array.from(commentMap.values());
-    const nicknameVerification = verifyNicknameFromComments({
-      transcript: fullText,
-      spokenNickname: saleResult.buyerNickname,
-      sessionId: currentSessionIdRef.current,
-      recognizedAt,
-      comments: cloudComments
-    });
-    const hasVerifiedCommentNickname = Boolean(nicknameVerification.verifiedNickname);
-    const isSuffixReference = Boolean(nicknameVerification.suffixDigits);
-    const buyerNickname = hasVerifiedCommentNickname
-      ? nicknameVerification.verifiedNickname!
-      : isSuffixReference
-        ? '미확인(보류)'
-        : saleResult.buyerNickname;
-    const status = hasVerifiedCommentNickname ? saleResult.status : '보류';
+    const requestCandidates = [
+      ...storageService.getPurchaseRequests(workspaceId).filter((item) => item.sessionId === sessionSnapshot),
+      ...getPurchaseRequests(cloudComments, sessionSnapshot),
+    ];
+    const requests = [...new Map(requestCandidates.map((item) => [item.id, item])).values()];
+    const consumed = new Set(sales.filter((sale) => sale.sessionId === sessionSnapshot && sale.status !== '취소' && sale.status !== '보류')
+      .map((sale) => sale.purchaseRequestId).filter((id): id is string => Boolean(id)));
+    for (const sale of sales) {
+      if (sale.sessionId !== sessionSnapshot || sale.status === '보류' || !sale.purchaseRequestId) continue;
+      const original = requests.find((item) => item.id === sale.purchaseRequestId);
+      if (!original) continue;
+      for (const sibling of requests) {
+        const age = Date.parse(sale.recognizedAt) - Date.parse(sibling.capturedAt);
+        if (sibling.accountKey === original.accountKey && age >= 0 && age <= 30_000) consumed.add(sibling.id);
+      }
+    }
+    for (const id of reservedPurchaseRequestsRef.current) consumed.add(id);
+    const match = matchPurchaseRequest(saleResult.buyerNickname, requests, recognizedAt, consumed);
+    if (match.kind === 'NO_REQUEST') {
+      const priorMatch = matchPurchaseRequest(saleResult.buyerNickname, requests, recognizedAt);
+      if (priorMatch.kind === 'MATCH' && consumed.has(priorMatch.request.id)) return;
+    }
+    const request = match.kind === 'MATCH' ? match.request : null;
+    if (request) reservedPurchaseRequestsRef.current.add(request.id);
+    const buyerNickname = request?.nickname || saleResult.buyerNickname;
+    const status = request && saleResult.amount > 0 ? '자동저장' : '보류';
 
-    const productLink = await ensureProductForVoiceSale();
+    // A missing registered product is promoted inside the atomic server commit.
+    // The seller never needs to pre-register a price for this flow.
+    const productLink = { product: activeProductSnapshot, fallbackCode: undefined, fallbackImageDataUrl: undefined };
     const product = productLink.product;
-    const sessionId = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
+    const sessionId = sessionSnapshot;
     const fallbackAutoCode = getNextProductCodeForSession(
       sessionId,
       sales,
@@ -829,12 +797,12 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         amount: saleResult.amount,
         productCode: resolvedProductCode,
         productName: autoSequentialProductName,
-        unitPrice: product?.unitPrice ?? 0,
+        unitPrice: saleResult.amount,
         quantity: 1,
         captureImageUrls: fallbackImage ? [fallbackImage] : undefined,
       },
       {
-        relevantCommentIds: nicknameVerification.commentId ? [nicknameVerification.commentId] : [],
+        relevantCommentIds: request ? [request.commentId] : [],
         snapshotVersion: 1,
       }
     );
@@ -842,18 +810,25 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const saved = addSale({
       sessionId,
       buyerNickname,
+      buyerId: request?.buyerId || undefined,
+      purchaseRequestId: request?.id,
+      sourceCommentIds: request ? [request.commentId] : [],
       amount: saleResult.amount,
       recognizedAt,
       rawTranscript: fullText,
       status,
-      note: nicknameVerificationNote(nicknameVerification),
+      note: request
+        ? `구매 댓글 "${request.content}" · 판매자 발화 "${saleResult.buyerNickname}" 연결 (${match.kind === 'MATCH' ? match.score : 0}점)`
+        : match.kind === 'AMBIGUOUS' ? '구매자 후보가 여러 명이라 확인이 필요합니다.'
+          : match.kind === 'DIGIT_CONFLICT' ? '판매자 발화와 댓글의 숫자 식별자가 다릅니다.'
+            : '연결 가능한 구매 의사 댓글이 없어 확인이 필요합니다.',
       productId: product?.id,
       productCode: resolvedProductCode,
       productName: autoSequentialProductName,
       productImageUrl: product?.imageUrl || fallbackImage,
       productImagePath: product?.imagePath,
       quantity: 1,
-      unitPrice: product?.unitPrice ?? 0,
+      unitPrice: saleResult.amount,
       source: 'WEB_VOICE',
       captureImageUrls: fallbackImage ? [fallbackImage] : undefined,
       revision: 1,
@@ -873,6 +848,48 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       );
     }
   };
+
+  // A buyer's comment can arrive after the seller's short allocation phrase.
+  // Re-evaluate only still-pending voice decisions, preserving the original
+  // speech/price evidence and never consuming an already allocated request.
+  useEffect(() => {
+    const reconcile = () => {
+      if (!workspaceId) return;
+      const cloudRequests = getPurchaseRequests((productSales.feed?.comments || []).map((comment) => ({
+        id: comment.id, sessionId: comment.sessionId, platformMessageId: comment.platformMessageId,
+        buyerId: comment.buyerId, nickname: comment.nicknameSnapshot, content: comment.content,
+        capturedAt: comment.capturedAt,
+      })), productSales.activeSession?.id || currentSessionId);
+      const requests = [...new Map([
+        ...storageService.getPurchaseRequests(workspaceId), ...cloudRequests,
+      ].map((item) => [item.id, item])).values()];
+      const claimed = new Set(sales.filter((sale) => sale.status !== '보류').map((sale) => sale.purchaseRequestId)
+        .filter((id): id is string => Boolean(id)));
+      for (const sale of sales) {
+        if (sale.source !== 'WEB_VOICE' || sale.status !== '보류' || sale.amount <= 0
+          || sale.purchaseRequestId || !sale.sessionId) continue;
+        const extracted = extractSaleFromTranscript(sale.rawTranscript);
+        if (!extracted || !extracted.buyerNickname || extracted.amount !== sale.amount) continue;
+        const match = matchPurchaseRequest(extracted.buyerNickname,
+          requests.filter((request) => request.sessionId === sale.sessionId), sale.recognizedAt, claimed);
+        if (match.kind !== 'MATCH') continue;
+        claimed.add(match.request.id);
+        updateSale({
+          ...sale,
+          buyerNickname: match.request.nickname,
+          buyerId: match.request.buyerId || undefined,
+          purchaseRequestId: match.request.id,
+          sourceCommentIds: [match.request.commentId],
+          status: '자동저장',
+          pendingReasons: [],
+          note: `늦게 도착한 구매 댓글 "${match.request.content}" 연결`,
+        });
+      }
+    };
+    window.addEventListener('voicecap_purchase_requests_updated', reconcile);
+    reconcile();
+    return () => window.removeEventListener('voicecap_purchase_requests_updated', reconcile);
+  }, [sales, updateSale, workspaceId, productSales.feed?.comments, productSales.activeSession?.id, currentSessionId]);
 
   interface TranscriptProcessingOptions {
     skipCommands?: boolean;
@@ -1335,9 +1352,16 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } else {
         // 2. 판매 멘트 감지 ("구매확정 됐습니다...")
-        const saleResult = processingOptions.skipSale
-          ? null
-          : extractSaleFromTranscript(fullText, activeKeywords);
+        const previousFragment = recentFinalFragmentRef.current;
+        const combinedText = previousFragment && Date.now() - previousFragment.at <= 3_000
+          && !extractSaleFromTranscript(previousFragment.text, activeKeywords)
+          ? `${previousFragment.text} ${fullText}` : fullText;
+        const currentSaleResult = processingOptions.skipSale ? null : extractSaleFromTranscript(fullText, activeKeywords);
+        const combinedSaleResult = !processingOptions.skipSale && combinedText !== fullText
+          ? extractSaleFromTranscript(combinedText, activeKeywords) : null;
+        const saleResult = currentSaleResult?.isPending && combinedSaleResult && !combinedSaleResult.isPending
+          ? combinedSaleResult : currentSaleResult || combinedSaleResult;
+        recentFinalFragmentRef.current = { text: fullText, at: Date.now() };
 
       // 캡처 조건: '캡처하세요' 멘트가 반드시 포함되어 있어야 함
       // (띄어쓰기 유연성 및 단어 규칙 관리 등록 반영)
@@ -1352,19 +1376,18 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           ));
 
       if (saleResult) {
-        actionTriggered = 'SALE_SAVED';
+        actionTriggered = 'SALE_PENDING';
         const hasActiveStream = Boolean(screenCaptureService.getActiveStream());
         if (hasCaptureInstruction) {
-          ruleActionName = '🛍️ 판매 DB 저장 + 📸 캡처하세요 연동';
+          ruleActionName = '🛍️ 판매 후보 확인 중 + 📸 캡처 연동';
         } else if (hasActiveStream) {
-          ruleActionName = '🛍️ 판매 DB 저장 + 📸 화면 자동 캡처';
+          ruleActionName = '🛍️ 판매 후보 확인 중 + 📸 화면 캡처';
         } else {
-          ruleActionName = '🛍️ 판매 DB 자동 저장';
+          ruleActionName = '🛍️ 구매 댓글·음성 가격 확인 중';
         }
-        playBeep(1046, 120);
         void persistVoiceSale(
           saleResult,
-          fullText,
+          saleResult.rawTranscript,
           hasCaptureInstruction,
           requiredListeningGeneration
         );
@@ -1384,6 +1407,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else if (
         lastSavedSaleRef.current &&
         lastSavedSaleRef.current.status === '보류' &&
+        lastSavedSaleRef.current.source !== 'WEB_VOICE' &&
         Date.now() - new Date(lastSavedSaleRef.current.recognizedAt).getTime() <= 20000 &&
         fullText.trim().length > 0
       ) {

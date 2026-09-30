@@ -55,6 +55,10 @@ export const SalesReviewPage: React.FC = () => {
   };
 
   const handleSaveRow = (sale: SaleRecord) => {
+    if (sale.syncStatus === 'PENDING') {
+      setToastMsg('서버 저장 확인 후 수정할 수 있습니다.');
+      return;
+    }
     const edit = editingRecords[sale.id];
     if (!edit) return;
 

@@ -65,6 +65,12 @@ const mapSale = async (row: Row): Promise<SaleRecord> => {
     productImagePath: productImagePath || undefined,
     quantity: Number(row.quantity || 1),
     unitPrice: Number(row.unit_price ?? row.amount ?? 0),
+    purchaseRequestId: row.purchase_request_id || undefined,
+    sourceCommentIds: Array.isArray(row.source_comment_ids) ? row.source_comment_ids : [],
+    pendingReasons: Array.isArray(row.pending_reasons) ? row.pending_reasons : [],
+    evidenceSnapshot: row.evidence_snapshot || undefined,
+    aiVerification: row.ai_verification || undefined,
+    history: Array.isArray(row.history) ? row.history : [],
     source: row.source || 'LEGACY',
     captureImageUrls: await imageUrls(storagePaths),
     note: row.note || undefined,
@@ -98,6 +104,12 @@ const toSaleRow = async (workspaceId: string, sale: SaleRecord) => ({
   session_id: sale.sessionId,
   buyer_nickname: sale.buyerNickname,
   buyer_id: sale.buyerId || null,
+  purchase_request_id: sale.purchaseRequestId || null,
+  source_comment_ids: sale.sourceCommentIds || [],
+  pending_reasons: sale.pendingReasons || [],
+  evidence_snapshot: sale.evidenceSnapshot || null,
+  ai_verification: sale.aiVerification || null,
+  history: sale.history || [],
   amount: sale.amount,
   recognized_at: sale.recognizedAt,
   raw_transcript: sale.rawTranscript,
@@ -500,7 +512,40 @@ export const remoteWorkspaceService = {
   },
 
   async saveSale(workspaceId: string, sale: SaleRecord) {
-    const row = await toSaleRow(workspaceId, sale);
+    if (sale.source === 'WEB_VOICE' && sale.status === '자동저장'
+        && sale.purchaseRequestId && sale.printStatus === 'QUEUED' && (sale.printRevision || 0) === 1) {
+      const { data, error } = await ensureEnabled().functions.invoke('sales-api', { body: {
+        action: 'commit-voice-sale', operationId: sale.id.slice(2),
+        sale: {
+          id: sale.id, sessionId: sale.sessionId, purchaseRequestId: sale.purchaseRequestId,
+          productId: sale.productId, productCode: sale.productCode, productName: sale.productName,
+          amount: sale.amount, unitPrice: sale.unitPrice || 0,
+          rawTranscript: sale.rawTranscript, recognizedAt: sale.recognizedAt,
+        },
+      } });
+      if (error || !data?.ok) throw new Error(data?.error?.message || error?.message || '음성 판매 서버 확정 실패');
+      return;
+    }
+    // The first voice allocation is committed by the RPC, which resolves the
+    // canonical buyer/comment/product IDs. Later print/correction updates must
+    // not overwrite those IDs with the optimistic client's empty placeholders.
+    let canonicalSale = sale;
+    if (sale.source === 'WEB_VOICE' && sale.purchaseRequestId && (sale.revision || 1) > 1) {
+      const { data: confirmed, error: readError } = await ensureEnabled().from('sales').select(
+        'buyer_id, product_id, source_comment_ids, buyer_nickname, product_code_snapshot, product_name_snapshot')
+        .eq('workspace_id', workspaceId).eq('id', sale.id).maybeSingle();
+      if (readError) throw readError;
+      if (confirmed) canonicalSale = {
+        ...sale,
+        buyerId: confirmed.buyer_id || sale.buyerId,
+        buyerNickname: confirmed.buyer_nickname || sale.buyerNickname,
+        productId: confirmed.product_id || sale.productId,
+        sourceCommentIds: confirmed.source_comment_ids || sale.sourceCommentIds,
+        productCode: confirmed.product_code_snapshot || sale.productCode,
+        productName: confirmed.product_name_snapshot || sale.productName,
+      };
+    }
+    const row = await toSaleRow(workspaceId, canonicalSale);
     const { error } = await ensureEnabled().from('sales').upsert(row);
     if (!error) return;
     // 운영 DB에 SQL 마이그레이션을 적용하기 전에도 기존 판매 저장 자체는 멈추지 않게 한다.

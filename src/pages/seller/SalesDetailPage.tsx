@@ -96,6 +96,10 @@ export const SalesDetailPage: React.FC = () => {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    if (sale.syncStatus === 'PENDING') {
+      alert('서버 저장 확인 후 판매 정보를 수정할 수 있습니다.');
+      return;
+    }
     const updated = {
       ...sale,
       buyerNickname,
@@ -395,7 +399,7 @@ export const SalesDetailPage: React.FC = () => {
           />
         </div>
 
-        {sale.status !== '보류' && (
+        {sale.status !== '보류' && sale.syncStatus !== 'PENDING' && (
           <div className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between ${
             sale.printStatus === 'PRINTED' ? 'bg-emerald-50 border-emerald-200' : sale.printStatus === 'FAILED' ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'
           }`}>

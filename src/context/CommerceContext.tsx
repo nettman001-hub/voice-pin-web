@@ -169,7 +169,8 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return payments.map((payment) => {
       if (payment.saleIds.length > 0 && payment.matchStatus === 'MATCHED') return payment;
       const candidates = sales.filter(
-        (sale) => normalize(sale.buyerNickname) === normalize(payment.payerName) && sale.amount === payment.amount
+        (sale) => sale.status !== '보류' && sale.status !== '취소' && sale.syncStatus !== 'PENDING'
+          && normalize(sale.buyerNickname) === normalize(payment.payerName) && sale.amount === payment.amount
       );
       if (candidates.length === 1) {
         return { ...payment, saleIds: [candidates[0].id], matchStatus: 'MATCHED' };

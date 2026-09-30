@@ -108,7 +108,7 @@ export const ShipmentManagementPage: React.FC = () => {
   const shippedSaleIds = new Set(shipments.flatMap((shipment) => shipment.saleIds));
   const candidates = useMemo(
     () => sales.filter((sale) => {
-      if (sale.status === '보류' || shippedSaleIds.has(sale.id)) return false;
+      if (sale.status === '보류' || sale.status === '취소' || sale.syncStatus === 'PENDING' || shippedSaleIds.has(sale.id)) return false;
       if (sessionFilter !== 'ALL' && sale.sessionId !== sessionFilter) return false;
       return true;
     }),

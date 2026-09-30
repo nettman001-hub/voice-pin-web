@@ -7,6 +7,8 @@ export interface SaleRecord {
   sessionId: string;           // 방송 회차 ID (예: 20260824_02)
   buyerNickname: string;       // 구매자 닉네임
   buyerId?: string;            // 구매자 고유 ID (등록 구매자 연결 시)
+  purchaseRequestId?: string;  // 구매 의사 댓글의 안정적인 요청 ID
+  sourceCommentIds?: string[]; // 판매 근거 댓글 (서버 정식 UUID 또는 로컬 원본 ID)
   recordState?: 'ACTIVE' | 'CANCELLED'; // 서버 sales.record_state 동기화
   amount: number;              // 판매 금액 (원)
   recognizedAt: string;        // 인식 일시 (ISO string)
@@ -72,6 +74,7 @@ export interface SttTranscriptLog {
   confidence: number;
   matchedKeywords?: string[];
   actionTriggered?:
+    | 'SALE_PENDING'
     | 'SALE_SAVED'
     | 'SCREEN_CAPTURED'
     | 'VOICE_EDIT_START'

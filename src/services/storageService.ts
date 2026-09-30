@@ -9,6 +9,7 @@ import type { ProductSalesProduct, ProductSalesSession, ProductSalesBootstrapDat
 import type { SalesLocalState } from './salesSyncController';
 import { durableStorage } from './durableStorage';
 import { normalizeSttVocabulary } from './sttVocabularyService';
+import type { PurchaseRequest } from './purchaseFirstSales';
 
 export interface CaptureAreaSnapshot {
   imageUrl: string;
@@ -819,6 +820,44 @@ export class StorageService {
     this.saveRecoverable(key, records);
   }
 
+  public getPurchaseRequests(workspaceIdOverride?: string | null): PurchaseRequest[] {
+    return this.getItem<PurchaseRequest[]>(this.scopedKey('voicecap_purchase_requests', workspaceIdOverride), [])
+      .filter((request) => !this.isCommentDeleted({
+        id: request.commentId, sessionId: request.sessionId, platformMessageId: request.platformMessageId,
+      }, workspaceIdOverride));
+  }
+
+  public addPurchaseRequest(request: PurchaseRequest, workspaceIdOverride?: string | null): void {
+    const requests = this.getPurchaseRequests(workspaceIdOverride);
+    if (requests.some((item) => item.id === request.id)) return;
+    this.saveRecoverable(this.scopedKey('voicecap_purchase_requests', workspaceIdOverride),
+      [request, ...requests].slice(0, 2000));
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('voicecap_purchase_requests_updated'));
+  }
+
+  public withdrawPurchaseRequestsForComment(comment: CommentRecord, workspaceIdOverride?: string | null): void {
+    const accountKey = comment.buyerId || (comment.platformUserId
+      ? `platform:${comment.platformUserId}` : comment.uniqueId ? `handle:${comment.uniqueId.toLowerCase()}` : null);
+    if (!accountKey) return;
+    const requests = this.getPurchaseRequests(workspaceIdOverride);
+    if (!requests.some((request) => request.accountKey === accountKey && request.sessionId === comment.sessionId && !request.withdrawn)) return;
+    this.saveRecoverable(this.scopedKey('voicecap_purchase_requests', workspaceIdOverride), requests.map((request) =>
+      request.accountKey === accountKey && request.sessionId === comment.sessionId
+        ? { ...request, withdrawn: true } : request));
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('voicecap_purchase_requests_updated'));
+  }
+
+  public promotePurchaseRequests(fromSessionId: string, toSessionId: string, workspaceIdOverride?: string | null): void {
+    if (!isTemporarySessionId(fromSessionId) || !toSessionId || fromSessionId === toSessionId) return;
+    const requests = this.getPurchaseRequests(workspaceIdOverride);
+    if (!requests.some((item) => item.sessionId === fromSessionId)) return;
+    this.saveRecoverable(this.scopedKey('voicecap_purchase_requests', workspaceIdOverride), requests.map((item) =>
+      item.sessionId === fromSessionId
+        ? { ...item, sessionId: toSessionId, id: `${toSessionId}:${item.platformMessageId || item.commentId}` }
+        : item));
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('voicecap_purchase_requests_updated'));
+  }
+
   private getCommentTombstones(workspaceIdOverride?: string | null): { id: string; key?: string }[] {
     return this.getItem(this.scopedKey('voicecap_comment_tombstones', workspaceIdOverride), []);
   }
@@ -980,7 +1019,7 @@ export class StorageService {
     const buyerMap = new Map<string, { quantity: number; amount: number; count: number; displayNickname: string }>();
     const totals = new Map<string, { count: number; amount: number }>();
     for (const sale of sales) {
-      if (sale.status === '보류' || sale.status === '취소' || sale.recordState === 'CANCELLED') continue;
+      if (sale.status === '보류' || sale.status === '취소' || sale.recordState === 'CANCELLED' || sale.syncStatus === 'PENDING') continue;
       const key = sale.buyerId || (sale.buyerNickname || '익명').trim();
       const total = totals.get(key) || { count: 0, amount: 0 };
       totals.set(key, { count: total.count + 1, amount: total.amount + (Number(sale.amount) || 0) });
@@ -988,7 +1027,7 @@ export class StorageService {
 
     for (const sale of sessionSales) {
       // 보류 건 및 취소 건 제외 (서버의 record_state === 'ACTIVE' 및 status !== '보류'와 완벽 일치)
-      if (sale.status === '보류' || sale.status === '취소' || sale.recordState === 'CANCELLED') continue;
+      if (sale.status === '보류' || sale.status === '취소' || sale.recordState === 'CANCELLED' || sale.syncStatus === 'PENDING') continue;
 
       const qty = sale.quantity && sale.quantity > 0 ? sale.quantity : 1;
       const amt = Number(sale.amount) || 0;

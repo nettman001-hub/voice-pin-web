@@ -79,7 +79,8 @@ export const AdminDashboardPage: React.FC = () => {
   const totalMembers = allMembers.length;
   const activeMembers = allMembers.filter((m: User) => m.status === '활성').length;
   const pendingReports = reports.filter((r: ReportItem) => r.status === '접수').length;
-  const totalRevenue = sales.filter((s) => s.status !== '보류').reduce((sum, s) => sum + s.amount, 0);
+  const totalRevenue = sales.filter((s) => s.status !== '보류' && s.status !== '취소'
+    && s.syncStatus !== 'PENDING').reduce((sum, s) => sum + s.amount, 0);
   const sellerMembers = allMembers.filter((m: User) => m.role === '판매자');
   const allowedSellersCount = sellerMembers.filter((m: User) => m.allowAdminSttKey).length;
 

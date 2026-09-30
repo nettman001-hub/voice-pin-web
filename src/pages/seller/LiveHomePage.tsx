@@ -7,6 +7,7 @@ import { useSales } from '../../context/SalesContext';
 import { AudioVisualizer } from '../../components/common/AudioVisualizer';
 import { screenCaptureService } from '../../services/screenCaptureService';
 import { storageService } from '../../services/storageService';
+import { getPurchaseRequests } from '../../services/purchaseFirstSales';
 import {
   Radio,
   Square,
@@ -78,7 +79,7 @@ export const LiveHomePage: React.FC = () => {
     cloudSyncStatus
   } = useLive();
 
-  const { user } = useAuth();
+  const { user, workspaceId } = useAuth();
   const isAdmin = user?.role === '관리자';
   const {
     isActive: isCommentCaptureActive,
@@ -259,8 +260,17 @@ export const LiveHomePage: React.FC = () => {
   }, [currentSessionSales, isListening]);
 
   const todayTotalAmount = currentSessionSales
-    .filter((s) => s.status !== '보류')
+    .filter((s) => s.status !== '보류' && s.status !== '취소' && s.syncStatus !== 'PENDING')
     .reduce((sum, item) => sum + item.amount, 0);
+
+  const purchaseRequests = React.useMemo(() => {
+    const sessionId = activeSession?.id || currentSessionId;
+    const persisted = storageService.getPurchaseRequests(workspaceId)
+      .filter((item) => item.sessionId === sessionId);
+    const derived = getPurchaseRequests(liveComments, sessionId);
+    return [...new Map([...derived, ...persisted].map((item) => [item.id, item])).values()]
+      .sort((a, b) => Date.parse(b.capturedAt) - Date.parse(a.capturedAt)).slice(0, 10);
+  }, [activeSession?.id, currentSessionId, liveComments, workspaceId]);
 
   const effectiveAudioLevel = isDemoActive ? demoAudioLevel : audioLevel;
   const effectiveWaveform = isDemoActive ? demoWaveform : waveform;
@@ -269,7 +279,8 @@ export const LiveHomePage: React.FC = () => {
   const effectiveInterimTranscript = isDemoActive ? demoInterimTranscript : currentInterimTranscript;
   const effectiveMatchedRuleItem = isDemoActive ? demoMatchedRuleItem : lastMatchedRuleItem;
   const effectiveSessionSales = isDemoActive ? demoSales : displayedSessionSales;
-  const effectiveSalesCount = isDemoActive ? demoSalesCount : currentSessionSales.length;
+  const effectiveSalesCount = isDemoActive ? demoSalesCount : currentSessionSales.filter((sale) =>
+    sale.status !== '보류' && sale.status !== '취소' && sale.syncStatus !== 'PENDING').length;
   const effectiveTotalAmount = isDemoActive ? demoTotalAmount : todayTotalAmount;
 
   // 댓글 피드: 아래쪽이 최신글이 되도록 새 댓글이 오면 자동 스크롤한다.
@@ -902,12 +913,36 @@ export const LiveHomePage: React.FC = () => {
             </div>
           </div>
 
+          {/* 구매 댓글은 판매가 아니다. 음성 배정 및 서버 확인을 따로 표시한다. */}
+          <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
+            <h3 className="text-xs sm:text-sm font-bold text-slate-900 mb-2">구매요청 · 판매자 배정 대기</h3>
+            {purchaseRequests.length === 0 ? (
+              <p className="text-xs text-slate-400">저요·ㅈㅇ 등 구매 의사 댓글이 들어오면 여기에 표시됩니다.</p>
+            ) : (
+              <div className="space-y-1.5 max-h-[140px] overflow-y-auto">
+                {purchaseRequests.map((request) => {
+                  const linked = currentSessionSales.find((sale) => sale.purchaseRequestId === request.id && sale.status !== '취소');
+                  const state = request.withdrawn ? '구매 의사 철회'
+                    : request.conditional ? '조건 확인'
+                    : request.requiresReview ? '수량·옵션 확인'
+                    : linked?.status === '보류' ? '확인 필요'
+                    : linked?.syncStatus === 'PENDING' ? '서버 저장 대기'
+                      : linked ? '판매 확정' : '배정 대기';
+                  return <div key={request.id} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs">
+                    <span className="truncate"><strong>{request.nickname}</strong> · {request.content}</span>
+                    <span className={`shrink-0 font-bold ${linked?.syncStatus === 'SYNCED' && linked.status !== '보류' ? 'text-emerald-700' : 'text-amber-700'}`}>{state}</span>
+                  </div>;
+                })}
+              </div>
+            )}
+          </div>
+
           {/* 판매 내역 카드 리스트 */}
           <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                <span>자동 적재된 판매 내역</span>
+                <span>판매 내역 · 확인 대기</span>
               </h3>
               <div className="flex items-center gap-2">
                 <button
@@ -930,7 +965,7 @@ export const LiveHomePage: React.FC = () => {
             <div className="space-y-2 max-h-[200px] sm:max-h-[220px] overflow-y-auto pr-1">
               {effectiveSessionSales.length === 0 ? (
                 <div className="py-2.5 sm:py-3 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl min-h-[38px] flex items-center justify-center">
-                  이번 방송 회차에서 저장된 판매 내역이 없습니다. ("구매확정" 시 자동 등록)
+                  판매자 배정 발화와 구매 댓글이 연결되면 판매가 등록됩니다.
                 </div>
               ) : (
                 effectiveSessionSales.map((sale) => {
@@ -1036,7 +1071,7 @@ export const LiveHomePage: React.FC = () => {
                               ? 'bg-purple-100 text-purple-700'
                               : 'bg-emerald-50 text-emerald-700'
                           }`}>
-                            {sale.status}
+                            {sale.syncStatus === 'PENDING' ? '서버 저장 대기' : sale.status}
                           </span>
                           {sale.note?.startsWith('댓글 닉네임 검증 완료') && (
                             <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold bg-cyan-50 text-cyan-700 border border-cyan-200">
@@ -1048,7 +1083,7 @@ export const LiveHomePage: React.FC = () => {
                               댓글 닉네임 확인 필요
                             </span>
                           )}
-                          {sale.printStatus === 'QUEUED' && (
+                          {sale.printStatus === 'QUEUED' && sale.syncStatus !== 'PENDING' && (
                             <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold bg-sky-50 text-sky-700 border border-sky-200">
                               전표 출력 중
                             </span>

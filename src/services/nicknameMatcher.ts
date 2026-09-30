@@ -240,10 +240,10 @@ export const normalizeNickname = (value?: string): string => {
     .toLocaleLowerCase('ko-KR')
     .trim()
     .replace(/^@/, '')
-    .replace(/님\s*$/u, '')
+    .replace(/(?:언니|님|씨)(?:께|에게|한테)?\s*$/u, '')
     // 공백·문장부호·기호 제거 (한글, 영문, 숫자는 유지)
     .replace(/[\s\p{P}\p{S}]+/gu, '')
-    .replace(/님$/u, '');
+    .replace(/(?:언니|님|씨)(?:께|에게|한테)?$/u, '');
 };
 
 /** 뒷번호 호칭 및 4자리 식별자 추출 */
@@ -494,7 +494,7 @@ export function cleanHonorificsAndGuides(text?: string): string {
   clean = clean.replace(/^(?:닉네임은?|닉네임|아이디|계정명|계정|사용자|유저|회원님|회원|고객님|고객)[:：#\s]*/u, '');
 
   // 뒷부분 호칭 제거: 고객님, 회원님, 아이디, 닉네임, 계정명, 계정, 사용자, 유저, 고객, 회원, 님
-  clean = clean.replace(/(?:고객님|회원님|아이디|닉네임|계정명|계정|사용자|유저|고객|회원|님)$/u, '');
+  clean = clean.replace(/(?:고객님|회원님|아이디|닉네임|계정명|계정|사용자|유저|고객|회원|언니|님|씨)(?:께|에게|한테)?$/u, '');
 
   return clean;
 }
@@ -804,6 +804,15 @@ export function compareNicknames(left?: string, right?: string): NicknameCompari
 
   const cleanLeft = normalizeNickname(rawLeft);
   const cleanRight = normalizeNickname(rawRight);
+
+  // A spoken explicit numeric identifier is never allowed to silently match
+  // a different identifier just because the alphabetic base is identical.
+  const leftDigits = cleanLeft.match(/\d+/gu)?.join('') || '';
+  const rightDigits = cleanRight.match(/\d+/gu)?.join('') || '';
+  if (leftDigits && rightDigits && leftDigits !== rightDigits) {
+    return { isSame: false, isSimilar: false, score: 0, reason: 'NO_MATCH', matchType: 'none',
+      normalizedLeft: cleanLeft, normalizedRight: cleanRight, details: '명시된 숫자 식별자 충돌' };
+  }
 
   // 1. 완전 일치 (100점: 정규화한 전체 문자열이 정확히 일치)
   if (cleanLeft === cleanRight) {

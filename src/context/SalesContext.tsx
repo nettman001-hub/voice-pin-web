@@ -67,7 +67,20 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       save: (sale) => isRemoteAuth ? remoteWorkspaceService.saveSale(workspaceId, sale) : Promise.resolve(),
       remove: (id) => isRemoteAuth ? remoteWorkspaceService.deleteSale(workspaceId, id) : Promise.resolve(),
       load: () => isRemoteAuth ? remoteWorkspaceService.loadSales(workspaceId) : Promise.resolve(storageService.getSales(workspaceId)),
-      changed: (records) => { salesRef.current = records; setSales(records); },
+      changed: (records) => {
+        const before = salesRef.current;
+        salesRef.current = records;
+        setSales(records);
+        // A queued receipt is dispatched only after the cloud acknowledges the
+        // allocation. A local optimistic row is never an invoice/print order.
+        for (const sale of records) {
+          const old = before.find((item) => item.id === sale.id);
+          if (sale.printStatus === 'QUEUED' && sale.syncStatus === 'SYNCED'
+            && old?.syncStatus === 'PENDING' && old.printRevision === sale.printRevision) {
+            sendToPrinter(sale);
+          }
+        }
+      },
       error: (message) => setSyncError(message ? '클라우드 저장 대기 중입니다. 연결을 확인해 주세요.' : null),
       active: () => identityGenerationRef.current === generation && identityRef.current === workspaceId && controllerRef.current?.controller === controller,
     });
@@ -212,7 +225,6 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       printError: undefined,
     };
     const persisted = replaceSale(queued) || queued;
-    sendToPrinter(persisted);
     return persisted;
   };
 
@@ -234,12 +246,30 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const controller = getController();
     if (!controller) throw new Error('로그인한 작업공간이 준비되지 않았습니다.');
     const persisted = controller.upsert(newSale);
-    if (persisted.printStatus === 'QUEUED') sendToPrinter(persisted);
     return persisted;
   };
 
   const updateSale = (updated: SaleRecord) => {
     const previous = salesRef.current.find((sale) => sale.id === updated.id);
+    if (previous?.source === 'WEB_VOICE' && previous.syncStatus === 'PENDING') {
+      const sameEvidence = previous.sessionId === updated.sessionId
+        && previous.amount === updated.amount && previous.rawTranscript === updated.rawTranscript
+        && previous.recognizedAt === updated.recognizedAt
+        && previous.productId === updated.productId && previous.productCode === updated.productCode
+        && previous.productName === updated.productName;
+      const metadataOnly = sameEvidence && previous.buyerNickname === updated.buyerNickname
+        && previous.purchaseRequestId === updated.purchaseRequestId && previous.status === updated.status;
+      const lateCommentLinked = sameEvidence && previous.status === '보류'
+        && updated.status === '자동저장' && Boolean(updated.purchaseRequestId);
+      if (!metadataOnly && !lateCommentLinked) {
+        setSyncError('음성 판매의 서버 저장 확인 전에는 구매자·가격을 수정할 수 없습니다.');
+        return;
+      }
+      if (metadataOnly) {
+        replaceSale(updated);
+        return;
+      }
+    }
     const shouldPrint = previous
       ? isPrintableSale(updated) && (!isPrintableSale(previous) || hasSellerEditChanged(previous, updated))
       : false;
@@ -252,7 +282,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const retrySalePrint = (id: string) => {
     const sale = salesRef.current.find((item) => item.id === id);
-    if (!sale || !isPrintableSale(sale)) return;
+    if (!sale || sale.syncStatus === 'PENDING' || !isPrintableSale(sale)) return;
     queueSalePrint(sale, Math.max(1, sale.printRevision || 0) + 1);
   };
 
@@ -279,6 +309,8 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (!hasValidNickname) validationErrors.push('구매자 닉네임 미확인');
       if (!hasValidAmount) validationErrors.push('판매 금액 0원 또는 미입력');
       if (!hasProduct) validationErrors.push('연결 상품 정보 누락');
+      if (sale.syncStatus === 'PENDING') validationErrors.push('서버 저장 확인 대기');
+      if (sale.source === 'WEB_VOICE' && !sale.purchaseRequestId) validationErrors.push('실제 구매 댓글·계정 연결 필요');
       if (unresolved.length > 0) {
         validationErrors.push(...unresolved.map((r) => r.message));
       }
@@ -355,7 +387,8 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (period === 'CUSTOM' && customRange) return recordedAt >= new Date(customRange.start).getTime() && recordedAt <= new Date(customRange.end).setHours(23, 59, 59, 999);
       return true;
     });
-    const validSales = filtered.filter((sale) => sale.status !== '보류');
+    const validSales = filtered.filter((sale) => sale.status !== '보류' && sale.status !== '취소'
+      && sale.recordState !== 'CANCELLED' && sale.syncStatus !== 'PENDING');
     const pendingSales = filtered.filter((sale) => sale.status === '보류');
     const groups: Record<string, SaleRecord[]> = {};
     validSales.forEach((sale) => {

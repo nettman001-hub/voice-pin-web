@@ -51,6 +51,21 @@ async function invokeSalesApi<T>(action: string, payload: Record<string, unknown
 }
 
 export const productSalesApi = {
+  async commitVoiceSale(sale: {
+    id: string;
+    sessionId: string;
+    purchaseRequestId: string;
+    productId?: string;
+    productCode?: string;
+    productName?: string;
+    amount: number;
+    unitPrice: number;
+    rawTranscript: string;
+    recognizedAt: string;
+  }) {
+    return invokeSalesApi<{ saleId: string; buyerId: string; commentId: string; productId: string; amount: number }>(
+      'commit-voice-sale', { operationId: sale.id.slice(2), sale });
+  },
   async getBootstrap(workspaceId?: string) {
     return invokeSalesApi<{
       workspaceId: string;
