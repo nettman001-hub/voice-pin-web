@@ -102,7 +102,7 @@ export const CommentCaptureSettings: React.FC = () => {
       {helperCheckComplete && serverStatus === 'DISCONNECTED' && (
         <div className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <strong className="text-amber-900">댓글 받기 프로그램을 확인해 주세요.</strong>
+            <strong className="text-amber-900">댓글 도우미 서버 프로그램을 확인해 주세요.</strong>
             <p className="mt-1 text-amber-800">Windows 시작 메뉴에서 VoiceCAP 댓글 도우미를 실행하세요. 없다면 한 번만 설치하면 됩니다.</p>
           </div>
           <a href={COMMENT_HELPER_DOWNLOAD_URL} target="_blank" rel="noreferrer"
