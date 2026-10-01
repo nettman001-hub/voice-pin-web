@@ -38,7 +38,7 @@ const pending = (candidateSaleIds = ['sale-1']) => ({
   parsedCorrection: corrections.parseVoiceCorrection('햇살님 금액 1.2로 정정합니다'),
 });
 
-function fixture({ sales = [], rules = [], pendingCorrection = null } = {}) {
+function fixture({ sales = [], rules = [], pendingCorrection = null, failProductProcessing = false } = {}) {
   const state = { sales, rules, logs: [], events: [], beeps: [], saves: [], captures: [], cloud: [], captions: [], productCalls: [] };
   const timers = new Map();
   let nextTimerId = 1;
@@ -53,7 +53,10 @@ function fixture({ sales = [], rules = [], pendingCorrection = null } = {}) {
     interimStreamChunkerRef: { current: { reset() {}, finalize: (text) => [{ text }],
       processInterim: (text) => ({ newFlowItems: [], displayInterimText: text }) } },
     setCurrentInterimTranscript() {}, setLiveTranscriptFlow: (update) => { state.captions = update(state.captions); },
-    handleVoiceProductTranscript: (text) => { state.productCalls.push(text); return null; },
+    handleVoiceProductTranscript: (text) => {
+      if (failProductProcessing) throw new Error('simulated business processor failure');
+      state.productCalls.push(text); return null;
+    },
     isVoiceEditingRef: { current: false }, setIsVoiceEditing() {}, setEditingFieldInfo() {}, resetVoiceEditTimeout() {}, editTimeoutRef: { current: null },
     activePendingCorrectionRef: { current: pendingCorrection }, lastSavedSaleRef: { current: sales[0] || null },
     recentFinalFragmentRef: { current: null }, pendingVoiceFollowupRef: { current: new Map() }, setPendingAiTick() {},
@@ -94,6 +97,18 @@ test('ordinary questions remain logs without correction alerts, beeps, edits, ca
     assert.equal(extractSaleFromTranscript(text), null);
   }
 });
+
+for (const provider of [undefined, 'SONIOX']) {
+  test(`a business processing failure cannot discard final speech or block the next transcript (${provider || 'standard'})`, () => {
+    const ctx = fixture({ failProductProcessing: true });
+    for (const text of ['원단이 부드럽습니다.', '다음 상품 보여드릴게요.']) {
+      assert.doesNotThrow(() => ctx.send(text, { provider, confirmedTextDelta: text }));
+    }
+    assert.equal(ctx.state.logs.length, 2);
+    assert.equal(ctx.state.logs[1].text, '원단이 부드럽습니다.');
+    assert.equal(ctx.state.logs[0].text, '다음 상품 보여드릴게요.');
+  });
+}
 
 test('an actual registered word in a general question still produces a word-rule event', () => {
   const ctx = fixture({ rules: [{ word: '자켓', isEnabled: true }] });

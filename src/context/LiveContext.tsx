@@ -1174,16 +1174,20 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     requiredListeningGeneration?: number,
     requiredUserId?: string
   ) {
-    if (data.confirmedTextDelta) {
-      consumeSonioxConfirmedText(
-        data.confirmedTextDelta,
-        data.confidence,
-        requiredListeningGeneration,
-        requiredUserId,
-        data.isFinal
-      );
-    } else if (data.isFinal) {
-      consumeSonioxConfirmedText('', data.confidence, requiredListeningGeneration, requiredUserId, true);
+    try {
+      if (data.confirmedTextDelta) {
+        consumeSonioxConfirmedText(
+          data.confirmedTextDelta,
+          data.confidence,
+          requiredListeningGeneration,
+          requiredUserId,
+          data.isFinal
+        );
+      } else if (data.isFinal) {
+        consumeSonioxConfirmedText('', data.confidence, requiredListeningGeneration, requiredUserId, true);
+      }
+    } catch (error) {
+      console.error('[Live] Soniox 판매·명령 처리 실패. 원본 전사는 계속 표시합니다:', error);
     }
 
     if (!data.isFinal) {
@@ -1282,336 +1286,343 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ]);
     }
 
-    const rules = storageService.getRules().filter((r) => r.isEnabled);
-    const activeKeywords = rules.map((r) => r.word);
-    const matchedKeywords = activeKeywords.filter((kw) => fullText.includes(kw));
-
+    let matchedKeywords: string[] = [];
     let loggedAction: SttTranscriptLog['actionTriggered'] = 'NONE';
-    // Captions/logs keep the original STT result. Business actions use separate
-    // question/correction segments, preserving adjacent name and price statements.
-    for (const segmentText of getVoiceProcessingSegments(fullText)) {
-      const fullText = segmentText;
-      const matchedKeywords = activeKeywords.filter((kw) => fullText.includes(kw));
-      const correctionIntent = parseVoiceCorrection(fullText);
-      const targetSessionId = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
-      const sessionSales = sales.filter((sale) => sale.sessionId === targetSessionId);
-      let actionTriggered: SttTranscriptLog['actionTriggered'] = 'NONE';
-      let ruleActionName = !processingOptions.skipProductCommands && !correctionIntent.isQuestion && !correctionIntent.isNegativeCommand
-        ? handleVoiceProductTranscript(fullText, requiredListeningGeneration) || '' : '';
+    try {
+      const rules = storageService.getRules().filter((r) => r.isEnabled);
+      const activeKeywords = rules.map((r) => r.word);
+      matchedKeywords = activeKeywords.filter((kw) => fullText.includes(kw));
+      // Captions/logs keep the original STT result. Business actions use separate
+      // question/correction segments, preserving adjacent name and price statements.
+      for (const segmentText of getVoiceProcessingSegments(fullText)) {
+        const fullText = segmentText;
+        const matchedKeywords = activeKeywords.filter((kw) => fullText.includes(kw));
+        const correctionIntent = parseVoiceCorrection(fullText);
+        const targetSessionId = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
+        const sessionSales = sales.filter((sale) => sale.sessionId === targetSessionId);
+        let actionTriggered: SttTranscriptLog['actionTriggered'] = 'NONE';
+        let ruleActionName = !processingOptions.skipProductCommands && !correctionIntent.isQuestion && !correctionIntent.isNegativeCommand
+          ? handleVoiceProductTranscript(fullText, requiredListeningGeneration) || '' : '';
 
-      // 1. 방송 중 음성 명령 파싱 ("수정 시작" / "닉네임은 xxx" / "수정 완료")
-      const command = processingOptions.skipCommands
-        ? { type: 'NONE' as const, rawText: fullText }
-        : parseVoiceCommand(fullText, isVoiceEditingRef.current);
-      if (processingOptions.skipCorrections && command.type === 'NONE'
-        && (correctionIntent.isCorrection || correctionIntent.isCorrectionQuestion || correctionIntent.isNegativeCommand)) continue;
+        // 1. 방송 중 음성 명령 파싱 ("수정 시작" / "닉네임은 xxx" / "수정 완료")
+        const command = processingOptions.skipCommands
+          ? { type: 'NONE' as const, rawText: fullText }
+          : parseVoiceCommand(fullText, isVoiceEditingRef.current);
+        if (processingOptions.skipCorrections && command.type === 'NONE'
+          && (correctionIntent.isCorrection || correctionIntent.isCorrectionQuestion || correctionIntent.isNegativeCommand)) continue;
 
-      if (command.type === 'START_EDIT') {
-        isVoiceEditingRef.current = true;
-        setIsVoiceEditing(true);
-        setEditingFieldInfo('수정 대기 중: "닉네임은 홍길동, 금액은 3만원"처럼 말씀해주세요.');
-        actionTriggered = 'VOICE_EDIT_START';
-        ruleActionName = '🎙️ 음성 수정 시작';
-        playBeep(880, 200);
-        resetVoiceEditTimeout();
-      } else if (command.type === 'FINISH_EDIT') {
-        isVoiceEditingRef.current = false;
-        setIsVoiceEditing(false);
-        setEditingFieldInfo(null);
-        actionTriggered = 'VOICE_EDIT_DONE';
-        ruleActionName = '✅ 음성 수정 완료';
-        playBeep(1200, 250);
-        if (editTimeoutRef.current) clearTimeout(editTimeoutRef.current);
-      } else if (command.type === 'FIELD_UPDATE' && isVoiceEditingRef.current) {
-        resetVoiceEditTimeout();
-        if (lastSavedSaleRef.current) {
-          const target = lastSavedSaleRef.current;
-          const updated: SaleRecord = {
-            ...target,
-            buyerNickname: command.updatedNickname || target.buyerNickname,
-            amount: command.updatedAmount !== undefined ? command.updatedAmount : target.amount,
-            status: '수동수정'
-          };
-          updateSale(updated);
-          lastSavedSaleRef.current = updated;
-          ruleActionName = '✏️ 항목 수정';
-          setEditingFieldInfo(`수정됨 -> 닉네임: ${updated.buyerNickname}, 금액: ${updated.amount.toLocaleString()}원 ("수정 완료"를 말씀하세요)`);
-        }
-      } else if (command.type === 'DELETE_LAST' && lastSavedSaleRef.current) {
-        playBeep(440, 300);
-        lastSavedSaleRef.current = null;
-        ruleActionName = '🗑️ 최근 항목 삭제';
-      } else {
-        // 1-A. 음성 정정 의도 우선 판별 (PLAN.md 1-B: 일반 판매 추출보다 음성 정정 의도를 먼저 판단)
-        let followUpCorrectionApplied = false;
+        if (command.type === 'START_EDIT') {
+          isVoiceEditingRef.current = true;
+          setIsVoiceEditing(true);
+          setEditingFieldInfo('수정 대기 중: "닉네임은 홍길동, 금액은 3만원"처럼 말씀해주세요.');
+          actionTriggered = 'VOICE_EDIT_START';
+          ruleActionName = '🎙️ 음성 수정 시작';
+          playBeep(880, 200);
+          resetVoiceEditTimeout();
+        } else if (command.type === 'FINISH_EDIT') {
+          isVoiceEditingRef.current = false;
+          setIsVoiceEditing(false);
+          setEditingFieldInfo(null);
+          actionTriggered = 'VOICE_EDIT_DONE';
+          ruleActionName = '✅ 음성 수정 완료';
+          playBeep(1200, 250);
+          if (editTimeoutRef.current) clearTimeout(editTimeoutRef.current);
+        } else if (command.type === 'FIELD_UPDATE' && isVoiceEditingRef.current) {
+          resetVoiceEditTimeout();
+          if (lastSavedSaleRef.current) {
+            const target = lastSavedSaleRef.current;
+            const updated: SaleRecord = {
+              ...target,
+              buyerNickname: command.updatedNickname || target.buyerNickname,
+              amount: command.updatedAmount !== undefined ? command.updatedAmount : target.amount,
+              status: '수동수정'
+            };
+            updateSale(updated);
+            lastSavedSaleRef.current = updated;
+            ruleActionName = '✏️ 항목 수정';
+            setEditingFieldInfo(`수정됨 -> 닉네임: ${updated.buyerNickname}, 금액: ${updated.amount.toLocaleString()}원 ("수정 완료"를 말씀하세요)`);
+          }
+        } else if (command.type === 'DELETE_LAST' && lastSavedSaleRef.current) {
+          playBeep(440, 300);
+          lastSavedSaleRef.current = null;
+          ruleActionName = '🗑️ 최근 항목 삭제';
+        } else {
+          // 1-A. 음성 정정 의도 우선 판별 (PLAN.md 1-B: 일반 판매 추출보다 음성 정정 의도를 먼저 판단)
+          let followUpCorrectionApplied = false;
 
-        // 1-B. 활성 정정 보류 요청이 있을 때 후속 발화("12번이요") 연결 검사
-        if (!processingOptions.skipCorrections && activePendingCorrectionRef.current && !correctionIntent.isNegativeCommand && !correctionIntent.isQuestion) {
-          const linkRes = linkFollowUpToPendingCorrection(
-            activePendingCorrectionRef.current,
-            fullText,
-            sessionSales
-          );
+          // 1-B. 활성 정정 보류 요청이 있을 때 후속 발화("12번이요") 연결 검사
+          if (!processingOptions.skipCorrections && activePendingCorrectionRef.current && !correctionIntent.isNegativeCommand && !correctionIntent.isQuestion) {
+            const linkRes = linkFollowUpToPendingCorrection(
+              activePendingCorrectionRef.current,
+              fullText,
+              sessionSales
+            );
 
-          if (linkRes.resolvedSaleId) {
-            const target = sessionSales.find((s) => s.id === linkRes.resolvedSaleId);
-            if (target) {
-              const applyRes = applyCorrectionToSale(
-                target,
-                activePendingCorrectionRef.current.parsedCorrection,
-                { expectedRevision: target.revision }
-              );
-              updateSale(applyRes.updatedSale);
-              if (isRemoteAuth && workspaceId) {
-                void aiSettingsApi.applyVoiceCorrection(
-                  target.id,
+            if (linkRes.resolvedSaleId) {
+              const target = sessionSales.find((s) => s.id === linkRes.resolvedSaleId);
+              if (target) {
+                const applyRes = applyCorrectionToSale(
+                  target,
                   activePendingCorrectionRef.current.parsedCorrection,
-                  { expectedRevision: target.revision, pendingCorrectionId: activePendingCorrectionRef.current.id, workspaceId }
+                  { expectedRevision: target.revision }
                 );
+                updateSale(applyRes.updatedSale);
+                if (isRemoteAuth && workspaceId) {
+                  void aiSettingsApi.applyVoiceCorrection(
+                    target.id,
+                    activePendingCorrectionRef.current.parsedCorrection,
+                    { expectedRevision: target.revision, pendingCorrectionId: activePendingCorrectionRef.current.id, workspaceId }
+                  );
+                }
+                activePendingCorrectionRef.current = null;
+                actionTriggered = 'CORRECTION_APPLIED';
+                ruleActionName = `✅ 후속 연결 정정 완료 (${applyRes.updatedSale.productCode}번)`;
+                playBeep(1200, 250);
+                followUpCorrectionApplied = true;
               }
-              activePendingCorrectionRef.current = null;
-              actionTriggered = 'CORRECTION_APPLIED';
-              ruleActionName = `✅ 후속 연결 정정 완료 (${applyRes.updatedSale.productCode}번)`;
-              playBeep(1200, 250);
-              followUpCorrectionApplied = true;
             }
           }
-        }
 
-        if (followUpCorrectionApplied) {
-          // The resolved correction is reported and logged below, once.
-        } else if (correctionIntent.isNegativeCommand || correctionIntent.isQuestion) {
-          // General questions remain transcripts; only correction-related questions
-          // or negative correction commands produce a correction event.
-          if (correctionIntent.isNegativeCommand || correctionIntent.isCorrectionQuestion) {
-            actionTriggered = 'CORRECTION_IGNORED';
-            ruleActionName = correctionIntent.isNegativeCommand
-              ? '⚠️ 정정 금지 — 변경하지 않음'
-              : '정정 질문 — 변경하지 않음';
-            playBeep(440, 150);
-          }
-        } else if (correctionIntent.isCancellation) {
-          // "방금 수정한 거 취소" (판매 삭제와 구분)
-          if (activePendingCorrectionRef.current) {
-            activePendingCorrectionRef.current = null;
-            actionTriggered = 'CORRECTION_CANCELLED';
-            ruleActionName = '↩️ 미적용 정정 대기 취소';
-            playBeep(880, 200);
-          } else {
-            const target = [...sessionSales].reverse().find((s) =>
-              s.history?.some((h) => h.changeType === 'VOICE_CORRECTION')
-            );
-            if (target) {
-              const rollbackRes = rollbackCorrection(target);
-              if (rollbackRes.success && rollbackRes.rolledBackSale) {
-                updateSale(rollbackRes.rolledBackSale);
+          if (followUpCorrectionApplied) {
+            // The resolved correction is reported and logged below, once.
+          } else if (correctionIntent.isNegativeCommand || correctionIntent.isQuestion) {
+            // General questions remain transcripts; only correction-related questions
+            // or negative correction commands produce a correction event.
+            if (correctionIntent.isNegativeCommand || correctionIntent.isCorrectionQuestion) {
+              actionTriggered = 'CORRECTION_IGNORED';
+              ruleActionName = correctionIntent.isNegativeCommand
+                ? '⚠️ 정정 금지 — 변경하지 않음'
+                : '정정 질문 — 변경하지 않음';
+              playBeep(440, 150);
+            }
+          } else if (correctionIntent.isCancellation) {
+            // "방금 수정한 거 취소" (판매 삭제와 구분)
+            if (activePendingCorrectionRef.current) {
+              activePendingCorrectionRef.current = null;
+              actionTriggered = 'CORRECTION_CANCELLED';
+              ruleActionName = '↩️ 미적용 정정 대기 취소';
+              playBeep(880, 200);
+            } else {
+              const target = [...sessionSales].reverse().find((s) =>
+                s.history?.some((h) => h.changeType === 'VOICE_CORRECTION')
+              );
+              if (target) {
+                const rollbackRes = rollbackCorrection(target);
+                if (rollbackRes.success && rollbackRes.rolledBackSale) {
+                  updateSale(rollbackRes.rolledBackSale);
+                  if (isRemoteAuth && workspaceId) {
+                    void aiSettingsApi.rollbackVoiceCorrection({
+                      saleId: target.id,
+                      workspaceId,
+                    });
+                  }
+                  actionTriggered = 'CORRECTION_RESTORED';
+                  ruleActionName = '↩️ 이전 판매값으로 복원';
+                  playBeep(880, 200);
+                } else {
+                  actionTriggered = 'CORRECTION_CONFLICT';
+                  ruleActionName = `⚠️ 복원 충돌: ${rollbackRes.conflictReason || '확인 필요'}`;
+                  playBeep(440, 300);
+                }
+              } else {
+                ruleActionName = '⚠️ 복원할 이전 정정 이력이 없습니다';
+                playBeep(440, 200);
+              }
+            }
+          } else if (correctionIntent.isIncomplete) {
+            // "0.9가 아니고..." 새 값이 완성될 때까지 초안 대기
+            actionTriggered = 'CORRECTION_INCOMPLETE';
+            ruleActionName = '⏳ 정정 값 대기 중...';
+            playBeep(660, 150);
+          } else if (correctionIntent.isCorrection && !isActionableVoiceCorrection(correctionIntent)) {
+            actionTriggered = 'CORRECTION_INCOMPLETE';
+            ruleActionName = '⏳ 정정 값·적용 범위 확인 필요';
+          } else if (correctionIntent.isCorrection) {
+            // 정정 대상 탐색 (상품번호, 기존 구매자, 기존 금액 등)
+            const targetResult = findTargetSaleForCorrection(correctionIntent, sessionSales);
+
+            if (targetResult.targetSaleId) {
+              const target = sessionSales.find((s) => s.id === targetResult.targetSaleId);
+              if (target) {
+                const applyRes = applyCorrectionToSale(target, correctionIntent, {
+                  expectedRevision: target.revision,
+                });
+                updateSale(applyRes.updatedSale);
                 if (isRemoteAuth && workspaceId) {
-                  void aiSettingsApi.rollbackVoiceCorrection({
-                    saleId: target.id,
+                  void aiSettingsApi.applyVoiceCorrection(target.id, correctionIntent, {
+                    expectedRevision: target.revision,
                     workspaceId,
                   });
                 }
-                actionTriggered = 'CORRECTION_RESTORED';
-                ruleActionName = '↩️ 이전 판매값으로 복원';
-                playBeep(880, 200);
-              } else {
-                actionTriggered = 'CORRECTION_CONFLICT';
-                ruleActionName = `⚠️ 복원 충돌: ${rollbackRes.conflictReason || '확인 필요'}`;
-                playBeep(440, 300);
+                actionTriggered = 'CORRECTION_APPLIED';
+                ruleActionName = '✏️ 음성 정정 완료';
+                playBeep(1200, 250);
               }
+            } else if (targetResult.candidates.length > 1) {
+              // 복수 후보 존재 시 별도 정정 보류 요청 생성 (마지막 판매 임의 선택 금지)
+              const pendingReq: PendingCorrectionRequest = {
+                id: `pc-${crypto.randomUUID()}`,
+                workspaceId: workspaceId || 'local',
+                sessionId: currentSessionIdRef.current || 'default',
+                status: 'PENDING',
+                targetSaleId: null,
+                candidateSaleIds: targetResult.candidates.map((c) => c.id),
+                originalUtterance: fullText,
+                followUpUtterances: [],
+                parsedCorrection: correctionIntent,
+                missingInfo: targetResult.missingInfo,
+                conflictReason: '동일 조건 복수 판매 후보 존재 (상품번호 확인 필요)',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              };
+              activePendingCorrectionRef.current = pendingReq;
+              actionTriggered = 'CORRECTION_PENDING';
+              ruleActionName = '⚠️ 정정 보류 (상품번호를 말씀하세요)';
+              playBeep(660, 250);
             } else {
-              ruleActionName = '⚠️ 복원할 이전 정정 이력이 없습니다';
+              actionTriggered = 'CORRECTION_UNMATCHED';
+              ruleActionName = '⚠️ 정정 대상 판매 미확인';
               playBeep(440, 200);
             }
-          }
-        } else if (correctionIntent.isIncomplete) {
-          // "0.9가 아니고..." 새 값이 완성될 때까지 초안 대기
-          actionTriggered = 'CORRECTION_INCOMPLETE';
-          ruleActionName = '⏳ 정정 값 대기 중...';
-          playBeep(660, 150);
-        } else if (correctionIntent.isCorrection && !isActionableVoiceCorrection(correctionIntent)) {
-          actionTriggered = 'CORRECTION_INCOMPLETE';
-          ruleActionName = '⏳ 정정 값·적용 범위 확인 필요';
-        } else if (correctionIntent.isCorrection) {
-          // 정정 대상 탐색 (상품번호, 기존 구매자, 기존 금액 등)
-          const targetResult = findTargetSaleForCorrection(correctionIntent, sessionSales);
+          } else {
+            // 2. 판매 멘트 감지 ("구매확정 됐습니다...")
+            const previousFragment = recentFinalFragmentRef.current;
+            const combinedText = previousFragment && Date.now() - previousFragment.at <= 3_000
+              && !extractSaleFromTranscript(previousFragment.text, activeKeywords)
+              ? `${previousFragment.text} ${fullText}` : fullText;
+            const currentSaleResult = processingOptions.skipSale ? null : extractSaleFromTranscript(fullText, activeKeywords);
+            const combinedSaleResult = !processingOptions.skipSale && combinedText !== fullText
+              ? extractSaleFromTranscript(combinedText, activeKeywords) : null;
+            const saleResult = currentSaleResult?.isPending && combinedSaleResult && !combinedSaleResult.isPending
+              ? combinedSaleResult : currentSaleResult || combinedSaleResult;
+            recentFinalFragmentRef.current = { text: fullText, at: Date.now() };
 
-          if (targetResult.targetSaleId) {
-            const target = sessionSales.find((s) => s.id === targetResult.targetSaleId);
-            if (target) {
-              const applyRes = applyCorrectionToSale(target, correctionIntent, {
-                expectedRevision: target.revision,
-              });
-              updateSale(applyRes.updatedSale);
-              if (isRemoteAuth && workspaceId) {
-                void aiSettingsApi.applyVoiceCorrection(target.id, correctionIntent, {
-                  expectedRevision: target.revision,
-                  workspaceId,
-                });
-              }
-              actionTriggered = 'CORRECTION_APPLIED';
-              ruleActionName = '✏️ 음성 정정 완료';
-              playBeep(1200, 250);
+          // 캡처 조건: '캡처하세요' 멘트가 반드시 포함되어 있어야 함
+          // (띄어쓰기 유연성 및 단어 규칙 관리 등록 반영)
+          const hasCaptureInstruction =
+            !processingOptions.skipCapture &&
+            (/(캡처\s*하세요|캡쳐\s*하세요)/u.test(fullText) ||
+              rules.some(
+                (r) =>
+                  r.isEnabled &&
+                  (r.word.includes('캡처하세요') || r.word.includes('캡쳐하세요')) &&
+                  fullText.includes(r.word)
+              ));
+
+          if (saleResult) {
+            actionTriggered = 'SALE_PENDING';
+            const hasActiveStream = Boolean(screenCaptureService.getActiveStream());
+            if (hasCaptureInstruction) {
+              ruleActionName = '🛍️ 판매 후보 확인 중 + 📸 캡처 연동';
+            } else if (hasActiveStream) {
+              ruleActionName = '🛍️ 판매 후보 확인 중 + 📸 화면 캡처';
+            } else {
+              ruleActionName = '🛍️ 구매 댓글·음성 가격 확인 중';
             }
-          } else if (targetResult.candidates.length > 1) {
-            // 복수 후보 존재 시 별도 정정 보류 요청 생성 (마지막 판매 임의 선택 금지)
-            const pendingReq: PendingCorrectionRequest = {
-              id: `pc-${crypto.randomUUID()}`,
-              workspaceId: workspaceId || 'local',
-              sessionId: currentSessionIdRef.current || 'default',
-              status: 'PENDING',
-              targetSaleId: null,
-              candidateSaleIds: targetResult.candidates.map((c) => c.id),
-              originalUtterance: fullText,
-              followUpUtterances: [],
-              parsedCorrection: correctionIntent,
-              missingInfo: targetResult.missingInfo,
-              conflictReason: '동일 조건 복수 판매 후보 존재 (상품번호 확인 필요)',
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            };
-            activePendingCorrectionRef.current = pendingReq;
-            actionTriggered = 'CORRECTION_PENDING';
-            ruleActionName = '⚠️ 정정 보류 (상품번호를 말씀하세요)';
-            playBeep(660, 250);
-          } else {
-            actionTriggered = 'CORRECTION_UNMATCHED';
-            ruleActionName = '⚠️ 정정 대상 판매 미확인';
-            playBeep(440, 200);
-          }
-        } else {
-          // 2. 판매 멘트 감지 ("구매확정 됐습니다...")
-          const previousFragment = recentFinalFragmentRef.current;
-          const combinedText = previousFragment && Date.now() - previousFragment.at <= 3_000
-            && !extractSaleFromTranscript(previousFragment.text, activeKeywords)
-            ? `${previousFragment.text} ${fullText}` : fullText;
-          const currentSaleResult = processingOptions.skipSale ? null : extractSaleFromTranscript(fullText, activeKeywords);
-          const combinedSaleResult = !processingOptions.skipSale && combinedText !== fullText
-            ? extractSaleFromTranscript(combinedText, activeKeywords) : null;
-          const saleResult = currentSaleResult?.isPending && combinedSaleResult && !combinedSaleResult.isPending
-            ? combinedSaleResult : currentSaleResult || combinedSaleResult;
-          recentFinalFragmentRef.current = { text: fullText, at: Date.now() };
-
-        // 캡처 조건: '캡처하세요' 멘트가 반드시 포함되어 있어야 함
-        // (띄어쓰기 유연성 및 단어 규칙 관리 등록 반영)
-        const hasCaptureInstruction =
-          !processingOptions.skipCapture &&
-          (/(캡처\s*하세요|캡쳐\s*하세요)/u.test(fullText) ||
-            rules.some(
-              (r) =>
-                r.isEnabled &&
-                (r.word.includes('캡처하세요') || r.word.includes('캡쳐하세요')) &&
-                fullText.includes(r.word)
-            ));
-
-        if (saleResult) {
-          actionTriggered = 'SALE_PENDING';
-          const hasActiveStream = Boolean(screenCaptureService.getActiveStream());
-          if (hasCaptureInstruction) {
-            ruleActionName = '🛍️ 판매 후보 확인 중 + 📸 캡처 연동';
-          } else if (hasActiveStream) {
-            ruleActionName = '🛍️ 판매 후보 확인 중 + 📸 화면 캡처';
-          } else {
-            ruleActionName = '🛍️ 구매 댓글·음성 가격 확인 중';
-          }
-          void persistVoiceSale(
-            saleResult,
-            saleResult.rawTranscript,
-            hasCaptureInstruction,
-            requiredListeningGeneration
-          );
-        } else if (
-          hasCaptureInstruction ||
-          (!processingOptions.skipCapture &&
-            (fullText.includes('화면캡처') || fullText.includes('화면 캡처')))
-        ) {
-          // 3. 단독 캡처 트리거 감지 (판매 멘트가 없을 때 '캡처하세요' 또는 '화면 캡처')
-          actionTriggered = 'SCREEN_CAPTURED';
-          ruleActionName = '📸 화면 자동 캡처';
-          void captureCurrentScreen(
-            undefined,
-            '음성인식 자동캡처',
-            requiredListeningGeneration
-          );
-        } else if (
-          !processingOptions.skipSale &&
-          lastSavedSaleRef.current?.status === '보류' && lastSavedSaleRef.current.source === 'WEB_VOICE'
-          && Date.now() - Date.parse(lastSavedSaleRef.current.recognizedAt) <= 5_000
-          && Boolean(parseKoreanAmount(fullText)) && fullText.trim().length <= 120
-        ) {
-          // A short price continuation is advisory context, never an automatic
-          // overwrite of the original purchase or price evidence.
-          pendingVoiceFollowupRef.current.set(lastSavedSaleRef.current.id, fullText.trim());
-          setPendingAiTick((tick) => tick + 1);
-        } else if (
-          !processingOptions.skipSale &&
-          lastSavedSaleRef.current &&
-          lastSavedSaleRef.current.status === '보류' &&
-          lastSavedSaleRef.current.source !== 'WEB_VOICE' &&
-          Date.now() - new Date(lastSavedSaleRef.current.recognizedAt).getTime() <= 20000 &&
-          fullText.trim().length > 0
-        ) {
-          // 4. 직전 보류 판매에 대한 후속 발화(followingUtterance) 연결
-          const pendingSale = lastSavedSaleRef.current;
-          const currentReasons = pendingSale.pendingReasons || [];
-          const ruleEval = evaluatePendingRules(currentReasons, {
-            sale: pendingSale,
-            comments: (productSalesRef.current.feed?.comments || []).map((comment) => ({
-              id: comment.id,
-              sessionId: comment.sessionId,
-              nickname: comment.nicknameSnapshot,
-              content: comment.content,
-              capturedAt: comment.capturedAt,
-            })),
-            buyers: [],
-            activeProduct: productSalesRef.current.activeProduct ? {
-              unitPrice: productSalesRef.current.activeProduct.unitPrice ?? undefined,
-              productCode: productSalesRef.current.activeProduct.productCode,
-            } : undefined,
-            followUpUtterance: fullText,
-          });
-
-          if (ruleEval.resolvedReasonCodes.length > 0) {
-            const updated = {
-              ...pendingSale,
-              ...ruleEval.changes,
-              status: ruleEval.allResolved ? '자동저장' : '보류',
-              pendingReasons: ruleEval.updatedReasons,
-              revision: (pendingSale.revision || 1) + 1,
-            };
-            updateSale(updated as SaleRecord);
-            lastSavedSaleRef.current = updated as SaleRecord;
-            actionTriggered = 'SALE_SAVED';
-            ruleActionName = '🔗 후속 발화 연결 보류 해결';
-            playBeep(1200, 200);
-          } else if (isRemoteAuth && workspaceId) {
-            // 규칙으로 미해결 시 후속 발화(followingUtterance)를 첨부하여 AI 분석 요청
-            void aiSettingsApi.triggerPendingAiResolution(pendingSale.id, {
-              followingUtterance: fullText,
+            void persistVoiceSale(
+              saleResult,
+              saleResult.rawTranscript,
+              hasCaptureInstruction,
+              requiredListeningGeneration
+            );
+          } else if (
+            hasCaptureInstruction ||
+            (!processingOptions.skipCapture &&
+              (fullText.includes('화면캡처') || fullText.includes('화면 캡처')))
+          ) {
+            // 3. 단독 캡처 트리거 감지 (판매 멘트가 없을 때 '캡처하세요' 또는 '화면 캡처')
+            actionTriggered = 'SCREEN_CAPTURED';
+            ruleActionName = '📸 화면 자동 캡처';
+            void captureCurrentScreen(
+              undefined,
+              '음성인식 자동캡처',
+              requiredListeningGeneration
+            );
+          } else if (
+            !processingOptions.skipSale &&
+            lastSavedSaleRef.current?.status === '보류' && lastSavedSaleRef.current.source === 'WEB_VOICE'
+            && Date.now() - Date.parse(lastSavedSaleRef.current.recognizedAt) <= 5_000
+            && Boolean(parseKoreanAmount(fullText)) && fullText.trim().length <= 120
+          ) {
+            // A short price continuation is advisory context, never an automatic
+            // overwrite of the original purchase or price evidence.
+            pendingVoiceFollowupRef.current.set(lastSavedSaleRef.current.id, fullText.trim());
+            setPendingAiTick((tick) => tick + 1);
+          } else if (
+            !processingOptions.skipSale &&
+            lastSavedSaleRef.current &&
+            lastSavedSaleRef.current.status === '보류' &&
+            lastSavedSaleRef.current.source !== 'WEB_VOICE' &&
+            Date.now() - new Date(lastSavedSaleRef.current.recognizedAt).getTime() <= 20000 &&
+            fullText.trim().length > 0
+          ) {
+            // 4. 직전 보류 판매에 대한 후속 발화(followingUtterance) 연결
+            const pendingSale = lastSavedSaleRef.current;
+            const currentReasons = pendingSale.pendingReasons || [];
+            const ruleEval = evaluatePendingRules(currentReasons, {
+              sale: pendingSale,
+              comments: (productSalesRef.current.feed?.comments || []).map((comment) => ({
+                id: comment.id,
+                sessionId: comment.sessionId,
+                nickname: comment.nicknameSnapshot,
+                content: comment.content,
+                capturedAt: comment.capturedAt,
+              })),
+              buyers: [],
+              activeProduct: productSalesRef.current.activeProduct ? {
+                unitPrice: productSalesRef.current.activeProduct.unitPrice ?? undefined,
+                productCode: productSalesRef.current.activeProduct.productCode,
+              } : undefined,
               followUpUtterance: fullText,
-              workspaceId,
             });
-            ruleActionName = '🤖 AI 후속 발화 분석 전달';
+
+            if (ruleEval.resolvedReasonCodes.length > 0) {
+              const updated = {
+                ...pendingSale,
+                ...ruleEval.changes,
+                status: ruleEval.allResolved ? '자동저장' : '보류',
+                pendingReasons: ruleEval.updatedReasons,
+                revision: (pendingSale.revision || 1) + 1,
+              };
+              updateSale(updated as SaleRecord);
+              lastSavedSaleRef.current = updated as SaleRecord;
+              actionTriggered = 'SALE_SAVED';
+              ruleActionName = '🔗 후속 발화 연결 보류 해결';
+              playBeep(1200, 200);
+            } else if (isRemoteAuth && workspaceId) {
+              // 규칙으로 미해결 시 후속 발화(followingUtterance)를 첨부하여 AI 분석 요청
+              void aiSettingsApi.triggerPendingAiResolution(pendingSale.id, {
+                followingUtterance: fullText,
+                followUpUtterance: fullText,
+                workspaceId,
+              });
+              ruleActionName = '🤖 AI 후속 발화 분석 전달';
+            }
           }
         }
       }
-    }
 
-      if (actionTriggered !== 'NONE') loggedAction = actionTriggered;
-      // Registered words and automatic actions are labelled separately.
-      if (matchedKeywords.length > 0 || ruleActionName) {
-        const actionKeywords = actionTriggered?.startsWith('CORRECTION_') ? ['음성 정정']
-          : actionTriggered === 'SALE_PENDING' ? ['판매 후보']
-          : actionTriggered === 'SALE_SAVED' ? ['판매 처리']
-          : actionTriggered === 'SCREEN_CAPTURED' ? ['화면 캡처']
-          : ruleActionName.includes('상품') ? ['상품등록'] : ['음성 명령'];
-        setLastMatchedRuleItem({
-          text: fullText,
-          matchedKeywords: matchedKeywords.length > 0 ? matchedKeywords : actionKeywords,
-          action: ruleActionName || '단어 규칙 일치',
-          timestamp: nowTime
-        });
+        if (actionTriggered !== 'NONE') loggedAction = actionTriggered;
+        // Registered words and automatic actions are labelled separately.
+        if (matchedKeywords.length > 0 || ruleActionName) {
+          const actionKeywords = actionTriggered?.startsWith('CORRECTION_') ? ['음성 정정']
+            : actionTriggered === 'SALE_PENDING' ? ['판매 후보']
+            : actionTriggered === 'SALE_SAVED' ? ['판매 처리']
+            : actionTriggered === 'SCREEN_CAPTURED' ? ['화면 캡처']
+            : ruleActionName.includes('상품') ? ['상품등록'] : ['음성 명령'];
+          setLastMatchedRuleItem({
+            text: fullText,
+            matchedKeywords: matchedKeywords.length > 0 ? matchedKeywords : actionKeywords,
+            action: ruleActionName || '단어 규칙 일치',
+            timestamp: nowTime
+          });
+        }
       }
+
+    } catch (error) {
+      // Captured speech is independent of product/sale processing. Keep its
+      // original evidence even if a rule, command or correction handler fails.
+      console.error('[Live] 판매·규칙 처리 실패. 원본 전사는 계속 보관합니다:', error);
     }
 
     // 전사 로그 적재
@@ -1968,12 +1979,16 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             setSttEngineStatus(status);
             if (message) setSttEngineMessage(message);
-            if (status === 'ERROR' && mode === 'TAB_AUDIO') {
+            if (status === 'DISCONNECTED' || (status === 'ERROR' && mode === 'TAB_AUDIO')) {
               listeningGenerationRef.current += 1;
               activeListeningUserIdRef.current = null;
               isListeningRef.current = false;
               setIsListening(false);
-              audioCaptureService.pauseCapture();
+              if (mode === 'TAB_AUDIO') audioCaptureService.pauseCapture();
+              else audioCaptureService.stopCapture();
+              if (status === 'DISCONNECTED') {
+                setSttEngineMessage(`${message || 'STT 연결이 종료되었습니다.'} 다시 시작을 눌러 연결해 주세요.`);
+              }
               setAudioLevel(0);
               setWaveform(new Uint8Array(128));
               resetSonioxBusinessAccumulator();

@@ -205,6 +205,8 @@ export class DeepgramSttService {
               language_hints: ['ko'],
               language_hints_strict: true,
               enable_speaker_diarization: false,
+              enable_endpoint_detection: true,
+              max_endpoint_delay_ms: 2000,
               ...(config.keyterms.length > 0 ? { context: { terms: config.keyterms } } : {})
             }));
 
@@ -217,8 +219,8 @@ export class DeepgramSttService {
 
             try {
               const data: SonioxResponse = JSON.parse(event.data);
-              if (data.error_type || data.error_message) {
-                console.warn('[Soniox] STT 오류:', data.error_type, data.request_id);
+              if (data.error_code || data.error_type || data.error_message) {
+                console.warn('[Soniox] STT 오류:', data.error_code, data.error_type, data.request_id);
                 handleCloudFailure(socket, 'Soniox 처리 오류로');
                 return;
               }
@@ -237,8 +239,11 @@ export class DeepgramSttService {
 
               if (confirmedTextDelta) {
                 this.sonioxFinalText += confirmedTextDelta;
-                if (this.sonioxFinalText.length > 1200) {
-                  this.sonioxFinalText = this.sonioxFinalText.slice(-1200);
+                // A long utterance must retain its original text for the log and
+                // purchase evidence. Ask for a boundary instead of dropping words.
+                if (!finalizationReached && this.sonioxFinalText.length >= 1200 && !this.sonioxFinalizeRequested) {
+                  this.sonioxFinalizeRequested = true;
+                  socket.send(JSON.stringify({ type: 'finalize' }));
                 }
               }
 
