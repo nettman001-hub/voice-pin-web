@@ -38,6 +38,8 @@ import { useSttVocabulary } from './SttVocabularyContext';
 import { buildCloudSttTerms, getRecentCommentNicknames } from '../services/sttVocabularyService';
 import { getVoiceReviewRequests, shouldReviewVoiceSale, voiceReviewFingerprint, isVoiceReviewReady } from '../services/voicePendingReviewService';
 import { decideSttSessionRotation, STT_ROTATION_POLICY } from '../services/sttSessionRotationService';
+import type { AudioCaptureDiagnostics } from '../services/audioCaptureService';
+import type { SttStreamDiagnostics } from '../services/deepgramService';
 
 const SONIOX_SALE_TIMEOUT_MS = 10000;
 const SONIOX_BUFFER_LIMIT = 600;
@@ -130,6 +132,7 @@ interface LiveContextType {
   localSttStatus: LocalSttStatusPayload;
   sttEngineStatus: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
   sttEngineMessage: string;
+  pipelineDiagnostics: { audio: AudioCaptureDiagnostics; stt: SttStreamDiagnostics; elapsedSeconds: number } | null;
   isScreenShareConnected: boolean;
   hasScreenShareAudio: boolean;
   startListening: (mode?: 'TAB_AUDIO' | 'MIC', salesSessionId?: string) => Promise<void>;
@@ -168,6 +171,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [recentCaptures, setRecentCaptures] = useState<CaptureItem[]>([]);
   const [sttEngineStatus, setSttEngineStatus] = useState<'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR'>('DISCONNECTED');
   const [sttEngineMessage, setSttEngineMessage] = useState<string>('대기 중');
+  const [pipelineDiagnostics, setPipelineDiagnostics] = useState<LiveContextType['pipelineDiagnostics']>(null);
   const [screenConnection, setScreenConnection] = useState(() => screenCaptureService.getConnectionState());
   
   // 방송 중 음성 명령 수정 상태
@@ -1852,6 +1856,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           .catch(() => false);
       }
 
+      if (listeningGenerationRef.current !== listeningGeneration || !isListeningRef.current) return;
       if (!captureResumed) {
         await audioCaptureService.startCapture(mode, chunkCallback, waveformCallback);
       }
@@ -1900,12 +1905,13 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             setSttEngineStatus(status);
             if (message) setSttEngineMessage(message);
-            if (status === 'ERROR' && mode === 'TAB_AUDIO') {
+            if (status === 'ERROR' || status === 'DISCONNECTED') {
               listeningGenerationRef.current += 1;
               activeListeningUserIdRef.current = null;
               isListeningRef.current = false;
               setIsListening(false);
-              audioCaptureService.pauseCapture();
+              if (mode === 'TAB_AUDIO') audioCaptureService.pauseCapture();
+              else audioCaptureService.stopCapture();
               setAudioLevel(0);
               setWaveform(new Uint8Array(128));
               resetSonioxBusinessAccumulator();
@@ -2018,6 +2024,19 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       startInFlightRef.current = false;
     }
   };
+
+  useEffect(() => {
+    if (!isListening) return;
+    const startedAt = Date.now();
+    const sample = () => setPipelineDiagnostics({
+      audio: audioCaptureService.getDiagnostics(),
+      stt: deepgramService.getDiagnostics(),
+      elapsedSeconds: (Date.now() - startedAt) / 1000,
+    });
+    sample();
+    const timer = window.setInterval(sample, 2000);
+    return () => window.clearInterval(timer);
+  }, [isListening]);
 
   useEffect(() => {
     if (!isListening || sttMode !== 'CLOUD') return;
@@ -2256,6 +2275,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localSttStatus,
         sttEngineStatus,
         sttEngineMessage,
+        pipelineDiagnostics,
         isScreenShareConnected: screenConnection.isConnected,
         hasScreenShareAudio: screenConnection.hasAudio,
         startListening,

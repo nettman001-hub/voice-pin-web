@@ -23,6 +23,11 @@ export interface SellerSettingsModalProps {
   onChangeAudioSourceMode?: (mode: 'TAB_AUDIO' | 'MIC') => void;
   sttProvider: string;
   sttMode: string;
+  onChangeSttMode?: (mode: 'CLOUD' | 'LOCAL') => void;
+  isListening?: boolean;
+  canUseCloudStt?: boolean;
+  localSttModel?: string;
+  localSttMessage?: string;
 }
 
 export const SellerSettingsModal: React.FC<SellerSettingsModalProps> = ({
@@ -34,7 +39,12 @@ export const SellerSettingsModal: React.FC<SellerSettingsModalProps> = ({
   audioSourceMode,
   onChangeAudioSourceMode,
   sttProvider,
-  sttMode
+  sttMode,
+  onChangeSttMode,
+  isListening = false,
+  canUseCloudStt = false,
+  localSttModel = 'base',
+  localSttMessage
 }) => {
   if (!isOpen) return null;
 
@@ -207,8 +217,28 @@ export const SellerSettingsModal: React.FC<SellerSettingsModalProps> = ({
               </span>
             </div>
             <p className="text-[11px] text-slate-500">
-              현재 활성화된 STT 엔진: <strong className="text-slate-700">{sttProvider === 'SONIOX' ? 'Soniox v5 (초고속 한국어)' : 'Deepgram Nova-3'}</strong>
+              현재 선택한 STT 엔진: <strong className="text-slate-700">{sttMode === 'LOCAL' ? `내 PC Whisper (${localSttModel})` : sttProvider === 'SONIOX' ? 'Soniox v5' : 'Deepgram Nova-3'}</strong>
             </p>
+            <div className="grid grid-cols-2 gap-2" role="group" aria-label="음성인식 엔진 선택">
+              {(['CLOUD', 'LOCAL'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={sttMode === mode}
+                  disabled={isListening || !onChangeSttMode || (mode === 'CLOUD' && !canUseCloudStt)}
+                  onClick={() => onChangeSttMode?.(mode)}
+                  className={`rounded-xl border p-2.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${sttMode === mode ? 'border-brand-500 bg-brand-50 text-brand-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+                >
+                  {mode === 'CLOUD' ? '클라우드 STT' : '내 PC STT'}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] leading-relaxed text-slate-500">
+              {isListening ? '엔진을 바꾸려면 먼저 청취를 중지해 주세요.' : !canUseCloudStt ? '클라우드 STT는 관리자 이용 승인과 API 키 등록이 필요합니다.' : '선택한 엔진은 다음 청취 시작부터 적용됩니다.'}
+            </p>
+            {sttMode === 'LOCAL' && <p className="text-[11px] leading-relaxed text-amber-800">
+              내 PC 모드에서는 클라우드 STT를 호출하지 않습니다. {localSttMessage || '댓글 도우미의 로컬 STT 엔진이 실행 중이어야 합니다.'}
+            </p>}
             <div className="pt-1 flex items-center justify-between text-xs">
               <Link
                 to="/my"

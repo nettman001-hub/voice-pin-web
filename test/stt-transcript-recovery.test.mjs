@@ -59,13 +59,13 @@ test('Soniox preserves the entire finalized utterance beyond 1200 characters', (
   ctx.service.stopLiveStream();
 });
 
-function liveStatusFixture(mode) {
+function liveStatusFixture(mode, engine = 'CLOUD') {
   const source = fs.readFileSync(new URL('../src/context/LiveContext.tsx', import.meta.url), 'utf8');
   const file = ts.createSourceFile('LiveContext.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let callback;
   function visit(node) {
-    if (ts.isCallExpression(node) && node.expression.getText(file) === 'deepgramService.startLiveStream') {
-      callback = node.arguments[3].getText(file);
+    if (ts.isCallExpression(node) && node.expression.getText(file) === (engine === 'LOCAL' ? 'localSttService.startListening' : 'deepgramService.startLiveStream')) {
+      callback = node.arguments[engine === 'LOCAL' ? 5 : 3].getText(file);
     }
     ts.forEachChild(node, visit);
   }
@@ -94,6 +94,36 @@ function liveStatusFixture(mode) {
   });
   return { state, refs, callback: module.exports };
 }
+
+for (const mode of ['TAB_AUDIO', 'MIC']) {
+  for (const status of ['ERROR', 'DISCONNECTED']) {
+    test(`local STT ${status} clears ON AIR, audio and late callbacks (${mode})`, () => {
+      const ctx = liveStatusFixture(mode, 'LOCAL');
+      ctx.callback(status, '로컬 엔진에 연결할 수 없습니다');
+      assert.equal(ctx.state.status, status);
+      assert.equal(ctx.state.listening, false);
+      assert.equal(ctx.refs.isListeningRef.current, false);
+      assert.equal(ctx.state.level, 0);
+      assert.equal(ctx.state.paused, mode === 'TAB_AUDIO' ? 1 : 0);
+      assert.equal(ctx.state.stopped, mode === 'MIC' ? 1 : 0);
+      ctx.callback('CONNECTED', 'old response');
+      assert.equal(ctx.state.status, status);
+    });
+  }
+}
+
+test('Soniox reports real PCM sends and response/text counts separately', () => {
+  const ctx = fixture();
+  assert.equal(ctx.service.getDiagnostics().audioSeconds, 0);
+  ctx.service.sendAudioChunk(new Int16Array(16000).buffer);
+  ctx.sendTokens([{ text: '안녕하세요', is_final: false }]);
+  const diagnostics = ctx.service.getDiagnostics();
+  assert.equal(diagnostics.audioSeconds, 1);
+  assert.equal(diagnostics.receivedResponses, 1);
+  assert.equal(diagnostics.receivedTextCharacters, 5);
+  assert.ok(diagnostics.lastResponseAt > 0);
+  ctx.service.stopLiveStream();
+});
 
 for (const mode of ['TAB_AUDIO', 'MIC']) {
   test(`a real Soniox close event clears ON AIR and stale callbacks (${mode})`, () => {

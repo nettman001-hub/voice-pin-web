@@ -72,6 +72,11 @@ export const LiveHomePage: React.FC = () => {
     setSonioxApiKey,
     sttProvider,
     sttMode,
+    localSttModel,
+    localSttStatus,
+    sttEngineStatus,
+    sttEngineMessage,
+    pipelineDiagnostics,
     setSttMode,
     startListening,
     stopListening,
@@ -746,6 +751,17 @@ export const LiveHomePage: React.FC = () => {
 
           {/* 최근 전사 로그 */}
           <div className="order-4 bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
+            {!isListening && (sttEngineStatus === 'ERROR' || sttEngineStatus === 'DISCONNECTED') && sttEngineMessage && <p role="alert" className="mb-2 text-xs leading-relaxed text-amber-800">{sttEngineMessage}</p>}
+            {isListening && pipelineDiagnostics && <div className="mb-2 space-y-1 text-[11px] text-slate-600" aria-label="실시간 전사 연결 진단">
+              <p>실제 오디오 입력 {pipelineDiagnostics.audio.audioSeconds.toFixed(1)}초
+                {sttMode === 'CLOUD' && <> · 현재 STT 연결 전송 {pipelineDiagnostics.stt.audioSeconds.toFixed(1)}초 · 서버 응답 {pipelineDiagnostics.stt.receivedResponses}회 · 전사 수신 {pipelineDiagnostics.stt.receivedTextCharacters}자</>}
+              </p>
+              <p title={sttEngineMessage}>{sttMode === 'LOCAL' ? '내 PC STT' : selectedSttName} · {sttEngineStatus === 'CONNECTED' ? '소켓 연결됨' : sttEngineStatus === 'CONNECTING' ? '연결 중' : sttEngineStatus === 'ERROR' ? '연결 오류' : '연결 끊김'} · {pipelineDiagnostics.audio.processor === 'AUDIO_WORKLET' ? '오디오 전용 처리' : pipelineDiagnostics.audio.processor === 'SCRIPT_PROCESSOR' ? '호환 오디오 처리' : '오디오 처리 대기'}</p>
+              {pipelineDiagnostics.elapsedSeconds >= 10 && pipelineDiagnostics.audio.chunks === 0 && <p role="alert" className="text-amber-800">오디오 데이터가 생성되지 않습니다. 청취를 중지한 뒤 다시 시작해 주세요.</p>}
+              {pipelineDiagnostics.elapsedSeconds >= 10 && pipelineDiagnostics.audio.chunks > 0 && !pipelineDiagnostics.audio.lastSignalAt && <p role="alert" className="text-amber-800">공유한 탭에서 소리가 들어오지 않습니다. 실제 방송 탭과 탭 오디오 공유를 확인해 주세요.</p>}
+              {sttMode === 'CLOUD' && pipelineDiagnostics.stt.audioSeconds >= 10 && pipelineDiagnostics.stt.receivedResponses === 0 && <p role="alert" className="text-amber-800">오디오는 전송됐지만 STT 서버 응답이 없습니다. 연결 상태를 확인해 주세요.</p>}
+              {sttEngineStatus === 'ERROR' && <p role="alert" className="text-rose-700">{sttEngineMessage}</p>}
+            </div>}
             <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
               <div className="flex items-center space-x-2 flex-wrap">
                 <Clock className="w-4 h-4 text-brand-600 shrink-0" />
@@ -1501,6 +1517,11 @@ export const LiveHomePage: React.FC = () => {
         onChangeAudioSourceMode={handleAudioSourceModeChange}
         sttProvider={sttProvider}
         sttMode={sttMode}
+        onChangeSttMode={setSttMode}
+        isListening={isListening || isSessionStarting}
+        canUseCloudStt={canUseAdminKey && hasAdminSttKey}
+        localSttModel={localSttModel}
+        localSttMessage={localSttStatus.message}
       />
 
       {viewerModal.isOpen && (

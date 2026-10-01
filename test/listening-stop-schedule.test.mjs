@@ -113,6 +113,17 @@ function providerFixture() {
   };
 }
 
+test('without a reservation, listening starts and continues without any schedule timer or stop', () => {
+  const ctx = providerFixture();
+  ctx.state.live.isListening = false; ctx.settle();
+  ctx.state.live.isListening = true; ctx.state.live.listeningRunId++; ctx.settle();
+  ctx.setNow(ctx.now + 30 * 60_000); ctx.tick(); ctx.event('window:focus');
+  assert.equal(ctx.render().scheduledStop, null);
+  assert.equal(ctx.intervals.size, 0);
+  assert.equal(ctx.state.live.isListening, true);
+  assert.deepEqual(ctx.stops, { listening: 0, comments: 0 });
+});
+
 test('the scheduled deadline stops listening and comments exactly once, even after menu navigation', () => {
   const ctx = providerFixture();
   ctx.render().scheduleStop(ctx.now + 60_000);

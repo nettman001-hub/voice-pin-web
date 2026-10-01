@@ -21,6 +21,14 @@ export type OnStatusCallback = (status: 'CONNECTING' | 'CONNECTED' | 'DISCONNECT
 
 export type ActiveSttEngine = SttProvider | 'WEB_SPEECH' | 'LOCAL_WHISPER' | 'NONE';
 
+export interface SttStreamDiagnostics {
+  engine: ActiveSttEngine;
+  audioSeconds: number;
+  receivedResponses: number;
+  receivedTextCharacters: number;
+  lastResponseAt: number;
+}
+
 export class DeepgramSttService {
   private ws: WebSocket | null = null;
   private speechRecognition: any = null;
@@ -43,6 +51,10 @@ export class DeepgramSttService {
   private rotationAttemptId: number = 0;
   private quietAudioMs: number = 0;
   private deepgramHasUnfinalizedTranscript: boolean = false;
+  private sentAudioBytes = 0;
+  private receivedResponses = 0;
+  private receivedTextCharacters = 0;
+  private lastResponseAt = 0;
 
   private isCurrentGeneration(generation: number): boolean {
     return this.sessionGeneration === generation;
@@ -125,6 +137,10 @@ export class DeepgramSttService {
     this.sonioxAudioMsSinceFinalize = 0;
     this.quietAudioMs = 0;
     this.deepgramHasUnfinalizedTranscript = false;
+    this.sentAudioBytes = 0;
+    this.receivedResponses = 0;
+    this.receivedTextCharacters = 0;
+    this.lastResponseAt = 0;
 
     return this.sessionGeneration;
   }
@@ -219,6 +235,13 @@ export class DeepgramSttService {
 
             try {
               const data: SonioxResponse = JSON.parse(event.data);
+              this.receivedResponses++;
+              this.lastResponseAt = Date.now();
+              if (this.receivedResponses === 1) console.log('[Soniox] 첫 서버 응답 수신:', {
+                tokens: data.tokens?.length || 0,
+                processedAudioMs: data.total_audio_proc_ms || 0,
+                errorCode: data.error_code,
+              });
               if (data.error_code || data.error_type || data.error_message) {
                 console.warn('[Soniox] STT 오류:', data.error_code, data.error_type, data.request_id);
                 handleCloudFailure(socket, 'Soniox 처리 오류로');
@@ -226,6 +249,8 @@ export class DeepgramSttService {
               }
 
               const tokens = data.tokens || [];
+              this.receivedTextCharacters += tokens.filter((token) => token.text !== '<end>' && token.text !== '<fin>')
+                .reduce((count, token) => count + token.text.length, 0);
               const finalizationReached = tokens.some((token) => (
                 token.is_final && (token.text === '<fin>' || token.text === '<end>')
               ));
@@ -341,8 +366,11 @@ export class DeepgramSttService {
 
           try {
             const data: DeepgramResponse = JSON.parse(event.data);
+            this.receivedResponses++;
+            this.lastResponseAt = Date.now();
             if (data.type === 'Results' && data.channel?.alternatives?.[0]) {
               const alt = data.channel.alternatives[0];
+              this.receivedTextCharacters += alt.transcript?.length || 0;
               if (data.is_final || data.speech_final) {
                 this.deepgramHasUnfinalizedTranscript = false;
               } else if (alt.transcript && alt.transcript.trim()) {
@@ -625,6 +653,11 @@ export class DeepgramSttService {
     }
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(chunk);
+      const bytes = chunk instanceof ArrayBuffer ? chunk.byteLength : chunk.size;
+      if (this.sentAudioBytes === 0 && bytes > 0) console.log('[STT] 첫 오디오 전송:', {
+        engine: this.currentEngine, bytes,
+      });
+      this.sentAudioBytes += bytes;
 
       if (chunk instanceof ArrayBuffer) {
         this.observeRotationBoundary(chunk);
@@ -761,6 +794,17 @@ export class DeepgramSttService {
   public getCurrentEngine(): ActiveSttEngine {
     if (this.activeDelegate) return this.activeDelegate.getCurrentEngine();
     return this.currentEngine;
+  }
+
+  public getDiagnostics(): SttStreamDiagnostics {
+    if (this.activeDelegate) return this.activeDelegate.getDiagnostics();
+    return {
+      engine: this.currentEngine,
+      audioSeconds: this.sentAudioBytes / (16000 * 2),
+      receivedResponses: this.receivedResponses,
+      receivedTextCharacters: this.receivedTextCharacters,
+      lastResponseAt: this.lastResponseAt,
+    };
   }
 
   /**

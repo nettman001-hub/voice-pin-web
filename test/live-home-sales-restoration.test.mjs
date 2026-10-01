@@ -20,7 +20,10 @@ function pageFixture() {
     live: { isListening: false, currentSessionId: 'local-session-after-reload',
       liveTranscriptFlow: [], transcriptLogs: [], recentCaptures: [],
       currentInterimTranscript: '', totalSessionTranscriptCount: 0, audioLevel: 0,
-      waveform: new Uint8Array(128), sttMode: 'CLOUD', sttProvider: 'SONIOX' },
+      waveform: new Uint8Array(128), sttMode: 'CLOUD', sttProvider: 'SONIOX',
+      localSttModel: 'base', localSttStatus: { message: '로컬 연결 대기' },
+      sttEngineStatus: 'DISCONNECTED', sttEngineMessage: '', pipelineDiagnostics: null,
+      setSttMode() {} },
     activeSession: null,
     sales: [],
     refreshedSales: [],
@@ -117,6 +120,19 @@ const visibleSaleIds = (tree) => nodes(tree).filter((node) =>
   node.type === 'link' && /^\/sales\/[^/]+$/.test(node.props.to) && node.props.to !== '/sales/review')
   .map((node) => node.props.to.slice('/sales/'.length));
 const refreshButton = (tree) => nodes(tree).find((node) => node.props.title === '판매 내역 새로고침');
+
+test('a stopped live page keeps the STT failure visible and wires the engine selector to persisted settings', () => {
+  const ctx = pageFixture();
+  ctx.state.live.sttEngineStatus = 'ERROR';
+  ctx.state.live.sttEngineMessage = '내 PC STT에 연결할 수 없습니다';
+  const tree = ctx.settle();
+  const alert = nodes(tree).find((node) => node.props.role === 'alert' && node.props.children.includes(ctx.state.live.sttEngineMessage));
+  assert.ok(alert, 'stopping after a failure must not hide its cause');
+  const modal = nodes(tree).find((node) => node.type === 'SellerSettingsModal');
+  assert.equal(modal.props.onChangeSttMode, ctx.state.live.setSttMode);
+  assert.equal(modal.props.isListening, false);
+  assert.equal(modal.props.canUseCloudStt, false);
+});
 
 for (const restorationOrder of ['sales-first', 'session-first']) {
   test(`reloading the stopped live page restores sales and pending rows (${restorationOrder})`, () => {
