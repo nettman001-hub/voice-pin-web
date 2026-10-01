@@ -11,7 +11,8 @@ export type HelperDispatcherFn = (
   endpointUrl: string,
   requestPayload: any,
   headers: Record<string, string>,
-  timeoutMs: number
+  timeoutMs: number,
+  signal?: AbortSignal
 ) => Promise<{ status: number; body: string }>;
 
 export interface SelfHostedAdapterOptions {
@@ -19,6 +20,7 @@ export interface SelfHostedAdapterOptions {
   secretValue?: string;
   helperDispatcher?: HelperDispatcherFn;
   allowInsecureHttpForExternal?: boolean;
+  signal?: AbortSignal;
 }
 
 /**
@@ -131,28 +133,28 @@ export async function runSelfHostedResolution(
 
   let rawResponseText = '';
   let tokenStats: { prompt?: number; completion?: number; total?: number } | undefined;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
 
   try {
     // 4. 경로별 호출 실행
     if (routingMode === 'PC_HELPER') {
       // PC 도우미 경유: 도우미 디스패처가 제공된 경우 전달, 없으면 직접 로컬 fetch (로컬 테스트 및 도우미 내부 환경)
       if (helperDispatcher) {
-        const helperRes = await helperDispatcher(endpoint, requestBody, headers, timeoutMs);
+        const helperRes = await helperDispatcher(endpoint, requestBody, headers, timeoutMs, signal);
         if (helperRes.status >= 400) {
           throw new Error(`PC 도우미 경유 호출 오류 (HTTP ${helperRes.status}): ${helperRes.body}`);
         }
         rawResponseText = helperRes.body;
       } else {
         // 로컬 환경 또는 단위 테스트에서 직접 호출
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
         const res = await fetch(endpoint, {
           method: 'POST',
           headers,
           body: JSON.stringify(requestBody),
-          signal: controller.signal,
+          signal,
         });
-        clearTimeout(timer);
         if (!res.ok) {
           const errText = await res.text().catch(() => '');
           // 만약 response_format 관련 거부(400)일 경우, response_format 제거 후 1회 재시도
@@ -162,6 +164,7 @@ export async function runSelfHostedResolution(
               method: 'POST',
               headers,
               body: JSON.stringify(requestBody),
+              signal,
             });
             if (retryRes.ok) {
               rawResponseText = await retryRes.text();
@@ -178,15 +181,13 @@ export async function runSelfHostedResolution(
       }
     } else {
       // SERVER_DIRECT: 서버에서 직접 외부 IP/도메인 LLM 호출 (safeFetch로 SSRF 및 3xx 리디렉션 차단)
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
       let res = await safeFetch(
         endpoint,
         {
           method: 'POST',
           headers,
           body: JSON.stringify(requestBody),
-          signal: controller.signal,
+          signal,
         },
         {
           routingMode: 'SERVER_DIRECT',
@@ -194,21 +195,18 @@ export async function runSelfHostedResolution(
           allowInsecureHttpForExternal,
         }
       );
-      clearTimeout(timer);
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
         // 만약 response_format 관련 거부(400)일 경우, response_format 제거 후 1회 재시도
         if (res.status === 400 && requestBody?.response_format && errText.includes('response_format')) {
           delete requestBody.response_format;
-          const retryController = new AbortController();
-          const retryTimer = setTimeout(() => retryController.abort(), timeoutMs);
           const retryRes = await safeFetch(
             endpoint,
             {
               method: 'POST',
               headers,
               body: JSON.stringify(requestBody),
-              signal: retryController.signal,
+              signal,
             },
             {
               routingMode: 'SERVER_DIRECT',
@@ -216,7 +214,6 @@ export async function runSelfHostedResolution(
               allowInsecureHttpForExternal,
             }
           );
-          clearTimeout(retryTimer);
           if (!retryRes.ok) {
             const retryErrText = await retryRes.text().catch(() => '');
             throw new Error(`외부 서버 LLM 응답 오류 (HTTP ${retryRes.status}): ${retryErrText}`);
@@ -282,7 +279,7 @@ export async function runSelfHostedResolution(
       evidenceIds: [],
       evidenceSummary: `자체 운영 LLM 호출 실패: ${err.message || '네트워크 오류'}`,
       missingInfo: [err.message || 'LLM 호출 오류'],
-      conflictReason: err.code || '추론 엔진 호출 실패',
+      conflictReason: signal.aborted ? 'TIMEOUT' : err.code || '추론 엔진 호출 실패',
       execution: {
         adapterType: 'SELF_HOSTED',
         routingMode,
@@ -293,5 +290,7 @@ export async function runSelfHostedResolution(
         rawResponse: rawResponseText || err.message,
       },
     };
+  } finally {
+    clearTimeout(timer);
   }
 }

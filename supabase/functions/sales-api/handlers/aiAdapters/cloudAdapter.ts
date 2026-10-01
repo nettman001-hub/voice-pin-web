@@ -10,6 +10,7 @@ import { buildResolutionPrompt, parseAndNormalizeAiOutput } from './common.ts';
 export interface CloudAdapterOptions {
   slotConfig: AiSlotConfig;
   secretApiKey: string;
+  signal?: AbortSignal;
 }
 
 /**
@@ -149,10 +150,11 @@ export async function runCloudResolution(
 
   let rawResponseText = '';
   let tokenStats: { prompt?: number; completion?: number; total?: number } | undefined;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
 
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     // safeFetch: SSRF 방지 및 HTTP 3xx 리디렉션 차단
     const res = await safeFetch(
@@ -161,14 +163,13 @@ export async function runCloudResolution(
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody),
-        signal: controller.signal,
+        signal,
       },
       {
         routingMode: 'SERVER_DIRECT',
         location: 'EXTERNAL_IP',
       }
     );
-    clearTimeout(timer);
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
@@ -235,7 +236,7 @@ export async function runCloudResolution(
       evidenceIds: [],
       evidenceSummary: `${provider} 클라우드 API 호출 실패: ${err.message || '네트워크 오류'}`,
       missingInfo: [err.message || '클라우드 API 호출 실패'],
-      conflictReason: '클라우드 공급자 통신 오류',
+      conflictReason: signal.aborted ? 'TIMEOUT' : '클라우드 공급자 통신 오류',
       execution: {
         adapterType: 'CLOUD',
         routingMode: 'SERVER_DIRECT',
@@ -246,5 +247,7 @@ export async function runCloudResolution(
         rawResponse: rawResponseText || err.message,
       },
     };
+  } finally {
+    clearTimeout(timer);
   }
 }

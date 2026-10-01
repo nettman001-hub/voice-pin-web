@@ -12,7 +12,7 @@ import { generateSequentialProductName } from '../utils/productNaming';
 import { useSales } from './SalesContext';
 import { useAuth } from './AuthContext';
 import { CaptureAreaConfig } from '../types/rules';
-import { SttProvider } from '../types/deepgram';
+import { SttConfig, SttProvider } from '../types/deepgram';
 import { localSttService } from '../services/localSttService';
 import { LocalSttModel, LocalSttStatusPayload, SttMode } from '../types/stt';
 import { User } from '../types/auth';
@@ -32,7 +32,9 @@ import {
 import type { PendingCorrectionRequest } from '../types/voiceCorrection';
 import { aiSettingsApi } from '../services/aiSettingsApi';
 import { useSttVocabulary } from './SttVocabularyContext';
-import { buildCloudSttTerms } from '../services/sttVocabularyService';
+import { buildCloudSttTerms, getRecentCommentNicknames } from '../services/sttVocabularyService';
+import { getVoiceReviewRequests, shouldReviewVoiceSale, voiceReviewFingerprint, isVoiceReviewReady } from '../services/voicePendingReviewService';
+import { decideSttSessionRotation, STT_ROTATION_POLICY } from '../services/sttSessionRotationService';
 
 const SONIOX_SALE_TIMEOUT_MS = 10000;
 const SONIOX_BUFFER_LIMIT = 600;
@@ -95,6 +97,7 @@ export interface MatchedRuleItem {
 
 interface LiveContextType {
   isListening: boolean;
+  listeningRunId: number;
   currentSessionId: string;
   sessionStartTime: string | null;
   audioLevel: number;
@@ -141,7 +144,7 @@ interface LiveContextType {
 const LiveContext = createContext<LiveContextType | undefined>(undefined);
 
 export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { addSale, updateSale, sales } = useSales();
+  const { addSale, updateSale, sales, refreshSales } = useSales();
   const { isAuthenticated, user, workspaceId, isRemoteAuth } = useAuth();
   const { getWordsForConnection } = useSttVocabulary();
   const productSales = useProductSales();
@@ -172,6 +175,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const recentFinalFragmentRef = useRef<{ text: string; at: number } | null>(null);
   const recentVoiceDecisionsRef = useRef<Map<string, number>>(new Map());
   const reservedPurchaseRequestsRef = useRef<Set<string>>(new Set());
+  const pendingAiAttemptsRef = useRef<Map<string, { fingerprint: string; attemptedAt: number; failed: boolean }>>(new Map());
+  const pendingAiRunningRef = useRef(false);
+  const pendingVoiceFollowupRef = useRef<Map<string, string>>(new Map());
+  const [pendingAiTick, setPendingAiTick] = useState(0);
   const productSalesRef = useRef(productSales);
   const voiceProductDraftRef = useRef<VoiceProductDraft | null>(null);
   const interimStreamChunkerRef = useRef<InterimStreamChunker>(new InterimStreamChunker());
@@ -248,6 +255,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const startInFlightRef = useRef(false);
   const cloudSttStartTimeRef = useRef<number | null>(null);
   const activeCloudProviderRef = useRef<'DEEPGRAM' | 'SONIOX' | null>(null);
+  const activeCloudSttConfigRef = useRef<SttConfig | null>(null);
+  const activeCloudNicknameTermsRef = useRef<string[]>([]);
+  const lastSuccessfulSttConnectionAtRef = useRef<number>(0);
+  const nextSttRotationAttemptAtRef = useRef<number>(0);
+  const sttRotationBusyRef = useRef(false);
   const currentSessionIdRef = useRef<string>(currentSessionId);
   const transcriptWorkspaceIdRef = useRef<string>(workspaceId || user?.id || 'local');
   const sessionTranscriptsRef = useRef<Map<string, SttTranscriptLog[]>>(new Map());
@@ -306,7 +318,9 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const targetSessionId = sessionIdOverride || currentSessionIdRef.current;
     if (!targetSessionId) return false;
 
-    const logs = sessionTranscriptsRef.current.get(targetSessionId) || allSessionTranscriptsRef.current;
+    const logs = sessionTranscriptsRef.current.get(targetSessionId)
+      || (targetSessionId === currentSessionIdRef.current ? allSessionTranscriptsRef.current
+        : storageService.getSessionTranscripts(targetWorkspaceId, targetSessionId));
     if (!logs || logs.length === 0) {
       return false;
     }
@@ -749,9 +763,27 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (priorMatch.kind === 'MATCH' && consumed.has(priorMatch.request.id)) return;
     }
     const request = match.kind === 'MATCH' ? match.request : null;
-    if (request) reservedPurchaseRequestsRef.current.add(request.id);
+    if (saleResult.intent === 'UNCERTAIN' && !getVoiceReviewRequests({
+      sessionId: sessionSnapshot, recognizedAt, rawTranscript: fullText,
+    }, cloudComments).length) return;
     const buyerNickname = request?.nickname || saleResult.buyerNickname;
-    const status = request && saleResult.amount > 0 ? '자동저장' : '보류';
+    const status = request && saleResult.amount > 0 && saleResult.intent === 'ALLOCATION' ? '자동저장' : '보류';
+    // Repeated allocation/price phrases for one purchase comment refine the
+    // same pending sale rather than creating another transaction.
+    const existingPending = request ? sales.find((sale) => sale.sessionId === sessionSnapshot
+      && sale.source === 'WEB_VOICE' && sale.status === '보류'
+      && (sale.purchaseRequestId === request.id || sale.sourceCommentIds?.includes(request.commentId))) : undefined;
+    if (existingPending) {
+      if (status === '자동저장' && existingPending.syncStatus !== 'PENDING') {
+        updateSale({ ...existingPending, buyerNickname: request!.nickname, buyerId: request!.buyerId || undefined,
+          purchaseRequestId: request!.id, sourceCommentIds: [request!.commentId], amount: saleResult.amount,
+          unitPrice: saleResult.amount, rawTranscript: fullText, recognizedAt, status, pendingReasons: [],
+          aiVerification: undefined, note: '같은 구매 댓글의 후속 판매 배정·가격 확인' });
+        reservedPurchaseRequestsRef.current.add(request!.id);
+      }
+      return;
+    }
+    if (request && status === '자동저장') reservedPurchaseRequestsRef.current.add(request.id);
 
     // A missing registered product is promoted inside the atomic server commit.
     // The seller never needs to pre-register a price for this flow.
@@ -811,7 +843,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sessionId,
       buyerNickname,
       buyerId: request?.buyerId || undefined,
-      purchaseRequestId: request?.id,
+      purchaseRequestId: status === '자동저장' ? request?.id : undefined,
       sourceCommentIds: request ? [request.commentId] : [],
       amount: saleResult.amount,
       recognizedAt,
@@ -821,7 +853,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ? `구매 댓글 "${request.content}" · 판매자 발화 "${saleResult.buyerNickname}" 연결 (${match.kind === 'MATCH' ? match.score : 0}점)`
         : match.kind === 'AMBIGUOUS' ? '구매자 후보가 여러 명이라 확인이 필요합니다.'
           : match.kind === 'DIGIT_CONFLICT' ? '판매자 발화와 댓글의 숫자 식별자가 다릅니다.'
-            : '연결 가능한 구매 의사 댓글이 없어 확인이 필요합니다.',
+            : '판매자 발화의 추정 닉네임입니다. 댓글 닉네임 연결 후 판매자 확인이 필요합니다.',
       productId: product?.id,
       productCode: resolvedProductCode,
       productName: autoSequentialProductName,
@@ -869,7 +901,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (sale.source !== 'WEB_VOICE' || sale.status !== '보류' || sale.amount <= 0
           || sale.purchaseRequestId || !sale.sessionId) continue;
         const extracted = extractSaleFromTranscript(sale.rawTranscript);
-        if (!extracted || !extracted.buyerNickname || extracted.amount !== sale.amount) continue;
+        if (!extracted || extracted.intent !== 'ALLOCATION' || !extracted.buyerNickname || extracted.amount !== sale.amount) continue;
         const match = matchPurchaseRequest(extracted.buyerNickname,
           requests.filter((request) => request.sessionId === sale.sessionId), sale.recognizedAt, claimed);
         if (match.kind !== 'MATCH') continue;
@@ -890,6 +922,74 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     reconcile();
     return () => window.removeEventListener('voicecap_purchase_requests_updated', reconcile);
   }, [sales, updateSale, workspaceId, productSales.feed?.comments, productSales.activeSession?.id, currentSessionId]);
+
+  useEffect(() => {
+    if (!isRemoteAuth || !workspaceId || !sales.some((sale) => sale.source === 'WEB_VOICE' && sale.status === '보류')) return;
+    const timer = window.setInterval(() => setPendingAiTick((tick) => tick + 1), 5_000);
+    return () => window.clearInterval(timer);
+  }, [isRemoteAuth, workspaceId, sales]);
+
+  // Wait for the local pending row to reach the server before asking AI. Each
+  // meaningful evidence snapshot is reviewed once, with bounded failure retries.
+  useEffect(() => {
+    if (!isRemoteAuth || !workspaceId || pendingAiRunningRef.current) return;
+    const local = storageService.getCommentRecords(workspaceId);
+    const feed = (productSales.feed?.comments || []).map((c) => ({ id: c.id, sessionId: c.sessionId,
+      platformMessageId: c.platformMessageId, buyerId: c.buyerId, nickname: c.nicknameSnapshot,
+      content: c.content, capturedAt: c.capturedAt }));
+    const comments = [...feed, ...local];
+    const reviewLogs = (sale: SaleRecord) => sessionTranscriptsRef.current.get(sale.sessionId)
+      || storageService.getSessionTranscripts(workspaceId, sale.sessionId);
+    const pending = sales.find((sale) => {
+      if (sale.syncStatus === 'PENDING' || !shouldReviewVoiceSale(sale, comments)
+        || !isVoiceReviewReady(sale, comments)) return false;
+      const fingerprint = voiceReviewFingerprint(sale, comments, '', reviewLogs(sale));
+      const previous = pendingAiAttemptsRef.current.get(`${workspaceId}:${sale.id}`);
+      if (sale.aiVerification?.reviewFingerprint === fingerprint && sale.aiVerification.aiStatus !== 'CHECKING'
+        && !sale.aiVerification.errorMessage) return false;
+      return !previous || previous.fingerprint !== fingerprint || (previous.failed && Date.now() - previous.attemptedAt > 30_000);
+    });
+    if (!pending) return;
+    const key = `${workspaceId}:${pending.id}`;
+    const fingerprint = voiceReviewFingerprint(pending, comments, '', reviewLogs(pending));
+    const attempt = { fingerprint, attemptedAt: Date.now(), failed: false };
+    pendingAiAttemptsRef.current.set(key, attempt);
+    pendingAiRunningRef.current = true;
+    // The server owns CHECKING and final metadata. Never overwrite it through
+    // a local optimistic sale save while the review is executing.
+    const requiredUserId = currentUserIdRef.current;
+    const requiredAuthGeneration = authBoundaryGenerationRef.current;
+    const isCurrentReview = () => currentUserIdRef.current === requiredUserId
+      && authBoundaryGenerationRef.current === requiredAuthGeneration
+      && transcriptWorkspaceIdRef.current === workspaceId;
+    const checkingTimer = window.setTimeout(() => { if (isCurrentReview()) void refreshSales(); }, 700);
+    void (async () => {
+      if (!isCurrentReview()) return;
+      const logs = reviewLogs(pending);
+      if (logs.length && !await syncSessionTranscriptsToCloud(pending.sessionId)) {
+        throw new Error('판매자 멘트 저장을 기다린 후 AI 검토를 재시도합니다.');
+      }
+      if (!isCurrentReview()) return;
+      return aiSettingsApi.triggerPendingAiResolution(pending.id, { workspaceId });
+    })()
+      .then((result) => {
+        if (!isCurrentReview() || !result) return;
+        // Another request may still be processing when fresh following context
+        // arrives. Retry that context after the current review has finished.
+        if (result.waitingForWindow || result.sale?.ai_verification?.errorMessage
+          || (result.skipped && result.sale?.ai_verification?.aiStatus === 'CHECKING')) attempt.failed = true;
+        return refreshSales();
+      })
+      .catch((error) => {
+        attempt.failed = true;
+        console.error('[VoiceSale] AI 보류 검토 실패:', { saleId: pending.id, message: error?.message });
+      }).finally(() => {
+        window.clearTimeout(checkingTimer);
+        pendingAiRunningRef.current = false;
+        if (isCurrentReview()) setPendingAiTick((tick) => tick + 1);
+      });
+  }, [sales, workspaceId, isRemoteAuth, isListening, currentSessionId, productSales.activeSession?.id,
+    productSales.feed?.comments, refreshSales, pendingAiTick, syncSessionTranscriptsToCloud]);
 
   interface TranscriptProcessingOptions {
     skipCommands?: boolean;
@@ -1405,6 +1505,15 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           requiredListeningGeneration
         );
       } else if (
+        lastSavedSaleRef.current?.status === '보류' && lastSavedSaleRef.current.source === 'WEB_VOICE'
+        && Date.now() - Date.parse(lastSavedSaleRef.current.recognizedAt) <= 5_000
+        && Boolean(parseKoreanAmount(fullText)) && fullText.trim().length <= 120
+      ) {
+        // A short price continuation is advisory context, never an automatic
+        // overwrite of the original purchase or price evidence.
+        pendingVoiceFollowupRef.current.set(lastSavedSaleRef.current.id, fullText.trim());
+        setPendingAiTick((tick) => tick + 1);
+      } else if (
         lastSavedSaleRef.current &&
         lastSavedSaleRef.current.status === '보류' &&
         lastSavedSaleRef.current.source !== 'WEB_VOICE' &&
@@ -1645,9 +1754,12 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const rules = storageService.getRules().filter((r) => r.isEnabled);
       const ruleTerms = rules.map((r) => r.word.trim()).filter(Boolean);
+      const recentNicknameTerms = getRecentCommentNicknames(
+        storageService.getSessionCommentRecords(newSessionId, transcriptWorkspaceIdRef.current),
+      );
       const cloudKeyterms = sttModeRef.current === 'LOCAL'
         ? []
-        : buildCloudSttTerms(await getWordsForConnection(), ruleTerms);
+        : buildCloudSttTerms(await getWordsForConnection(), recentNicknameTerms, ruleTerms);
 
       if (
         listeningGenerationRef.current !== listeningGeneration ||
@@ -1783,18 +1895,25 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         cloudSttStartTimeRef.current = Date.now();
         activeCloudProviderRef.current = activeSttProvider;
 
+        const cloudSttConfig: SttConfig = {
+          provider: activeSttProvider,
+          apiKey: activeApiKey,
+          model: 'nova-3',
+          language: 'ko',
+          keyterms: cloudKeyterms,
+          punctuate: true,
+          interimResults: true,
+          endpointing: 300,
+          allowBrowserSpeechFallback: mode === 'MIC'
+        };
+        activeCloudSttConfigRef.current = cloudSttConfig;
+        activeCloudNicknameTermsRef.current = recentNicknameTerms;
+        lastSuccessfulSttConnectionAtRef.current = Date.now();
+        nextSttRotationAttemptAtRef.current = 0;
+        sttRotationBusyRef.current = false;
+
         deepgramService.startLiveStream(
-          {
-            provider: activeSttProvider,
-            apiKey: activeApiKey,
-            model: 'nova-3',
-            language: 'ko',
-            keyterms: cloudKeyterms,
-            punctuate: true,
-            interimResults: true,
-            endpointing: 300,
-            allowBrowserSpeechFallback: mode === 'MIC'
-          },
+          cloudSttConfig,
           (data) => {
             handleTranscript(data, listeningGeneration, requestedUserId);
           },
@@ -1847,6 +1966,89 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  useEffect(() => {
+    if (!isListening || sttMode !== 'CLOUD') return;
+
+    let disposed = false;
+    const evaluateRotation = async () => {
+      if (
+        disposed ||
+        sttRotationBusyRef.current ||
+        Date.now() < nextSttRotationAttemptAtRef.current
+      ) return;
+
+      const config = activeCloudSttConfigRef.current;
+      const connectedAt = lastSuccessfulSttConnectionAtRef.current;
+      const requiredUserId = currentUserIdRef.current;
+      const requiredListeningGeneration = listeningGenerationRef.current;
+      if (!config || !connectedAt || !requiredUserId || !isListeningRef.current) return;
+
+      const recentNicknameTerms = getRecentCommentNicknames(
+        storageService.getSessionCommentRecords(
+          currentSessionIdRef.current,
+          transcriptWorkspaceIdRef.current,
+        ),
+      );
+      const decision = decideSttSessionRotation(
+        activeCloudNicknameTermsRef.current,
+        recentNicknameTerms,
+        Date.now() - connectedAt,
+      );
+      if (!decision.shouldRotate || !deepgramService.isSafeToRotateLiveStream()) return;
+
+      sttRotationBusyRef.current = true;
+      try {
+        const rules = storageService.getRules().filter((rule) => rule.isEnabled);
+        const ruleTerms = rules.map((rule) => rule.word.trim()).filter(Boolean);
+        const nextKeyterms = buildCloudSttTerms(
+          await getWordsForConnection(),
+          recentNicknameTerms,
+          ruleTerms,
+        );
+        if (
+          disposed ||
+          !isListeningRef.current ||
+          currentUserIdRef.current !== requiredUserId ||
+          listeningGenerationRef.current !== requiredListeningGeneration ||
+          activeCloudSttConfigRef.current !== config
+        ) return;
+
+        const nextConfig = { ...config, keyterms: nextKeyterms };
+        const rotated = await deepgramService.rotateLiveStream(nextConfig);
+        if (!rotated) {
+          nextSttRotationAttemptAtRef.current = Date.now() + 15_000;
+          return;
+        }
+        if (
+          disposed ||
+          !isListeningRef.current ||
+          currentUserIdRef.current !== requiredUserId ||
+          listeningGenerationRef.current !== requiredListeningGeneration
+        ) return;
+
+        activeCloudSttConfigRef.current = nextConfig;
+        activeCloudNicknameTermsRef.current = recentNicknameTerms;
+        lastSuccessfulSttConnectionAtRef.current = Date.now();
+        nextSttRotationAttemptAtRef.current = 0;
+      } catch (error) {
+        nextSttRotationAttemptAtRef.current = Date.now() + 15_000;
+        console.warn('[Live] STT 닉네임 갱신 연결 실패:', error);
+      } finally {
+        sttRotationBusyRef.current = false;
+      }
+    };
+
+    void evaluateRotation();
+    const timer = window.setInterval(
+      () => void evaluateRotation(),
+      STT_ROTATION_POLICY.CHECK_INTERVAL_MS,
+    );
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [isListening, sttMode, getWordsForConnection]);
+
     // 라이브 청취 중지 (TAB_AUDIO는 파이프라인을 일시정지해 공유 연결을 유지한다)
   const stopListening = useCallback(() => {
     persistCurrentSessionTranscripts();
@@ -1864,6 +2066,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     resetSonioxBusinessAccumulator();
     localSttService.stopListening();
     deepgramService.stopLiveStream();
+    activeCloudSttConfigRef.current = null;
+    activeCloudNicknameTermsRef.current = [];
+    lastSuccessfulSttConnectionAtRef.current = 0;
+    nextSttRotationAttemptAtRef.current = 0;
 
     if (cloudSttStartTimeRef.current && activeCloudProviderRef.current) {
       const durationSeconds = Math.max(1, Math.round((Date.now() - cloudSttStartTimeRef.current) / 1000));
@@ -1969,6 +2175,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <LiveContext.Provider
       value={{
         isListening,
+        listeningRunId: listeningGenerationRef.current,
         currentSessionId,
         sessionStartTime,
         audioLevel,

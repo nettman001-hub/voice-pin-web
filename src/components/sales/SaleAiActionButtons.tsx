@@ -2,6 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { SaleRecord } from '../../types/live';
 import { SaleAiEvidenceModal } from './SaleAiEvidenceModal';
 import { useSales } from '../../context/SalesContext';
+import { useLive } from '../../context/LiveContext';
+import { useAuth } from '../../context/AuthContext';
 import { aiSettingsApi } from '../../services/aiSettingsApi';
 import { rollbackCorrection } from '../../services/voiceCorrectionService';
 import {
@@ -24,11 +26,14 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
   className = '',
   onRefresh,
 }) => {
-  const { updateSale } = useSales();
+  const { updateSale, refreshSales } = useSales();
+  const { syncCurrentTranscriptsToCloud } = useLive();
+  const { workspaceId } = useAuth();
   const [showEvidenceModal, setShowEvidenceModal] = useState<boolean>(false);
   const [isApplyingCandidate, setIsApplyingCandidate] = useState<boolean>(false);
   const [isRollingBack, setIsRollingBack] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isReviewing, setIsReviewing] = useState(false);
 
   // 최신 변경 이력 가져오기
   const latestHistory = useMemo(() => {
@@ -58,6 +63,11 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
         className: 'bg-rose-100 text-rose-800 border border-rose-300 font-bold',
       };
     }
+
+    if (aiStatus === 'INSUFFICIENT_DATA') return {
+      text: sale.aiVerification?.errorMessage ? 'AI 검토 실패 · 재시도 가능' : 'AI 검토 완료 · 근거 부족',
+      className: 'bg-amber-50 text-amber-800 border border-amber-200',
+    };
 
     // 3. 1번 실패 -> 2번 처리
     if (
@@ -116,7 +126,8 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
   // 후보 추천 정보 확인
   const candidate = sale.aiVerification?.candidateBuyer;
   const candidateAmount = sale.aiVerification?.candidateAmount;
-  const hasCandidate = Boolean(candidate || candidateAmount);
+  const hasCandidate = Boolean(candidate?.nickname && candidateAmount && candidateAmount > 0
+    && sale.aiVerification?.nicknameVerified !== false);
 
   // 되돌리기(롤백) 가능 여부 확인: 이전 정정 이력이 존재하는지
   const canRollback = useMemo(() => {
@@ -129,6 +140,9 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
     setIsApplyingCandidate(true);
     setErrorMsg(null);
     try {
+      if (!hasCandidate || sale.syncStatus === 'PENDING') {
+        throw new Error('댓글 닉네임과 가격을 확인한 후보만 적용할 수 있습니다. 구매자를 직접 확인해 주세요.');
+      }
       const newNickname = candidate?.nickname || sale.buyerNickname;
       const newAmount = candidateAmount || sale.amount;
 
@@ -138,11 +152,17 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
         buyerNickname: newNickname,
         buyerId: candidate?.buyerId || sale.buyerId,
         amount: newAmount,
+        unitPrice: newAmount,
+        purchaseRequestId: sale.aiVerification?.candidatePurchaseRequestId || sale.purchaseRequestId,
+        sourceCommentIds: sale.aiVerification?.candidateCommentId ? [sale.aiVerification.candidateCommentId] : sale.sourceCommentIds,
         status: '확정',
+        pendingReasons: sale.pendingReasons?.map((reason) => ({ ...reason, resolved: true,
+          resolvedAt: new Date().toISOString(), resolvedBy: 'MANUAL', resolutionDetails: '판매자가 닉네임·가격 후보를 확인했습니다.' })),
         revision: (sale.revision || 1) + 1,
         aiVerification: {
           ...sale.aiVerification,
           aiStatus: 'RESOLVED',
+          reviewDecision: undefined,
           resolutionSummary: `후보 (${newNickname}, ${newAmount.toLocaleString()}원) 판매자 직접 승인 적용`,
           validatedAt: new Date().toISOString(),
         },
@@ -200,6 +220,21 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
     <div className={`flex flex-col gap-1.5 ${className}`}>
       {/* 상태 배지 및 전후 값 Diff */}
       <div className="flex items-center gap-1.5 flex-wrap">
+        {sale.status === '보류' && sale.source === 'WEB_VOICE' && (
+          <button type="button" disabled={isReviewing || sale.syncStatus === 'PENDING' || sale.aiVerification?.aiStatus === 'CHECKING'}
+            className="px-2.5 py-1 bg-sky-50 text-sky-800 text-[11px] font-bold rounded-lg border border-sky-200 flex items-center gap-1 disabled:opacity-50"
+            onClick={(e) => {
+              e.preventDefault(); e.stopPropagation(); setIsReviewing(true); setErrorMsg(null);
+              void syncCurrentTranscriptsToCloud(sale.sessionId)
+                .then(() => aiSettingsApi.triggerPendingAiResolution(sale.id, { forceReanalyze: true, workspaceId: workspaceId || undefined }))
+                .then((result) => { if (result.skipped && result.message) setErrorMsg(result.message); return refreshSales(); })
+                .then(() => onRefresh?.())
+                .catch((err) => setErrorMsg(err.message || 'AI 검토 요청에 실패했습니다.'))
+                .finally(() => setIsReviewing(false));
+            }}>
+            <Sparkles className="w-3 h-3" />{isReviewing ? 'AI 검토 중' : sale.aiVerification?.aiTaskId ? 'AI 다시 검토' : 'AI 검토'}
+          </button>
+        )}
         {aiBadge && (
           <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${aiBadge.className}`}>
             {aiBadge.text}
@@ -222,6 +257,14 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
       {errorMsg && (
         <span className="text-[10px] text-rose-600 font-bold bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
           ⚠️ {errorMsg}
+        </span>
+      )}
+
+      {(candidate || candidateAmount) && (
+        <span className="text-[11px] font-bold text-slate-700">
+          AI 검토 결과: {candidate?.nickname || sale.aiVerification?.suggestedNickname || '구매자 미확인'}
+          {' · '}{candidateAmount ? `${candidateAmount.toLocaleString()}원` : '금액 미확인'}
+          {sale.aiVerification?.nicknameVerified === false ? ' · 닉네임 확인 필요' : ''}
         </span>
       )}
 

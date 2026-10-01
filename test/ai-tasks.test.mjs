@@ -4,6 +4,7 @@ import {
   createAiTaskObject,
   processAiTask,
   validateAndApplyLateAttemptResult,
+  withAiDeadline,
 } from '../supabase/functions/sales-api/handlers/aiTaskCore.ts';
 import { AI_TASK_CONFIG } from '../supabase/functions/sales-api/handlers/aiTaskConfig.ts';
 
@@ -70,14 +71,97 @@ test('Task Init: 작업 객체는 필수 6대 식별자 및 메타데이터를 �
 });
 
 // 2. 타임아웃 및 서킷 브레이커 기본값 한곳에서 집중 관리 검증
-test('Config Constants: 타임아웃 3초/20초/15초, 서킷 브레이커 2회/30초/2회 설정 확인', () => {
+test('Config Constants: 연결 3초/우선 응답 4초/자체 20초/클라우드 15초, 서킷 브레이커 2회/30초/2회 설정 확인', () => {
   assert.equal(AI_TASK_CONFIG.TIMEOUTS.CONNECT_SECONDS, 3);
+  assert.equal(AI_TASK_CONFIG.TIMEOUTS.PRIMARY_RESPONSE_SECONDS, 4);
   assert.equal(AI_TASK_CONFIG.TIMEOUTS.SELF_HOSTED_SECONDS, 20);
   assert.equal(AI_TASK_CONFIG.TIMEOUTS.CLOUD_SECONDS, 15);
 
   assert.equal(AI_TASK_CONFIG.CIRCUIT_BREAKER.FAIL_THRESHOLD, 2);
   assert.equal(AI_TASK_CONFIG.CIRCUIT_BREAKER.COOLDOWN_MS, 30000);
   assert.equal(AI_TASK_CONFIG.CIRCUIT_BREAKER.RECOVERY_SUCCESS_THRESHOLD, 2);
+});
+
+test('priority slot 2 times out after 4 seconds including a stalled response body, then slot 1 wins', async () => {
+  const task = createAiTaskObject(createSamplePayload(), 2);
+  const originalFetch = globalThis.fetch;
+  let releaseLateBody;
+  let primarySignal;
+  let secondaryStartedAt;
+  const startedAt = Date.now();
+  const validOutput = JSON.stringify({ resolvable: true, action: 'UPDATE_SALE', targetSaleId: 'sale_999',
+    changes: null, evidenceIds: ['voice'], evidenceSummary: '대체 AI 완료', missingInfo: [], conflictReason: null });
+  globalThis.fetch = async (_url, options) => {
+    primarySignal = options.signal;
+    return { ok: true, status: 200, text: () => new Promise((resolve) => { releaseLateBody = resolve; }) };
+  };
+  try {
+    const processed = await processAiTask(task, {
+      primarySlot: 2,
+      slot1Config: { ...mockSlot1Config, routingMode: 'PC_HELPER' },
+      slot2Config: mockSlot2Config, slot2Secret: 'key',
+      helperDispatcher: async () => {
+        secondaryStartedAt = Date.now();
+        return { status: 200, body: JSON.stringify({ message: { content: validOutput } }) };
+      },
+    });
+    assert.ok(secondaryStartedAt - startedAt >= 3900);
+    assert.ok(secondaryStartedAt - startedAt < 5500);
+    assert.equal(primarySignal.aborted, true);
+    assert.equal(processed.task.activeSlot, 1);
+    assert.equal(processed.task.status, 'RESOLVED');
+    assert.equal(processed.task.attempts[0].errorCode, 'TIMEOUT');
+    assert.equal(processed.task.attempts[0].isValidAttempt, false);
+    releaseLateBody(JSON.stringify({ candidates: [{ content: { parts: [{ text: validOutput }] } }] }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(processed.task.activeSlot, 1);
+  } finally {
+    releaseLateBody?.('{}');
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('deadline also expires a PC helper that ignores abort and invalidates late results', async () => {
+  let release;
+  let signal;
+  await assert.rejects(withAiDeadline(25, (currentSignal) => {
+    signal = currentSignal;
+    return new Promise((resolve) => { release = resolve; });
+  }), (error) => error.code === 'TIMEOUT');
+  assert.equal(signal.aborted, true);
+  release('late result');
+});
+
+test('priority slot 2 returns malformed JSON and immediately fails over to slot 1', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ candidates: [{ content: { parts: [{ text: '{}' }] } }] }) });
+  try {
+    const { task } = await processAiTask(createAiTaskObject(createSamplePayload(), 2), {
+      primarySlot: 2, slot1Config: { ...mockSlot1Config, routingMode: 'PC_HELPER' }, slot2Config: mockSlot2Config, slot2Secret: 'key',
+      helperDispatcher: async () => ({ status: 200, body: JSON.stringify({ message: { content: JSON.stringify({
+        resolvable: false, action: 'INSUFFICIENT_DATA', targetSaleId: null, changes: null,
+        evidenceIds: [], evidenceSummary: '실제 근거 부족', missingInfo: ['가격'], conflictReason: null,
+      }) } }) }),
+    });
+    assert.equal(task.activeSlot, 1);
+    assert.equal(task.attempts.length, 2);
+    assert.equal(task.status, 'INSUFFICIENT_DATA');
+    assert.equal(task.attempts[0].errorCode, '응답 형식 불일치');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('missing credentials on the priority AI are an execution failure, not missing sales evidence', async () => {
+  const { task } = await processAiTask(createAiTaskObject(createSamplePayload(), 2), {
+    primarySlot: 2, slot1Config: { ...mockSlot1Config, routingMode: 'PC_HELPER' }, slot2Config: mockSlot2Config,
+    helperDispatcher: async () => ({ status: 200, body: JSON.stringify({ message: { content: JSON.stringify({
+      resolvable: false, action: 'INSUFFICIENT_DATA', targetSaleId: null, changes: null,
+      evidenceIds: [], evidenceSummary: '추가 가격 근거 필요', missingInfo: ['가격'], conflictReason: null,
+    }) } }) }),
+  });
+  assert.equal(task.attempts.length, 2);
+  assert.equal(task.attempts[0].errorCode, '인증 정보 누락');
+  assert.equal(task.activeSlot, 1);
+  assert.equal(task.status, 'INSUFFICIENT_DATA');
 });
 
 // 3. 슬롯 1 정상 성공 케이스: 1번에서 바로 해결되고 서킷 브레이커 통과 카운트 증가

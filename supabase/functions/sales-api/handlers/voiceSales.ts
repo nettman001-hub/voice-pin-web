@@ -12,12 +12,10 @@ export async function handleCommitVoiceSale(workspaceId: string, actorId: string
   if (invalidFields.length) {
     return errorResponse('VALIDATION_ERROR', voiceSaleValidationMessage(invalidFields), 400, { invalidFields })
   }
-  const evidence = extractSpeechPrice(sale.rawTranscript)
   const extracted = extractSaleFromTranscript(sale.rawTranscript)
+  const evidence = extracted?.allocationTranscript ? extractSpeechPrice(extracted.allocationTranscript) : null
   if (!evidence || evidence.amount !== sale.amount || sale.unitPrice !== sale.amount
-      || !extracted || extracted.amount !== sale.amount
-      || /(?:드릴까요|드리는\s*거\s*아니|안\s*드리|못\s*드리|입금하시면|결제하시면|아까\s*.*(?:드렸|드린)|보여드리|입어드리|설명드리)/u.test(sale.rawTranscript)
-      || !/(?:드리겠습니다|드릴게요|드릴께요|챙겨드릴게요|구매\s*확정|낙찰)/u.test(sale.rawTranscript)) {
+      || !extracted || extracted.intent !== 'ALLOCATION' || extracted.amount !== sale.amount) {
     return errorResponse('PRICE_OR_INTENT_UNVERIFIED', '판매 확정 발화와 음성 가격 근거를 확인할 수 없습니다.', 422)
   }
 

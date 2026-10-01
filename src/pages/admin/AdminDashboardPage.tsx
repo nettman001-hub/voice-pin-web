@@ -46,6 +46,7 @@ export const AdminDashboardPage: React.FC = () => {
   const [adminTotalRevenue, setAdminTotalRevenue] = useState<number | null>(null);
   const [adminTotalSalesCount, setAdminTotalSalesCount] = useState<number>(0);
   const [aiRuntimeStatus, setAiRuntimeStatus] = useState<AiRuntimeStatus | null>(null);
+  const [aiRuntimeError, setAiRuntimeError] = useState<string | null>(null);
   const [aiHealthSummary, setAiHealthSummary] = useState<AiHealthSummaryResponse | null>(null);
 
   useEffect(() => {
@@ -60,13 +61,14 @@ export const AdminDashboardPage: React.FC = () => {
       console.warn('[AdminDashboard] 전체 판매 내역 조회 실패:', err);
     });
 
-    void Promise.all([
-      aiSettingsApi.getAiRuntimeStatus().catch(() => null),
-      aiSettingsApi.getAiHealth().catch(() => null),
+    void Promise.allSettled([
+      aiSettingsApi.getAiRuntimeStatus(),
+      aiSettingsApi.getAiHealth(),
     ]).then(([rt, hl]) => {
       if (!active) return;
-      if (rt?.runtimeStatus) setAiRuntimeStatus(rt.runtimeStatus);
-      if (hl) setAiHealthSummary(hl);
+      if (rt.status === 'fulfilled') setAiRuntimeStatus(rt.value.runtimeStatus);
+      else setAiRuntimeError(rt.reason instanceof Error ? rt.reason.message : 'AI 운영 상태를 조회하지 못했습니다.');
+      if (hl.status === 'fulfilled') setAiHealthSummary(hl.value);
     });
 
     return () => { active = false; };
@@ -163,9 +165,19 @@ export const AdminDashboardPage: React.FC = () => {
                 <span className="px-2 py-0.5 rounded-full bg-brand-500/20 text-brand-300 text-[10px] font-bold border border-brand-500/30">
                   2-슬롯 Failover
                 </span>
-                {aiRuntimeStatus?.activeSlot && (
-                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30">
-                    현재 활성: AI {aiRuntimeStatus.activeSlot}번
+                {aiRuntimeStatus && (
+                  <>
+                    <span className="px-2 py-0.5 rounded-full bg-brand-500/20 text-brand-300 text-[10px] font-bold border border-brand-500/30">
+                      운영 우선: AI {aiRuntimeStatus.activePrimarySlot}번
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30">
+                      다음 작업 예상: AI {aiRuntimeStatus.activeSlot}번
+                    </span>
+                  </>
+                )}
+                {aiRuntimeError && (
+                  <span className="text-[10px] font-bold text-amber-300" title={aiRuntimeError}>
+                    운영 상태 조회 실패 · AI 설정을 확인해 주세요
                   </span>
                 )}
               </div>
@@ -215,7 +227,7 @@ export const AdminDashboardPage: React.FC = () => {
             <div className="flex items-center justify-between">
               <span className="font-bold text-slate-200 flex items-center gap-1.5">
                 <span className="w-5 h-5 rounded-md bg-purple-500/20 text-purple-300 text-[10px] font-black flex items-center justify-center">2</span>
-                <span>AI 2번 (대체 클라우드)</span>
+                <span>AI 2번</span>
               </span>
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                 aiHealthSummary?.slot2?.overallStatus === 'AVAILABLE' && !aiRuntimeStatus?.slot2CircuitBreaker?.isOpen

@@ -152,6 +152,26 @@ export const SaleAiEvidenceModal: React.FC<SaleAiEvidenceModalProps> = ({ sale, 
           )}
 
           {/* 4. 연결된 화면 캡처 이미지 */}
+          {Boolean(sale.aiVerification?.purchaseWindows?.length) && (
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+              <span className="font-bold text-slate-700">구매 댓글 기준 검토 구간 · 이전 30초 / 이후 70초</span>
+              {sale.aiVerification!.purchaseWindows!.map((window) => (
+                <p key={window.commentId} className="text-[11px] text-slate-600">
+                  <strong>{window.nickname}</strong> · {new Date(window.startAt).toLocaleTimeString('ko-KR')}
+                  {' ~ '}{new Date(window.endAt).toLocaleTimeString('ko-KR')}
+                </p>
+              ))}
+              <div className="max-h-60 overflow-y-auto space-y-1.5">
+                {sale.aiVerification?.sellerUtterances?.map((utterance) => (
+                  <p key={utterance.id} className="bg-white rounded-lg p-2 text-slate-800">
+                    <span className="text-slate-400 mr-2">{utterance.timestamp ? new Date(utterance.timestamp).toLocaleTimeString('ko-KR') : ''}</span>
+                    {utterance.text}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
           {sale.captureImageUrls && sale.captureImageUrls.length > 0 && (
             <div className="space-y-2">
               <span className="font-bold text-slate-700 flex items-center gap-1.5">

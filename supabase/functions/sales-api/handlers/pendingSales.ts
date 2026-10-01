@@ -17,7 +17,9 @@ import {
 } from './pendingSalesCore.ts';
 import { createAiTaskObject, processAiTask } from './aiTaskCore.ts';
 import { AI_TASK_CONFIG } from './aiTaskConfig.ts';
+import { getOperationalAiSetting, getPrimaryAiSlot } from './aiOperationalSettings.ts';
 import { normalizeCommentIntentForPrompt } from './aiAdapters/common.ts';
+import { handleReviewVoicePendingSale } from './voicePendingReview.ts';
 
 /**
  * 1. 단건 판매 보류 해결 및 원자적 확정 (Revision 충돌 검증 포함)
@@ -437,6 +439,10 @@ export async function handleTriggerPendingAiResolution(
     });
   }
 
+  if (sale.source === 'WEB_VOICE') {
+    return await handleReviewVoicePendingSale(workspaceId, actorId, auth, sale, body);
+  }
+
   // 2. 관련 방송 회차 및 댓글/상품 컨텍스트 조회
   const sessionId = sale.session_id;
 
@@ -556,7 +562,14 @@ export async function handleTriggerPendingAiResolution(
     },
   };
 
-  const aiTaskObj = createAiTaskObject(aiPayload);
+  let aiSetting: any;
+  try {
+    aiSetting = await getOperationalAiSetting();
+  } catch (err: any) {
+    return errorResponse('DATABASE_ERROR', `운영 AI 설정 조회 실패: ${err.message}`, 500);
+  }
+  aiPayload.settingVersion = aiSetting?.applied_version || 1;
+  const aiTaskObj = createAiTaskObject(aiPayload, getPrimaryAiSlot(aiSetting));
 
   // DB에 AI 작업 등록
   await admin.from('ai_tasks').insert({

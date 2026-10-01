@@ -7,6 +7,7 @@ import {
 } from './aiHealthCore.ts';
 import type { AiSlotConfig } from '../../../../src/types/aiSettings.ts';
 import type { AiSlotHealth } from '../../../../src/types/aiHealth.ts';
+import { getOperationalAiSetting } from './aiOperationalSettings.ts';
 
 function checkIsAdmin(auth: AuthContext): boolean {
   return auth.role === 'ADMIN' || auth.role === 'OWNER' || auth.capabilities.has('ADMIN');
@@ -157,11 +158,12 @@ export async function handleGetAiHealth(
   const { executorId = 'SERVER', deviceId } = body || {};
 
   // 최신 ai_settings 조회
-  const { data: setting } = await admin
-    .from('ai_settings')
-    .select('slot1, slot2, primary_slot, applied_version')
-    .eq('scope', 'GLOBAL')
-    .maybeSingle();
+  let setting: any;
+  try {
+    setting = await getOperationalAiSetting();
+  } catch (err: any) {
+    return errorResponse('DATABASE_ERROR', `운영 AI 설정 조회 실패: ${err.message}`, 500);
+  }
 
   const slot1Config = setting?.slot1 || {};
   const slot2Config = setting?.slot2 || {};

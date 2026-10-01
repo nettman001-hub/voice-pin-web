@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { SalesProvider } from './context/SalesContext';
 import { LiveProvider } from './context/LiveContext';
 import { CommentCaptureProvider } from './context/CommentCaptureContext';
+import { ListeningStopScheduleProvider } from './context/ListeningStopScheduleContext';
 import { AppDataProvider } from './context/AppDataContext';
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
@@ -165,6 +166,7 @@ export const App: React.FC = () => {
               <SttVocabularyProvider>
                 <LiveProvider>
                   <CommentCaptureProvider>
+                    <ListeningStopScheduleProvider>
                     <AppDataProvider>
                       <AppLayout>
                         <Routes>
@@ -240,6 +242,7 @@ export const App: React.FC = () => {
                         </Routes>
                       </AppLayout>
                     </AppDataProvider>
+                    </ListeningStopScheduleProvider>
                   </CommentCaptureProvider>
                 </LiveProvider>
               </SttVocabularyProvider>

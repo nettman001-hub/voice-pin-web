@@ -42,6 +42,7 @@ export const AdminAiSettingsPage: React.FC = () => {
   const [settings, setSettings] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<boolean>(false);
   const [toastMsg, setToastMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // 비밀정보 입력 임시 상태
@@ -62,6 +63,7 @@ export const AdminAiSettingsPage: React.FC = () => {
 
   const [isCheckingAll, setIsCheckingAll] = useState<boolean>(false);
   const [runtimeStatus, setRuntimeStatus] = useState<AiRuntimeStatus | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const lastAlertSignatureRef = React.useRef<string>('');
   const [syntheticModalData, setSyntheticModalData] = useState<{
     slotNumber: 1 | 2;
@@ -70,11 +72,16 @@ export const AdminAiSettingsPage: React.FC = () => {
 
   const loadData = async () => {
     setIsLoading(true);
+    setLoadError(false);
+    setRuntimeError(null);
     try {
       const [settingsData, healthData, runtimeData] = await Promise.all([
-        aiSettingsApi.getAiSettings(),
+        aiSettingsApi.getAiSettings(undefined, true),
         aiSettingsApi.getAiHealth().catch(() => null),
-        aiSettingsApi.getAiRuntimeStatus().catch(() => null),
+        aiSettingsApi.getAiRuntimeStatus().catch((err) => {
+          setRuntimeError(err instanceof Error ? err.message : '운영 AI 상태를 조회하지 못했습니다.');
+          return null;
+        }),
       ]);
       setSettings(settingsData);
       if (healthData) {
@@ -85,6 +92,7 @@ export const AdminAiSettingsPage: React.FC = () => {
         setRuntimeStatus(runtimeData.runtimeStatus);
       }
     } catch (err: any) {
+      setLoadError(true);
       showToast('error', err?.message || '설정 및 상태를 불러오지 못했습니다.');
     } finally {
       setIsLoading(false);
@@ -253,6 +261,14 @@ export const AdminAiSettingsPage: React.FC = () => {
       };
 
       setSettings(sanitizedUpdated);
+      const latestRuntime = await aiSettingsApi.getAiRuntimeStatus().catch((err) => {
+        setRuntimeError(err instanceof Error ? err.message : '운영 AI 상태를 조회하지 못했습니다.');
+        return null;
+      });
+      if (latestRuntime?.runtimeStatus) {
+        setRuntimeStatus(latestRuntime.runtimeStatus);
+        setRuntimeError(null);
+      }
       setSlot1NewSecret('');
       setSlot1ClearSecret(false);
       setShowSlot1SecretInput(false);
@@ -278,6 +294,14 @@ export const AdminAiSettingsPage: React.FC = () => {
     try {
       const updated = await aiSettingsApi.applyAiSettings(settings.version);
       setSettings(updated);
+      const latestRuntime = await aiSettingsApi.getAiRuntimeStatus().catch((err) => {
+        setRuntimeError(err instanceof Error ? err.message : '운영 AI 상태를 조회하지 못했습니다.');
+        return null;
+      });
+      if (latestRuntime?.runtimeStatus) {
+        setRuntimeStatus(latestRuntime.runtimeStatus);
+        setRuntimeError(null);
+      }
       showToast('success', `운영 설정이 버전 v${updated.appliedVersion}으로 성공적으로 적용되었습니다.`);
     } catch (err: any) {
       showToast('error', err?.message || '적용 중 오류가 발생했습니다.');
@@ -354,6 +378,21 @@ export const AdminAiSettingsPage: React.FC = () => {
         </div>
       )}
 
+      {loadError && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-xs font-bold text-rose-800">
+          <span>서버의 AI 설정을 확인하지 못해 저장과 운영 적용이 중지되었습니다.</span>
+          <button type="button" onClick={loadData} disabled={isLoading} className="rounded-lg bg-white px-3 py-1.5 text-rose-800 border border-rose-200">
+            다시 불러오기
+          </button>
+        </div>
+      )}
+
+      {runtimeError && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs font-bold text-amber-900">
+          운영 AI 상태를 확인하지 못했습니다: {runtimeError}
+        </div>
+      )}
+
       {/* Top Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
         <div>
@@ -393,7 +432,7 @@ export const AdminAiSettingsPage: React.FC = () => {
 
           <button
             type="button"
-            disabled={isSaving}
+            disabled={isLoading || isSaving || loadError}
             onClick={() => handleSave(false)}
             className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition border border-slate-300"
           >
@@ -402,7 +441,7 @@ export const AdminAiSettingsPage: React.FC = () => {
 
           <button
             type="button"
-            disabled={isSaving}
+            disabled={isLoading || isSaving || loadError}
             onClick={() => handleSave(true)}
             className="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold rounded-xl transition shadow-md shadow-brand-200 flex items-center gap-1.5"
           >
@@ -439,7 +478,7 @@ export const AdminAiSettingsPage: React.FC = () => {
         {settings.isDraft && (
           <button
             type="button"
-            disabled={isSaving}
+            disabled={isLoading || isSaving || loadError}
             onClick={handleApplyCurrentVersion}
             className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-lg transition"
           >
@@ -517,7 +556,7 @@ export const AdminAiSettingsPage: React.FC = () => {
               className="mt-1 w-4 h-4 text-brand-600 rounded border-slate-300 focus:ring-brand-500"
             />
             <div>
-              <div className="text-xs font-bold text-slate-900">1번 복구 시 자동 복귀</div>
+              <div className="text-xs font-bold text-slate-900">우선 슬롯 복구 시 자동 복귀</div>
               <div className="text-[11px] text-slate-500 mt-0.5">장애 복구 점검 연속 성공 시 우선 슬롯으로 자동 복귀</div>
             </div>
           </label>
@@ -669,17 +708,23 @@ export const AdminAiSettingsPage: React.FC = () => {
               우선순위 슬롯
             </span>
             <span className="text-sm font-black">
-              현재 [ 슬롯 {settings.primarySlot} ] 이 우선(Primary) 처리기로 지정됨
+              설정 화면 선택: 슬롯 {settings.primarySlot}번 우선(Primary)
             </span>
+            {runtimeStatus && (
+              <span className="text-xs font-bold text-emerald-300">
+                운영 우선: 슬롯 {runtimeStatus.activePrimarySlot}번
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-300">
-            기본적으로 1번 모델이 판매 보류·정정을 분석하며, 1번 사용 불가 시 2번 모델로 대체(Failover)됩니다.
+            운영 환경에 적용하면 선택한 슬롯이 먼저 분석합니다. 4초 안에 유효한 답변을 받지 못하거나 호출에 실패하면 다른 슬롯으로 넘깁니다.
           </p>
         </div>
 
         <button
           type="button"
           onClick={handleSwapPriority}
+          disabled={isLoading || isSaving || loadError}
           className="px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-950 font-black rounded-xl text-xs flex items-center gap-2 transition shadow-md whitespace-nowrap"
         >
           <ArrowRightLeft className="w-4 h-4 text-brand-600" />

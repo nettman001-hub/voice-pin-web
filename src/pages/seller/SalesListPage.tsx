@@ -143,6 +143,7 @@ export const SalesListPage: React.FC = () => {
   // 1차 필터링
   const filteredSales = useMemo(() => {
     return sales.filter((item) => {
+      if (item.aiVerification?.reviewDecision === 'NOT_SALE') return false;
       if (sessionFilter !== 'ALL' && item.sessionId !== sessionFilter) return false;
       const matchesSearch =
         item.buyerNickname.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -245,7 +246,8 @@ export const SalesListPage: React.FC = () => {
   }, [filteredSales, sortOrder]);
 
   const currentSessionSummary = useMemo(() => {
-    const targetSales = sessionFilter === 'ALL' ? sales : sales.filter((s) => s.sessionId === sessionFilter);
+    const targetSales = sales.filter((s) => s.aiVerification?.reviewDecision !== 'NOT_SALE'
+      && (sessionFilter === 'ALL' || s.sessionId === sessionFilter));
     const revenue = calculateSalesListRevenue(targetSales, promiseDefaults);
     const pendingCount = targetSales.filter((s) => s.status === '보류').length;
 

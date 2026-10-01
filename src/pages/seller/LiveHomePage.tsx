@@ -36,8 +36,8 @@ import { COMMENT_HELPER_DOWNLOAD_URL } from '../../types/comment';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
 import { useProductSales } from '../../context/ProductSalesContext';
 import { formatMultiSaleAmount } from '../../services/salesExtractor';
-import { areNicknamesSimilar } from '../../services/nicknameMatcher';
 import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
+import { ListeningStopControl, ListeningStopStatus } from '../../components/live/ListeningStopControl';
 import { AiSaleBadge } from '../../components/sales/AiSaleBadge';
 import { formatSessionDisplay } from '../../utils/sessionFormatter';
 import { ImageViewerModal } from '../../components/common/ImageViewerModal';
@@ -249,15 +249,35 @@ export const LiveHomePage: React.FC = () => {
   // 댓글 피드: 아래쪽이 최신글이 되도록 새 댓글이 오면 자동 스크롤한다.
   // 회차를 고른 뒤에는 서버 판매 회차 UUID를 사용하고, 오프라인 호환 시에만 로컬 ID를 보조로 사용한다.
   const currentSessionSales = React.useMemo(() => sales.filter((sale) => (
-    sale.sessionId === currentSessionId ||
-    (activeSession?.id && sale.sessionId === activeSession.id)
+    sale.aiVerification?.reviewDecision !== 'NOT_SALE' && (sale.sessionId === currentSessionId ||
+    (activeSession?.id && sale.sessionId === activeSession.id))
   )), [activeSession?.id, currentSessionId, sales]);
-  const [displayedSessionSales, setDisplayedSessionSales] = useState(currentSessionSales);
+  const sessionSalesScope = JSON.stringify([user?.id, workspaceId, currentSessionId, activeSession?.id]);
+  const [stoppedSessionSales, setStoppedSessionSales] = useState<{
+    scope: string;
+    records: SaleRecord[];
+  } | null>(null);
+  const wasListeningRef = React.useRef(isListening);
 
-  // 청취를 멈춘 뒤에는 마지막으로 본 판매 목록을 고정하고, 수동 새로고침에서만 갱신한다.
+  // 최초 진입에서는 회차·판매의 비동기 복원을 그대로 반영한다.
+  // 실제 청취를 중지한 뒤에만 해당 계정·회차의 목록을 고정한다.
   React.useEffect(() => {
-    if (isListening) setDisplayedSessionSales(currentSessionSales);
-  }, [currentSessionSales, isListening]);
+    const justStopped = !isListening && wasListeningRef.current;
+    setStoppedSessionSales((snapshot) => {
+      if (justStopped) return { scope: sessionSalesScope, records: currentSessionSales };
+      if (isListening || snapshot?.scope !== sessionSalesScope) return null;
+      const records = snapshot.records.map((record) => {
+        const latest = currentSessionSales.find((sale) => sale.id === record.id);
+        return latest?.aiVerification && latest.aiVerification !== record.aiVerification ? latest : record;
+      }).filter((sale) => sale.aiVerification?.reviewDecision !== 'NOT_SALE');
+      return records.some((record, index) => record !== snapshot.records[index]) || records.length !== snapshot.records.length
+        ? { ...snapshot, records } : snapshot;
+    });
+    wasListeningRef.current = isListening;
+  }, [currentSessionSales, isListening, sessionSalesScope]);
+  const displayedSessionSales = !isListening && stoppedSessionSales?.scope === sessionSalesScope
+    ? stoppedSessionSales.records
+    : currentSessionSales;
 
   const todayTotalAmount = currentSessionSales
     .filter((s) => s.status !== '보류' && s.status !== '취소' && s.syncStatus !== 'PENDING')
@@ -357,10 +377,13 @@ export const LiveHomePage: React.FC = () => {
     setIsSalesRefreshing(true);
     try {
       const latestSales = await refreshSales();
-      setDisplayedSessionSales(latestSales.filter((sale) => (
-        sale.sessionId === currentSessionId
-        || (activeSession?.id && sale.sessionId === activeSession.id)
-      )));
+      setStoppedSessionSales((snapshot) => snapshot?.scope === sessionSalesScope ? {
+        scope: sessionSalesScope,
+        records: latestSales.filter((sale) => (
+          sale.aiVerification?.reviewDecision !== 'NOT_SALE' && (sale.sessionId === currentSessionId
+          || (activeSession?.id && sale.sessionId === activeSession.id))
+        )),
+      } : snapshot);
     } catch (error) {
       alert(error instanceof Error ? error.message : '판매 내역을 새로고침하지 못했습니다.');
     } finally {
@@ -371,7 +394,7 @@ export const LiveHomePage: React.FC = () => {
   return (
     <div className="p-3.5 sm:p-6 max-w-7xl mx-auto space-y-3 sm:space-y-5">
       {/* 최소 높이 상단 헤더 & 핵심 제어 */}
-      <div className="flex items-center justify-between gap-2 bg-white border border-slate-200 px-2.5 py-2 sm:px-3 rounded-2xl shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 px-2.5 py-2 sm:px-3 rounded-2xl shadow-sm">
         <div className="flex items-center gap-2 min-w-0">
           <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all flex-shrink-0 ${
             isListening
@@ -395,7 +418,7 @@ export const LiveHomePage: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-1.5 ml-auto">
           {/* 실제 판매 데모보기 버튼 (상단 헤더 직접 노출) */}
           <button
             type="button"
@@ -445,6 +468,8 @@ export const LiveHomePage: React.FC = () => {
               )}
             </label>
 
+          <ListeningStopControl />
+
           <button
             onClick={handleToggleListening}
             className={`h-8 min-w-16 px-2.5 rounded-lg font-black text-xs shadow-sm flex items-center justify-center gap-1.5 transition active:scale-95 ${
@@ -467,6 +492,8 @@ export const LiveHomePage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      <ListeningStopStatus />
 
       {/* 영업 시연용 실시간 데모 배너 */}
       {isDemoActive && (
@@ -970,6 +997,8 @@ export const LiveHomePage: React.FC = () => {
                 </div>
               ) : (
                 effectiveSessionSales.map((sale) => {
+                  const nicknameNeedsConfirmation = sale.source === 'WEB_VOICE' && sale.status === '보류'
+                    && (sale.aiVerification?.nicknameVerified === false || !sale.sourceCommentIds?.length);
                   const productImage = sale.productImageUrl
                     || sale.captureImageUrls?.[0]
                     || (sale.productCode && sale.productCode === activeProduct?.productCode ? activeProduct?.imageUrl : undefined);
@@ -982,8 +1011,8 @@ export const LiveHomePage: React.FC = () => {
                         : '기존';
 
                   // 다건 구매자 판정 및 금액 포맷팅 (시간순 정렬)
-                  const buyerSessionSales = effectiveSessionSales
-                    .filter((s) => areNicknamesSimilar(s.buyerNickname, sale.buyerNickname))
+                  const buyerSessionSales = (nicknameNeedsConfirmation ? [sale] : effectiveSessionSales
+                    .filter((s) => sale.buyerId && s.buyerId ? s.buyerId === sale.buyerId : s.buyerNickname === sale.buyerNickname))
                     .sort((a, b) => new Date(a.recognizedAt).getTime() - new Date(b.recognizedAt).getTime());
                   const multiAmount = formatMultiSaleAmount(buyerSessionSales.map((s) => s.amount));
 
@@ -1044,18 +1073,23 @@ export const LiveHomePage: React.FC = () => {
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center space-x-2 flex-wrap gap-1">
-                          <span className="font-bold text-sm text-slate-900 truncate">{sale.buyerNickname}</span>
+                          <span className="font-bold text-sm text-slate-900 truncate">{sale.buyerNickname === '미확인(보류)' ? '구매자 미확인' : sale.buyerNickname}</span>
+                          {nicknameNeedsConfirmation && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                              추정 닉네임 · 확인 필요
+                            </span>
+                          )}
                           {multiAmount.isMulti && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200">
                               ★ 다건 {buyerSessionSales.length}건
                             </span>
                           )}
-                          <CustomerStatsBadge
+                          {!nicknameNeedsConfirmation && <CustomerStatsBadge
                             nickname={sale.buyerNickname}
                             buyerId={sale.buyerId}
                             variant="pill"
                             currentSessionId={sale.sessionId || currentSessionId || activeSession?.id}
-                          />
+                          />}
                           <AiSaleBadge sale={sale} />
                           <span className={`text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold border ${
                             sale.source === 'ANDROID_COMMENTS'

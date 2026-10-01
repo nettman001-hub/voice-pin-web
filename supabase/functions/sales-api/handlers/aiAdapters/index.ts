@@ -23,6 +23,7 @@ export interface ExecuteResolutionOptions {
   secretValue?: string;
   helperDispatcher?: HelperDispatcherFn;
   allowInsecureHttpForExternal?: boolean;
+  signal?: AbortSignal;
 }
 
 /**
@@ -34,7 +35,7 @@ export async function executeAiResolution(
   request: AiResolutionRequest,
   options: ExecuteResolutionOptions
 ): Promise<AiResolutionResult> {
-  const { slotConfig, secretValue, helperDispatcher, allowInsecureHttpForExternal } = options;
+  const { slotConfig, secretValue, helperDispatcher, allowInsecureHttpForExternal, signal } = options;
 
   if (slotConfig.type === 'LOCAL') {
     return await runSelfHostedResolution(request, {
@@ -42,11 +43,13 @@ export async function executeAiResolution(
       secretValue,
       helperDispatcher,
       allowInsecureHttpForExternal,
+      signal,
     });
   } else {
     return await runCloudResolution(request, {
       slotConfig,
       secretApiKey: secretValue || '',
+      signal,
     });
   }
 }

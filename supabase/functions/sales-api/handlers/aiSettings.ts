@@ -203,6 +203,34 @@ export async function handleSaveAiSettings(workspaceId: string, actorId: string,
     }
   }
 
+  // 첫 초안을 저장하기 전에 현재 운영 버전의 설정을 보존한다.
+  // 초안은 같은 ai_settings 행을 갱신하므로 이 기록이 런타임의 기준이 된다.
+  if (!applyImmediately && current.version === current.applied_version) {
+    const { data: previousHistory, error: historyReadErr } = await admin
+      .from('ai_settings_history')
+      .select('id')
+      .eq('setting_id', current.id)
+      .eq('version', current.applied_version)
+      .limit(1)
+
+    if (historyReadErr) {
+      return errorResponse('DATABASE_ERROR', historyReadErr.message, 500)
+    }
+    if (!previousHistory?.length) {
+      const { error: historyWriteErr } = await admin.from('ai_settings_history').insert({
+        setting_id: current.id,
+        version: current.version,
+        applied_version: current.applied_version,
+        snapshot: current,
+        change_summary: `운영 버전 ${current.applied_version} 자동 보존`,
+        created_by: actorId,
+      })
+      if (historyWriteErr) {
+        return errorResponse('DATABASE_ERROR', historyWriteErr.message, 500)
+      }
+    }
+  }
+
   // 비밀정보(신규 키/토큰) 처리 (slot1)
   if (settings.slot1?.clearSecret) {
     await admin.from('ai_secrets').delete().eq('setting_id', current.id).eq('slot_number', 1)
