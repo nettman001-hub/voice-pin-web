@@ -6,6 +6,7 @@ import type {
 import type { AiSlotConfig } from '../../../../../src/types/aiSettings.ts';
 import { validateExternalEndpoint, safeFetch } from '../aiValidation.ts';
 import { buildResolutionPrompt, parseAndNormalizeAiOutput, buildOpenAiChatUrl } from './common.ts';
+import { createConversationTraceRecorder, redactConversationSecrets, type ConversationTraceListener } from './conversationTrace.ts';
 
 export type HelperDispatcherFn = (
   endpointUrl: string,
@@ -21,6 +22,7 @@ export interface SelfHostedAdapterOptions {
   helperDispatcher?: HelperDispatcherFn;
   allowInsecureHttpForExternal?: boolean;
   signal?: AbortSignal;
+  onConversationTrace?: ConversationTraceListener;
 }
 
 /**
@@ -136,14 +138,21 @@ export async function runSelfHostedResolution(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+  const trace = createConversationTraceRecorder({
+    systemPrompt, userPrompt, provider: slotConfig.provider || 'OLLAMA', model: requestBody.model,
+  }, options.onConversationTrace, [secretValue || '']);
+  let responseStatus = 200;
 
   try {
     // 4. 경로별 호출 실행
+    trace.dispatched();
     if (routingMode === 'PC_HELPER') {
       // PC 도우미 경유: 도우미 디스패처가 제공된 경우 전달, 없으면 직접 로컬 fetch (로컬 테스트 및 도우미 내부 환경)
       if (helperDispatcher) {
         const helperRes = await helperDispatcher(endpoint, requestBody, headers, timeoutMs, signal);
+        responseStatus = helperRes.status;
         if (helperRes.status >= 400) {
+          trace.received(helperRes.body, helperRes.status, 'HTTP_ERROR');
           throw new Error(`PC 도우미 경유 호출 오류 (HTTP ${helperRes.status}): ${helperRes.body}`);
         }
         rawResponseText = helperRes.body;
@@ -155,21 +164,26 @@ export async function runSelfHostedResolution(
           body: JSON.stringify(requestBody),
           signal,
         });
+        responseStatus = res.status;
         if (!res.ok) {
           const errText = await res.text().catch(() => '');
+          trace.received(errText, res.status, 'HTTP_ERROR');
           // 만약 response_format 관련 거부(400)일 경우, response_format 제거 후 1회 재시도
           if (res.status === 400 && requestBody?.response_format && errText.includes('response_format')) {
             delete requestBody.response_format;
+            trace.dispatched();
             const retryRes = await fetch(endpoint, {
               method: 'POST',
               headers,
               body: JSON.stringify(requestBody),
               signal,
             });
+            responseStatus = retryRes.status;
             if (retryRes.ok) {
               rawResponseText = await retryRes.text();
             } else {
               const retryErrText = await retryRes.text().catch(() => '');
+              trace.received(retryErrText, retryRes.status, 'HTTP_ERROR');
               throw new Error(`로컬 LLM 응답 오류 (HTTP ${retryRes.status}): ${retryErrText}`);
             }
           } else {
@@ -195,11 +209,14 @@ export async function runSelfHostedResolution(
           allowInsecureHttpForExternal,
         }
       );
+      responseStatus = res.status;
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
+        trace.received(errText, res.status, 'HTTP_ERROR');
         // 만약 response_format 관련 거부(400)일 경우, response_format 제거 후 1회 재시도
         if (res.status === 400 && requestBody?.response_format && errText.includes('response_format')) {
           delete requestBody.response_format;
+          trace.dispatched();
           const retryRes = await safeFetch(
             endpoint,
             {
@@ -214,8 +231,10 @@ export async function runSelfHostedResolution(
               allowInsecureHttpForExternal,
             }
           );
+          responseStatus = retryRes.status;
           if (!retryRes.ok) {
             const retryErrText = await retryRes.text().catch(() => '');
+            trace.received(retryErrText, retryRes.status, 'HTTP_ERROR');
             throw new Error(`외부 서버 LLM 응답 오류 (HTTP ${retryRes.status}): ${retryErrText}`);
           }
           rawResponseText = await retryRes.text();
@@ -257,6 +276,7 @@ export async function runSelfHostedResolution(
     } catch {
       // raw text 자체를 파서로 전달
     }
+    trace.received(typeof contentToParse === 'string' ? contentToParse : JSON.stringify(contentToParse), responseStatus, 'MODEL_OUTPUT');
 
     const executionMeta: AiExecutionMeta = {
       adapterType: 'SELF_HOSTED',
@@ -271,14 +291,15 @@ export async function runSelfHostedResolution(
     return parseAndNormalizeAiOutput(contentToParse, request, executionMeta);
   } catch (err: any) {
     const latencyMs = Date.now() - startTime;
+    const safeError = redactConversationSecrets(err.message || 'LLM 호출 오류', [secretValue || '']);
     return {
       resolvable: false,
       targetSaleId: null,
       action: 'INSUFFICIENT_DATA',
       changes: null,
       evidenceIds: [],
-      evidenceSummary: `자체 운영 LLM 호출 실패: ${err.message || '네트워크 오류'}`,
-      missingInfo: [err.message || 'LLM 호출 오류'],
+      evidenceSummary: `자체 운영 LLM 호출 실패: ${safeError}`,
+      missingInfo: [safeError],
       conflictReason: signal.aborted ? 'TIMEOUT' : err.code || '추론 엔진 호출 실패',
       execution: {
         adapterType: 'SELF_HOSTED',
@@ -287,7 +308,7 @@ export async function runSelfHostedResolution(
         provider: slotConfig.provider,
         model: slotConfig.model,
         latencyMs,
-        rawResponse: rawResponseText || err.message,
+        rawResponse: redactConversationSecrets(rawResponseText || safeError, [secretValue || '']),
       },
     };
   } finally {

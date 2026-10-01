@@ -28,6 +28,8 @@ export interface VoiceCorrectionIntent {
   scope: CorrectionScope;
   isNegativeCommand: boolean;
   isQuestion: boolean;
+  /** A question specifically about changing an existing sale, not general conversation. */
+  isCorrectionQuestion?: boolean;
   isCancellation: boolean;
   isIncomplete: boolean;
   rawUtterance: string;

@@ -1,5 +1,6 @@
 import type { SaleRecord, SaleStatus } from '../types/live.ts';
 import { extractSpeechPrice } from './priceEvidence.ts';
+import { isQuestionUtterance, splitTranscriptClauses } from './voiceUtteranceService.ts';
 
 /**
  * 한국어 금액 표현(예: "35,000원", "3만 5천원", "3만원", "42000원", "5천원")을 숫자(number)로 변환
@@ -111,51 +112,63 @@ export function parseKoreanAmount(text: string): number | null {
   return null;
 }
 
-/**
- * 전사 문장에서 구매자 닉네임 추출
- */
-export function parseBuyerNickname(text: string): string | null {
-  if (!text) return null;
+const NON_BUYER_NAMES = new Set([
+  '보여', '입어', '설명', '안내', '말씀', '네', '있는데', '잠시', '박시하게', '언니들',
+  '구매하신', '구매자', '고객', '손', '다음', '이번',
+  '이거', '요거', '그거', '저거', '이것', '요것', '그것', '저것',
+  '이건', '요건', '그건', '저건', '여기', '거기', '저기',
+]);
 
+function distinctBuyerNames(candidates: string[]): string[] {
+  const names = new Map<string, string>();
+  for (const value of candidates) {
+    const candidate = value.trim();
+    const key = candidate.replace(/\s+/gu, '').toLowerCase();
+    if (key && !NON_BUYER_NAMES.has(key) && !names.has(key)) names.set(key, candidate);
+  }
+  return [...names.values()];
+}
+
+function honorificBuyerNames(text: string): string[] {
   // Live allocation: "네, 햇살언니께 드리겠습니다" / "뒷자리1234언니께".
   // Preserve the position word so the account matcher can verify the suffix.
-  const allocationName = text.match(/(?:^|[\s,，])((?:뒷\s*자리|뒷\s*번호|끝\s*번호)?\s*[가-힣a-zA-Z0-9_]{1,20})\s*(?:언니|님|씨)(?:께|에게|한테|는|은|도|을|를)?(?=\s|[,.!?]|드리|챙겨|$)/u);
-  if (allocationName?.[1]) {
-    const candidate = allocationName[1].trim();
-    if (!['보여', '입어', '설명', '안내', '말씀', '네', '있는데', '잠시', '박시하게', '언니들', '구매자', '고객'].includes(candidate)) return candidate;
-  }
+  return distinctBuyerNames([...text.matchAll(/(?:^|[\s,，])((?:뒷\s*자리|뒷\s*번호|끝\s*번호)?\s*[가-힣a-zA-Z0-9_]{1,20})\s*(?:언니|님|씨)(?:께|에게|한테|는|은|도|을|를)?(?=\s|[,.!?]|드리|챙겨|$)/gu)]
+    .map((match) => match[1]));
+}
+
+/** Spoken name candidates only; canonical identity comes from the comment. */
+export function getBuyerNicknameCandidates(text: string): string[] {
+  if (!text) return [];
+
+  const allocationNames = honorificBuyerNames(text);
+  if (allocationNames.length) return allocationNames;
 
   // 패턴 0: 접미부/접두부 위치 호칭 (예: "뒷번호 0517님", "뒷자리 에스엠디아이님", "끝번호 smdi님", "앞자리 지아이이님")
-  const p0 = text.match(
-    /(?:마지막\s*자리|마지막\s*번호|전화\s*번호\s*뒤|핸드폰\s*뒤|폰\s*뒤|전화\s*뒤|뒷\s*자리|뒷\s*번호|뒤\s*번호|끝\s*자리|끝\s*번호|마지막|처음\s*자리|앞\s*자리|앞\s*번호|첫\s*자리|첫\s*번호|처음)\s*[:：#]?\s*([가-힣a-zA-Z0-9_]{1,16})(?:\s*번)?(?:\s*님|\s*이|\s*씨|\s*고객)?/u
-  );
-  if (p0 && p0[1]) {
-    return p0[0].replace(/(?:\s*번)?(?:\s*님|\s*이|\s*씨|\s*고객)$/u, '').trim();
-  }
+  const p0 = distinctBuyerNames([...text.matchAll(
+    /(?:마지막\s*자리|마지막\s*번호|전화\s*번호\s*뒤|핸드폰\s*뒤|폰\s*뒤|전화\s*뒤|뒷\s*자리|뒷\s*번호|뒤\s*번호|끝\s*자리|끝\s*번호|마지막|처음\s*자리|앞\s*자리|앞\s*번호|첫\s*자리|첫\s*번호|처음)\s*[:：#]?\s*([가-힣a-zA-Z0-9_]{1,16})(?:\s*번)?(?:\s*님|\s*이|\s*씨|\s*고객)?/gu
+  )].map((match) => match[0].replace(/(?:\s*번)?(?:\s*님|\s*이|\s*씨|\s*고객)$/u, '')));
+  if (p0.length) return p0;
 
   // 패턴 1: "닉네임은 [xxx]님", "닉네임 [xxx]님", "[xxx]님 이시구요", "[xxx]님이"
-  const p1 = text.match(/(?:닉네임은?|구매하신\s*분은?|구매자(?:는)?)\s*([가-힣a-zA-Z0-9_]{1,15})(?:\s*님|\s*이|\s*씨|\s*고객)/);
-  if (p1 && p1[1]) {
-    return p1[1].trim();
-  }
+  const p1 = distinctBuyerNames([...text.matchAll(/(?:닉네임은?|구매하신\s*분은?|구매자(?:는)?)\s*([가-힣a-zA-Z0-9_]{1,15})(?:\s*님|\s*이|\s*씨|\s*고객)/gu)]
+    .map((match) => match[1]));
+  if (p1.length) return p1;
 
   // 패턴 2: "[xxx]님 구매확정", "[xxx]님 결제"
-  const p2 = text.match(/([가-힣a-zA-Z0-9_]{2,12})\s*님/);
-  if (p2 && p2[1]) {
-    const candidate = p2[1].trim();
-    // 흔한 조사나 불용어 제외
-    if (!['구매하신', '구매자', '고객', '손', '다음', '이번'].includes(candidate)) {
-      return candidate;
-    }
-  }
+  const p2 = distinctBuyerNames([...text.matchAll(/([가-힣a-zA-Z0-9_]{2,12})\s*님/gu)]
+    .map((match) => match[1]));
+  if (p2.length) return p2;
 
   // 패턴 3: "닉네임 [xxx]"
-  const p3 = text.match(/닉네임\s*([가-힣a-zA-Z0-9_]{2,12})/);
-  if (p3 && p3[1]) {
-    return p3[1].trim();
-  }
+  const p3 = distinctBuyerNames([...text.matchAll(/닉네임(?:은)?\s*([가-힣a-zA-Z0-9_]{2,12})/gu)]
+    .map((match) => match[1].replace(/(?:언니|님|씨)(?:께|에게|한테)?$/u, '')));
+  return p3;
+}
 
-  return null;
+/** Never pick the first/last candidate when more than one real name remains. */
+export function parseBuyerNickname(text: string): string | null {
+  const candidates = getBuyerNicknameCandidates(text);
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 export interface ExtractedSaleResult {
@@ -170,22 +183,53 @@ export interface ExtractedSaleResult {
   allocationTranscript?: string;
 }
 
-const ALLOCATION_ACTION = /(?:드리겠습니다|드릴게요|드릴께요|챙겨\s*드릴게요|챙겨\s*드리겠습니다|(?:넣어|담아|배정해)\s*드(?:릴(?:게|께)요|렸(?:어요|습니다))|구매\s*확정(?:입니다|할게요)?|낙찰(?:입니다)?|판매\s*완료|주문\s*확정|결제\s*완료)/u;
-const NON_ALLOCATION = /(?:드릴까요|드릴\s*수\s*있|드리는\s*거\s*아니|안\s*드리|못\s*드리|입금하시면|결제하시면|아까\s*.*(?:드렸|드린)|(?:보여|입어|설명|안내|알려|비춰|찍어|읽어|확인해|보내|재|제|재어|측정해)\s*드(?:릴(?:게|께)요|리겠습니다|립니다|려요))/u;
+const ALLOCATION_ACTION = /(?:드리겠습니다|드릴게요|드릴께요|챙겨\s*드릴게요|챙겨\s*드리겠습니다|챙겨\s*줄(?:게|께)(?:요)?(?=\s|[,.!?]|$)|(?:넣어|담아|배정해)\s*드(?:릴(?:게|께)요|렸(?:어요|습니다))|구매\s*확정(?:입니다|할게요)?|낙찰(?:입니다)?|판매\s*완료|주문\s*확정|결제\s*완료)/u;
+const NON_ALLOCATION = /(?:드릴까요|드릴\s*수\s*있|드리는\s*거\s*아니|안\s*드리|못\s*드리|(?:안|못)\s*챙겨|챙겨\s*(?:안|못)\s*줄|챙겨\s*줄(?:게|께)(?:요)?[\s,，]*(?:라고|라는|아니|취소|(?:하고|고)\s*(?:말|했)|했(?:잖|어|다)|하기로)|(?:입금|결제|구매|원)(?:하시면|하면)|사시면|있으면|남으면|가능하면|아까\s*.*(?:드렸|드린)|(?:보여|입어|설명|안내|알려|비춰|찍어|읽어|확인해|보내|재|제|재어|측정해)\s*(?:드(?:릴(?:게|께)요|리겠습니다|립니다|려요)|줄(?:게|께)(?:요)?))/u;
+
+/** A price declaration may continue an allocation, but measurements and a
+ * second buyer/product/price must never become its transaction evidence. */
+export function findExplicitPriceTranscript(text: string): string | null {
+  const clause = text.trim();
+  if (splitTranscriptClauses(clause).length !== 1 || isQuestionUtterance(clause)
+    || getBuyerNicknameCandidates(clause).length > 0
+    || /(?:아니|말고|정정|수정|변경|취소|이면|라면|다면|하시면|다음|다른|이전|새\s*상품)/u.test(clause)) return null;
+  const prefix = clause.match(/^(?:가격|금액|단가|판매가)(?:은|는|이|가)?\s*[:：]?\s*/u);
+  if (!prefix || (clause.match(/(?:가격|금액|단가|판매가)/gu)?.length || 0) !== 1) return null;
+  // Keep the explicit price separate even when STT puts decimal measurements
+  // into the same sentence: "금액은 1.0, 가단 60.5에 총장 89.5".
+  // A measurement label must introduce a value; do not strip a unit suffix
+  // like "1.5 사이즈" and accidentally turn that dimension into money.
+  const body = clause.slice(prefix[0].length)
+    .split(/(?:가단|가슴\s*단면|총장|기장|길이|높이|폭|사이즈)(?:은|는|이|가)?\s*[:：]?\s*(?=[\d영공일이삼사오육칠팔구])/u)[0]
+    .replace(/[.!。\s]+$/u, '').trim();
+  const price = extractSpeechPrice(body);
+  if (!price || !body.startsWith(price.quote)) return null;
+  const ending = body.slice(price.quote.length);
+  if (!/^(?:\s*(?:만\s*원|원)?\s*(?:입니다|이에요|예요|에요|이요|요|이고요|이고)?[\s,，.!。]*)$/u.test(ending)) return null;
+  return `${prefix[0]}${price.quote}`;
+}
 
 /** Judge the verb and its own clause, rather than joining an unrelated name,
  * price and polite "드릴게요" from anywhere in the STT buffer. */
 export function findAllocationTranscript(text: string): string | null {
-  const clauses = text.split(/(?<!\d)\.(?!\d)|[!?。\n]/u).map((part) => part.trim()).filter(Boolean);
+  const clauses = splitTranscriptClauses(text)
+    .map((part) => part.replace(/[.!。\s]+$/u, '').trim()).filter(Boolean);
   for (let i = 0; i < clauses.length; i++) {
     const clause = clauses[i];
-    if (!ALLOCATION_ACTION.test(clause) || NON_ALLOCATION.test(clause)) continue;
-    if (parseBuyerNickname(clause)) return clause;
+    if (isQuestionUtterance(clause) || !ALLOCATION_ACTION.test(clause) || NON_ALLOCATION.test(clause)) continue;
+    const withFollowingPrice = (allocation: string): string => {
+      if (extractSpeechPrice(allocation)) return allocation;
+      const priceClause = findExplicitPriceTranscript(clauses[i + 1] || '');
+      return priceClause ? `${allocation}. ${priceClause}` : allocation;
+    };
+    // A clear allocation with several possible names must stay visible for
+    // review, even without a price; never promote one of those names by order.
+    if (getBuyerNicknameCandidates(clause).length > 0) return withFollowingPrice(clause);
     const previous = clauses[i - 1];
     // A short, stand-alone vocative can be a separate STT sentence.
     if (previous && /^(?:네[,，]?\s*)?[가-힣a-zA-Z0-9_]{2,20}\s*(?:언니|님|씨)(?:께|에게|한테)?$/u.test(previous)
-      && parseBuyerNickname(previous)) return `${previous}. ${clause}`;
-    if (/구매\s*확정|낙찰|판매\s*완료|주문\s*확정|결제\s*완료|(?:넣어|담아|배정해)\s*드/u.test(clause)) return clause;
+      && parseBuyerNickname(previous)) return withFollowingPrice(`${previous}. ${clause}`);
+    if (/구매\s*확정|낙찰|판매\s*완료|주문\s*확정|결제\s*완료|(?:넣어|담아|배정해)\s*드/u.test(clause)) return withFollowingPrice(clause);
     // Keep a priced allocation as pending when STT loses the buyer's name.
     // Measurement/demonstration clauses were rejected above.
     if (extractSpeechPrice(clause)) return clause;
@@ -199,19 +243,24 @@ export function findAllocationTranscript(text: string): string | null {
 export function extractSaleFromTranscript(transcript: string, activeKeywords: string[] = []): ExtractedSaleResult | null {
   if (!transcript || transcript.trim().length < 3) return null;
 
-  const text = transcript.trim();
+  const text = splitTranscriptClauses(transcript).filter((part) => !isQuestionUtterance(part)).join('\n').trim();
+  if (!text) return null;
   
   // 판매 멘트 감지 키워드 목록
   const saleTriggers = ['구매확정', '구매 확정', '구매하신 분', '구매하신분', '결제완료', '결제 완료', '주문확정', '낙찰', '판매완료'];
   const hasDecimal = /(?<!\d\.)(?<!\d)\d{1,3}\s*(?:[.]|점)\s*\d{1,2}(?!\.\d)(?!\s*(?:월|일|시|분|초|버전|ver))\b/u.test(text) ||
     /([영공일이삼사오육칠팔구십]+)\s*(?:[.]|점)\s*([영공일이삼사오육칠팔구]+)/u.test(text);
 
-  const allocationTranscript = findAllocationTranscript(text);
+  // Keep intervening questions as boundaries when linking a following price.
+  const allocationTranscript = findAllocationTranscript(transcript);
   const hasTrigger = Boolean(allocationTranscript) ||
     (text.includes('닉네임') && (hasDecimal || text.includes('원') || text.includes('금액') || text.includes('가격'))) ||
     (hasDecimal && Boolean(parseBuyerNickname(text)));
 
-  if (!hasTrigger || (!allocationTranscript && NON_ALLOCATION.test(text))) {
+  const isMeasurementDescription = /(?:가단|가슴\s*단면|기장|길이|높이|폭|사이즈|센티|미터|\bcm\b)/iu.test(text)
+    && !/(?:가격|금액)/u.test(text);
+
+  if (!hasTrigger || (!allocationTranscript && (NON_ALLOCATION.test(text) || isMeasurementDescription))) {
     return null;
   }
 
@@ -238,7 +287,7 @@ export function extractSaleFromTranscript(transcript: string, activeKeywords: st
     buyerNickname: nickname || '미확인(보류)',
     amount: amount || 0,
     status,
-    rawTranscript: text,
+    rawTranscript: transcript.trim(),
     isPending,
     matchedKeywords,
     intent: allocationTranscript ? 'ALLOCATION' : 'UNCERTAIN',

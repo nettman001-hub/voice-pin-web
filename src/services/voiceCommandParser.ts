@@ -1,4 +1,5 @@
-import { parseBuyerNickname, parseKoreanAmount } from './salesExtractor';
+import { getBuyerNicknameCandidates, parseBuyerNickname, parseKoreanAmount } from './salesExtractor.ts';
+import { isNegatedVoiceAction, isQuestionUtterance } from './voiceUtteranceService.ts';
 
 export interface VoiceCommandResult {
   type: 'START_EDIT' | 'FIELD_UPDATE' | 'FINISH_EDIT' | 'DELETE_LAST' | 'NONE';
@@ -10,6 +11,7 @@ export interface VoiceCommandResult {
 export function parseVoiceCommand(text: string, isCurrentlyEditing: boolean): VoiceCommandResult {
   if (!text) return { type: 'NONE', rawText: '' };
   const clean = text.trim();
+  if (isQuestionUtterance(clean) || isNegatedVoiceAction(clean)) return { type: 'NONE', rawText: clean };
 
   // 1. "수정 완료", "수정 끝", "완료"
   if (isCurrentlyEditing && (clean.includes('수정 완료') || clean.includes('수정완료') || clean.includes('수정 끝') || clean === '완료')) {
@@ -37,16 +39,19 @@ export function parseVoiceCommand(text: string, isCurrentlyEditing: boolean): Vo
 
   // 4. 수정 대기 상태에서 필드 업데이트 ("닉네임은 xxx, 금액은 xxx", "금액 3만원으로 변경", "닉네임 영희")
   if (isCurrentlyEditing) {
+    // The explicit-label fallback must not turn an ambiguous parser result
+    // back into the first buyer (or update their amount as a side effect).
+    if (getBuyerNicknameCandidates(clean).length > 1) return { type: 'NONE', rawText: clean };
     const updatedNickname = parseBuyerNickname(clean) || undefined;
     const updatedAmount = parseKoreanAmount(clean) || undefined;
 
     // 만약 닉네임만 말했을 때 ("닉네임 홍길동", "이름 홍길동")
     let directNickname: string | undefined = updatedNickname;
     if (!directNickname) {
-      const nameMatch = clean.match(/(?:닉네임|이름)(?:은|이)?\s*([가-힣a-zA-Z0-9_]+)/);
-      if (nameMatch) {
-        directNickname = nameMatch[1].trim();
-      }
+      const directNames = [...new Set([...clean.matchAll(/(?:닉네임|이름)(?:은|이)?\s*([가-힣a-zA-Z0-9_]+)/gu)]
+        .map((match) => match[1].trim()))];
+      if (directNames.length > 1) return { type: 'NONE', rawText: clean };
+      directNickname = directNames[0];
     }
 
     if (directNickname || updatedAmount) {

@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { SaleRecord } from '../../types/live';
 import { SaleAiEvidenceModal } from './SaleAiEvidenceModal';
+import { useSaleAiConversationWindow } from './SaleAiConversationWindow';
 import { useSales } from '../../context/SalesContext';
 import { useLive } from '../../context/LiveContext';
 import { useAuth } from '../../context/AuthContext';
@@ -29,6 +30,7 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
   const { updateSale, refreshSales } = useSales();
   const { syncCurrentTranscriptsToCloud } = useLive();
   const { workspaceId } = useAuth();
+  const { openConversation } = useSaleAiConversationWindow();
   const [showEvidenceModal, setShowEvidenceModal] = useState<boolean>(false);
   const [isApplyingCandidate, setIsApplyingCandidate] = useState<boolean>(false);
   const [isRollingBack, setIsRollingBack] = useState<boolean>(false);
@@ -223,13 +225,25 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
         {sale.status === '보류' && sale.source === 'WEB_VOICE' && (
           <button type="button" disabled={isReviewing || sale.syncStatus === 'PENDING' || sale.aiVerification?.aiStatus === 'CHECKING'}
             className="px-2.5 py-1 bg-sky-50 text-sky-800 text-[11px] font-bold rounded-lg border border-sky-200 flex items-center gap-1 disabled:opacity-50"
+            title="AI 검토를 실행하고 질문·답변을 새 창에서 확인"
             onClick={(e) => {
-              e.preventDefault(); e.stopPropagation(); setIsReviewing(true); setErrorMsg(null);
+              e.preventDefault(); e.stopPropagation();
+              const conversation = openConversation(sale, { reviewing: true });
+              setIsReviewing(true); setErrorMsg(null);
               void syncCurrentTranscriptsToCloud(sale.sessionId)
                 .then(() => aiSettingsApi.triggerPendingAiResolution(sale.id, { forceReanalyze: true, workspaceId: workspaceId || undefined }))
-                .then((result) => { if (result.skipped && result.message) setErrorMsg(result.message); return refreshSales(); })
+                .then((result) => {
+                  const reviewError = result.sale?.ai_verification?.errorMessage || result.sale?.aiVerification?.errorMessage;
+                  if (reviewError || (result.skipped && result.message)) setErrorMsg(reviewError || result.message);
+                  conversation?.finishReview(reviewError || result.message || 'AI 검토가 완료되었습니다. 아래 저장된 질문과 답변을 확인해 주세요.');
+                  return refreshSales();
+                })
                 .then(() => onRefresh?.())
-                .catch((err) => setErrorMsg(err.message || 'AI 검토 요청에 실패했습니다.'))
+                .catch((err) => {
+                  const message = err.message || 'AI 검토 요청에 실패했습니다.';
+                  setErrorMsg(message);
+                  conversation?.finishReview(message);
+                })
                 .finally(() => setIsReviewing(false));
             }}>
             <Sparkles className="w-3 h-3" />{isReviewing ? 'AI 검토 중' : sale.aiVerification?.aiTaskId ? 'AI 다시 검토' : 'AI 검토'}

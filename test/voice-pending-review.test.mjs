@@ -76,6 +76,25 @@ test('a cited short following price can be proposed, but missing price evidence 
   assert.equal(review(missingPrice, [comment()], cited, '가격 1.5요').aiStatus, 'NEEDS_SELLER_CONFIRM');
 });
 
+test('AI can verify the cloud buyer price even when the following price sentence contains measurements', () => {
+  const current = { ...sale, buyerNickname: '구름', amount: 0,
+    rawTranscript: '택배 많을걸? 이제 언박싱 하십시오. 구름 언니, 이거 챙겨드릴게요. 금액은 1.0, 가단 60에 총장 89. 이렇게. 허리 스트링 채워도 돼?' };
+  const ai = result({ changes: { buyerNickname: { to: '구름' }, amount: { to: 10000, quantity: 1 } } });
+  const meta = review(current, [comment('구름', '저요')], ai);
+  assert.equal(meta.nicknameVerified, true);
+  assert.equal(meta.candidateBuyer.nickname, '구름');
+  assert.equal(meta.candidateAmount, 10000);
+  assert.equal(meta.saleConfirmed, true);
+
+  const split = { ...current, rawTranscript: '구름 언니, 이거 챙겨드릴게요.' };
+  const cited = { ...ai, evidenceIds: [...ai.evidenceIds, 'following:s-one'] };
+  const price = '금액은 1.0, 가단 60.5에 총장 89.5.';
+  assert.equal(review(split, [comment('구름')], cited, price).candidateAmount, 10000);
+  assert.equal(review(split, [comment('구름')], cited, '금액은 1.0.').candidateAmount, 10000);
+  assert.equal(review(split, [comment('구름')], ai, price).aiStatus, 'INSUFFICIENT_DATA', 'uncited prices are still rejected');
+  assert.equal(review(split, [comment('구름')], cited, '가단 60.5에 총장 89.5.').aiStatus, 'INSUFFICIENT_DATA');
+});
+
 const windowComment = { ...comment('KH', '연핑 저요'), capturedAt: '2026-09-15T12:40:19Z' };
 const windowSale = { ...sale, buyerNickname: '케이치', amount: 0,
   rawTranscript: '케이치 언니는 연핑 넣어드릴게요', recognizedAt: '2026-09-15T12:41:10Z' };

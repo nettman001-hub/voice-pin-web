@@ -705,14 +705,14 @@ export const LiveHomePage: React.FC = () => {
             </div>
           </div>
 
-          {/* 규칙 감지 핵심 발화 & 액션 (실시간 오디오 스트림처럼 한 줄 슬림 카드) */}
+          {/* 최근 감지된 단어 규칙 및 음성 처리 결과 */}
           <div className="order-3 bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between gap-2 sm:gap-3 min-h-[48px] sm:min-h-[50px]">
             <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
               <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
                 <Sparkles className="w-4 h-4 text-amber-500" />
               </div>
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 whitespace-nowrap">
-                규칙 감지 핵심 발화
+                최근 감지·처리 결과
               </h3>
             </div>
 
@@ -739,7 +739,7 @@ export const LiveHomePage: React.FC = () => {
               </div>
             ) : (
               <div className="flex-1 min-w-0 flex items-center justify-center py-1 px-2.5 rounded-xl border border-dashed border-slate-200 text-[11px] sm:text-xs text-slate-400 truncate italic">
-                "구매확정, 금액, 닉네임, 캡처, 수정" 등 규칙 지정 단어 감지 시 하이라이트
+                등록된 단어 규칙과 판매·음성 정정·캡처 처리 결과를 표시합니다.
               </div>
             )}
           </div>

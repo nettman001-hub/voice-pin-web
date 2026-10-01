@@ -10,6 +10,7 @@ import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
 import { MobileBottomNav } from './components/common/MobileBottomNav';
 import { SyncStatusNotice } from './components/common/SyncStatusNotice';
+import { SaleAiConversationProvider } from './components/sales/SaleAiConversationWindow';
 import { PanelLeftOpen } from 'lucide-react';
 import { hasAutoLoginCredentials } from './services/authCredentialsService';
 
@@ -160,6 +161,7 @@ export const App: React.FC = () => {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <SaleAiConversationProvider>
         <SalesProvider>
           <CommerceProvider>
             <ProductSalesProvider>
@@ -249,6 +251,7 @@ export const App: React.FC = () => {
             </ProductSalesProvider>
           </CommerceProvider>
         </SalesProvider>
+        </SaleAiConversationProvider>
       </AuthProvider>
     </BrowserRouter>
   );

@@ -5,6 +5,7 @@ import type {
 import type { AiSlotConfig } from '../../../../../src/types/aiSettings.ts';
 import { runSelfHostedResolution, type HelperDispatcherFn } from './selfHostedAdapter.ts';
 import { runCloudResolution } from './cloudAdapter.ts';
+import type { ConversationTraceListener } from './conversationTrace.ts';
 
 export {
   parseKoreanSpokenPrice,
@@ -24,6 +25,7 @@ export interface ExecuteResolutionOptions {
   helperDispatcher?: HelperDispatcherFn;
   allowInsecureHttpForExternal?: boolean;
   signal?: AbortSignal;
+  onConversationTrace?: ConversationTraceListener;
 }
 
 /**
@@ -35,7 +37,7 @@ export async function executeAiResolution(
   request: AiResolutionRequest,
   options: ExecuteResolutionOptions
 ): Promise<AiResolutionResult> {
-  const { slotConfig, secretValue, helperDispatcher, allowInsecureHttpForExternal, signal } = options;
+  const { slotConfig, secretValue, helperDispatcher, allowInsecureHttpForExternal, signal, onConversationTrace } = options;
 
   if (slotConfig.type === 'LOCAL') {
     return await runSelfHostedResolution(request, {
@@ -44,12 +46,14 @@ export async function executeAiResolution(
       helperDispatcher,
       allowInsecureHttpForExternal,
       signal,
+      onConversationTrace,
     });
   } else {
     return await runCloudResolution(request, {
       slotConfig,
       secretApiKey: secretValue || '',
       signal,
+      onConversationTrace,
     });
   }
 }

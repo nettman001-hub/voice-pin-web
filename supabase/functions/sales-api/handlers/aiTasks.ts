@@ -105,27 +105,36 @@ export async function handleProcessAiTask(
   body: any
 ) {
   const { taskId, task: inputTask, helperDispatcher, allowInsecureHttpForExternal } = body || {};
+  const requestedTaskId = taskId || inputTask?.taskId;
 
   let currentTask: AiTask;
 
-  if (taskId) {
+  if (requestedTaskId) {
+    // Never trust an incoming task's workspace or attempt IDs. Conversation
+    // records must come from the task owned by the authenticated workspace.
     const { data: dbTask, error: taskErr } = await admin
       .from('ai_tasks')
       .select('*')
-      .eq('task_id', taskId)
+      .eq('task_id', requestedTaskId)
       .eq('workspace_id', workspaceId)
       .maybeSingle();
 
-    if (taskErr || !dbTask) {
-      return errorResponse('NOT_FOUND', `AI 작업을 찾을 수 없습니다: ${taskId}`, 404);
+    if (taskErr) {
+      return errorResponse('DATABASE_ERROR', `AI 작업 조회 실패: ${taskErr.message}`, 500);
+    }
+    if (!dbTask) {
+      return errorResponse('NOT_FOUND', `AI 작업을 찾을 수 없습니다: ${requestedTaskId}`, 404);
     }
 
     // 기존 시도 이력 조회
-    const { data: dbAttempts } = await admin
+    const { data: dbAttempts, error: attemptsError } = await admin
       .from('ai_task_attempts')
       .select('*')
-      .eq('task_id', taskId)
+      .eq('task_id', requestedTaskId)
       .order('started_at', { ascending: true });
+    if (attemptsError) {
+      return errorResponse('DATABASE_ERROR', `AI 대화 이력 조회 실패: ${attemptsError.message}`, 500);
+    }
 
     const attempts: AiTaskAttempt[] = (dbAttempts || []).map((att) => ({
       attemptId: att.attempt_id,
@@ -139,6 +148,7 @@ export async function handleProcessAiTask(
       errorCode: att.error_code,
       errorMessage: att.error_message,
       result: att.result,
+      conversationTrace: att.conversation_trace ?? null,
     }));
 
     currentTask = {
@@ -163,8 +173,6 @@ export async function handleProcessAiTask(
       createdAt: dbTask.created_at,
       updatedAt: dbTask.updated_at,
     };
-  } else if (inputTask) {
-    currentTask = inputTask;
   } else {
     return errorResponse('VALIDATION_ERROR', 'taskId 또는 task 객체가 필요합니다.', 400);
   }
@@ -271,7 +279,7 @@ export async function handleProcessAiTask(
 
   // 5. DB 상태 갱신
   // 5-1. ai_tasks 테이블 갱신
-  await admin
+  const { error: taskSaveError } = await admin
     .from('ai_tasks')
     .update({
       status: updatedTask.status,
@@ -282,12 +290,16 @@ export async function handleProcessAiTask(
       failure_reason: updatedTask.failureReason,
       updated_at: updatedTask.updatedAt,
     })
-    .eq('task_id', updatedTask.taskId);
+    .eq('task_id', updatedTask.taskId)
+    .eq('workspace_id', workspaceId);
+  if (taskSaveError) {
+    return errorResponse('DATABASE_ERROR', `AI 작업 결과 저장 실패: ${taskSaveError.message}`, 500);
+  }
 
   // 5-2. ai_task_attempts 테이블 갱신
   if (updatedTask.attempts && updatedTask.attempts.length > 0) {
     for (const att of updatedTask.attempts) {
-      await admin.from('ai_task_attempts').upsert(
+      const { error: attemptSaveError } = await admin.from('ai_task_attempts').upsert(
         {
           task_id: att.taskId,
           attempt_id: att.attemptId,
@@ -300,9 +312,13 @@ export async function handleProcessAiTask(
           error_code: att.errorCode,
           error_message: att.errorMessage,
           result: att.result,
+          conversation_trace: att.conversationTrace ?? null,
         },
         { onConflict: 'attempt_id' }
       );
+      if (attemptSaveError) {
+        return errorResponse('DATABASE_ERROR', `AI 질문·답변 기록 저장 실패: ${attemptSaveError.message}`, 500);
+      }
     }
   }
 
@@ -381,11 +397,14 @@ export async function handleGetAiTasks(
   const taskIds = dbTasks.map((t) => t.task_id);
 
   // 관련 attempts 조회
-  const { data: dbAttempts } = await admin
+  const { data: dbAttempts, error: attemptsError } = await admin
     .from('ai_task_attempts')
     .select('*')
     .in('task_id', taskIds)
     .order('started_at', { ascending: true });
+  if (attemptsError) {
+    return errorResponse('DATABASE_ERROR', `AI 대화 이력 조회 실패: ${attemptsError.message}`, 500);
+  }
 
   const attemptsByTask: Record<string, AiTaskAttempt[]> = {};
   if (dbAttempts) {
@@ -405,6 +424,7 @@ export async function handleGetAiTasks(
         errorCode: att.error_code,
         errorMessage: att.error_message,
         result: att.result,
+        conversationTrace: att.conversation_trace ?? null,
       });
     }
   }

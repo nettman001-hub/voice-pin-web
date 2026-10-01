@@ -2,7 +2,7 @@ import type { SaleRecord, SttTranscriptLog } from '../types/live.ts';
 import type { CommentRecord } from '../types/comment.ts';
 import type { AiResolutionRequest, AiResolutionResult, AiPurchaseWindow, AiUtteranceContext } from '../types/aiResolution.ts';
 import type { AiVerificationMeta } from '../types/pendingSale.ts';
-import { extractSaleFromTranscript } from './salesExtractor.ts';
+import { extractSaleFromTranscript, findExplicitPriceTranscript } from './salesExtractor.ts';
 import { extractSpeechPrice } from './priceEvidence.ts';
 import { getPurchaseRequests, type PurchaseRequest } from './purchaseFirstSales.ts';
 
@@ -129,6 +129,8 @@ export function validateVoiceReviewResult(sale: SaleRecord, comments: CommentRec
   const allocation = cited.some((u) => extractSaleFromTranscript(u.text)?.intent === 'ALLOCATION');
   const priced = cited.some((u) => {
     const extracted = extractSaleFromTranscript(u.text);
+    const explicitPrice = findExplicitPriceTranscript(u.text);
+    if (!extracted && explicitPrice) return extractSpeechPrice(explicitPrice)?.amount === amount;
     // An uncited or unrelated measurement cannot provide a transaction price.
     if (!extracted && /(?:가단|가슴\s*단면|총장|사이즈|보여|입어|캡처)/u.test(u.text)) return false;
     return extractSpeechPrice(extracted?.allocationTranscript || u.text)?.amount === amount;

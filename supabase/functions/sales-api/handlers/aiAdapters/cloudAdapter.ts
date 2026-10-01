@@ -6,11 +6,13 @@ import type {
 import type { AiSlotConfig } from '../../../../../src/types/aiSettings.ts';
 import { safeFetch } from '../aiValidation.ts';
 import { buildResolutionPrompt, parseAndNormalizeAiOutput } from './common.ts';
+import { createConversationTraceRecorder, redactConversationSecrets, type ConversationTraceListener } from './conversationTrace.ts';
 
 export interface CloudAdapterOptions {
   slotConfig: AiSlotConfig;
   secretApiKey: string;
   signal?: AbortSignal;
+  onConversationTrace?: ConversationTraceListener;
 }
 
 /**
@@ -153,10 +155,14 @@ export async function runCloudResolution(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+  const trace = createConversationTraceRecorder(
+    { systemPrompt, userPrompt, provider, model }, options.onConversationTrace, [secretApiKey],
+  );
 
   try {
 
     // safeFetch: SSRF 방지 및 HTTP 3xx 리디렉션 차단
+    trace.dispatched();
     const res = await safeFetch(
       url,
       {
@@ -173,6 +179,7 @@ export async function runCloudResolution(
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
+      trace.received(errText, res.status, 'HTTP_ERROR');
       throw new Error(`${provider} API 응답 오류 (HTTP ${res.status}): ${errText}`);
     }
 
@@ -183,7 +190,7 @@ export async function runCloudResolution(
     try {
       const json = JSON.parse(rawResponseText);
       if (provider === 'ANTHROPIC') {
-        contentToParse = json.content?.[0]?.text || '';
+        contentToParse = json.content?.[0]?.text ?? rawResponseText;
         if (json.usage) {
           tokenStats = {
             prompt: json.usage.input_tokens,
@@ -191,8 +198,8 @@ export async function runCloudResolution(
             total: (json.usage.input_tokens || 0) + (json.usage.output_tokens || 0),
           };
         }
-      } else if (provider === 'GOOGLE') {
-        contentToParse = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      } else if (provider === 'GOOGLE' || (provider as string) === 'GEMINI') {
+        contentToParse = json.candidates?.[0]?.content?.parts?.[0]?.text ?? rawResponseText;
         if (json.usageMetadata) {
           tokenStats = {
             prompt: json.usageMetadata.promptTokenCount,
@@ -202,7 +209,7 @@ export async function runCloudResolution(
         }
       } else {
         // OpenAI / DeepSeek / Custom
-        contentToParse = json.choices?.[0]?.message?.content || '';
+        contentToParse = json.choices?.[0]?.message?.content ?? rawResponseText;
         if (json.usage) {
           tokenStats = {
             prompt: json.usage.prompt_tokens,
@@ -214,6 +221,7 @@ export async function runCloudResolution(
     } catch {
       // raw text
     }
+    trace.received(typeof contentToParse === 'string' ? contentToParse : JSON.stringify(contentToParse), res.status, 'MODEL_OUTPUT');
 
     const executionMeta: AiExecutionMeta = {
       adapterType: 'CLOUD',
@@ -228,14 +236,15 @@ export async function runCloudResolution(
     return parseAndNormalizeAiOutput(contentToParse, request, executionMeta);
   } catch (err: any) {
     const latencyMs = Date.now() - startTime;
+    const safeError = redactConversationSecrets(err.message || '클라우드 API 호출 실패', [secretApiKey]);
     return {
       resolvable: false,
       targetSaleId: null,
       action: 'INSUFFICIENT_DATA',
       changes: null,
       evidenceIds: [],
-      evidenceSummary: `${provider} 클라우드 API 호출 실패: ${err.message || '네트워크 오류'}`,
-      missingInfo: [err.message || '클라우드 API 호출 실패'],
+      evidenceSummary: `${provider} 클라우드 API 호출 실패: ${safeError}`,
+      missingInfo: [safeError],
       conflictReason: signal.aborted ? 'TIMEOUT' : '클라우드 공급자 통신 오류',
       execution: {
         adapterType: 'CLOUD',
@@ -244,7 +253,7 @@ export async function runCloudResolution(
         provider,
         model,
         latencyMs,
-        rawResponse: rawResponseText || err.message,
+        rawResponse: redactConversationSecrets(rawResponseText || safeError, [secretApiKey]),
       },
     };
   } finally {

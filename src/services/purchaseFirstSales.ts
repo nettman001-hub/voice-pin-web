@@ -76,6 +76,16 @@ export type RequestMatch =
 const spokenBase = (value: string) => normalizeNickname(value).replace(/(?:언니|님|씨)$/u, '');
 const digits = (value: string) => spokenBase(value).match(/\d+/gu) || [];
 
+/** A short spoken name may identify the first complete component of a display
+ * name, but never an arbitrary substring. Keep this purchase-only: aliases must
+ * not merge customer histories or establish identity outside current requests. */
+function matchesDelimitedNicknamePrefix(spoken: string, nickname: string): boolean {
+  if (!/^\p{L}{2,}$/u.test(spoken)) return false;
+  const parts = nickname.normalize('NFKC').split(/[\s\p{P}\p{S}]+/u)
+    .map((part) => normalizeNickname(part)).filter((part) => /[\p{L}\p{N}]/u.test(part));
+  return parts.length >= 2 && parts[0] === spoken;
+}
+
 export function matchPurchaseRequest(
   spokenNickname: string,
   requests: PurchaseRequest[],
@@ -104,8 +114,11 @@ export function matchPurchaseRequest(
       continue;
     }
     const comparison = compareNicknames(spoken, request.nickname);
-    const score = comparison.score;
-    if (score < 84 || (!comparison.isSame && !comparison.isSimilar)) continue;
+    const prefixAlias = matchesDelimitedNicknamePrefix(spoken, request.nickname);
+    // 94 stays within the ambiguity margin of an exact short-name account
+    // (100): "가윤" cannot silently choose between "가윤" and "가윤♡예준맘".
+    const score = prefixAlias ? Math.max(comparison.score, 94) : comparison.score;
+    if (score < 84 || (!prefixAlias && !comparison.isSame && !comparison.isSimilar)) continue;
     const prior = contenders.get(request.accountKey);
     if (!prior || score > prior.score || (score === prior.score && request.capturedAt > prior.request.capturedAt)) {
       contenders.set(request.accountKey, { request, score });

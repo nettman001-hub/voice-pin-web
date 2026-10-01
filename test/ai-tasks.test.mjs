@@ -112,9 +112,16 @@ test('priority slot 2 times out after 4 seconds including a stalled response bod
     assert.equal(processed.task.status, 'RESOLVED');
     assert.equal(processed.task.attempts[0].errorCode, 'TIMEOUT');
     assert.equal(processed.task.attempts[0].isValidAttempt, false);
+    const timedOutTrace = processed.task.attempts[0].conversationTrace;
+    assert.ok(timedOutTrace.systemPrompt);
+    assert.match(timedOutTrace.userPrompt, /3번 상품/);
+    assert.equal(timedOutTrace.provider, 'GOOGLE');
+    assert.equal(timedOutTrace.responseText, undefined);
+    assert.equal(processed.task.attempts[1].conversationTrace.responseText, validOutput);
     releaseLateBody(JSON.stringify({ candidates: [{ content: { parts: [{ text: validOutput }] } }] }));
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(processed.task.activeSlot, 1);
+    assert.deepEqual(processed.task.attempts[0].conversationTrace, timedOutTrace);
   } finally {
     releaseLateBody?.('{}');
     globalThis.fetch = originalFetch;
@@ -147,6 +154,9 @@ test('priority slot 2 returns malformed JSON and immediately fails over to slot 
     assert.equal(task.attempts.length, 2);
     assert.equal(task.status, 'INSUFFICIENT_DATA');
     assert.equal(task.attempts[0].errorCode, '응답 형식 불일치');
+    assert.equal(task.attempts[0].conversationTrace.responseText, '{}');
+    assert.equal(task.attempts[0].conversationTrace.responseKind, 'MODEL_OUTPUT');
+    assert.ok(task.attempts[1].conversationTrace.responseText.includes('실제 근거 부족'));
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -160,6 +170,7 @@ test('missing credentials on the priority AI are an execution failure, not missi
   });
   assert.equal(task.attempts.length, 2);
   assert.equal(task.attempts[0].errorCode, '인증 정보 누락');
+  assert.equal(task.attempts[0].conversationTrace, undefined, 'preflight failure must not invent a sent prompt');
   assert.equal(task.activeSlot, 1);
   assert.equal(task.status, 'INSUFFICIENT_DATA');
 });

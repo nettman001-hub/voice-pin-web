@@ -155,6 +155,7 @@ export async function processAiTask(
     const startTime = Date.now();
     let slotResult: AiResolutionResult | null = null;
     let slotError: string | null = null;
+    let captureOpen = true;
 
     try {
       const timeoutSeconds = slotNum === primarySlot
@@ -167,6 +168,11 @@ export async function processAiTask(
         helperDispatcher,
         allowInsecureHttpForExternal,
         signal,
+        onConversationTrace: (trace) => {
+          if (captureOpen && task.currentAttemptId === attemptId && attempt.status === 'RUNNING') {
+            attempt.conversationTrace = { ...trace };
+          }
+        },
       }));
 
       const isEngineError =
@@ -190,6 +196,10 @@ export async function processAiTask(
       if (err.code) {
         attempt.errorCode = err.code;
       }
+    } finally {
+      // Aborted transports/helpers may still finish. Their late responses must not
+      // modify a completed attempt or make the fallback's answer look like theirs.
+      captureOpen = false;
     }
 
     attempt.completedAt = new Date().toISOString();

@@ -8,12 +8,13 @@ import type {
 } from '../types/voiceCorrection.ts';
 import { parseKoreanAmount } from './salesExtractor.ts';
 import { normalizeNickname } from './nicknameMatcher.ts';
+import { isNegatedVoiceAction, isQuestionUtterance, isStandaloneBuyerAddress, splitTranscriptClauses } from './voiceUtteranceService.ts';
 
 /**
  * 1. 음성 발화에서 정정 의도 및 전후 값, 대상 지칭, 적용 범위 추출
  * - 일반 판매 추출보다 먼저 실행하여 정정 문장이 신규 판매로 오인되는 것을 방지
  */
-export function parseVoiceCorrection(text: string): VoiceCorrectionIntent {
+function parseVoiceCorrectionClause(text: string): VoiceCorrectionIntent {
   if (!text) {
     return {
       isCorrection: false,
@@ -28,10 +29,18 @@ export function parseVoiceCorrection(text: string): VoiceCorrectionIntent {
   }
 
   const clean = text.trim();
+  const hasExplicitCorrection = /(?:정정|수정|변경|바꾸|바꾼|바꿔|잘못\s*말씀)/u.test(clean);
+  const hasPriceSubject = /(?:가격|금액)/u.test(clean);
+  const hasMeasurementSubject = /(?:가단|가슴\s*단면|기장|길이|높이|폭|사이즈|센티|미터|\bcm\b)/iu.test(clean);
+  const hasMoney = Boolean(parseKoreanAmount(clean)) && (hasPriceSubject || !hasMeasurementSubject);
+  const hasBuyerContrast = /(?:님|언니|씨)(?:이|가)?\s*(?:아니고|아니시고|아니라|말고)/u.test(clean);
+  const hasSaleSubject = /(?:가격|금액|구매자|닉네임|판매한|판매하신|구매하신|주문|\d+\s*번\s*상품)/u.test(clean)
+    || /[가-힣a-zA-Z0-9_]+\s*(?:님|언니|씨)/u.test(clean)
+    || hasMoney;
 
   // 1-1. 부정 명령 감지 ("1.2로 변경하지 마세요", "수정하지 마세요", "바꾸지 마세요")
-  const isNegative = /(?:변경|수정|바꾸|정정)(?:하지\s*마|하지마|하지\s*않|마세요|마라)/u.test(clean) ||
-    /하지\s*마세요/u.test(clean);
+  const isNegative = isNegatedVoiceAction(clean) && /(?:변경|수정|바꾸|정정)/u.test(clean)
+    && (hasSaleSubject || /^(?:변경|수정|바꾸|정정)/u.test(clean));
   if (isNegative) {
     return {
       isCorrection: false,
@@ -46,7 +55,7 @@ export function parseVoiceCorrection(text: string): VoiceCorrectionIntent {
   }
 
   // 1-2. 질문 감지 ("1.2인가요?", "바꾼건가요?", "맞나요?")
-  const isQuestion = /(?:인가요|인가|인가요\?|\?|맞나요|맞나요\?|바꾼건가요|바꾼건가요\?)$/u.test(clean);
+  const isQuestion = isQuestionUtterance(clean);
   if (isQuestion) {
     return {
       isCorrection: false,
@@ -54,6 +63,8 @@ export function parseVoiceCorrection(text: string): VoiceCorrectionIntent {
       scope: 'THIS_SALE_ONLY',
       isNegativeCommand: false,
       isQuestion: true,
+      isCorrectionQuestion: (hasExplicitCorrection && (hasSaleSubject || /^(?:정정|수정|변경|바꾸|바꾼)/u.test(clean)))
+        || ((hasPriceSubject || hasMoney || hasBuyerContrast) && /(?:아니고|아니시고|아니라|말고)/u.test(clean)),
       isCancellation: false,
       isIncomplete: false,
       rawUtterance: clean,
@@ -78,7 +89,7 @@ export function parseVoiceCorrection(text: string): VoiceCorrectionIntent {
 
   // 1-4. 미완성/조각난 발화 감지 ("xx님 0.9가 아니고...", "0.9가 아니고...")
   const isIncomplete = /(?:아니고|아니시고|아니라|말고)\s*(?:\.{2,}|…|\s*)$/u.test(clean);
-  if (isIncomplete) {
+  if (isIncomplete && (hasPriceSubject || hasMoney || hasBuyerContrast)) {
     // 이전 값은 있을 수 있으나 새 값이 아직 오지 않음
     return {
       isCorrection: true,
@@ -123,7 +134,7 @@ export function parseVoiceCorrection(text: string): VoiceCorrectionIntent {
   const relativeTime = /(?:좀전에|좀\s*전에|방금\s*전|방금|아까)/u.test(clean) ? 'JUST_BEFORE' : undefined;
 
   // 1-7-1. 향후 상품 가격 변경 패턴
-  if (scope === 'FUTURE_PRODUCT_SALES') {
+  if (scope === 'FUTURE_PRODUCT_SALES' && (hasPriceSubject || hasMoney)) {
     const parsedAmount = parseKoreanAmount(clean);
     if (parsedAmount && parsedAmount > 0) {
       return {
@@ -144,12 +155,12 @@ export function parseVoiceCorrection(text: string): VoiceCorrectionIntent {
   // 1-8. 금액 정정 패턴 분석
   // 예: "가격이 0.9가 아니고 1.2입니다", "xx님 구매하신거 가격이 0.9가 아니고 1.2입니다", "0.9 말고 1.2"
   const priceCorrectionMatch = clean.match(
-    /(?:가격이?|금액이?)?\s*([가-힣\d.]+)\s*(?:가|이|원|만원)?\s*(?:아니고|아니라|말고)\s*([가-힣\d.]+)\s*(?:로|으로|입|원|만원|입니다|할게요|변경|정정)/u
+    /(?:가격이?|금액이?)?\s*([가-힣\d.]+)\s*(?:가|이|원|만원)?\s*(?:아니고|아니라|말고)\s*([가-힣\d.]+)\s*(?:로|으로|입|원|만원|입니다|할게요|변경|정정|$)/u
   );
 
-  if (priceCorrectionMatch) {
-    const rawOldPrice = priceCorrectionMatch[1];
-    const rawNewPrice = priceCorrectionMatch[2];
+  if (priceCorrectionMatch && (hasPriceSubject || hasMoney)) {
+    const rawOldPrice = priceCorrectionMatch[1].replace(/[.。]+$/u, '');
+    const rawNewPrice = priceCorrectionMatch[2].replace(/[.。]+$/u, '');
 
     const oldAmount = parseKoreanAmount(rawOldPrice);
     const newAmount = parseKoreanAmount(rawNewPrice);
@@ -182,12 +193,12 @@ export function parseVoiceCorrection(text: string): VoiceCorrectionIntent {
   // 1-9. 구매자 정정 패턴 분석
   // 예: "좀전에 판매한거 xxx님이 아니시고 ooo님께 판매하겠습니다", "xxx님이 아니고 ooo님입니다"
   const buyerCorrectionMatch = clean.match(
-    /([가-힣a-zA-Z0-9_]{1,12})\s*(?:님이?|씨가?|씨|님)?\s*(?:아니시고|아니고|아니라|말고)\s*([가-힣a-zA-Z0-9_]{1,12})\s*(?:님께|님에게|님|씨|이)?(?:\s*판매|\s*드릴게요|\s*입니다|\s*으로)?/u
+    /([가-힣a-zA-Z0-9_]{1,20})\s*(?:님|언니|씨)(?:이|가)?\s*(?:아니시고|아니고|아니라|말고)\s*([가-힣a-zA-Z0-9_]{1,20})\s*(?:님|언니|씨)(?:께|에게|한테|이|가)?/u
   );
 
   if (buyerCorrectionMatch) {
-    let oldBuyer = buyerCorrectionMatch[1].replace(/(?:님|씨|이|고객)(?:이|가)?$/u, '').trim();
-    let newBuyer = buyerCorrectionMatch[2].replace(/(?:님|씨|이|고객)(?:이|가|께|에게)?$/u, '').trim();
+    const oldBuyer = buyerCorrectionMatch[1].trim();
+    const newBuyer = buyerCorrectionMatch[2].trim();
 
     // 일상 단어 및 불용어 제외
     const stopWords = ['가격', '금액', '상품', '판매', '취소', '정정', '방금', '좀전에', '내가'];
@@ -213,7 +224,7 @@ export function parseVoiceCorrection(text: string): VoiceCorrectionIntent {
   }
 
   // 1-10. 단일 필드 명시 정정 (예: "12번 상품, 러블리님 금액 1.2로 정정합니다")
-  const explicitCorrectionMatch = clean.match(/(?:금액|가격)\s*([가-힣\d.]+)\s*(?:로|으로)\s*(?:정정|변경)/u);
+  const explicitCorrectionMatch = clean.match(/(?:금액|가격)(?:은|는|이|가|을|를)?\s*([가-힣\d.]+)\s*(?:로|으로)\s*(?:정정|변경)/u);
   if (explicitCorrectionMatch) {
     const newAmount = parseKoreanAmount(explicitCorrectionMatch[1]);
     const buyerMatch = clean.match(/([가-힣a-zA-Z0-9_]{1,12})\s*님/u);
@@ -240,7 +251,7 @@ export function parseVoiceCorrection(text: string): VoiceCorrectionIntent {
   }
 
   return {
-    isCorrection: true,
+    isCorrection: hasExplicitCorrection && hasSaleSubject,
     field: 'COMPLEX',
     scope,
     isNegativeCommand: false,
@@ -249,6 +260,45 @@ export function parseVoiceCorrection(text: string): VoiceCorrectionIntent {
     isIncomplete: false,
     rawUtterance: clean,
   };
+}
+
+/** Keep ordinary statements together for split buyer/price evidence, but route questions
+ * and corrections separately so one question cannot suppress an unrelated sale. */
+export function getVoiceProcessingSegments(text: string): string[] {
+  const segments: string[] = [];
+  let statement = '';
+  for (const clause of splitTranscriptClauses(text)) {
+    const intent = parseVoiceCorrectionClause(clause);
+    if (intent.isQuestion || intent.isNegativeCommand || intent.isCorrection) {
+      if (statement && isStandaloneBuyerAddress(statement) && (intent.isCorrection || intent.isCorrectionQuestion)) {
+        segments.push(`${statement} ${clause}`);
+      } else {
+        if (statement) segments.push(statement);
+        segments.push(clause);
+      }
+      statement = '';
+    } else {
+      statement = statement ? `${statement} ${clause}` : clause;
+    }
+  }
+  if (statement) segments.push(statement);
+  return segments;
+}
+
+export function parseVoiceCorrection(text: string): VoiceCorrectionIntent {
+  const intents = getVoiceProcessingSegments(text).map(parseVoiceCorrectionClause);
+  const correction = intents.find((intent) => intent.isCorrection || intent.isCorrectionQuestion || intent.isNegativeCommand);
+  if (correction) return correction;
+  if (intents.length === 1) return intents[0];
+  const empty = parseVoiceCorrectionClause('');
+  return { ...empty, isQuestion: intents.length > 0 && intents.every((intent) => intent.isQuestion), rawUtterance: text.trim() };
+}
+
+export function isActionableVoiceCorrection(intent: VoiceCorrectionIntent): boolean {
+  return intent.isCorrection && !intent.isQuestion && !intent.isNegativeCommand && !intent.isIncomplete
+    && intent.scope === 'THIS_SALE_ONLY'
+    && ((intent.field === 'AMOUNT' && Number.isFinite(intent.affirmedNewValue?.amount) && (intent.affirmedNewValue?.amount || 0) > 0)
+      || (intent.field === 'BUYER' && Boolean(intent.affirmedNewValue?.buyerNickname?.trim())));
 }
 
 /**
@@ -270,6 +320,14 @@ export function findTargetSaleForCorrection(
   }
 
   let candidates = [...existingSales];
+
+  if (!isActionableVoiceCorrection(intent)) {
+    return { targetSaleId: null, candidates: [], missingInfo: ['정정할 값과 적용 범위 확인 필요'] };
+  }
+  if (!intent.targetReference?.productCode && !intent.negatedOldValue?.buyerNickname
+    && !intent.targetReference?.buyerNickname && !intent.negatedOldValue?.amount) {
+    return { targetSaleId: null, candidates, missingInfo: ['상품번호 또는 구매자 등 정정 대상 근거 필요'] };
+  }
 
   // 2-1. 상품번호 필터링
   if (intent.targetReference?.productCode) {
@@ -331,7 +389,10 @@ export function linkFollowUpToPendingCorrection(
   matchedProductCode?: string;
 } {
   const clean = followUpText.trim();
-  const productMatch = clean.match(/(\d{1,3})\s*(?:번\s*상품|번)?/u);
+  if (isQuestionUtterance(clean) || isNegatedVoiceAction(clean) || !isActionableVoiceCorrection(pending.parsedCorrection)) {
+    return { resolvedSaleId: null, stillAmbiguous: true };
+  }
+  const productMatch = clean.match(/^(?:네[,，]?\s*)?(?:아까\s*|방금\s*)?(?:상품(?:\s*번호)?(?:는|은)?\s*)?(\d{1,3})\s*번(?:\s*상품)?(?:이요|요|입니다|이에요|이었어요)?[.!。\s]*$/u);
   if (!productMatch) {
     return {
       resolvedSaleId: null,
@@ -385,6 +446,9 @@ export function applyCorrectionToSale(
   historyRecord: SaleHistoryRecord;
   printJobRequired: boolean;
 } {
+  if (!isActionableVoiceCorrection(intent)) {
+    throw new Error('INVALID_CORRECTION: 확정된 변경 값과 판매 한 건의 적용 범위가 필요합니다.');
+  }
   const currentRevision = sale.revision || 1;
   if (options.expectedRevision !== undefined && options.expectedRevision !== currentRevision) {
     throw new Error(

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Sparkles } from 'lucide-react';
 import { SaleRecord } from '../../types/live';
+import { useSaleAiConversationWindow } from './SaleAiConversationWindow';
 
 /**
  * 판매 적재/해결 시 AI가 사용되었는지 판별하는 헬퍼 함수
@@ -43,15 +44,23 @@ export const AiSaleBadge: React.FC<AiSaleBadgeProps> = ({
   className = '',
   showIcon = true,
 }) => {
+  const { openConversation } = useSaleAiConversationWindow();
   if (!isAiUsedSale(sale)) return null;
 
   return (
-    <span
-      className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-black bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-xs tracking-tight ${className}`}
-      title="AI를 사용하여 분석/적재된 판매 내역입니다."
+    <button
+      type="button"
+      className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-black bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-xs tracking-tight hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-500 ${className}`}
+      title="AI에게 보낸 질문과 답변을 새 창에서 확인"
+      aria-label="AI 질문과 답변 보기 (새 창)"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (sale) openConversation(sale);
+      }}
     >
       {showIcon && <Sparkles className="w-2.5 h-2.5 text-purple-200" />}
       <span>AI</span>
-    </span>
+    </button>
   );
 };
