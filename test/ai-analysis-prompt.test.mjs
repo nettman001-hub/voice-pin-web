@@ -53,6 +53,52 @@ test("PC_HELPER is explicitly rejected on server without a dispatcher", async ()
   assert.equal(result.content, null);
   assert.match(result.error, /PC 도우미/);
 });
+test("DeepSeek analysis explicitly disables thinking and bounds output without changing legacy reasoner mode", async () => {
+  const original = globalThis.fetch;
+  const bodies = [];
+  try {
+    globalThis.fetch = async (_url, options) => {
+      bodies.push(JSON.parse(options.body));
+      return Response.json({ choices: [{ finish_reason: "stop", message: { content: '{"summary":"report"}' } }] });
+    };
+    for (const model of ["deepseek-flash", "deepseek-reasoner"]) {
+      const result = await executeAiPrompt({ systemPrompt: "JSON", userPrompt: "evidence" }, {
+        slotConfig: { ...slot, provider: "DEEPSEEK", model }, secretValue: "SECRET",
+      });
+      assert.equal(result.content, '{"summary":"report"}');
+    }
+    assert.deepEqual(bodies[0].thinking, { type: "disabled" });
+    assert.equal(bodies[0].max_tokens, 4096);
+    assert.equal(bodies[1].thinking, undefined);
+    assert.equal(bodies[1].max_tokens, 4096);
+  } finally { globalThis.fetch = original; }
+});
+
+for (const [type, provider, response] of [
+  ["CLOUD", "DEEPSEEK", { choices: [{ finish_reason: "length", message: { content: '{"summary":"partial' } }] }],
+  ["LOCAL", "LM_STUDIO", { choices: [{ finish_reason: "length", message: { content: '{"summary":"partial' } }] }],
+  ["LOCAL", "OLLAMA", { done_reason: "length", message: { content: '{"summary":"partial' } }],
+]) {
+  test(`${provider} truncated analysis retains evidence and reports output limit instead of an invalid report`, async () => {
+    const original = globalThis.fetch;
+    let trace, body;
+    try {
+      globalThis.fetch = async (_url, options) => {
+        body = JSON.parse(options.body);
+        return Response.json(response);
+      };
+      const result = await executeAiPrompt({ systemPrompt: "JSON", userPrompt: "evidence" }, {
+        slotConfig: { ...slot, type, provider, model: "test" }, secretValue: "SECRET",
+        onConversationTrace: (v) => { trace = v; },
+      });
+      assert.equal(result.content, null);
+      assert.equal(result.errorCode, "OUTPUT_LIMIT");
+      assert.match(trace.responseText, /partial/);
+      assert.equal(trace.httpStatus, 200);
+      assert.equal(provider === "OLLAMA" ? body.options.num_predict : body.max_tokens, 4096);
+    } finally { globalThis.fetch = original; }
+  });
+}
 test("provider errors and traces never expose supplied secrets", async () => {
   const original = globalThis.fetch;
   let trace;

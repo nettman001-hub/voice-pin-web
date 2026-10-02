@@ -7,7 +7,12 @@ import {
   createSellerAnalysisInput,
   sameSellerAnalysisInput,
   sellerAnalysisApi,
+  type SellerAnalysisProgress,
 } from "../../services/sellerAnalysisApi";
+import SellerAnalysisAttempts, {
+  collectSellerAnalysisAttempts,
+} from "./SellerAnalysisAttempts";
+import { SELLER_ANALYSIS_SLOT_TIMEOUT_SECONDS } from "../../types/sellerAnalysis";
 import { SellerAnalysisCapture } from "../../services/sellerAnalysisCapture";
 import { normalizeAnalysisInput } from "../../services/sellerAnalysisRules";
 import type {
@@ -39,9 +44,18 @@ export default function SellerAnalysisPage() {
   const [version, setVersion] = useState<number | null>(null);
   const [state, setState] = useState<any>(null);
   const [reviewed, setReviewed] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState<
+    (SellerAnalysisProgress & { startedAt: number }) | null
+  >(null);
+  const [progressNow, setProgressNow] = useState(Date.now);
   const recorder = useRef<SellerAnalysisCapture | null>(null);
   const viewGeneration = useRef(0);
   const loadList = () => sellerAnalysisApi.list().then(setItems);
+  useEffect(() => {
+    if (!analysisProgress || analysisProgress.phase === "COMPLETE") return;
+    const timer = window.setInterval(() => setProgressNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [analysisProgress]);
   useEffect(() => {
     void loadList().catch((e) => setError(e.message));
     void refreshMembers();
@@ -97,6 +111,7 @@ export default function SellerAnalysisPage() {
     void run(async () => {
       stop();
       setStatus("");
+      setAnalysisProgress(null);
       const generation = ++viewGeneration.current;
       const next = await sellerAnalysisApi.get(id);
       if (generation === viewGeneration.current) {
@@ -191,6 +206,15 @@ export default function SellerAnalysisPage() {
       }
     });
   const report = doc?.reports.find((r) => r.version === version);
+  const savedAttempts = collectSellerAnalysisAttempts(doc?.messages || []);
+  const waiting = analysisProgress && analysisProgress.phase !== "COMPLETE";
+  const elapsedSeconds = analysisProgress
+    ? Math.max(0, Math.floor((progressNow - analysisProgress.startedAt) / 1000))
+    : 0;
+  const precedingErrors = analysisProgress?.phase === "FALLBACK"
+    ? (analysisProgress.analysis || doc)?.messages.at(-1)?.attempts
+      ?.filter((attempt) => attempt.error) || []
+    : [];
   const statusLabel: Record<string, string> = {
     DRAFT: "자료 준비",
     ANALYZING: "분석 중",
@@ -209,15 +233,30 @@ export default function SellerAnalysisPage() {
       stop();
       const generation = viewGeneration.current;
       const current = doc && !dirty ? doc : await save();
-      const next = await sellerAnalysisApi.analyze(
-        current,
-        feedback,
-        slotNumber,
-      );
-      if (generation === viewGeneration.current) {
-        accept(next);
-        setFeedback("");
-        await loadList();
+      if (generation !== viewGeneration.current) return;
+      try {
+        const next = await sellerAnalysisApi.analyze(
+          current,
+          feedback,
+          slotNumber,
+          (progress) => {
+            if (generation !== viewGeneration.current) return;
+            const now = Date.now();
+            setProgressNow(now);
+            setAnalysisProgress({ ...progress, startedAt: now });
+            // Preserve the saved fallback revision even if the next request fails.
+            if (progress.analysis) accept(progress.analysis);
+          },
+        );
+        if (generation === viewGeneration.current) {
+          accept(next);
+          setFeedback("");
+          await loadList();
+        }
+      } catch (e) {
+        if (generation !== viewGeneration.current) return;
+        setAnalysisProgress(null);
+        throw e;
       }
     });
   const verify = (confirmed: boolean) =>
@@ -289,6 +328,7 @@ export default function SellerAnalysisPage() {
               setFeedback("");
               setVersion(null);
               setReviewed(false);
+              setAnalysisProgress(null);
             }}
           >
             새 판매자 분석
@@ -512,9 +552,35 @@ export default function SellerAnalysisPage() {
               2분입니다. 실패 시 관리자 자동 대체 설정을 따릅니다. 수정·추가
               요청에도 같은 선택을 사용합니다.
             </p>
+            {waiting && (
+              <div role="status" className="rounded-xl bg-blue-50 p-4 text-sm leading-7 text-blue-900">
+                <p className="font-bold">
+                  {analysisProgress.activeSlot
+                    ? `${analysisProgress.activeSlot}번슬롯`
+                    : "우선 슬롯"} AI 응답을 기다리고 있습니다.
+                  {" "}{elapsedSeconds}초 경과 · 최대 {SELLER_ANALYSIS_SLOT_TIMEOUT_SECONDS}초
+                </p>
+                {analysisProgress.phase === "FALLBACK" && <p>앞선 슬롯이 분석을 완료하지 못해 대체 슬롯으로 이어서 분석합니다.</p>}
+                {precedingErrors.map((attempt, index) => <p key={`${attempt.slot}:${attempt.startedAt}:${index}`} className="mt-1 whitespace-pre-wrap break-words text-amber-900">
+                  {attempt.slot}번슬롯 · {attempt.model}: {attempt.error}
+                </p>)}
+                {elapsedSeconds >= SELLER_ANALYSIS_SLOT_TIMEOUT_SECONDS && <p>AI 대기시간이 지났습니다. 서버에서 결과를 확인하고 있습니다.</p>}
+              </div>
+            )}
           </section>
           {doc && (
             <section className="space-y-4 rounded-3xl border bg-white p-6">
+              {doc.lastError && (
+                <p role="alert" className="whitespace-pre-wrap break-words rounded-xl bg-red-50 p-4 text-sm leading-7 text-red-700">
+                  {doc.lastError}
+                </p>
+              )}
+              {(doc.status === "FAILED" || doc.status === "ANALYZING") && savedAttempts.length > 0 && (
+                <details open>
+                  <summary className="mb-3 cursor-pointer font-bold">분석 요청 기록 · 질문과 답변 확인</summary>
+                  <SellerAnalysisAttempts attempts={savedAttempts} />
+                </details>
+              )}
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-lg font-bold">AI 분석 보고서</h2>
                 <select
@@ -676,23 +742,17 @@ export default function SellerAnalysisPage() {
                           요청한 우선 슬롯: {report.requestedSlot}번슬롯
                         </p>
                       )}
-                      {report.attempts.map((a, i) => (
-                        <div
-                          key={i}
-                          className="mt-3 rounded-xl bg-slate-50 p-4"
-                        >
-                          <p>
-                            슬롯 {a.slot} · {a.provider} · {a.model} {a.error}
-                          </p>
-                          <pre className="mt-3 whitespace-pre-wrap break-words text-xs">{a.conversationTrace?.systemPrompt}{'\n\n'}{a.conversationTrace?.userPrompt}{'\n\n답변\n'}{a.conversationTrace?.responseText}</pre>
-                        </div>
-                      ))}
+                      <SellerAnalysisAttempts attempts={report.attempts} />
                     </details>
                   </>
                 )
                 : (
                   <p className="text-slate-500">
-                    자료를 저장한 뒤 AI 분석을 요청해 주세요. {doc.lastError}
+                    {doc.status === "FAILED"
+                      ? "분석을 완료하지 못했습니다. 위의 슬롯별 기록을 확인한 뒤 다시 분석할 수 있습니다."
+                      : doc.status === "ANALYZING"
+                      ? "분석을 진행하고 있습니다. 중단된 분석은 AI 판매방식 분석 버튼으로 이어서 진행할 수 있습니다."
+                      : "자료를 저장한 뒤 AI 분석을 요청해 주세요."}
                   </p>
                 )}
               <div className="space-y-3 border-t pt-5">

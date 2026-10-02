@@ -55,6 +55,8 @@ export interface SellerAnalysisReport {
 
 export interface SellerAnalysisAttempt {
   slot: 1 | 2;
+  phase?: "ANALYSIS" | "FORMAT_REPAIR";
+  errorCode?: "TIMEOUT" | "PROVIDER_ERROR" | "INVALID_REPORT" | "OUTPUT_LIMIT";
   provider: string;
   model: string;
   startedAt: string;

@@ -87,6 +87,11 @@ function fixture() {
     },
     "../../services/sellerAnalysisCapture": { SellerAnalysisCapture: class {} },
     "../../services/sellerAnalysisRules": { normalizeAnalysisInput },
+    "../../types/sellerAnalysis": { SELLER_ANALYSIS_SLOT_TIMEOUT_SECONDS: 120 },
+    "./SellerAnalysisAttempts": {
+      default: () => null,
+      collectSellerAnalysisAttempts: () => [],
+    },
   };
   const module = { exports: {} };
   vm.runInNewContext(compiled, {

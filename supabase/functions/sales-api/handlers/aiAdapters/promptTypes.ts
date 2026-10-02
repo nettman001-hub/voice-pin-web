@@ -6,5 +6,6 @@ export interface AiPromptInput {
 export interface AiPromptResult {
   content: string | null;
   error?: string;
+  errorCode?: "TIMEOUT" | "PROVIDER_ERROR" | "OUTPUT_LIMIT";
   execution?: AiExecutionMeta;
 }

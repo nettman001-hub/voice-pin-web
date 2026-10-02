@@ -270,7 +270,7 @@ test("explicit slot 2 uses its own credentials and falls back to slot 1 with ide
   assert.deepEqual(ctx.calls[0].prompt, ctx.calls[1].prompt);
   assert.equal(ctx.setting.primary_slot, 1);
 });
-test("invalid report from selected slot falls back to cloud with the same 120 second deadline", async () => {
+test("invalid report receives one format repair before falling back with a fresh 120 second budget", async () => {
   const ctx = fixture();
   ctx.aiResult = async (_prompt, options) => ({
     content: options.slotConfig.type === "LOCAL"
@@ -284,9 +284,73 @@ test("invalid report from selected slot falls back to cloud with the same 120 se
     slotNumber: 1,
   });
   assert.equal(doc.status, "REVIEW");
-  assert.deepEqual(doc.reports[0].attempts.map((a) => a.slot), [1, 2]);
+  assert.deepEqual(doc.reports[0].attempts.map((a) => a.slot), [1, 1, 2]);
   assert.ok(doc.reports[0].attempts[0].error);
-  assert.equal(ctx.calls[1].options.slotConfig.timeoutSeconds, 120);
+  assert.equal(doc.reports[0].attempts[1].phase, "FORMAT_REPAIR");
+  assert.ok(ctx.calls[1].options.slotConfig.timeoutSeconds <= 120);
+  assert.equal(ctx.calls[2].options.slotConfig.timeoutSeconds, 120);
+});
+
+test("production-like invalid report is repaired on the same slot within its remaining deadline", async (t) => {
+  const ctx = fixture();
+  const invalid = { ...report, purchaseSignals: [{ expression: "저요" }], profile: { ...report.profile, exclusionExpressions: ["."] } };
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-03T00:00:00Z") });
+  try {
+    ctx.aiResult = async (_prompt, options) => {
+      const first = ctx.calls.length === 1;
+      const content = JSON.stringify(first ? invalid : report);
+      options.onConversationTrace({ responseText: content, httpStatus: 200 });
+      if (first) t.mock.timers.tick(91_500);
+      return { content };
+    };
+    let doc = await call("seller-analysis-save", { input });
+    doc = await call("seller-analysis-analyze", { id: doc.id, expectedRevision: doc.revision, slotNumber: 2 });
+    assert.equal(doc.status, "REVIEW");
+    const attempts = doc.reports[0].attempts;
+    assert.deepEqual(attempts.map((a) => [a.slot, a.phase]), [[2, "ANALYSIS"], [2, "FORMAT_REPAIR"]]);
+    assert.equal(attempts[0].errorCode, "INVALID_REPORT");
+    assert.match(attempts[0].error, /purchaseSignals/);
+    assert.match(attempts[0].error, /exclusionExpressions/);
+    assert.equal(attempts[0].conversationTrace.responseText, JSON.stringify(invalid));
+    assert.equal(attempts[1].error, null);
+    assert.equal(ctx.calls[1].options.slotConfig.timeoutSeconds, 28.5);
+    const repair = JSON.parse(ctx.calls[1].prompt.userPrompt);
+    assert.equal(repair.originalRequest, ctx.calls[0].prompt.userPrompt);
+    assert.equal(repair.previousResponse, JSON.stringify(invalid));
+    assert.match(repair.validationError, /purchaseSignals/);
+  } finally { t.mock.timers.reset(); }
+});
+
+test("near-deadline validation failure does not start repair and keeps both slot errors", async (t) => {
+  const ctx = fixture();
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-03T00:00:00Z") });
+  try {
+    ctx.aiResult = async (_prompt, options) => {
+      if (options.slotConfig.type === "CLOUD") {
+        t.mock.timers.tick(119_000);
+        return { content: "not json" };
+      }
+      return { content: null, error: "AI 응답 대기시간 초과", errorCode: "TIMEOUT" };
+    };
+    let doc = await call("seller-analysis-save", { input });
+    doc = await call("seller-analysis-analyze", { id: doc.id, expectedRevision: doc.revision, slotNumber: 2 });
+    assert.equal(doc.status, "FAILED");
+    assert.equal(ctx.calls.length, 2);
+    assert.deepEqual(doc.messages.at(-1).attempts.map((a) => a.errorCode), ["INVALID_REPORT", "TIMEOUT"]);
+    assert.match(doc.lastError, /2번슬롯 \(cloud\).*JSON/);
+    assert.match(doc.lastError, /1번슬롯 \(local\).*대기시간 초과/);
+  } finally { t.mock.timers.reset(); }
+});
+
+test("output-limit failures are not retried as format repairs", async () => {
+  const ctx = fixture();
+  ctx.setting.auto_fallback_enabled = false;
+  ctx.aiResult = async () => ({ content: null, error: "출력 길이 제한", errorCode: "OUTPUT_LIMIT" });
+  let doc = await call("seller-analysis-save", { input });
+  doc = await call("seller-analysis-analyze", { id: doc.id, expectedRevision: doc.revision, slotNumber: 2 });
+  assert.equal(doc.status, "FAILED");
+  assert.equal(ctx.calls.length, 1);
+  assert.equal(doc.messages.at(-1).attempts[0].errorCode, "OUTPUT_LIMIT");
 });
 test("selected slot does not bypass disabled auto fallback", async () => {
   const ctx = fixture();

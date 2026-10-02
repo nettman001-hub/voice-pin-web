@@ -16,7 +16,7 @@ export async function executeAiPrompt(prompt: AiPromptInput, options: ExecuteRes
   const signal=options.signal?AbortSignal.any([options.signal,controller.signal]):controller.signal;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline=new Promise<AiPromptResult>(resolve=>{
-    timer=setTimeout(()=>{controller.abort();resolve({content:null,error:'AI 응답 대기시간 초과'});},options.slotConfig.timeoutSeconds*1000);
+    timer=setTimeout(()=>{controller.abort();resolve({content:null,error:'AI 응답 대기시간 초과',errorCode:'TIMEOUT'});},options.slotConfig.timeoutSeconds*1000);
   });
   try {
     return await Promise.race([deadline,options.slotConfig.type === 'LOCAL'

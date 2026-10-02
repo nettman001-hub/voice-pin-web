@@ -43,7 +43,8 @@ export async function runSelfHostedPrompt(request: AiPromptInput, options: SelfH
     return { content: null, error: '서버 분석에서 PC 도우미 연결을 사용할 수 없습니다. 대체 AI로 전환합니다.' };
   }
   const result = await runSelfHostedCompletion(request, options);
-  return 'content' in result ? result : { content: null, error: result.evidenceSummary, execution: result.execution };
+  return 'content' in result ? result : { content: null, error: result.evidenceSummary,
+    errorCode: result.conflictReason === 'TIMEOUT' ? 'TIMEOUT' : 'PROVIDER_ERROR', execution: result.execution };
 }
 
 async function runSelfHostedCompletion(request: AiResolutionRequest | AiPromptInput, options: SelfHostedAdapterOptions): Promise<AiResolutionResult | AiPromptResult> {
@@ -126,6 +127,7 @@ async function runSelfHostedCompletion(request: AiResolutionRequest | AiPromptIn
       // response_format: { type: 'json_object' }를 지원하지 않으므로 제외합니다.
       // systemPrompt의 명확한 JSON 지시와 common.ts의 파서가 완벽히 파싱 및 정규화합니다.
       temperature: 0.1,
+      ...('systemPrompt' in request ? { max_tokens: 4096 } : {}),
     };
   } else {
     // Ollama 기본 규격 (/api/chat)
@@ -142,6 +144,7 @@ async function runSelfHostedCompletion(request: AiResolutionRequest | AiPromptIn
       stream: false,
       options: {
         temperature: 0.1,
+        ...('systemPrompt' in request ? { num_predict: 4096 } : {}),
       },
     };
   }
@@ -262,9 +265,11 @@ async function runSelfHostedCompletion(request: AiResolutionRequest | AiPromptIn
     // 5. 엔진 응답에서 순수 콘텐츠 추출
     const latencyMs = Date.now() - startTime;
     let contentToParse = rawResponseText;
+    let outputLimited = false;
 
     try {
       const parsedContainer = JSON.parse(rawResponseText);
+      outputLimited = parsedContainer.done_reason === 'length' || parsedContainer.choices?.[0]?.finish_reason === 'length';
       if (parsedContainer.message?.content) {
         // Ollama
         contentToParse = parsedContainer.message.content;
@@ -301,7 +306,11 @@ async function runSelfHostedCompletion(request: AiResolutionRequest | AiPromptIn
       tokensUsed: tokenStats,
     };
 
-    if ('systemPrompt' in request) return { content: redactConversationSecrets(String(contentToParse), [secretValue || '']), execution: executionMeta };
+    if ('systemPrompt' in request) {
+      if (outputLimited) return { content: null, errorCode: 'OUTPUT_LIMIT',
+        error: 'AI 답변이 출력 길이 제한에 도달해 잘렸습니다. 분석 자료를 나누어 다시 요청해 주세요.', execution: executionMeta };
+      return { content: redactConversationSecrets(String(contentToParse), [secretValue || '']), execution: executionMeta };
+    }
     return parseAndNormalizeAiOutput(contentToParse, request, executionMeta);
   } catch (err: any) {
     const latencyMs = Date.now() - startTime;

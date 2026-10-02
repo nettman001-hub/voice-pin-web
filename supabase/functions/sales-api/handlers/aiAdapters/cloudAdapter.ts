@@ -30,7 +30,8 @@ export async function runCloudResolution(
 
 export async function runCloudPrompt(request: AiPromptInput, options: CloudAdapterOptions): Promise<AiPromptResult> {
   const result = await runCloudCompletion(request, options);
-  return 'content' in result ? result : { content: null, error: result.evidenceSummary, execution: result.execution };
+  return 'content' in result ? result : { content: null, error: result.evidenceSummary,
+    errorCode: result.conflictReason === 'TIMEOUT' ? 'TIMEOUT' : 'PROVIDER_ERROR', execution: result.execution };
 }
 
 async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, options: CloudAdapterOptions): Promise<AiResolutionResult | AiPromptResult> {
@@ -135,8 +136,7 @@ async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, 
     headers['Authorization'] = `Bearer ${secretApiKey.trim()}`;
     headers['x-api-key'] = secretApiKey.trim();
 
-    // DeepSeek 공식 문서 (https://api-docs.deepseek.com/):
-    // deepseek-reasoner(R1) 모델은 temperature, top_p, response_format 파라미터를 지원하지 않습니다 (전송 시 HTTP 400 반환).
+    // Preserve the legacy reasoner request shape for existing live resolution.
     const isDeepSeekReasoner = provider === 'DEEPSEEK' && model.includes('reasoner');
 
     if (isDeepSeekReasoner) {
@@ -157,6 +157,13 @@ async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, 
         response_format: { type: 'json_object' },
         temperature: 0.1,
       };
+    }
+    if ('systemPrompt' in request && provider === 'DEEPSEEK') {
+      // Workflow reports are concise structured extraction. Modern DeepSeek
+      // defaults to high-effort thinking; explicitly disable it for Flash/V4.
+      // https://api-docs.deepseek.com/guides/thinking_mode/
+      if (!isDeepSeekReasoner) requestBody.thinking = { type: 'disabled' };
+      requestBody.max_tokens = 4096;
     }
   }
 
@@ -196,10 +203,12 @@ async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, 
     rawResponseText = await res.text();
     const latencyMs = Date.now() - startTime;
     let contentToParse = rawResponseText;
+    let outputLimited = false;
 
     try {
       const json = JSON.parse(rawResponseText);
       if (provider === 'ANTHROPIC') {
+        outputLimited = json.stop_reason === 'max_tokens';
         contentToParse = json.content?.[0]?.text ?? rawResponseText;
         if (json.usage) {
           tokenStats = {
@@ -209,6 +218,7 @@ async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, 
           };
         }
       } else if (provider === 'GOOGLE' || (provider as string) === 'GEMINI') {
+        outputLimited = json.candidates?.[0]?.finishReason === 'MAX_TOKENS';
         contentToParse = json.candidates?.[0]?.content?.parts?.[0]?.text ?? rawResponseText;
         if (json.usageMetadata) {
           tokenStats = {
@@ -219,6 +229,7 @@ async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, 
         }
       } else {
         // OpenAI / DeepSeek / Custom
+        outputLimited = json.choices?.[0]?.finish_reason === 'length';
         contentToParse = json.choices?.[0]?.message?.content ?? rawResponseText;
         if (json.usage) {
           tokenStats = {
@@ -243,7 +254,11 @@ async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, 
       tokensUsed: tokenStats,
     };
 
-    if ('systemPrompt' in request) return { content: redactConversationSecrets(String(contentToParse), [secretApiKey]), execution: executionMeta };
+    if ('systemPrompt' in request) {
+      if (outputLimited) return { content: null, errorCode: 'OUTPUT_LIMIT',
+        error: 'AI 답변이 출력 길이 제한에 도달해 잘렸습니다. 분석 자료를 나누어 다시 요청해 주세요.', execution: executionMeta };
+      return { content: redactConversationSecrets(String(contentToParse), [secretApiKey]), execution: executionMeta };
+    }
     return parseAndNormalizeAiOutput(contentToParse, request, executionMeta);
   } catch (err: any) {
     const latencyMs = Date.now() - startTime;

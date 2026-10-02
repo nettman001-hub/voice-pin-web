@@ -10,7 +10,21 @@ let deployment:any=null;const clone=(v:any)=>structuredClone(v);
 export const sellerAnalysisApi={
  list:async()=>[clone(doc)],get:async()=>clone(doc),workflowState:async()=>({deployment,profiles:deployment?[{id:'p',report_version:doc.approvedReportVersion}]:[],observations:deployment?[{id:'mock-observation',profile_id:'p',session_id:'가상 방송 · 실제 수집 아님',decisions:verifyAnalysis(doc.input,report)}]:[]}),
  save:async(i:any)=>{doc={...doc,input:i,revision:doc.revision+1,status:'DRAFT',currentReportVersion:null,approvedAt:null,approvedReportVersion:null};return clone(doc);},
- analyze:async(_d:any,feedback:string,slotNumber:1|2)=>{const version=doc.reports.length+1;doc.revision++;doc.status='REVIEW';doc.approvedAt=null;doc.approvedReportVersion=null;doc.currentReportVersion=version;doc.reports.push({version,requestedSlot:slotNumber,inputRevision:doc.revision,input:doc.input,report:{...report,summary:feedback?'추가 요청 반영: '+feedback:report.summary},attempts:[{slot:slotNumber,provider:'LOCAL_UI_TEST',model:'가상 엔진 · 실제 AI 호출 아님',error:null,conversationTrace:null}],createdAt:new Date().toISOString()});doc.messages.push({id:String(version),role:'ADMIN',content:feedback,revision:doc.revision,reportVersion:version});return clone(doc);},
+ analyze:async(_d:any,feedback:string,slotNumber:1|2,onProgress?:(event:any)=>void)=>{
+  onProgress?.({phase:'ANALYZING',activeSlot:slotNumber});
+  const startedAt=new Date().toISOString();
+  if(new URLSearchParams(window.location.search).get('analysisOutcome')==='failed'){
+   await new Promise(resolve=>setTimeout(resolve,2000));
+   const first={slot:slotNumber,provider:'LOCAL_UI_TEST',model:'가상 엔진 · 실제 AI 호출 아님',startedAt,completedAt:new Date().toISOString(),error:'구매 표현은 30개까지 가능합니다.',errorCode:'INVALID_REPORT',conversationTrace:{systemPrompt:'방송 자료를 분석해 주세요.',userPrompt:'햇살언니 0.5에 드릴게요',responseText:'{"purchaseSignals":["저요"]}'}};
+   const nextSlot=slotNumber===1?2:1;doc={...doc,revision:doc.revision+1,status:'ANALYZING',messages:[...doc.messages,{id:'preview-fallback',role:'SYSTEM',content:'대체 슬롯으로 분석을 이어갑니다.',revision:doc.revision+1,reportVersion:null,attempts:[first],continuation:{requestedSlot:slotNumber,nextSlot},createdAt:new Date().toISOString()}]};
+   onProgress?.({phase:'FALLBACK',activeSlot:nextSlot,analysis:clone(doc)});
+   await new Promise(resolve=>setTimeout(resolve,8000));
+   const second={...first,slot:nextSlot,startedAt:first.completedAt,completedAt:new Date().toISOString(),error:'AI 응답 대기시간 초과',errorCode:'TIMEOUT',conversationTrace:{...first.conversationTrace,responseText:''}};
+   doc={...doc,revision:doc.revision+1,status:'FAILED',lastError:`${slotNumber}번슬롯: ${first.error}\n${nextSlot}번슬롯: ${second.error}`,messages:[...doc.messages,{id:'preview-failed',role:'SYSTEM',content:'분석에 실패했습니다.',revision:doc.revision+1,reportVersion:null,attempts:[first,second],createdAt:new Date().toISOString()}]};
+   onProgress?.({phase:'COMPLETE',activeSlot:nextSlot,analysis:clone(doc)});return clone(doc);
+  }
+  const version=doc.reports.length+1;doc.revision++;doc.status='REVIEW';doc.approvedAt=null;doc.approvedReportVersion=null;doc.currentReportVersion=version;doc.reports.push({version,requestedSlot:slotNumber,inputRevision:doc.revision,input:doc.input,report:{...report,summary:feedback?'추가 요청 반영: '+feedback:report.summary},attempts:[{slot:slotNumber,provider:'LOCAL_UI_TEST',model:'가상 엔진 · 실제 AI 호출 아님',startedAt,completedAt:new Date().toISOString(),error:null,conversationTrace:null}],createdAt:new Date().toISOString()});doc.messages.push({id:String(version),role:'ADMIN',content:feedback,revision:doc.revision,reportVersion:version});onProgress?.({phase:'COMPLETE',activeSlot:slotNumber,analysis:clone(doc)});return clone(doc);
+ },
  verify:async(_d:any,version:number,reviewed:boolean)=>{doc.revision++;const r=doc.reports.find((r:any)=>r.version===version);r.inputRevision=doc.revision;r.verification={decisions:verifyAnalysis(doc.input,r.report),reviewed,verifiedAt:new Date().toISOString()};return clone(doc);},
  approve:async(_d:any,version:number)=>{doc.status='APPROVED';doc.revision++;doc.approvedReportVersion=version;doc.approvedAt=new Date().toISOString();doc.approvedBy='테스트 관리자';return clone(doc);},
  workflowAction:async(action:string)=>{deployment={profile_id:'p',mode:action==='activate'?'ACTIVE':action==='rollback'?'DEFAULT':'SHADOW',shadow_reviewed:action==='review-shadow',revision:(deployment?.revision || 0)+1};},

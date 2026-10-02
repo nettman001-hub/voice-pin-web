@@ -14,6 +14,7 @@ import {
 } from "../../../../src/types/sellerAnalysis.ts";
 import {
   analysisPrompt,
+  analysisRepairPrompt,
   normalizeAnalysisInput,
   parseAnalysisReport,
   verifyAnalysis,
@@ -227,43 +228,49 @@ export async function handleSellerAnalysis(auth: AuthContext, body: any) {
         getPrimaryAiSlot(setting);
       const slot = continuation?.nextSlot ?? primary;
       let report = null;
-      // One 120-second AI attempt per HTTP request stays within the hosted
-      // request limit. The client resumes a persisted handoff for fallback.
+      // Initial analysis and at most one format repair share a 120-second
+      // slot budget. A fallback slot still runs in a separate HTTP request.
       {
         const config = setting[`slot${slot}`];
-        const attempt: SellerAnalysisAttempt = {
-          slot: slot as 1 | 2,
-          provider: config.provider,
-          model: config.model,
-          startedAt: new Date().toISOString(),
-          completedAt: "",
-          error: null,
-          conversationTrace: null,
-        };
-        const result = await executeAiPrompt(
-          analysisPrompt(doc.input, previous, feedback),
-          {
-            slotConfig: {
-              ...config,
-              timeoutSeconds: SELLER_ANALYSIS_SLOT_TIMEOUT_SECONDS,
-            },
-            secretValue: secrets?.find((s) => s.slot_number === slot)
-              ?.secret_value,
-            onConversationTrace: (trace) => {
-              attempt.conversationTrace = trace;
-            },
-          },
-        );
-        try {
+        const originalPrompt = analysisPrompt(doc.input, previous, feedback);
+        let prompt = originalPrompt;
+        const deadline = Date.now() + SELLER_ANALYSIS_SLOT_TIMEOUT_SECONDS * 1000;
+        for (let round = 0; round < 2; round++) {
+          const remainingSeconds = round === 0
+            ? SELLER_ANALYSIS_SLOT_TIMEOUT_SECONDS
+            : (deadline - Date.now()) / 1000;
+          if (remainingSeconds < 10) break;
+          const attempt: SellerAnalysisAttempt = {
+            slot: slot as 1 | 2,
+            phase: round === 0 ? "ANALYSIS" : "FORMAT_REPAIR",
+            provider: config.provider,
+            model: config.model,
+            startedAt: new Date().toISOString(),
+            completedAt: "",
+            error: null,
+            conversationTrace: null,
+          };
+          const result = await executeAiPrompt(prompt, {
+            slotConfig: { ...config, timeoutSeconds: remainingSeconds },
+            secretValue: secrets?.find((s) => s.slot_number === slot)?.secret_value,
+            onConversationTrace: (trace) => { attempt.conversationTrace = trace; },
+          });
           if (!result.content) {
-            throw new Error(result.error || "AI 응답이 없습니다.");
+            attempt.error = result.error || "AI 응답이 없습니다.";
+            attempt.errorCode = result.errorCode || "PROVIDER_ERROR";
+          } else {
+            try {
+              report = parseAnalysisReport(result.content);
+            } catch (e) {
+              attempt.error = e instanceof Error ? e.message : String(e);
+              attempt.errorCode = "INVALID_REPORT";
+              prompt = analysisRepairPrompt(originalPrompt, result.content, attempt.error);
+            }
           }
-          report = parseAnalysisReport(result.content);
-        } catch (e) {
-          attempt.error = e instanceof Error ? e.message : String(e);
+          attempt.completedAt = new Date().toISOString();
+          attempts.push(attempt);
+          if (report || attempt.errorCode !== "INVALID_REPORT") break;
         }
-        attempt.completedAt = new Date().toISOString();
-        attempts.push(attempt);
       }
       if (!report) {
         if (!continuation && setting.auto_fallback_enabled !== false) {
@@ -278,7 +285,7 @@ export async function handleSellerAnalysis(auth: AuthContext, body: any) {
                 id: crypto.randomUUID(),
                 role: "SYSTEM",
                 content:
-                  `${primary}번슬롯 분석 실패 · 대체 슬롯으로 이어서 분석합니다.`,
+                  `${primary}번슬롯 분석 실패: ${attempts.at(-1)?.error || "응답 없음"} · ${primary === 1 ? 2 : 1}번슬롯으로 이어서 분석합니다.`,
                 revision,
                 reportVersion: null,
                 attempts,
@@ -298,7 +305,9 @@ export async function handleSellerAnalysis(auth: AuthContext, body: any) {
           return successResponse({ analysis: doc });
         }
         throw new Error(
-          attempts.at(-1)?.error || "모든 AI 분석에 실패했습니다.",
+          attempts.filter((a) => a.error).map((a) =>
+            `${a.slot}번슬롯 (${a.model})${a.phase === "FORMAT_REPAIR" ? " 답변 형식 교정" : ""}: ${a.error}`
+          ).join("\n") || "모든 AI 분석에 실패했습니다.",
         );
       }
       const version = (doc.reports.at(-1)?.version || 0) + 1;

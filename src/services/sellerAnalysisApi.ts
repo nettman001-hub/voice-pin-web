@@ -20,6 +20,16 @@ export class SellerAnalysisApiError extends Error {
   }
 }
 
+export interface SellerAnalysisProgress {
+  phase: "ANALYZING" | "FALLBACK" | "COMPLETE";
+  activeSlot: SellerAnalysisSlot | null;
+  analysis?: SellerAnalysisDocument;
+}
+
+export type SellerAnalysisProgressCallback = (
+  progress: SellerAnalysisProgress,
+) => void;
+
 async function invoke<T>(
   action: string,
   payload: Record<string, unknown> = {},
@@ -128,9 +138,15 @@ export const sellerAnalysisApi = {
       & Partial<Pick<SellerAnalysisDocument, "status" | "messages">>,
     feedback?: string,
     slotNumber?: SellerAnalysisSlot,
+    onProgress?: SellerAnalysisProgressCallback,
   ): Promise<SellerAnalysisDocument> {
     const pending = document.status === "ANALYZING" &&
       document.messages?.at(-1)?.continuation;
+    let activeSlot = pending ? pending.nextSlot : slotNumber ?? null;
+    onProgress?.({
+      phase: pending ? "FALLBACK" : "ANALYZING",
+      activeSlot,
+    });
     let analysis = (await invoke<{ analysis: SellerAnalysisDocument }>(
       "seller-analysis-analyze",
       {
@@ -146,6 +162,8 @@ export const sellerAnalysisApi = {
       !pending && analysis.status === "ANALYZING" &&
       analysis.messages.at(-1)?.continuation
     ) {
+      activeSlot = analysis.messages.at(-1)!.continuation!.nextSlot;
+      onProgress?.({ phase: "FALLBACK", activeSlot, analysis });
       analysis = (await invoke<{ analysis: SellerAnalysisDocument }>(
         "seller-analysis-analyze",
         {
@@ -155,6 +173,7 @@ export const sellerAnalysisApi = {
         },
       )).analysis;
     }
+    onProgress?.({ phase: "COMPLETE", activeSlot, analysis });
     return analysis;
   },
   async approve(
