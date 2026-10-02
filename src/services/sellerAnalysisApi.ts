@@ -2,6 +2,7 @@ import { isSupabaseConfigured, requireSupabase } from "./supabaseClient";
 import type {
   SellerAnalysisDocument,
   SellerAnalysisInput,
+  SellerAnalysisSlot,
   SellerAnalysisSummary,
 } from "../types/sellerAnalysis";
 import type { AppliedSalesWorkflow } from "../types/salesWorkflow";
@@ -122,17 +123,39 @@ export const sellerAnalysisApi = {
     )).analysis;
   },
   async analyze(
-    document: Pick<SellerAnalysisDocument, "id" | "revision">,
+    document:
+      & Pick<SellerAnalysisDocument, "id" | "revision">
+      & Partial<Pick<SellerAnalysisDocument, "status" | "messages">>,
     feedback?: string,
+    slotNumber?: SellerAnalysisSlot,
   ): Promise<SellerAnalysisDocument> {
-    return (await invoke<{ analysis: SellerAnalysisDocument }>(
+    const pending = document.status === "ANALYZING" &&
+      document.messages?.at(-1)?.continuation;
+    let analysis = (await invoke<{ analysis: SellerAnalysisDocument }>(
       "seller-analysis-analyze",
       {
         id: document.id,
         expectedRevision: document.revision,
-        ...(feedback?.trim() ? { feedback: feedback.trim() } : {}),
+        ...(pending ? { continueAnalysis: true } : {
+          ...(slotNumber !== undefined ? { slotNumber } : {}),
+          ...(feedback?.trim() ? { feedback: feedback.trim() } : {}),
+        }),
       },
     )).analysis;
+    if (
+      !pending && analysis.status === "ANALYZING" &&
+      analysis.messages.at(-1)?.continuation
+    ) {
+      analysis = (await invoke<{ analysis: SellerAnalysisDocument }>(
+        "seller-analysis-analyze",
+        {
+          id: analysis.id,
+          expectedRevision: analysis.revision,
+          continueAnalysis: true,
+        },
+      )).analysis;
+    }
+    return analysis;
   },
   async approve(
     document: Pick<SellerAnalysisDocument, "id" | "revision">,

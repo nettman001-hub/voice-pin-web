@@ -94,3 +94,81 @@ test("deadline returns even when the provider ignores cancellation", async () =>
     globalThis.fetch = original;
   }
 });
+
+for (const type of ["LOCAL", "CLOUD"]) {
+  test(`${type} analysis waits the full 120 seconds and then aborts`, async (t) => {
+    const original = globalThis.fetch;
+    let signal;
+    let completed = false;
+    try {
+      t.mock.timers.enable({ apis: ["setTimeout"] });
+      globalThis.fetch = (_url, options) => {
+        signal = options.signal;
+        return new Promise(() => {});
+      };
+      const pending = executeAiPrompt({
+        systemPrompt: "JSON",
+        userPrompt: "Broadcast evidence",
+      }, {
+        slotConfig: {
+          ...slot,
+          type,
+          provider: type === "LOCAL" ? "LM_STUDIO" : "OPENAI",
+          timeoutSeconds: 120,
+        },
+        secretValue: "SECRET",
+      }).then((result) => {
+        completed = true;
+        return result;
+      });
+      assert.ok(signal);
+      t.mock.timers.tick(119_999);
+      await Promise.resolve();
+      assert.equal(completed, false);
+      assert.equal(signal.aborted, false);
+      t.mock.timers.tick(1);
+      const result = await pending;
+      assert.equal(signal.aborted, true);
+      assert.equal(result.content, null);
+      assert.match(result.error, /대기시간/);
+    } finally {
+      globalThis.fetch = original;
+      t.mock.timers.reset();
+    }
+  });
+}
+
+test("analysis accepts an answer after the old deadline but before 120 seconds", async (t) => {
+  const original = globalThis.fetch;
+  let release;
+  let signal;
+  try {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    globalThis.fetch = (_url, options) => {
+      signal = options.signal;
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    };
+    const pending = executeAiPrompt({
+      systemPrompt: "JSON",
+      userPrompt: "Broadcast evidence",
+    }, { slotConfig: { ...slot, timeoutSeconds: 120 }, secretValue: "SECRET" });
+    t.mock.timers.tick(119_000);
+    release(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '{"summary":"late report"}' } }],
+        }),
+        { status: 200 },
+      ),
+    );
+    const result = await pending;
+    assert.equal(result.content, '{"summary":"late report"}');
+    t.mock.timers.tick(2000);
+    assert.equal(signal.aborted, false);
+  } finally {
+    globalThis.fetch = original;
+    t.mock.timers.reset();
+  }
+});

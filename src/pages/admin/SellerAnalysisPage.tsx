@@ -13,6 +13,7 @@ import { normalizeAnalysisInput } from "../../services/sellerAnalysisRules";
 import type {
   SellerAnalysisDocument,
   SellerAnalysisInput,
+  SellerAnalysisSlot,
   SellerAnalysisSummary,
 } from "../../types/sellerAnalysis";
 
@@ -30,6 +31,7 @@ export default function SellerAnalysisPage() {
     createSellerAnalysisInput,
   );
   const [feedback, setFeedback] = useState("");
+  const [slotNumber, setSlotNumber] = useState<SellerAnalysisSlot>(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
@@ -76,6 +78,9 @@ export default function SellerAnalysisPage() {
     setInput(next.input);
     setVersion(next.currentReportVersion);
     setReviewed(false);
+    const pending = next.status === "ANALYZING" &&
+      next.messages.at(-1)?.continuation;
+    if (pending) setSlotNumber(pending.requestedSlot);
   };
   const run = async (task: () => Promise<void>) => {
     setBusy(true);
@@ -204,7 +209,11 @@ export default function SellerAnalysisPage() {
       stop();
       const generation = viewGeneration.current;
       const current = doc && !dirty ? doc : await save();
-      const next = await sellerAnalysisApi.analyze(current, feedback);
+      const next = await sellerAnalysisApi.analyze(
+        current,
+        feedback,
+        slotNumber,
+      );
       if (generation === viewGeneration.current) {
         accept(next);
         setFeedback("");
@@ -447,8 +456,23 @@ export default function SellerAnalysisPage() {
                   }}
                 />
               </label>
+            </details>
+            <div className="flex flex-wrap items-center gap-3">
               <button
-                className="mt-3 text-sm font-bold text-brand-700"
+                className={button}
+                disabled={busy || capturing}
+                onClick={() =>
+                  void run(async () => {
+                    await save();
+                    setStatus("분석 자료를 저장했습니다.");
+                  })}
+              >
+                자료 저장
+              </button>
+              <button
+                type="button"
+                className={button}
+                title="현재 방송 자료를 JSON 파일로 다운로드합니다."
                 onClick={() => {
                   const a = document.createElement("a");
                   const url = URL.createObjectURL(
@@ -462,21 +486,19 @@ export default function SellerAnalysisPage() {
                   URL.revokeObjectURL(url);
                 }}
               >
-                자료 JSON 다운로드
+                자료다운로드
               </button>
-            </details>
-            <div className="flex gap-3">
-              <button
-                className={button}
+              <select
+                aria-label="분석 AI 슬롯"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold disabled:bg-slate-50 disabled:opacity-40"
+                value={slotNumber}
                 disabled={busy || capturing}
-                onClick={() =>
-                  void run(async () => {
-                    await save();
-                    setStatus("분석 자료를 저장했습니다.");
-                  })}
+                onChange={(e) =>
+                  setSlotNumber(Number(e.target.value) as SellerAnalysisSlot)}
               >
-                자료 저장
-              </button>
+                <option value={1}>1번슬롯</option>
+                <option value={2}>2번슬롯</option>
+              </select>
               <button
                 className={button}
                 disabled={busy || capturing}
@@ -485,6 +507,11 @@ export default function SellerAnalysisPage() {
                 {busy ? "처리 중…" : "AI 판매방식 분석"}
               </button>
             </div>
+            <p className="text-xs leading-6 text-slate-500">
+              선택한 슬롯을 먼저 사용하며, 슬롯별 응답 대기시간은 최대
+              2분입니다. 실패 시 관리자 자동 대체 설정을 따릅니다. 수정·추가
+              요청에도 같은 선택을 사용합니다.
+            </p>
           </section>
           {doc && (
             <section className="space-y-4 rounded-3xl border bg-white p-6">
@@ -644,6 +671,11 @@ export default function SellerAnalysisPage() {
                       <summary className="cursor-pointer text-sm font-bold">
                         AI에게 보낸 질문과 답변
                       </summary>
+                      {report.requestedSlot && (
+                        <p className="mt-2 text-xs text-slate-500">
+                          요청한 우선 슬롯: {report.requestedSlot}번슬롯
+                        </p>
+                      )}
                       {report.attempts.map((a, i) => (
                         <div
                           key={i}

@@ -32,7 +32,7 @@ const bundle = await build({
    export const successResponse=data=>new Response(JSON.stringify({ok:true,data}));
    export const errorResponse=(code,message,status=400)=>new Response(JSON.stringify({ok:false,error:{code,message}}),{status});`
             : args.path === "settings"
-            ? `export const getOperationalAiSetting=async()=>({id:'setting',primary_slot:2,auto_fallback_enabled:true,slot1:{type:'LOCAL',provider:'CUSTOM',model:'local'},slot2:{type:'CLOUD',provider:'OPENAI',model:'cloud'}});export const getPrimaryAiSlot=s=>s.primary_slot;`
+            ? `export const getOperationalAiSetting=async()=>globalThis.analysisFixture.setting;export const getPrimaryAiSlot=s=>s.primary_slot;`
             : `export const executeAiPrompt=(...a)=>globalThis.analysisFixture.ai(...a);`,
         }),
       );
@@ -95,6 +95,13 @@ function fixture() {
   const ctx = {
     rows,
     calls,
+    setting: {
+      id: "setting",
+      primary_slot: 2,
+      auto_fallback_enabled: true,
+      slot1: { type: "LOCAL", provider: "CUSTOM", model: "local" },
+      slot2: { type: "CLOUD", provider: "OPENAI", model: "cloud" },
+    },
     from(table) {
       let id;
       const q = {
@@ -117,7 +124,10 @@ function fixture() {
         then(resolve, reject) {
           return Promise.resolve({
             data: table === "ai_secrets"
-              ? []
+              ? [{ slot_number: 1, secret_value: "TEST_SLOT_1_SECRET" }, {
+                slot_number: 2,
+                secret_value: "TEST_SLOT_2_SECRET",
+              }]
               : [...rows.values()].map((document) => ({
                 document,
                 summary: document,
@@ -138,6 +148,7 @@ function fixture() {
     },
     async ai(prompt, options) {
       calls.push({ prompt, options });
+      if (ctx.aiResult) return ctx.aiResult(prompt, options);
       if (options.slotConfig.type === "CLOUD") {
         return {
           content: null,
@@ -150,9 +161,20 @@ function fixture() {
   globalThis.analysisFixture = ctx;
   return ctx;
 }
-async function call(action, payload = {}) {
+async function singleCall(action, payload = {}) {
   return (await (await handleSellerAnalysis(auth, { action, ...payload }))
     .json()).data.analysis;
+}
+async function call(action, payload = {}) {
+  const doc = await singleCall(action, payload);
+  return action === "seller-analysis-analyze" && doc.status === "ANALYZING" &&
+      doc.messages.at(-1)?.continuation
+    ? singleCall(action, {
+      id: doc.id,
+      expectedRevision: doc.revision,
+      continueAnalysis: true,
+    })
+    : doc;
 }
 test("admin analysis follows primary order, keeps feedback and requires reviewed current replay before approval", async () => {
   const ctx = fixture();
@@ -164,7 +186,7 @@ test("admin analysis follows primary order, keeps feedback and requires reviewed
   });
   assert.equal(doc.status, "REVIEW");
   assert.equal(doc.reports.length, 1);
-  assert.equal(ctx.calls[0].options.slotConfig.timeoutSeconds, 4);
+  assert.equal(ctx.calls[0].options.slotConfig.timeoutSeconds, 120);
   assert.equal(ctx.calls[0].options.slotConfig.type, "CLOUD");
   assert.equal(ctx.calls[1].options.slotConfig.type, "LOCAL");
   assert.match(ctx.calls[0].prompt.userPrompt, /번호로 주문/);
@@ -210,6 +232,254 @@ test("admin analysis follows primary order, keeps feedback and requires reviewed
       }),
     (e) => e.code === "STALE_REPORT",
   );
+});
+test("explicit slot 1 overrides global slot 2 for this analysis without changing global settings", async () => {
+  const ctx = fixture();
+  let doc = await call("seller-analysis-save", { input });
+  doc = await call("seller-analysis-analyze", {
+    id: doc.id,
+    expectedRevision: doc.revision,
+    slotNumber: 1,
+  });
+  assert.equal(doc.status, "REVIEW");
+  assert.equal(ctx.calls.length, 1);
+  assert.equal(ctx.calls[0].options.slotConfig.model, "local");
+  assert.equal(ctx.calls[0].options.slotConfig.timeoutSeconds, 120);
+  assert.equal(ctx.calls[0].options.secretValue, "TEST_SLOT_1_SECRET");
+  assert.equal(ctx.setting.primary_slot, 2);
+  assert.equal(doc.reports[0].requestedSlot, 1);
+  assert.equal(doc.reports[0].attempts[0].slot, 1);
+});
+test("explicit slot 2 uses its own credentials and falls back to slot 1 with identical prompt", async () => {
+  const ctx = fixture();
+  ctx.setting.primary_slot = 1;
+  let doc = await call("seller-analysis-save", { input });
+  doc = await call("seller-analysis-analyze", {
+    id: doc.id,
+    expectedRevision: doc.revision,
+    slotNumber: 2,
+  });
+  assert.equal(doc.status, "REVIEW");
+  assert.deepEqual(doc.reports[0].attempts.map((a) => a.slot), [2, 1]);
+  assert.equal(doc.reports[0].requestedSlot, 2);
+  assert.equal(ctx.calls[0].options.slotConfig.model, "cloud");
+  assert.equal(ctx.calls[0].options.slotConfig.timeoutSeconds, 120);
+  assert.equal(ctx.calls[0].options.secretValue, "TEST_SLOT_2_SECRET");
+  assert.equal(ctx.calls[1].options.slotConfig.timeoutSeconds, 120);
+  assert.equal(ctx.calls[1].options.secretValue, "TEST_SLOT_1_SECRET");
+  assert.deepEqual(ctx.calls[0].prompt, ctx.calls[1].prompt);
+  assert.equal(ctx.setting.primary_slot, 1);
+});
+test("invalid report from selected slot falls back to cloud with the same 120 second deadline", async () => {
+  const ctx = fixture();
+  ctx.aiResult = async (_prompt, options) => ({
+    content: options.slotConfig.type === "LOCAL"
+      ? "not json"
+      : JSON.stringify(report),
+  });
+  let doc = await call("seller-analysis-save", { input });
+  doc = await call("seller-analysis-analyze", {
+    id: doc.id,
+    expectedRevision: doc.revision,
+    slotNumber: 1,
+  });
+  assert.equal(doc.status, "REVIEW");
+  assert.deepEqual(doc.reports[0].attempts.map((a) => a.slot), [1, 2]);
+  assert.ok(doc.reports[0].attempts[0].error);
+  assert.equal(ctx.calls[1].options.slotConfig.timeoutSeconds, 120);
+});
+test("selected slot does not bypass disabled auto fallback", async () => {
+  const ctx = fixture();
+  ctx.setting.auto_fallback_enabled = false;
+  ctx.setting.primary_slot = 1;
+  let doc = await call("seller-analysis-save", { input });
+  doc = await call("seller-analysis-analyze", {
+    id: doc.id,
+    expectedRevision: doc.revision,
+    slotNumber: 2,
+  });
+  assert.equal(doc.status, "FAILED");
+  assert.equal(ctx.calls.length, 1);
+  assert.equal(ctx.calls[0].options.slotConfig.type, "CLOUD");
+  assert.equal(doc.messages.at(-1).attempts[0].slot, 2);
+});
+test("slot 1 and slot 2 can both be used for correction reanalysis", async () => {
+  const ctx = fixture();
+  let doc = await call("seller-analysis-save", { input });
+  doc = await call("seller-analysis-analyze", {
+    id: doc.id,
+    expectedRevision: doc.revision,
+    slotNumber: 1,
+  });
+  ctx.calls.length = 0;
+  doc = await call("seller-analysis-analyze", {
+    id: doc.id,
+    expectedRevision: doc.revision,
+    slotNumber: 2,
+    feedback: "재고 미상일 때도 확정하도록 검토해 주세요.",
+  });
+  assert.equal(doc.reports[1].requestedSlot, 2);
+  assert.equal(ctx.calls[0].options.slotConfig.type, "CLOUD");
+  const prompt = JSON.parse(ctx.calls[0].prompt.userPrompt);
+  assert.deepEqual(prompt.previous, report);
+  assert.match(prompt.feedback, /재고 미상/);
+});
+test("invalid slot values are rejected before claiming or calling AI", async () => {
+  const ctx = fixture();
+  const doc = await call("seller-analysis-save", { input });
+  for (const slotNumber of [0, 3, "1", null, true, {}, [1]]) {
+    await assert.rejects(() =>
+      call("seller-analysis-analyze", {
+        id: doc.id,
+        expectedRevision: doc.revision,
+        slotNumber,
+      }), (e) => e.code === "VALIDATION_ERROR");
+    assert.equal(ctx.rows.get(doc.id).status, "DRAFT");
+    assert.equal(ctx.rows.get(doc.id).revision, doc.revision);
+  }
+  assert.equal(ctx.calls.length, 0);
+});
+test("fallback runs in a separate request with persisted original feedback, priority and attempts", async () => {
+  const ctx = fixture();
+  let doc = await call("seller-analysis-save", { input });
+  const feedback = "미확인 사례를 구분해 주세요.";
+  doc = await singleCall("seller-analysis-analyze", {
+    id: doc.id,
+    expectedRevision: doc.revision,
+    slotNumber: 2,
+    feedback,
+  });
+  assert.equal(doc.status, "ANALYZING");
+  assert.equal(ctx.calls.length, 1);
+  assert.equal(doc.messages.at(-1).continuation.nextSlot, 1);
+  assert.equal(doc.messages.at(-1).attempts[0].slot, 2);
+  doc = await singleCall("seller-analysis-analyze", {
+    id: doc.id,
+    expectedRevision: doc.revision,
+    continueAnalysis: true,
+    slotNumber: 2,
+    feedback: "client must not change the original prompt",
+  });
+  assert.equal(doc.status, "REVIEW");
+  assert.equal(doc.reports.length, 1);
+  assert.equal(doc.reports[0].requestedSlot, 2);
+  assert.deepEqual(doc.reports[0].attempts.map((a) => a.slot), [2, 1]);
+  assert.equal(ctx.calls[1].options.slotConfig.timeoutSeconds, 120);
+  assert.deepEqual(ctx.calls[0].prompt, ctx.calls[1].prompt);
+  assert.equal(JSON.parse(ctx.calls[1].prompt.userPrompt).feedback, feedback);
+  assert.equal(doc.messages.filter((m) => m.role === "ADMIN").length, 1);
+  assert.ok(doc.messages.every((m) => !m.continuation));
+});
+test("long analysis cannot be replaced by saving or restarting after the old 60 second guard", async () => {
+  const ctx = fixture();
+  const doc = await call("seller-analysis-save", { input });
+  for (const elapsed of [90_000, 239_000, 299_000]) {
+    ctx.rows.set(doc.id, {
+      ...doc,
+      status: "ANALYZING",
+      updatedAt: new Date(Date.now() - elapsed).toISOString(),
+    });
+    await assert.rejects(() =>
+      singleCall("seller-analysis-analyze", {
+        id: doc.id,
+        expectedRevision: doc.revision,
+        slotNumber: 1,
+      }), (e) => e.code === "BUSY");
+    await assert.rejects(() =>
+      singleCall("seller-analysis-save", {
+        id: doc.id,
+        expectedRevision: doc.revision,
+        input,
+      }), (e) => e.code === "BUSY");
+  }
+  assert.equal(ctx.calls.length, 0);
+});
+test("an abandoned analysis can be restarted after the five minute safety lease", async () => {
+  const ctx = fixture();
+  let doc = await call("seller-analysis-save", { input });
+  ctx.rows.set(doc.id, {
+    ...doc,
+    status: "ANALYZING",
+    updatedAt: new Date(Date.now() - 301_000).toISOString(),
+  });
+  doc = await call("seller-analysis-analyze", {
+    id: doc.id,
+    expectedRevision: doc.revision,
+    slotNumber: 1,
+  });
+  assert.equal(doc.status, "REVIEW");
+  assert.equal(ctx.calls.length, 1);
+});
+test("a continuation without a server-issued handoff cannot run AI", async () => {
+  const ctx = fixture();
+  const doc = await call("seller-analysis-save", { input });
+  await assert.rejects(() =>
+    singleCall("seller-analysis-analyze", {
+      id: doc.id,
+      expectedRevision: doc.revision,
+      continueAnalysis: true,
+    }), (e) => e.code === "NO_PENDING_ANALYSIS");
+  assert.equal(ctx.calls.length, 0);
+  assert.equal(ctx.rows.get(doc.id).status, "DRAFT");
+});
+test("changed operational settings do not silently change a queued fallback model", async () => {
+  const ctx = fixture();
+  let doc = await call("seller-analysis-save", { input });
+  doc = await singleCall("seller-analysis-analyze", {
+    id: doc.id,
+    expectedRevision: doc.revision,
+    slotNumber: 2,
+  });
+  ctx.setting.applied_version = 2;
+  doc = await singleCall("seller-analysis-analyze", {
+    id: doc.id,
+    expectedRevision: doc.revision,
+    continueAnalysis: true,
+  });
+  assert.equal(doc.status, "FAILED");
+  assert.match(doc.lastError, /운영 AI 설정이 변경/);
+  assert.equal(ctx.calls.length, 1);
+  assert.equal(doc.messages.at(-1).attempts[0].slot, 2);
+});
+test("fallback handoff can only be claimed once and cannot loop to the first slot", async () => {
+  const ctx = fixture();
+  let doc = await call("seller-analysis-save", { input });
+  doc = await singleCall("seller-analysis-analyze", {
+    id: doc.id,
+    expectedRevision: doc.revision,
+    slotNumber: 2,
+  });
+  let release;
+  ctx.aiResult = () =>
+    new Promise((resolve) => {
+      release = resolve;
+    });
+  const running = singleCall("seller-analysis-analyze", {
+    id: doc.id,
+    expectedRevision: doc.revision,
+    continueAnalysis: true,
+  });
+  for (let i = 0; i < 20 && !release; i++) await Promise.resolve();
+  assert.ok(release);
+  const claimed = ctx.rows.get(doc.id);
+  assert.ok(!claimed.messages.at(-1).continuation);
+  await assert.rejects(() =>
+    singleCall("seller-analysis-analyze", {
+      id: doc.id,
+      expectedRevision: doc.revision,
+      continueAnalysis: true,
+    }), (e) => e.code === "REVISION_CONFLICT");
+  await assert.rejects(() =>
+    singleCall("seller-analysis-analyze", {
+      id: claimed.id,
+      expectedRevision: claimed.revision,
+      continueAnalysis: true,
+    }), (e) => e.code === "NO_PENDING_ANALYSIS");
+  release({ content: null, error: "TIMEOUT" });
+  const failed = await running;
+  assert.equal(failed.status, "FAILED");
+  assert.equal(ctx.calls.length, 2);
+  assert.deepEqual(failed.messages.at(-1).attempts.map((a) => a.slot), [2, 1]);
 });
 test("workspace OWNER and device ADMIN capability cannot analyze or approve seller profiles", async () => {
   fixture();

@@ -9,6 +9,10 @@ import type {
   SellerAnalysisDocument,
 } from "../../../../src/types/sellerAnalysis.ts";
 import {
+  SELLER_ANALYSIS_BUSY_TIMEOUT_MS,
+  SELLER_ANALYSIS_SLOT_TIMEOUT_SECONDS,
+} from "../../../../src/types/sellerAnalysis.ts";
+import {
   analysisPrompt,
   normalizeAnalysisInput,
   parseAnalysisReport,
@@ -105,7 +109,7 @@ export async function handleSellerAnalysis(auth: AuthContext, body: any) {
     }
     if (
       old?.status === "ANALYZING" &&
-      Date.now() - Date.parse(old.updatedAt) < 60_000
+      Date.now() - Date.parse(old.updatedAt) < SELLER_ANALYSIS_BUSY_TIMEOUT_MS
     ) fail("BUSY", "AI 분석 완료 후 수정해 주세요.", 409);
     if (old && body.expectedRevision !== old.revision) {
       fail("REVISION_CONFLICT", "분석이 변경되었습니다.", 409);
@@ -137,11 +141,31 @@ export async function handleSellerAnalysis(auth: AuthContext, body: any) {
     );
   }
   if (body.action === "seller-analysis-analyze") {
+    const handoff = doc.status === "ANALYZING"
+      ? doc.messages.at(-1)?.continuation
+      : undefined;
+    const continuing = body.continueAnalysis === true;
+    if (continuing && !handoff) {
+      fail(
+        "NO_PENDING_ANALYSIS",
+        "이어 처리할 대체 슬롯 분석이 없습니다.",
+        409,
+      );
+    }
+    const continuation = continuing ? handoff : undefined;
+    const requestedSlot = body.slotNumber;
     if (
-      doc.status === "ANALYZING" &&
-      Date.now() - Date.parse(doc.updatedAt) < 60_000
+      requestedSlot !== undefined && requestedSlot !== 1 && requestedSlot !== 2
+    ) {
+      fail("VALIDATION_ERROR", "분석 AI 슬롯은 1번 또는 2번을 선택해 주세요.");
+    }
+    if (
+      !continuing && doc.status === "ANALYZING" &&
+      Date.now() - Date.parse(doc.updatedAt) < SELLER_ANALYSIS_BUSY_TIMEOUT_MS
     ) fail("BUSY", "이미 분석 중입니다.", 409);
-    const feedback = String(body.feedback || "").trim();
+    // A continuation must reuse server-owned feedback, order and evidence.
+    const feedback = continuation?.feedback ??
+      String(body.feedback || "").trim();
     if (feedback.length > 4000 || doc.reports.length >= 20) {
       fail(
         "VALIDATION_ERROR",
@@ -159,34 +183,53 @@ export async function handleSellerAnalysis(auth: AuthContext, body: any) {
         approvedRevision: null,
         approvedReportVersion: null,
         updatedAt: now,
-        messages: [...doc.messages, {
-          id: crypto.randomUUID(),
-          role: "ADMIN",
-          content: feedback || "최초 분석 요청",
-          revision: doc.revision + 1,
-          reportVersion: null,
-          createdAt: now,
-        }],
+        messages: continuation
+          ? doc.messages.map((m, i) =>
+            i === doc.messages.length - 1
+              ? { ...m, continuation: undefined }
+              : m
+          )
+          : [...doc.messages, {
+            id: crypto.randomUUID(),
+            role: "ADMIN",
+            content: feedback || "최초 분석 요청",
+            revision: doc.revision + 1,
+            reportVersion: null,
+            createdAt: now,
+          }],
       },
       doc.revision,
       auth.actorId,
     );
-    const attempts: SellerAnalysisAttempt[] = [];
+    const attempts: SellerAnalysisAttempt[] = continuation
+      ? [...(doc.messages.at(-1)?.attempts || [])]
+      : [];
     try {
       const setting = await getOperationalAiSetting();
       if (!setting) {
         throw new Error("관리자 AI 설정을 먼저 운영에 적용해 주세요.");
       }
+      const settingVersion = setting.applied_version ?? setting.version ?? 0;
+      if (
+        continuation && (continuation.settingId !== setting.id ||
+          continuation.settingVersion !== settingVersion)
+      ) {
+        throw new Error(
+          "분석 중 운영 AI 설정이 변경되었습니다. 다시 분석해 주세요.",
+        );
+      }
       const { data: secrets, error: secretError } = await admin.from(
         "ai_secrets",
       ).select("slot_number,secret_value").eq("setting_id", setting.id);
       if (secretError) throw secretError;
-      const primary = getPrimaryAiSlot(setting);
-      const slots = setting.auto_fallback_enabled === false
-        ? [primary]
-        : [primary, primary === 1 ? 2 : 1];
+      // This request's choice does not change the globally applied priority.
+      const primary = continuation?.requestedSlot ?? requestedSlot ??
+        getPrimaryAiSlot(setting);
+      const slot = continuation?.nextSlot ?? primary;
       let report = null;
-      for (const slot of slots) {
+      // One 120-second AI attempt per HTTP request stays within the hosted
+      // request limit. The client resumes a persisted handoff for fallback.
+      {
         const config = setting[`slot${slot}`];
         const attempt: SellerAnalysisAttempt = {
           slot: slot as 1 | 2,
@@ -202,9 +245,7 @@ export async function handleSellerAnalysis(auth: AuthContext, body: any) {
           {
             slotConfig: {
               ...config,
-              timeoutSeconds: slot === primary
-                ? 4
-                : (config.type === "LOCAL" ? 20 : 15),
+              timeoutSeconds: SELLER_ANALYSIS_SLOT_TIMEOUT_SECONDS,
             },
             secretValue: secrets?.find((s) => s.slot_number === slot)
               ?.secret_value,
@@ -223,9 +264,39 @@ export async function handleSellerAnalysis(auth: AuthContext, body: any) {
         }
         attempt.completedAt = new Date().toISOString();
         attempts.push(attempt);
-        if (report) break;
       }
       if (!report) {
+        if (!continuation && setting.auto_fallback_enabled !== false) {
+          const revision = doc.revision + 1;
+          doc = await save(
+            {
+              ...doc,
+              revision,
+              updatedAt: new Date().toISOString(),
+              lastError: null,
+              messages: [...doc.messages, {
+                id: crypto.randomUUID(),
+                role: "SYSTEM",
+                content:
+                  `${primary}번슬롯 분석 실패 · 대체 슬롯으로 이어서 분석합니다.`,
+                revision,
+                reportVersion: null,
+                attempts,
+                continuation: {
+                  requestedSlot: primary,
+                  nextSlot: primary === 1 ? 2 : 1,
+                  settingId: setting.id,
+                  settingVersion,
+                  feedback,
+                },
+                createdAt: new Date().toISOString(),
+              }],
+            },
+            doc.revision,
+            auth.actorId,
+          );
+          return successResponse({ analysis: doc });
+        }
         throw new Error(
           attempts.at(-1)?.error || "모든 AI 분석에 실패했습니다.",
         );
@@ -242,6 +313,7 @@ export async function handleSellerAnalysis(auth: AuthContext, body: any) {
           updatedAt: new Date().toISOString(),
           reports: [...doc.reports, {
             version,
+            requestedSlot: primary,
             inputRevision: nextRevision,
             input: doc.input,
             report,

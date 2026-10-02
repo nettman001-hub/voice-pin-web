@@ -6,6 +6,10 @@ import type {
 } from "./salesWorkflow";
 import type { CommentRecord } from "./comment";
 
+export type SellerAnalysisSlot = 1 | 2;
+export const SELLER_ANALYSIS_SLOT_TIMEOUT_SECONDS = 120;
+export const SELLER_ANALYSIS_BUSY_TIMEOUT_MS = 5 * 60 * 1000;
+
 export interface SellerAnalysisInput {
   sellerName: string;
   sellerUserId: string | null;
@@ -61,6 +65,7 @@ export interface SellerAnalysisAttempt {
 
 export interface SellerAnalysisReportVersion {
   version: number;
+  requestedSlot?: SellerAnalysisSlot;
   inputRevision: number;
   input: SellerAnalysisInput;
   report: SellerAnalysisReport;
@@ -80,6 +85,14 @@ export interface SellerAnalysisMessage {
   revision: number;
   reportVersion: number | null;
   attempts?: SellerAnalysisAttempt[];
+  /** Server-created handoff to a second request; excluded from list summaries. */
+  continuation?: {
+    requestedSlot: SellerAnalysisSlot;
+    nextSlot: SellerAnalysisSlot;
+    settingId: string;
+    settingVersion: number;
+    feedback: string;
+  };
   createdAt: string;
 }
 
