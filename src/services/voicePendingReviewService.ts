@@ -4,12 +4,13 @@ import type { AiResolutionRequest, AiResolutionResult, AiPurchaseWindow, AiUtter
 import type { AiVerificationMeta } from '../types/pendingSale.ts';
 import { extractSaleFromTranscript, findExplicitPriceTranscript } from './salesExtractor.ts';
 import { extractSpeechPrice } from './priceEvidence.ts';
-import { getPurchaseRequests, type PurchaseRequest } from './purchaseFirstSales.ts';
+import { getPurchaseRequests, commentWithdrawsPurchase, type PurchaseRequest } from './purchaseFirstSales.ts';
+import { isWorkflowAllocation, extractCommentOrderCode } from './salesWorkflowEngine.ts';
 
 export const VOICE_REVIEW_WINDOW = { BEFORE_MS: 30_000, AFTER_MS: 70_000 } as const;
 export type ReviewTranscript = SttTranscriptLog & { sessionId?: string };
 type ReviewSale = Pick<SaleRecord, 'sessionId' | 'recognizedAt' | 'rawTranscript'>
-  & Partial<Pick<SaleRecord, 'purchaseRequestId' | 'sourceCommentIds'>>;
+  & Partial<Pick<SaleRecord, 'purchaseRequestId' | 'sourceCommentIds' | 'workflowEvidence'>>;
 
 function dedupeReviewComments(comments: CommentRecord[]): CommentRecord[] {
   const byMessage = new Map<string, CommentRecord>();
@@ -24,7 +25,16 @@ function dedupeReviewComments(comments: CommentRecord[]): CommentRecord[] {
 export function getVoiceReviewRequests(sale: ReviewSale,
   comments: CommentRecord[]): PurchaseRequest[] {
   const when = Date.parse(sale.recognizedAt);
-  const requests = getPurchaseRequests(dedupeReviewComments(comments), sale.sessionId).filter((request) => {
+  const records=dedupeReviewComments(comments);
+  const numbered:PurchaseRequest[] = sale.workflowEvidence?.orderCode && sale.workflowEvidence.profileSnapshot?.modules.includes('ORDER_CODE')
+    ? records.filter(c=>c.sessionId===sale.sessionId && !commentWithdrawsPurchase(c.content) && extractCommentOrderCode(c.content)===sale.workflowEvidence!.orderCode)
+      .map(c=>({id:`${c.sessionId}:${c.platformMessageId || c.id}`,sessionId:c.sessionId,commentId:c.id,nickname:c.nickname,
+        capturedAt:c.capturedAt,content:c.content,buyerId:c.buyerId,accountKey:c.buyerId || c.platformUserId || c.uniqueId || `unresolved:${c.id}`,
+        conditional:/있으면|가능하면|맞으면/u.test(c.content),requiresReview:/옵션|사이즈|빨강|파랑|검정|\d+\s*개/u.test(c.content),
+        withdrawn:records.some(later=>later.sessionId===c.sessionId && later.capturedAt>c.capturedAt && later.capturedAt<=sale.recognizedAt
+          && Boolean((c.buyerId&&later.buyerId===c.buyerId)||(c.platformUserId&&later.platformUserId===c.platformUserId)||(c.uniqueId&&later.uniqueId===c.uniqueId))
+          && commentWithdrawsPurchase(later.content))})) : [];
+  const requests = [...new Map([...getPurchaseRequests(records, sale.sessionId),...numbered].map(r=>[r.id,r])).values()].filter((request) => {
     const age = when - Date.parse(request.capturedAt);
     return !request.withdrawn && age >= -VOICE_REVIEW_WINDOW.BEFORE_MS && age <= VOICE_REVIEW_WINDOW.AFTER_MS;
   });
@@ -70,7 +80,7 @@ export function getVoiceReviewUtterances(sale: ReviewSale, comments: CommentReco
 
 export function shouldReviewVoiceSale(sale: SaleRecord, comments: CommentRecord[]): boolean {
   return sale.source === 'WEB_VOICE' && sale.status === '보류' && sale.recordState !== 'CANCELLED'
-    && Boolean(extractSaleFromTranscript(sale.rawTranscript)) && getVoiceReviewRequests(sale, comments).length > 0;
+    && Boolean(sale.workflowEvidence || extractSaleFromTranscript(sale.rawTranscript)) && getVoiceReviewRequests(sale, comments).length > 0;
 }
 
 export function voiceReviewFingerprint(sale: SaleRecord, comments: CommentRecord[], followingText = '', logs: ReviewTranscript[] = []): string {
@@ -87,6 +97,7 @@ export function buildVoiceReviewRequest(sale: SaleRecord, comments: CommentRecor
     && inWindows(Date.parse(c.capturedAt), purchaseWindows));
   return {
     taskType: 'PENDING_RESOLUTION', workspaceId: '', sessionId: sale.sessionId,
+    workflowProfile: sale.workflowEvidence?.profileSnapshot,
     currentUtterance: sale.rawTranscript,
     priorUtterances: [{ id: `voice:${sale.id}`, text: sale.rawTranscript, timestamp: sale.recognizedAt, speakerRole: 'SELLER' }],
     followingUtterances: followingText ? [{ id: `following:${sale.id}`, text: followingText, speakerRole: 'SELLER' }] : [],
@@ -126,7 +137,8 @@ export function validateVoiceReviewResult(sale: SaleRecord, comments: CommentRec
     || (result.changes?.amount?.quantity || 1) !== 1) {
     return { ...base, resolutionSummary: 'AI 응답의 구매자 닉네임·가격이 모두 필요합니다. 판매자 확인이 필요합니다.' };
   }
-  const allocation = cited.some((u) => extractSaleFromTranscript(u.text)?.intent === 'ALLOCATION');
+  const allocation = cited.some((u) => extractSaleFromTranscript(u.text)?.intent === 'ALLOCATION'
+    || (sale.workflowEvidence?.profileSnapshot && isWorkflowAllocation(u.text,sale.workflowEvidence.profileSnapshot)));
   const priced = cited.some((u) => {
     const extracted = extractSaleFromTranscript(u.text);
     const explicitPrice = findExplicitPriceTranscript(u.text);

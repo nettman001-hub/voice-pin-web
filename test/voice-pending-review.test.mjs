@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildResolutionPrompt } from '../supabase/functions/sales-api/handlers/aiAdapters/common.ts';
+import {DEFAULT_WORKFLOW_PROFILE} from '../src/services/salesWorkflowEngine.ts';
 import { buildVoiceReviewRequest, shouldReviewVoiceSale, validateVoiceReviewResult, voiceReviewFingerprint,
   getVoiceReviewWindows, isVoiceReviewReady, getVoiceReviewUtterances } from '../src/services/voicePendingReviewService.ts';
 
@@ -14,6 +15,17 @@ const result = (overrides = {}) => ({ resolvable: true, targetSaleId: sale.id, a
   execution: { adapterType: 'CLOUD', routingMode: 'SERVER_DIRECT', provider: 'CUSTOM', model: 'test', latencyMs: 10 }, ...overrides });
 const review = (current = sale, comments = [comment()], ai = result(), followingText = '') =>
   validateVoiceReviewResult(current, comments, ai, 2, 'task', voiceReviewFingerprint(current, comments, followingText), followingText);
+
+test('approved numbered workflow comments participate in pending AI review',()=>{
+ const numbered={...sale,rawTranscript:'햇살언니 접수 완료 1.5',workflowEvidence:{decisionId:'decision',orderCode:'1',profileSnapshot:{...DEFAULT_WORKFLOW_PROFILE,confirmationExpressions:['접수 완료']}}};
+ assert.equal(shouldReviewVoiceSale(numbered,[comment('햇살','1번')]),true);
+ assert.equal(shouldReviewVoiceSale({...numbered,workflowEvidence:undefined},[comment('햇살','1번')]),false);
+ const request=buildVoiceReviewRequest(numbered,[comment('햇살','1번')]);
+ assert.equal(request.relevantComments[0].isPurchaseIntent,true);assert.deepEqual(request.workflowProfile,numbered.workflowEvidence.profileSnapshot);
+ assert.equal(review(numbered,[comment('햇살','1번')]).nicknameVerified,true);
+ const cancelled=[comment('햇살','1번'),{...comment('햇살','취소요','cancel'),capturedAt:'2026-10-01T01:00:02Z'}];
+ assert.equal(shouldReviewVoiceSale(numbered,cancelled),false);
+});
 
 test('only plausible pending voice sales with real purchase comments are sent to AI', () => {
   assert.equal(shouldReviewVoiceSale(sale, [comment()]), true);

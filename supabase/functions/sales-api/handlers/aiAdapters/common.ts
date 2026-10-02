@@ -159,6 +159,7 @@ export function buildResolutionPrompt(req: AiResolutionRequest): { systemPrompt:
     saleCandidates: req.saleCandidates || [],
     activeProduct: req.activeProduct || null,
     taskType: req.taskType,
+    ...(req.workflowProfile ? {workflowProfile:req.workflowProfile,workflowInstructions:'승인된 판매방식에 따라 안내된 번호 댓글을 구매 신청으로 읽으세요. 복수 호명을 고려하되 이 판매 건만 검토하세요. 재고 안내가 있을 때만 초과 충돌을 검사하고 재고 미상은 차단 사유가 아닙니다.'} : {}),
     ...(req.purchaseWindows ? { purchaseWindows: req.purchaseWindows, sellerUtterances: req.sellerUtterances || [] } : {}),
   }, null, 2);
 

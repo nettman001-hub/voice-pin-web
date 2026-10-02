@@ -42,6 +42,7 @@ export interface AiSaleCandidate {
 }
 
 export interface AiResolutionRequest {
+  workflowProfile?: import('./salesWorkflow.ts').SalesWorkflowProfile;
   taskId?: string;
   taskType: AiTaskType;
   workspaceId: string;

@@ -4,6 +4,7 @@ import type {
   AiExecutionMeta,
 } from '../../../../../src/types/aiResolution.ts';
 import type { AiSlotConfig } from '../../../../../src/types/aiSettings.ts';
+import type { AiPromptInput, AiPromptResult } from './promptTypes.ts';
 import { safeFetch } from '../aiValidation.ts';
 import { buildResolutionPrompt, parseAndNormalizeAiOutput } from './common.ts';
 import { createConversationTraceRecorder, redactConversationSecrets, type ConversationTraceListener } from './conversationTrace.ts';
@@ -24,6 +25,15 @@ export async function runCloudResolution(
   request: AiResolutionRequest,
   options: CloudAdapterOptions
 ): Promise<AiResolutionResult> {
+  return await runCloudCompletion(request, options) as AiResolutionResult;
+}
+
+export async function runCloudPrompt(request: AiPromptInput, options: CloudAdapterOptions): Promise<AiPromptResult> {
+  const result = await runCloudCompletion(request, options);
+  return 'content' in result ? result : { content: null, error: result.evidenceSummary, execution: result.execution };
+}
+
+async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, options: CloudAdapterOptions): Promise<AiResolutionResult | AiPromptResult> {
   const { slotConfig } = options;
   const startTime = Date.now();
   const provider = slotConfig.provider || 'OPENAI';
@@ -70,7 +80,7 @@ export async function runCloudResolution(
   }
 
   // 2. 프롬프트 구성
-  const { systemPrompt, userPrompt } = buildResolutionPrompt(request);
+  const { systemPrompt, userPrompt } = 'systemPrompt' in request ? request : buildResolutionPrompt(request);
 
   // 3. 공급자별 엔드포인트 및 요청 바디 구성
   let url = (slotConfig.endpointUrl || '').trim();
@@ -88,7 +98,7 @@ export async function runCloudResolution(
       model,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
-      max_tokens: 1024,
+      max_tokens: 'systemPrompt' in request ? 4096 : 1024,
       temperature: 0.1,
     };
   } else if (provider === 'GOOGLE' || (provider as string) === 'GEMINI') {
@@ -104,7 +114,7 @@ export async function runCloudResolution(
       generationConfig: {
         responseMimeType: 'application/json',
         temperature: 0.1,
-        maxOutputTokens: 1024,
+        maxOutputTokens: 'systemPrompt' in request ? 4096 : 1024,
       },
     };
   } else {
@@ -233,6 +243,7 @@ export async function runCloudResolution(
       tokensUsed: tokenStats,
     };
 
+    if ('systemPrompt' in request) return { content: redactConversationSecrets(String(contentToParse), [secretApiKey]), execution: executionMeta };
     return parseAndNormalizeAiOutput(contentToParse, request, executionMeta);
   } catch (err: any) {
     const latencyMs = Date.now() - startTime;

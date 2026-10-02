@@ -4,6 +4,7 @@ import type {
   AiExecutionMeta,
 } from '../../../../../src/types/aiResolution.ts';
 import type { AiSlotConfig } from '../../../../../src/types/aiSettings.ts';
+import type { AiPromptInput, AiPromptResult } from './promptTypes.ts';
 import { validateExternalEndpoint, safeFetch } from '../aiValidation.ts';
 import { buildResolutionPrompt, parseAndNormalizeAiOutput, buildOpenAiChatUrl } from './common.ts';
 import { createConversationTraceRecorder, redactConversationSecrets, type ConversationTraceListener } from './conversationTrace.ts';
@@ -34,6 +35,18 @@ export async function runSelfHostedResolution(
   request: AiResolutionRequest,
   options: SelfHostedAdapterOptions
 ): Promise<AiResolutionResult> {
+  return await runSelfHostedCompletion(request, options) as AiResolutionResult;
+}
+
+export async function runSelfHostedPrompt(request: AiPromptInput, options: SelfHostedAdapterOptions): Promise<AiPromptResult> {
+  if (options.slotConfig.routingMode === 'PC_HELPER' && !options.helperDispatcher) {
+    return { content: null, error: '서버 분석에서 PC 도우미 연결을 사용할 수 없습니다. 대체 AI로 전환합니다.' };
+  }
+  const result = await runSelfHostedCompletion(request, options);
+  return 'content' in result ? result : { content: null, error: result.evidenceSummary, execution: result.execution };
+}
+
+async function runSelfHostedCompletion(request: AiResolutionRequest | AiPromptInput, options: SelfHostedAdapterOptions): Promise<AiResolutionResult | AiPromptResult> {
   const { slotConfig, secretValue, helperDispatcher, allowInsecureHttpForExternal } = options;
   const startTime = Date.now();
 
@@ -75,7 +88,7 @@ export async function runSelfHostedResolution(
   }
 
   // 2. 프롬프트 구성
-  const { systemPrompt, userPrompt } = buildResolutionPrompt(request);
+  const { systemPrompt, userPrompt } = 'systemPrompt' in request ? request : buildResolutionPrompt(request);
 
   // 3. 엔진별 API 엔드포인트 및 페이로드 구성 (Ollama vs vLLM/OpenAI 호환)
   let endpoint = slotConfig.endpointUrl.trim();
@@ -288,6 +301,7 @@ export async function runSelfHostedResolution(
       tokensUsed: tokenStats,
     };
 
+    if ('systemPrompt' in request) return { content: redactConversationSecrets(String(contentToParse), [secretValue || '']), execution: executionMeta };
     return parseAndNormalizeAiOutput(contentToParse, request, executionMeta);
   } catch (err: any) {
     const latencyMs = Date.now() - startTime;

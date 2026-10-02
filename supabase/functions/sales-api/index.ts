@@ -45,6 +45,8 @@ import {
   handleGetProductSales,
 } from './handlers/sales.ts'
 import { handleCommitVoiceSale } from './handlers/voiceSales.ts'
+import { handleSellerAnalysis } from './handlers/sellerAnalysis.ts'
+import { handleSellerWorkflow } from './handlers/sellerWorkflow.ts'
 
 import {
   handleClaimPrintJobs,
@@ -126,6 +128,25 @@ serve(async (req: Request) => {
     }
 
     switch (action) {
+      case 'seller-analysis-list':
+      case 'seller-analysis-get':
+      case 'seller-analysis-save':
+      case 'seller-analysis-analyze':
+      case 'seller-analysis-verify':
+      case 'seller-analysis-approve':
+        return await handleSellerAnalysis(auth, body)
+      case 'seller-workflow-current':
+        requireCapability(body.sessionId ? 'SALES_WRITE' : 'SALES_READ')
+        return await handleSellerWorkflow(auth, body)
+      case 'seller-workflow-observe':
+        requireCapability('SALES_WRITE')
+        return await handleSellerWorkflow(auth, body)
+      case 'seller-workflow-state':
+      case 'seller-workflow-deploy':
+      case 'seller-workflow-review-shadow':
+      case 'seller-workflow-activate':
+      case 'seller-workflow-rollback':
+        return await handleSellerWorkflow(auth, body)
       // Sessions & Bootstrap
       case 'get-bootstrap':
         requireCapability('SALES_READ')

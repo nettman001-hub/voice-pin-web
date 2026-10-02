@@ -23,12 +23,16 @@ export function extractSpeechPrice(text: string): SpeechPriceEvidence | null {
     const after = text.slice(offset + match[0].length);
     const before = text.slice(Math.max(0, offset - 10), offset);
     if (/^\s*(?:월|일|시|분|초|미터|센티|cm|개|번|사이즈|버전)/iu.test(after)
-      || /(?:번호|뒷자리|사이즈|길이|높이|폭)\s*$/u.test(before)) continue;
+      || /(?:번호|뒷자리|사이즈|길이|높이|폭|가단|가슴\s*단면|총장|기장)(?:은|는|이|가)?\s*[:：]?\s*$/u.test(before)) continue;
     const [whole, fraction] = [match[1], match[2]];
     const amount = Number(whole) * 10_000 + Number(fraction) * (fraction.length === 1 ? 1000 : 100);
     add(match[0], amount, 'DECIMAL_MAN', offset);
   }
   for (const match of text.matchAll(/([영공일이삼사오육칠팔구])\s*점\s*([영공일이삼사오육칠팔구])/gu)) {
+    const before=text.slice(Math.max(0,match.index-10),match.index);
+    const after=text.slice(match.index+match[0].length);
+    if(/(?:번호|뒷자리|사이즈|길이|높이|폭|가단|가슴\s*단면|총장|기장)(?:은|는|이|가)?\s*[:：]?\s*$/u.test(before)
+      || /^\s*(?:월|일|시|분|초|미터|센티|cm|개|번|사이즈|버전)/iu.test(after)) continue;
     const amount = KOREAN_DIGITS[match[1]] * 10_000 + KOREAN_DIGITS[match[2]] * 1000;
     add(match[0], amount, 'DECIMAL_MAN', match.index);
   }

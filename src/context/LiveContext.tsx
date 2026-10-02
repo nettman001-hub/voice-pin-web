@@ -40,6 +40,9 @@ import { getVoiceReviewRequests, shouldReviewVoiceSale, voiceReviewFingerprint, 
 import { decideSttSessionRotation, STT_ROTATION_POLICY } from '../services/sttSessionRotationService';
 import type { AudioCaptureDiagnostics } from '../services/audioCaptureService';
 import type { SttStreamDiagnostics } from '../services/deepgramService';
+import { sellerAnalysisApi } from '../services/sellerAnalysisApi';
+import { replaySalesWorkflow } from '../services/salesWorkflowEngine';
+import type { AppliedSalesWorkflow } from '../types/salesWorkflow';
 
 const SONIOX_SALE_TIMEOUT_MS = 10000;
 const SONIOX_BUFFER_LIMIT = 600;
@@ -133,6 +136,8 @@ interface LiveContextType {
   sttEngineStatus: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
   sttEngineMessage: string;
   pipelineDiagnostics: { audio: AudioCaptureDiagnostics; stt: SttStreamDiagnostics; elapsedSeconds: number } | null;
+  salesWorkflow: AppliedSalesWorkflow | null;
+  workflowProcessingError: string;
   isScreenShareConnected: boolean;
   hasScreenShareAudio: boolean;
   startListening: (mode?: 'TAB_AUDIO' | 'MIC', salesSessionId?: string) => Promise<void>;
@@ -168,6 +173,22 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [transcriptLogs, setTranscriptLogs] = useState<SttTranscriptLog[]>([]);
   const [totalSessionTranscriptCount, setTotalSessionTranscriptCount] = useState<number>(0);
   const allSessionTranscriptsRef = useRef<SttTranscriptLog[]>([]);
+  const appliedWorkflowRef = useRef<AppliedSalesWorkflow | null>(null);
+  const [workflowProcessingError,setWorkflowProcessingError]=useState('');
+  const workflowDecisionsRef = useRef(new Set<string>());
+  const workflowFingerprintsRef = useRef(new Map<string,string>());
+  const workflowReplayRef = useRef<(()=>void)|null>(null);
+  const currentWorkflowSalesRef = useRef(sales);
+  currentWorkflowSalesRef.current = sales;
+  const workflowQueueRef = useRef(Promise.resolve());
+  const workflowObservationAtRef = useRef(0);
+  useEffect(() => {
+    if (!isListening) return;
+    const replay = () => workflowReplayRef.current?.();
+    const timer = window.setInterval(replay, 5000);
+    window.addEventListener('voicecap_purchase_requests_updated', replay);
+    return () => {window.clearInterval(timer);window.removeEventListener('voicecap_purchase_requests_updated',replay);};
+  }, [isListening]);
   const [recentCaptures, setRecentCaptures] = useState<CaptureItem[]>([]);
   const [sttEngineStatus, setSttEngineStatus] = useState<'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR'>('DISCONNECTED');
   const [sttEngineMessage, setSttEngineMessage] = useState<string>('대기 중');
@@ -281,6 +302,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const nextOwner = workspaceId || user?.id || 'local';
     if (transcriptWorkspaceIdRef.current !== nextOwner) {
+      appliedWorkflowRef.current=null;workflowReplayRef.current=null;
+      workflowDecisionsRef.current.clear();workflowFingerprintsRef.current.clear();
       const sessionId = currentSessionIdRef.current;
       const previousLogs = sessionTranscriptsRef.current.get(sessionId) || allSessionTranscriptsRef.current;
       if (previousLogs.length > 0) storageService.saveSessionTranscripts(transcriptWorkspaceIdRef.current, sessionId, previousLogs);
@@ -907,7 +930,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const claimed = new Set(sales.filter((sale) => sale.status !== '보류').map((sale) => sale.purchaseRequestId)
         .filter((id): id is string => Boolean(id)));
       for (const sale of sales) {
-        if (sale.source !== 'WEB_VOICE' || sale.status !== '보류' || sale.amount <= 0
+        if (sale.workflowEvidence || sale.source !== 'WEB_VOICE' || sale.status !== '보류' || sale.amount <= 0
           || sale.purchaseRequestId || !sale.sessionId) continue;
         const extracted = extractSaleFromTranscript(sale.rawTranscript);
         if (!extracted || extracted.intent !== 'ALLOCATION' || !extracted.buyerNickname || extracted.amount !== sale.amount) continue;
@@ -1007,6 +1030,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     /** Soniox corrections/products are handled once on completed utterances. */
     skipCorrections?: boolean;
     skipProductCommands?: boolean;
+    workflowFinal?: boolean;
   }
 
   const clearSonioxSaleTimeout = () => {
@@ -1096,6 +1120,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       requiredUserId,
       isFinalized
     );
+    if (appliedWorkflowRef.current?.mode === 'ACTIVE') return;
 
     sonioxSaleBufferRef.current = `${sonioxSaleBufferRef.current}${confirmedTextDelta}`;
     if (sonioxSaleBufferRef.current.length > SONIOX_BUFFER_LIMIT) {
@@ -1210,7 +1235,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       { text: data.text, isFinal: true, confidence: data.confidence },
       requiredListeningGeneration,
       requiredUserId,
-      { skipCommands: true, skipSale: true, skipCapture: true }
+      { skipCommands: true, skipSale: true, skipCapture: true, workflowFinal: true }
     );
   }
 
@@ -1494,8 +1519,9 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const combinedText = previousFragment && Date.now() - previousFragment.at <= 3_000
               && !extractSaleFromTranscript(previousFragment.text, activeKeywords)
               ? `${previousFragment.text} ${fullText}` : fullText;
-            const currentSaleResult = processingOptions.skipSale ? null : extractSaleFromTranscript(fullText, activeKeywords);
-            const combinedSaleResult = !processingOptions.skipSale && combinedText !== fullText
+            const workflowActive = appliedWorkflowRef.current?.mode === 'ACTIVE';
+            const currentSaleResult = processingOptions.skipSale || workflowActive ? null : extractSaleFromTranscript(fullText, activeKeywords);
+            const combinedSaleResult = !processingOptions.skipSale && !workflowActive && combinedText !== fullText
               ? extractSaleFromTranscript(combinedText, activeKeywords) : null;
             const saleResult = currentSaleResult?.isPending && combinedSaleResult && !combinedSaleResult.isPending
               ? combinedSaleResult : currentSaleResult || combinedSaleResult;
@@ -1631,6 +1657,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 전사 로그 적재
     const newLog: SttTranscriptLog = {
+      workflowEligible: processingOptions.workflowFinal || Boolean(data.provider),
       id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       timestamp: nowTime,
       recognizedAt: new Date().toISOString(),
@@ -1652,6 +1679,60 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setTotalSessionTranscriptCount(nextSessionLogs.length);
     setTranscriptLogs((prev) => [newLog, ...prev.slice(0, 299)]);
     scheduleTranscriptPersistence();
+    const workflow = appliedWorkflowRef.current;
+    if (workflow && newLog.workflowEligible) {
+      const generation = authBoundaryGenerationRef.current;
+      const owner = workspaceId;
+      const sessionId = transcriptSessionId;
+      const enqueueReplay = () => { workflowQueueRef.current = workflowQueueRef.current.then(async () => {
+        if (generation !== authBoundaryGenerationRef.current || owner !== transcriptWorkspaceIdRef.current) return;
+        const local = storageService.getCommentRecords(owner).filter(c => c.sessionId === sessionId);
+        const feed = (productSalesRef.current.feed?.comments || []).filter(c => c.sessionId === sessionId).map(c => ({
+          id:c.id,sessionId:c.sessionId,platformMessageId:c.platformMessageId,buyerId:c.buyerId,
+          nickname:c.nicknameSnapshot,content:c.content,capturedAt:c.capturedAt,
+        }));
+        const comments = [...new Map([...local,...feed].map(c => [c.platformMessageId || c.id,c])).values()];
+        const logs=sessionTranscriptsRef.current.get(sessionId) || [];
+        const transcripts = logs.filter(l => l.recognizedAt && l.workflowEligible !== false).map(l => ({id:l.id,text:l.text,recognizedAt:l.recognizedAt!,isFinal:l.isFinal}));
+        if (workflow.mode === 'SHADOW') {
+          if (Date.now()-workflowObservationAtRef.current<30_000) return;
+          workflowObservationAtRef.current=Date.now();
+          if (await syncSessionTranscriptsToCloud(sessionId)) await sellerAnalysisApi.observe(sessionId);
+          return;
+        }
+        const decisions = replaySalesWorkflow({sessionId,profile:workflow.profile,comments,transcripts});
+        const pending = decisions.filter(d => workflowFingerprintsRef.current.get(d.id)!==JSON.stringify(d)
+          && !currentWorkflowSalesRef.current.some(s => s.status!=='보류' && (s.workflowEvidence?.decisionId === d.id || (d.requestId && s.purchaseRequestId === d.requestId))));
+        if (!pending.length) return;
+        // Upload original speech before the server independently replays it.
+        if (isRemoteAuth && !await syncSessionTranscriptsToCloud(sessionId)) throw new Error('판매방식 검증을 위한 발화 저장을 기다립니다.');
+        if (generation !== authBoundaryGenerationRef.current || owner !== transcriptWorkspaceIdRef.current) return;
+        for (const d of pending) {
+          if (workflowFingerprintsRef.current.get(d.id)===JSON.stringify(d)) continue;
+          const data: Omit<SaleRecord,'id'> = {sessionId,buyerNickname:d.nickname,buyerId:d.buyerId,purchaseRequestId:d.requestId,
+            sourceCommentIds:d.commentId?[d.commentId]:[],amount:d.amount,unitPrice:d.unitPrice,quantity:d.quantity,
+            recognizedAt:d.recognizedAt,rawTranscript:d.rawTranscript,status:d.status==='CONFIRMED'?'자동저장':'보류',
+            source:'WEB_VOICE',productCode:d.orderCode,productName:d.orderCode?`방송 주문번호 ${d.orderCode}`:'방송 상품',
+            note:d.reasons.length?d.reasons.join(' · '):`판매방식 버전 ${workflow.version} · 댓글 닉네임 검증`,
+            pendingReasons:d.reasons.map(message=>({code:message.includes('가격')?'MISSING_AMOUNT'
+              :message.includes('댓글')?'DELAYED_COMMENT':'MULTIPLE_CANDIDATES_CONFLICT',message,resolved:false})),
+            workflowEvidence:{decisionId:d.id,profileId:workflow.id,profileVersion:workflow.version,offerId:d.offerId,
+              orderCode:d.orderCode,profileSnapshot:workflow.profile,
+              transcripts:transcripts.filter(t=>t.id===d.transcriptId || t.id===d.priceTranscriptId)},
+          };
+          const existing=currentWorkflowSalesRef.current.find(s=>s.workflowEvidence?.decisionId===d.id&&s.status==='보류');
+          if(existing) updateSale({...existing,...data});else addSale(data);
+          workflowFingerprintsRef.current.set(d.id,JSON.stringify(d));
+        }
+        setWorkflowProcessingError('');
+      }).catch(e => {
+        console.error('[SalesWorkflow] 판매방식 처리 실패:', e);
+        if(generation===authBoundaryGenerationRef.current&&owner===transcriptWorkspaceIdRef.current)
+          setWorkflowProcessingError(e instanceof Error?e.message:'판매방식 처리 결과를 저장하지 못했습니다.');
+      }); };
+      workflowReplayRef.current=enqueueReplay;
+      enqueueReplay();
+    }
   }
 
   // 오늘 방송 전체 전사 로그 파일 다운로드 (.txt / .csv)
@@ -1741,6 +1822,12 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     resetSonioxBusinessAccumulator();
 
     try {
+      const newSessionId = salesSessionId || generateSessionId();
+      appliedWorkflowRef.current = isRemoteAuth ? await sellerAnalysisApi.currentWorkflow(salesSessionId) : null;
+      setWorkflowProcessingError('');
+      workflowDecisionsRef.current.clear();
+      workflowFingerprintsRef.current.clear();workflowReplayRef.current=null;
+      workflowObservationAtRef.current = 0;
       if (
         mode === 'TAB_AUDIO' &&
         screenCaptureService.getActiveStream() &&
@@ -1755,7 +1842,6 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const previousMode = activeAudioSourceModeRef.current;
       activeAudioSourceModeRef.current = mode;
       isListeningRef.current = true;
-      const newSessionId = salesSessionId || generateSessionId();
       const isSameSession = newSessionId === currentSessionIdRef.current;
 
       // 회차를 바꾸기 전에 직전 회차 전체 로그를 저장한다. 이어가기라면 같은 회차의
@@ -2125,7 +2211,12 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const stopListening = useCallback(() => {
     persistCurrentSessionTranscripts();
     // 방송 종료 시 전체 멘트 이력을 Supabase 클라우드에 비동기 자동 저장
-    void syncSessionTranscriptsToCloud();
+    const stoppedWorkflow=appliedWorkflowRef.current;
+    const stoppedSession=currentSessionIdRef.current;
+    void syncSessionTranscriptsToCloud().then(saved=>{
+      if(saved&&stoppedWorkflow?.mode==='SHADOW')return sellerAnalysisApi.observe(stoppedSession);
+    }).catch(e=>console.error('[SalesWorkflow] 관찰 저장 실패:',e));
+    workflowReplayRef.current=null;
     listeningGenerationRef.current += 1;
     activeListeningUserIdRef.current = null;
     isListeningRef.current = false;
@@ -2276,6 +2367,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         sttEngineStatus,
         sttEngineMessage,
         pipelineDiagnostics,
+        salesWorkflow: appliedWorkflowRef.current,
+        workflowProcessingError,
         isScreenShareConnected: screenConnection.isConnected,
         hasScreenShareAudio: screenConnection.hasAudio,
         startListening,

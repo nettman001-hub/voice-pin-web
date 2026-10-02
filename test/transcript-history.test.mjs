@@ -124,7 +124,8 @@ function liveCallback(name, globals) {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   });
   const module = { exports: {} };
-  vm.runInNewContext(outputText, { module, console: { log() {}, warn() {} }, ...globals });
+  vm.runInNewContext(outputText, { module, console: { log() {}, warn() {} },
+    appliedWorkflowRef:{current:null},workflowReplayRef:{current:null},workflowDecisionsRef:{current:new Set()},workflowFingerprintsRef:{current:new Map()},...globals });
   return module.exports;
 }
 

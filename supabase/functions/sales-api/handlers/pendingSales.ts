@@ -5,6 +5,7 @@ import type {
   PendingEvidenceSnapshot,
   SaleHistoryRecord,
   BatchConfirmResult,
+  AiVerificationMeta,
 } from '../../../../src/types/pendingSale.ts';
 import type { SaleRecord } from '../../../../src/types/live.ts';
 import {
@@ -134,7 +135,7 @@ export async function handleResolvePendingSale(
 
     const validation = validateAiResolutionForSale(aiResult, sale, {
       sessionComments: normalizedComments,
-      registeredBuyers: buyers || [],
+      sessionBuyers: buyers || [],
       sessionProducts: products || [],
     });
 
@@ -156,12 +157,9 @@ export async function handleResolvePendingSale(
     effectiveResolutionDetails = effectiveResolutionDetails || aiResult.evidenceSummary || 'AI 분석 및 서버 교차 검증 통과';
 
     verifiedAiMeta = {
-      verified: true,
-      adapterType: aiResult.execution?.adapterType || 'CLOUD',
-      verifiedAt: new Date().toISOString(),
-      evidenceIds: aiResult.evidenceIds || [],
-      evidenceSummary: aiResult.evidenceSummary || '서버 교차 검증 완료',
-      checksPassed: validation.checksPassed || [],
+      aiStatus: 'RESOLVED',
+      validatedAt: new Date().toISOString(),
+      resolutionSummary: aiResult.evidenceSummary || '서버 교차 검증 완료',
     };
   }
 
@@ -485,7 +483,8 @@ export async function handleTriggerPendingAiResolution(
     sale,
     comments: normalizedComments,
     buyers: buyers || [],
-    activeProduct: products?.find((p) => p.id === sale.product_id || p.product_code === sale.product_code_snapshot),
+    activeProduct: products?.map((p) => ({id:p.id,productCode:p.product_code,name:p.name,unitPrice:p.unit_price}))
+      .find((p) => p.id === sale.product_id || p.productCode === sale.product_code_snapshot),
     sessionProducts: products || [],
     followUpUtterance,
   });

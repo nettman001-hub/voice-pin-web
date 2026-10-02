@@ -7,6 +7,7 @@ release/
 dist/
 .git/
 .vercel/
+supabase/.temp/
 
 # 로컬 비밀값과 개발용 환경 파일
 eulerstream_key.txt

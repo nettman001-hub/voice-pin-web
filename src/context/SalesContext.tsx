@@ -299,7 +299,13 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         && previous.purchaseRequestId === updated.purchaseRequestId && previous.status === updated.status;
       const lateCommentLinked = sameEvidence && previous.status === '보류'
         && updated.status === '자동저장' && Boolean(updated.purchaseRequestId);
-      if (!metadataOnly && !lateCommentLinked) {
+      const workflowContinuation = previous.status === '보류' && Boolean(previous.workflowEvidence)
+        && previous.sessionId === updated.sessionId && previous.recognizedAt === updated.recognizedAt
+        && previous.workflowEvidence?.decisionId === updated.workflowEvidence?.decisionId
+        && previous.workflowEvidence?.profileId === updated.workflowEvidence?.profileId
+        && previous.workflowEvidence?.profileVersion === updated.workflowEvidence?.profileVersion
+        && (updated.status === '보류' || (updated.status === '자동저장' && Boolean(updated.purchaseRequestId)));
+      if (!metadataOnly && !lateCommentLinked && !workflowContinuation) {
         setSyncError('음성 판매의 서버 저장 확인 전에는 구매자·가격을 수정할 수 없습니다.');
         return;
       }

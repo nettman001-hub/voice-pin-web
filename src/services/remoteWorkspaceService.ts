@@ -68,6 +68,7 @@ const mapSale = async (row: Row): Promise<SaleRecord> => {
     quantity: Number(row.quantity || 1),
     unitPrice: Number(row.unit_price ?? row.amount ?? 0),
     purchaseRequestId: row.purchase_request_id || undefined,
+    workflowEvidence: row.workflow_evidence || undefined,
     sourceCommentIds: Array.isArray(row.source_comment_ids) ? row.source_comment_ids : [],
     pendingReasons: Array.isArray(row.pending_reasons) ? row.pending_reasons : [],
     evidenceSnapshot: row.evidence_snapshot || undefined,
@@ -107,6 +108,7 @@ const toSaleRow = async (workspaceId: string, sale: SaleRecord) => ({
   buyer_nickname: sale.buyerNickname,
   buyer_id: sale.buyerId || null,
   purchase_request_id: sale.purchaseRequestId || null,
+  workflow_evidence: sale.workflowEvidence || null,
   source_comment_ids: sale.sourceCommentIds || [],
   pending_reasons: sale.pendingReasons || [],
   evidence_snapshot: sale.evidenceSnapshot || null,
@@ -558,7 +560,8 @@ export const remoteWorkspaceService = {
         sale: {
           id: sale.id, sessionId: sale.sessionId, purchaseRequestId: sale.purchaseRequestId,
           productId: sale.productId, productCode: sale.productCode, productName: sale.productName,
-          amount: sale.amount, unitPrice: sale.unitPrice || 0,
+          amount: sale.amount, unitPrice: sale.unitPrice || 0, quantity: sale.quantity || 1,
+          workflowEvidence: sale.workflowEvidence,
           rawTranscript: sale.rawTranscript, recognizedAt: sale.recognizedAt,
         },
       } });

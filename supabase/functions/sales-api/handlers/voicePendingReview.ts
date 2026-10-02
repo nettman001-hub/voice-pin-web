@@ -4,6 +4,8 @@ import { buildVoiceReviewRequest, shouldReviewVoiceSale, validateVoiceReviewResu
   isVoiceReviewReady, getVoiceReviewWindows, type ReviewTranscript } from '../../../../src/services/voicePendingReviewService.ts';
 import { handleCreateAiTask, handleProcessAiTask } from './aiTasks.ts';
 import { getOperationalAiSetting } from './aiOperationalSettings.ts';
+import { getWorkflowEvents } from './sellerWorkflow.ts';
+import { replaySalesWorkflow } from '../../../../src/services/salesWorkflowEngine.ts';
 
 export async function handleReviewVoicePendingSale(workspaceId: string, actorId: string, auth: AuthContext, row: any, body: any) {
   const sale: SaleRecord = {
@@ -12,7 +14,19 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
     status: row.status, source: row.source, revision: row.revision || 1, recordState: row.record_state,
     productCode: row.product_code_snapshot, quantity: row.quantity, aiVerification: row.ai_verification,
     purchaseRequestId: row.purchase_request_id, sourceCommentIds: row.source_comment_ids || [],
+    workflowEvidence: row.workflow_evidence,
   };
+  if(sale.workflowEvidence){
+    const {data:ws,error:we}=await admin.from('workspaces').select('owner_id').eq('id',workspaceId).single();
+    if(we) throw we;
+    const {data:profile,error:pe}=await admin.from('seller_workflow_profiles').select('*').eq('id',sale.workflowEvidence.profileId).eq('seller_user_id',ws.owner_id).maybeSingle();
+    if(pe) throw pe;
+    if(!profile) return errorResponse('PROFILE_UNVERIFIED','판매방식 설정을 확인할 수 없습니다.',409);
+    const events=await getWorkflowEvents(workspaceId,sale.sessionId,{profile:profile.profile,endAt:new Date(Date.parse(sale.recognizedAt)+70_000).toISOString()});
+    const decision=replaySalesWorkflow({sessionId:sale.sessionId,profile:profile.profile,...events}).find(d=>d.id===sale.workflowEvidence!.decisionId);
+    if(!decision) return errorResponse('WORKFLOW_EVIDENCE_UNVERIFIED','검토할 원본 발화를 확인할 수 없습니다.',409);
+    sale.workflowEvidence={...sale.workflowEvidence,orderCode:decision.orderCode,profileSnapshot:profile.profile};
+  }
   const when = Date.parse(sale.recognizedAt);
   if (!Number.isFinite(when)) return errorResponse('VALIDATION_ERROR', '판매 발화 시각이 유효하지 않습니다.', 400);
   const { data: rows, count, error } = await admin.from('live_comments')

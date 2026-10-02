@@ -8,6 +8,7 @@ import * as corrections from '../src/services/voiceCorrectionService.ts';
 import { extractSaleFromTranscript, parseKoreanAmount } from '../src/services/salesExtractor.ts';
 import { parseVoiceCommand } from '../src/services/voiceCommandParser.ts';
 import { splitTranscriptClauses, isQuestionUtterance } from '../src/services/voiceUtteranceService.ts';
+import {replaySalesWorkflow,DEFAULT_WORKFLOW_PROFILE} from '../src/services/salesWorkflowEngine.ts';
 
 // Execute the real live callbacks with controlled storage/audio/cloud boundaries.
 const source = fs.readFileSync(new URL('../src/context/LiveContext.tsx', import.meta.url), 'utf8');
@@ -38,18 +39,24 @@ const pending = (candidateSaleIds = ['sale-1']) => ({
   parsedCorrection: corrections.parseVoiceCorrection('햇살님 금액 1.2로 정정합니다'),
 });
 
-function fixture({ sales = [], rules = [], pendingCorrection = null, failProductProcessing = false } = {}) {
+function fixture({ sales = [], rules = [], pendingCorrection = null, failProductProcessing = false, workflow=null, comments=[] } = {}) {
   const state = { sales, rules, logs: [], events: [], beeps: [], saves: [], captures: [], cloud: [], captions: [], productCalls: [] };
   const timers = new Map();
   let nextTimerId = 1;
   const globals = {
     ...corrections, extractSaleFromTranscript, parseKoreanAmount, parseVoiceCommand, splitTranscriptClauses,
     crypto: { randomUUID }, console,
+    appliedWorkflowRef: {current:workflow},replaySalesWorkflow,
+    workflowQueueRef:{current:Promise.resolve()},workflowReplayRef:{current:null},workflowObservationAtRef:{current:0},
+    workflowFingerprintsRef:{current:new Map()},workflowDecisionsRef:{current:new Set()},
+    currentWorkflowSalesRef:{current:sales},transcriptWorkspaceIdRef:{current:'workspace'},
+    syncSessionTranscriptsToCloud:async()=>true,sellerAnalysisApi:{observe:async()=>state.cloud.push('observe')},
+    addSale:data=>{const row={...data,id:'s-'+randomUUID()};sales.push(row);return row;},
     isAuthenticatedRef: { current: true }, currentUserIdRef: { current: 'seller' },
-    listeningGenerationRef: { current: 1 }, isListeningRef: { current: true }, activeListeningUserIdRef: { current: 'seller' },
+    listeningGenerationRef: { current: 1 }, authBoundaryGenerationRef:{current:1},setWorkflowProcessingError:message=>{state.workflowError=message;},isListeningRef: { current: true }, activeListeningUserIdRef: { current: 'seller' },
     currentSessionIdRef: { current: 'broadcast' }, productSalesRef: { current: { activeSession: { id: 'broadcast' }, feed: { comments: [] } } },
     sales, isRemoteAuth: true, workspaceId: 'workspace',
-    storageService: { getRules: () => rules },
+    storageService: { getRules: () => rules,getCommentRecords:()=>comments },
     interimStreamChunkerRef: { current: { reset() {}, finalize: (text) => [{ text }],
       processInterim: (text) => ({ newFlowItems: [], displayInterimText: text }) } },
     setCurrentInterimTranscript() {}, setLiveTranscriptFlow: (update) => { state.captions = update(state.captions); },
@@ -80,12 +87,30 @@ function fixture({ sales = [], rules = [], pendingCorrection = null, failProduct
   };
   const module = { exports: {} };
   vm.runInNewContext(compiled, { module, ...globals });
-  return { state, globals, flushTimers() {
+  return { state, globals, flushWorkflow:()=>globals.workflowQueueRef.current, flushTimers() {
     const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach((callback) => callback());
   }, send: (text, extra = {}, options = {}) => module.exports.handleTranscript(
     { text, isFinal: true, confidence: 0.99, ...extra }, 1, 'seller', options) };
 }
 
+test('active workflow replaces the legacy extractor and allocates numeric orders through real live callbacks',async()=>{
+  const now=new Date().toISOString();
+  const ctx=fixture({workflow:{id:'profile',version:1,mode:'ACTIVE',profile:DEFAULT_WORKFLOW_PROFILE},
+    comments:[{id:'c',platformMessageId:'c',platformUserId:'buyer',sessionId:'broadcast',nickname:'햇살',content:'1',capturedAt:now}]});
+  ctx.send('댓글에 1번 입력해주세요 0.5',{provider:'DEEPGRAM'});
+  await ctx.flushWorkflow();
+  ctx.send('햇살언니 챙겨드릴게요',{provider:'DEEPGRAM'});
+  await ctx.flushWorkflow();
+  assert.equal(ctx.state.saves.length,0);
+  assert.equal(ctx.state.sales.length,1);
+  assert.equal(ctx.state.sales[0].buyerNickname,'햇살');assert.equal(ctx.state.sales[0].amount,5000);
+  assert.equal(ctx.state.sales[0].workflowEvidence.profileId,'profile');
+});
+test('shadow workflow retains legacy sales processing and never writes a new-profile sale',async()=>{
+  const ctx=fixture({workflow:{id:'profile',version:1,mode:'SHADOW',profile:DEFAULT_WORKFLOW_PROFILE}});
+  ctx.send('햇살언니 챙겨드릴게요 0.5',{provider:'DEEPGRAM'});await ctx.flushWorkflow();
+  assert.equal(ctx.state.saves.length,1);assert.equal(ctx.state.sales.length,0);assert.deepEqual(ctx.state.cloud,['observe']);
+});
 test('ordinary questions remain logs without correction alerts, beeps, edits, capture or AI calls', () => {
   for (const text of ['이거 자켓 어때, 언니들?', '이거 자켓 어때, 언니들.', '가격이 1.2인가요?', '햇살언니 1.5에 드릴까요?']) {
     const ctx = fixture({ sales: [sale()] });

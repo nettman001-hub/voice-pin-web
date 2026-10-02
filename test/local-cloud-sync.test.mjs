@@ -10,6 +10,7 @@ import * as purchaseFirstSales from '../src/services/purchaseFirstSales.ts';
 
 const quiet = { log() {}, warn() {}, error() {} };
 function load(path, dependencies = {}, globals = {}) {
+  dependencies = { '../../../../src/services/salesWorkflowEngine.ts': {}, './sellerWorkflow.ts': {}, ...dependencies };
   const source = fs.readFileSync(new URL(path, import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },

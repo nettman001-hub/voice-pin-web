@@ -77,6 +77,8 @@ export const LiveHomePage: React.FC = () => {
     sttEngineStatus,
     sttEngineMessage,
     pipelineDiagnostics,
+    salesWorkflow,
+    workflowProcessingError,
     setSttMode,
     startListening,
     stopListening,
@@ -398,6 +400,7 @@ export const LiveHomePage: React.FC = () => {
 
   return (
     <div className="p-3.5 sm:p-6 max-w-7xl mx-auto space-y-3 sm:space-y-5">
+      {workflowProcessingError&&<p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">판매방식 처리를 재시도하고 있습니다. 원본 전사는 유지됩니다. {workflowProcessingError}</p>}
       {/* 최소 높이 상단 헤더 & 핵심 제어 */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 px-2.5 py-2 sm:px-3 rounded-2xl shadow-sm">
         <div className="flex items-center gap-2 min-w-0">
@@ -416,6 +419,7 @@ export const LiveHomePage: React.FC = () => {
               }`}>
                 {isListening ? 'ON AIR' : '대기 중'}
               </span>
+              {salesWorkflow && <span className="text-[10px] text-brand-700">판매방식 v{salesWorkflow.version} · {salesWorkflow.mode==='SHADOW'?'관찰':'적용'}</span>}
             </div>
             <p className="hidden sm:block text-[10px] leading-none text-slate-400 mt-0.5 truncate">
               회차 <strong className="text-slate-700 font-bold">{formatSessionDisplay(activeSession?.displayCode || currentSessionId)}</strong>
