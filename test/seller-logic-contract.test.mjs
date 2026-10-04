@@ -117,6 +117,89 @@ test('first-link prompts forbid invented prior aliases and only show a prior-lin
   assert.doesNotMatch(prompt.systemPrompt, /이전 거래가 없으므로/);
 });
 
+test('seller product-number announcement remains an unmatched candidate without a fabricated buyer or transaction', () => {
+  const evidence = { sessionId: 'live', slotNumber: 2, comments: [],
+    transcripts: [{ id: 'offer', text: '그레이 한 분, 7,000원. 번호 1번, 원단도 다 좋아', recognizedAt: '2026-10-05T12:00:00Z', isFinal: true }],
+    linkSignals: [{ id: 'slsig:number', summary: '1번 상품 번호 안내', commentIds: [], transcriptIds: ['offer'] }] };
+  const window = prepareSellerLogicWindow(evidence, 7), prompt = sellerLogicWindowPrompt(window);
+  assert.match(prompt.systemPrompt, /상품 주문번호 안내는 구매자가 없어도 유효한 판매자 발화 후보/);
+  assert.match(prompt.systemPrompt, /번호 안내만 있고 아직 구매 요청·구매자 배정 근거가 없으면/);
+  assert.match(prompt.systemPrompt, /해당 후보의 거래만 만들지 말고/);
+  assert.match(prompt.systemPrompt, /다른 후보의 실제 거래는 decisions에 유지하세요/);
+  assert.match(prompt.systemPrompt, /모든 후보에 거래가 없을 때만 decisions:\[\]로 반환하세요/);
+  assert.match(prompt.systemPrompt, /UNMATCHED와 빈 연결 목록으로 반환하여 후속 연결을 기다리세요/);
+  assert.match(prompt.systemPrompt, /번호만 안내한 후보를 단순 설명이라는 이유로 NOT_SALE 처리하지/);
+  assert.match(prompt.systemPrompt, /상품 설명·가격·재질·사이즈·수량 숫자만.*NOT_SALE/);
+  assert.match(prompt.systemPrompt, /구매자의 구매 의사와 판매자의 배정·확정·협상·정정·취소는 상품번호가 없어도 계속 분석/);
+  const raw = { summary: '1번 상품의 주문번호 안내이며 아직 구매자 연결 없음', decisions: [], purchaseIntentCommentIds: [],
+    retractedPurchaseIntentCommentIds: [], memory: [], signalLinks: [{ signalId: 'F0', outcome: 'UNMATCHED', decisionIndexes: [], previousDecisionIds: [] }] };
+  const parsed = parseSellerLogicWindowResult(JSON.stringify(raw), window);
+  assert.deepEqual(parsed.decisions, []);
+  assert.deepEqual(parsed.purchaseIntentCommentIds, []);
+  assert.deepEqual(parsed.signalLinks, [{ signalId: 'slsig:number', outcome: 'UNMATCHED', decisionIds: [] }]);
+  const fabricated = { ...raw, decisions: [{ id: null, status: 'CONFIRMED', nickname: null, unitPrice: 7000, quantity: 1,
+    reason: '상품번호와 가격만 안내됨', commentIds: [], transcriptIds: ['S0'] }],
+    signalLinks: [{ signalId: 'F0', outcome: 'MATCHED', decisionIndexes: [0], previousDecisionIds: [] }] };
+  assert.throws(() => parseSellerLogicWindowResult(JSON.stringify(fabricated), window), /CONFIRMED/);
+});
+
+test('one unmatched product-number announcement does not erase another candidate confirmed transaction in the same batch', () => {
+  const evidence = input();
+  evidence.transcripts.push({ id: 'new-offer', text: '다음 니트 1번이에요.', recognizedAt: '2026-10-04T14:58:12Z', isFinal: true });
+  evidence.linkSignals = [
+    { id: 'slsig:new-offer', summary: '새 상품번호 안내만 있음', commentIds: [], transcriptIds: ['new-offer'] },
+    { id: 'slsig:accepted', summary: '앞선 6번 상품 구매와 협상 합의', commentIds: ['c1', 'c2', 'c3'], transcriptIds: ['t1', 't2'] },
+  ];
+  const basePrompt = sellerLogicPrompt(evidence).systemPrompt;
+  assert.match(basePrompt, /구매 요청·배정 근거가 아직 없는 해당 상품번호 안내만으로는 거래를 만들지/);
+  assert.match(basePrompt, /다른 후보의 실제 거래는 decisions에 유지하고, 모든 후보에 거래가 없을 때만 decisions:\[\]/);
+  const raw = { summary: '1번 안내는 대기, 6번 거래는 합의 완료',
+    decisions: [{ ...decision(), commentIds: ['C0', 'C1', 'C2'], transcriptIds: ['S0', 'S1'] }],
+    purchaseIntentCommentIds: ['C0'], retractedPurchaseIntentCommentIds: [], memory: [],
+    signalLinks: [
+      { signalId: 'F0', outcome: 'UNMATCHED', decisionIndexes: [], previousDecisionIds: [] },
+      { signalId: 'F1', outcome: 'MATCHED', decisionIndexes: [0], previousDecisionIds: [] },
+    ] };
+  const result = parseSellerLogicWindowResult(JSON.stringify(raw), prepareSellerLogicWindow(evidence, 7));
+  assert.equal(result.decisions.length, 1);
+  assert.equal(result.decisions[0].status, 'CONFIRMED');
+  assert.equal(result.decisions[0].orderCode, '6');
+  assert.deepEqual(result.signalLinks[0], { signalId: 'slsig:new-offer', outcome: 'UNMATCHED', decisionIds: [] });
+  assert.deepEqual(result.signalLinks[1].decisionIds, [result.decisions[0].id]);
+});
+
+test('later numeric purchase and seller allocation can connect the number announcement to an actual transaction', () => {
+  const evidence = { sessionId: 'live', slotNumber: 2,
+    comments: [{ id: 'buyer', sessionId: 'live', nickname: '루비', content: '1', capturedAt: '2026-10-05T12:00:03Z' }],
+    transcripts: [
+      { id: 'offer', text: '7,000원, 1번.', recognizedAt: '2026-10-05T12:00:00Z', isFinal: true },
+      { id: 'accept', text: '루비 언니 그레이 7천원 드릴게요.', recognizedAt: '2026-10-05T12:00:04Z', isFinal: true },
+    ], linkSignals: [{ id: 'slsig:number', summary: '1번 상품 안내 뒤 구매와 배정', commentIds: ['buyer'], transcriptIds: ['offer', 'accept'] }] };
+  const raw = { summary: '번호 구매와 판매자 배정 연결', decisions: [{ id: null, status: 'CONFIRMED', nickname: '루비', unitPrice: 7000, quantity: 1,
+    orderCode: '1', reason: '1번 상품번호 안내와 구매 댓글 뒤 판매자 배정을 연결', commentIds: ['C0'], transcriptIds: ['S0', 'S1'] }],
+    purchaseIntentCommentIds: ['C0'], retractedPurchaseIntentCommentIds: [], memory: [],
+    signalLinks: [{ signalId: 'F0', outcome: 'MATCHED', decisionIndexes: [0], previousDecisionIds: [] }] };
+  const parsed = parseSellerLogicWindowResult(JSON.stringify(raw), prepareSellerLogicWindow(evidence, 7));
+  assert.equal(parsed.decisions[0].status, 'CONFIRMED');
+  assert.equal(parsed.decisions[0].nickname, '루비');
+  assert.equal(parsed.decisions[0].unitPrice, 7000);
+  assert.deepEqual(parsed.decisions[0].transcriptIds, ['offer', 'accept']);
+  assert.equal(parsed.signalLinks[0].signalId, 'slsig:number');
+  assert.equal(parsed.signalLinks[0].decisionIds[0], parsed.decisions[0].id);
+});
+
+test('AI rejects an incorrectly detected plain product explanation as NOT_SALE without creating a pending purchase', () => {
+  const evidence = { sessionId: 'live', slotNumber: 2, comments: [],
+    transcripts: [{ id: 'description', text: '이 니트는 부드러워요. 7천원이고 44~55예요.', recognizedAt: '2026-10-05T12:00:00Z', isFinal: true }],
+    linkSignals: [{ id: 'slsig:description', summary: '오탐 후보', commentIds: [], transcriptIds: ['description'] }] };
+  const raw = { summary: '상품번호 안내나 구매/배정 없이 상품을 설명함', decisions: [], purchaseIntentCommentIds: [],
+    retractedPurchaseIntentCommentIds: [], memory: [], signalLinks: [{ signalId: 'F0', outcome: 'NOT_SALE', decisionIndexes: [], previousDecisionIds: [] }] };
+  const parsed = parseSellerLogicWindowResult(JSON.stringify(raw), prepareSellerLogicWindow(evidence, 7));
+  assert.deepEqual(parsed.decisions, []);
+  assert.deepEqual(parsed.purchaseIntentCommentIds, []);
+  assert.equal(parsed.signalLinks[0].outcome, 'NOT_SALE');
+});
+
 test("entire evidence goes to AI without keyword, price or nickname preclassification", () => {
   const evidence = normalizeSellerLogicInput(input());
   const prompt = sellerLogicPrompt(evidence);

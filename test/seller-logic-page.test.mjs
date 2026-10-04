@@ -153,6 +153,77 @@ function signal(id, input, extra = {}) {
     status: 'WATCHING', decisionIds: [], needsAnalysis: false, observationClosed: false, ...extra };
 }
 
+test('the always-visible comment panel receives comments immediately before and during AI analysis', async () => {
+  const f = fixture();
+  const emptyPanel = f.find('실시간 댓글');
+  assert.ok(visible(emptyPanel).includes('아직 수집된 댓글이 없습니다.'));
+  assert.ok(visible(emptyPanel).includes('누적 0개'));
+  assert.equal(f.calls.length, 0);
+  await settle(); f.click('실시간 청취 시작'); await settle();
+  const capture = f.captures[0];
+  const first = { id: 'live-first', sessionId: capture.options.sessionId, nickname: '😚JJEONG😚',
+    content: '아이보리 저용\n한 개 부탁해요', capturedAt: '2026-10-05T03:04:05Z' };
+  capture.options.comment(first);
+  const beforeAnalysis = f.find('실시간 댓글');
+  assert.ok(visible(beforeAnalysis).includes(first.nickname));
+  assert.ok(visible(beforeAnalysis).includes(first.content));
+  const commentTime = nodes(beforeAnalysis).find((node) => node.type === 'time');
+  assert.match(visible(commentTime), /12(?::|시\s)0?4(?::|분\s)0?5/u, 'comment time is displayed in Korea time across supported locale formats');
+  assert.equal(commentTime.props.dateTime, first.capturedAt);
+  assert.equal(f.calls.length, 0, 'comment rendering must not wait for an AI request or timer');
+
+  f.click('지금 AI 분석');
+  assert.equal(f.calls.length, 1);
+  capture.options.comment({ ...first, id: 'live-second', nickname: '루비', content: '검정도 있나요?' });
+  capture.options.transcript(captureSpeech('seller-live', '검정 재고 확인해 드릴게요.'));
+  const duringAnalysis = f.find('실시간 댓글');
+  assert.ok(visible(duringAnalysis).includes('검정도 있나요?'));
+  assert.ok(visible(duringAnalysis).includes('누적 2개'));
+  assert.equal(nodes(duringAnalysis).filter((node) => node.type === 'li').length, 2);
+  assert.ok(!visible(duringAnalysis).includes('검정 재고 확인해 드릴게요.'));
+  assert.ok(visible(f.render()).includes('검정 재고 확인해 드릴게요.'), 'the existing seller speech timeline remains visible');
+  assert.equal(f.calls.length, 1, 'new comments do not start concurrent AI analysis');
+  f.unmount(); capture.stopped.resolve(); f.calls[0].resolve(completeResult(f.calls[0].input)); await settle();
+});
+
+test('the comment panel bounds visible rows while preserving the full archive and duplicate suppression', async () => {
+  const f = fixture(); f.render(); await settle(); f.click('실시간 청취 시작'); await settle();
+  const capture = f.captures[0];
+  const comments = Array.from({ length: 205 }, (_, index) => ({ id: `comment-${index}`,
+    sessionId: capture.options.sessionId, platformMessageId: `platform-${index}`, nickname: `구매자-${index}`,
+    content: `수집 댓글 ${index}`, capturedAt: new Date(Date.parse('2026-10-05T03:04:05Z') + index * 1000).toISOString() }));
+  comments.forEach(capture.options.comment);
+  capture.options.comment(comments[204]);
+  capture.options.comment({ ...comments[204], id: 'duplicate-platform-message' });
+  const panel = f.find('실시간 댓글');
+  const rows = nodes(panel).filter((node) => node.type === 'li');
+  assert.equal(rows.length, 200);
+  assert.ok(visible(rows[0]).includes('구매자-204'), 'latest received comment is first');
+  assert.ok(visible(rows.at(-1)).includes('구매자-5'));
+  assert.ok(!rows.some((row) => visible(row).includes('수집 댓글 0')));
+  assert.ok(visible(panel).includes('누적 205개'));
+  assert.ok(visible(panel).includes('최근 200개 표시'));
+  assert.ok(visible(panel).includes('전체 댓글은 분석과 내려받기에 포함됩니다.'));
+  f.click('지금 AI 분석');
+  assert.equal(f.calls[0].input.comments.length, 205);
+  assert.equal(f.calls[0].input.comments[0].content, comments[0].content);
+  assert.equal(f.calls[0].input.comments.at(-1).content, comments.at(-1).content);
+  f.unmount(); capture.stopped.resolve(); f.calls[0].resolve(completeResult(f.calls[0].input)); await settle();
+});
+
+test('imported comments are visible without AI and a new session clears the comment panel', async () => {
+  const f = fixture(); await f.import();
+  const panel = f.find('실시간 댓글');
+  assert.ok(visible(panel).includes('😚JJEONG😚'));
+  assert.ok(visible(panel).includes('저용'));
+  assert.ok(visible(panel).includes('누적 1개'));
+  assert.equal(f.calls.length, 0);
+  f.click('새 분석');
+  assert.ok(visible(f.find('실시간 댓글')).includes('누적 0개'));
+  assert.ok(!visible(f.find('실시간 댓글')).includes('😚JJEONG😚'));
+  f.unmount();
+});
+
 test('analysis interval defaults to five seconds and changes waiting work without interrupting analysis', async () => {
   const f = fixture(); await f.import();
   const interval = f.find('자동 분석 주기');

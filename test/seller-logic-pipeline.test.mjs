@@ -32,6 +32,65 @@ function recorder(detect = () => detection(), link = (packet) => linked(packet))
 }
 const live = (seconds) => ({ live: true, now: epoch + seconds * 1000 });
 
+test('a seller-first order-code signal remains visible without inventing a buyer or transaction', async () => {
+  const archive = input([], [speech('number-announcement', 0, '그레이 니트 7,000원, 1번입니다.')]);
+  const r = recorder(() => detection([candidate('order-code', [], ['number-announcement'])]));
+  const first = await runSellerLogicPipeline(archive, r.calls, live(1));
+  assert.equal(r.links.length, 1, 'a seller-only signal must immediately reach stage two');
+  assert.deepEqual(r.links[0].comments, []);
+  assert.deepEqual(first.decisions, [], 'an unmatched product announcement is not a pending purchase');
+  assert.deepEqual(first.purchaseIntentCommentIds, []);
+  assert.equal(first.pipeline.signals[0].status, 'WATCHING');
+  assert.equal(first.pipeline.signals[0].startedAt, at(0));
+  assert.deepEqual(first.pipeline.signals[0].transcriptIds, ['number-announcement']);
+
+  const closed = await runSellerLogicPipeline(resume(archive, first), r.calls, live(61));
+  assert.equal(closed.pipeline.signals[0].status, 'UNMATCHED');
+  assert.equal(closed.pipeline.signals[0].id, 'order-code');
+  assert.deepEqual(closed.decisions, []);
+  assert.equal(r.detections.length, 1);
+  assert.equal(r.links.length, 1, 'quiet observation expiry must not repeat a paid inference');
+});
+
+test('a seller-first order code links a later buyer and confirmation to the same signal', async () => {
+  const archive = input([], [speech('number-announcement', 0, '그레이 니트 7,000원, 1번입니다.')]);
+  const first = await runSellerLogicPipeline(archive, recorder(() => detection([
+    candidate('order-code', [], ['number-announcement']),
+  ])).calls, live(1));
+  const buyerArchive = input([comment('number-order', 25, '1번 저요')], archive.transcripts);
+  const pendingSale = transaction('number-sale', ['number-order'], ['number-announcement'], {
+    status: 'PENDING', unitPrice: 7000, orderCode: '1', productName: '그레이 니트',
+  });
+  const buyer = recorder((packet) => {
+    assert.equal(packet.existingSignals[0].id, 'order-code');
+    assert.ok(packet.transcripts.some((row) => row.id === 'number-announcement'), 'retain the number mapping after short overlap expires');
+    return detection([candidate('order-code', ['number-order'], ['number-announcement'])]);
+  }, (packet) => matched(packet, pendingSale));
+  const pending = await runSellerLogicPipeline(resume(buyerArchive, first), buyer.calls, live(26));
+  assert.equal(pending.decisions.length, 1);
+  assert.equal(pending.decisions[0].status, 'PENDING');
+  assert.equal(pending.pipeline.signals.length, 1);
+  assert.equal(pending.pipeline.signals[0].id, 'order-code');
+
+  const finalArchive = input(buyerArchive.comments, [...archive.transcripts,
+    speech('number-confirmation', 35, '루비 언니 1번 그레이 니트 7,000원 드릴게요.'),
+  ]);
+  const confirmation = recorder((packet) => {
+    assert.equal(packet.existingSignals[0].id, 'order-code');
+    return detection([candidate('order-code', ['number-order'], ['number-announcement', 'number-confirmation'])]);
+  }, (packet) => {
+    assert.equal(packet.previousDecisions[0].id, 'number-sale');
+    return matched(packet, { ...pendingSale, status: 'CONFIRMED', transcriptIds: ['number-announcement', 'number-confirmation'] });
+  });
+  const confirmed = await runSellerLogicPipeline(resume(finalArchive, pending), confirmation.calls, live(36));
+  assert.equal(confirmed.decisions.length, 1);
+  assert.equal(confirmed.decisions[0].id, 'number-sale');
+  assert.equal(confirmed.decisions[0].status, 'CONFIRMED');
+  assert.equal(confirmed.decisions[0].unitPrice, 7000);
+  assert.equal(confirmed.pipeline.signals.length, 1);
+  assert.deepEqual(confirmed.pipeline.signals[0].decisionIds, ['number-sale']);
+});
+
 test('a broadcast with no detected sale calls only stage one and preserves every processed source', async () => {
   const archive = input([comment('question', 2, '가슴 단면이 얼마인가요?')], [speech('greeting', 0, '안녕하세요'), speech('description', 8, '부드러운 소재예요')]);
   const r = recorder();

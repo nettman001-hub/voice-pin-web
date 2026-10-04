@@ -11,6 +11,7 @@ import type { SellerLogicAnalysisInput, SellerLogicAnalysisResult, SellerLogicSl
 
 const field = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm disabled:bg-slate-100';
 const button = 'inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:opacity-40';
+const visibleCommentLimit = 200;
 const emptyEvidence = (): SellerLogicEvidence => ({ comments: [], transcripts: [] });
 const time = (value: string) => new Date(value).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });
 const statusLabels = { CONFIRMED: '판매 확정', PENDING: '대화 진행 중', REVIEW: '확인 필요', CANCELLED: '취소' };
@@ -330,6 +331,7 @@ export default function SellerLogicAnalysisPage() {
   const confirmed = decisions.filter((d) => d.status === 'CONFIRMED');
   const total = confirmed.reduce((sum, d) => sum + (d.unitPrice || 0) * d.quantity, 0);
   const count = evidence.comments.length + evidence.transcripts.length;
+  const recentComments = evidence.comments.slice(-visibleCommentLimit).reverse();
   const timeline = [
     ...evidence.comments.map((c) => ({ id: c.id, at: c.capturedAt, author: c.nickname, text: c.content, kind: 'comment' })),
     ...evidence.transcripts.map((t) => ({ id: t.id, at: t.recognizedAt, author: '판매자', text: t.text, kind: 'speech' })),
@@ -384,6 +386,24 @@ export default function SellerLogicAnalysisPage() {
           queueRef.current?.analyzeNow();
         }}><Play size={14} />{running ? '분석 중' : '지금 AI 분석'}</button></div>
     </div>
+
+    <section aria-label="실시간 댓글" className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 p-5">
+        <div><h2 className="flex items-center gap-2 font-bold text-slate-900"><MessageSquareText size={18} /> 실시간 댓글</h2>
+          <p className="mt-1 text-xs text-slate-500">수집한 댓글을 바로 표시합니다. 최근 수집한 댓글이 위에 표시됩니다.</p></div>
+        <div className="text-right text-xs text-slate-500"><p className="font-semibold text-slate-700">누적 {evidence.comments.length.toLocaleString()}개</p>
+          <p className="mt-1">최근 {recentComments.length}개 표시 · 최대 {visibleCommentLimit}개 · 한국 시각</p></div>
+      </div>
+      {!recentComments.length ? <p className="px-5 py-10 text-center text-sm leading-relaxed text-slate-400">아직 수집된 댓글이 없습니다.<br />실시간 청취를 시작하면 댓글이 여기에 표시됩니다.</p>
+        : <ul aria-label="실시간 댓글 목록" className="max-h-80 divide-y divide-slate-100 overflow-y-auto overscroll-contain sm:max-h-96">
+          {recentComments.map((comment) => <li key={comment.id} className="px-5 py-3">
+            <div className="flex items-start justify-between gap-3 text-xs"><strong className="min-w-0 break-words text-slate-800">{comment.nickname}</strong>
+              <time dateTime={comment.capturedAt} className="shrink-0 tabular-nums text-slate-400">{time(comment.capturedAt)}</time></div>
+            <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{comment.content}</p>
+          </li>)}
+        </ul>}
+      {evidence.comments.length > visibleCommentLimit && <p className="border-t border-slate-100 px-5 py-3 text-xs text-slate-400">화면에는 최근 {visibleCommentLimit}개를 표시합니다. 전체 댓글은 분석과 내려받기에 포함됩니다.</p>}
+    </section>
 
     <div className="grid gap-4 sm:grid-cols-3">
       {[{ label: '판매 확정', value: `${confirmed.length}건`, icon: CheckCircle2, color: 'text-emerald-600' },

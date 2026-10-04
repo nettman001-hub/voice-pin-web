@@ -1,0 +1,202 @@
+{
+  "verifiedAt": "2026-10-04T21:01:22.656Z",
+  "scope": "Synthetic examples through local production handlers with actual applied slot providers; authentication boundary was simulated for these model checks.",
+  "appliedVersion": 33,
+  "passed": true,
+  "automaticTests": {
+    "total": 830,
+    "passed": 830
+  },
+  "uiCheck": "Local browser: comments visible with nickname, Korean time and content before starting AI. Callback rendering during analysis is covered by page tests.",
+  "earlierFinding": "Slot 1 initially returned a signal for a simple buyer price question. The prompt now explicitly excludes inquiry-only candidates and retains existing-transaction correction questions. Both final runs passed.",
+  "sourceSha256": {
+    "src/services/sellerLogicDetection.ts": "0b25d3844ceb38dc1e20457dcf85f00204125f83653ba8282fa06ae88256c458",
+    "src/services/sellerLogicContract.ts": "211b45facf42f73c70d264436251d7eedb7b15bfafef38da17f3bf4c0dc646d4"
+  },
+  "slots": [
+    {
+      "slotNumber": 1,
+      "provider": "LM_STUDIO",
+      "model": "gemma-4-e4b-it",
+      "startedAt": "2026-10-04T21:00:04.899Z",
+      "finishedAt": "2026-10-04T21:00:22.733Z",
+      "pass": true,
+      "cases": [
+        {
+          "name": "description-only",
+          "expectedSignal": false,
+          "actualSignalCount": 0,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 1194
+        },
+        {
+          "name": "price-size-only",
+          "expectedSignal": false,
+          "actualSignalCount": 0,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 719
+        },
+        {
+          "name": "number-only-announcement",
+          "expectedSignal": true,
+          "actualSignalCount": 1,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 923,
+          "link": {
+            "status": 200,
+            "elapsedMs": 4473,
+            "decisionCount": 0,
+            "outcomes": [
+              "UNMATCHED"
+            ]
+          }
+        },
+        {
+          "name": "description-with-order-number",
+          "expectedSignal": true,
+          "actualSignalCount": 1,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 2174
+        },
+        {
+          "name": "split-number-announcement",
+          "expectedSignal": true,
+          "actualSignalCount": 1,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 1944
+        },
+        {
+          "name": "number-after-description-overlap",
+          "expectedSignal": true,
+          "actualSignalCount": 1,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 2250
+        },
+        {
+          "name": "seller-allocation",
+          "expectedSignal": true,
+          "actualSignalCount": 1,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 1214
+        },
+        {
+          "name": "buyer-first-request",
+          "expectedSignal": true,
+          "actualSignalCount": 1,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 2432
+        },
+        {
+          "name": "buyer-price-question",
+          "expectedSignal": false,
+          "actualSignalCount": 0,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 479
+        }
+      ]
+    },
+    {
+      "slotNumber": 2,
+      "provider": "DEEPSEEK",
+      "model": "deepseek-flash",
+      "startedAt": "2026-10-04T21:00:04.953Z",
+      "finishedAt": "2026-10-04T21:00:16.833Z",
+      "pass": true,
+      "cases": [
+        {
+          "name": "description-only",
+          "expectedSignal": false,
+          "actualSignalCount": 0,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 914
+        },
+        {
+          "name": "price-size-only",
+          "expectedSignal": false,
+          "actualSignalCount": 0,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 1304
+        },
+        {
+          "name": "number-only-announcement",
+          "expectedSignal": true,
+          "actualSignalCount": 1,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 989,
+          "link": {
+            "status": 200,
+            "elapsedMs": 1371,
+            "decisionCount": 0,
+            "outcomes": [
+              "UNMATCHED"
+            ]
+          }
+        },
+        {
+          "name": "description-with-order-number",
+          "expectedSignal": true,
+          "actualSignalCount": 1,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 1355
+        },
+        {
+          "name": "split-number-announcement",
+          "expectedSignal": true,
+          "actualSignalCount": 1,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 1151
+        },
+        {
+          "name": "number-after-description-overlap",
+          "expectedSignal": true,
+          "actualSignalCount": 1,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 1450
+        },
+        {
+          "name": "seller-allocation",
+          "expectedSignal": true,
+          "actualSignalCount": 1,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 1277
+        },
+        {
+          "name": "buyer-first-request",
+          "expectedSignal": true,
+          "actualSignalCount": 1,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 1137
+        },
+        {
+          "name": "buyer-price-question",
+          "expectedSignal": false,
+          "actualSignalCount": 0,
+          "pass": true,
+          "status": 200,
+          "elapsedMs": 917
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Synthetic cases do not establish accuracy for every real broadcast.",
+    "Live TikTok capture and Soniox were unchanged and were not re-run for this UI/prompt correction."
+  ]
+}

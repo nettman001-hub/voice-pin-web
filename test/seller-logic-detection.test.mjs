@@ -61,6 +61,75 @@ test('detection preserves every source and utterance boundary revision without t
   assert.match(prompt.systemPrompt, /거래 확정·가격 결정.*하지 않습니다/);
 });
 
+test('seller-start detection instructions distinguish announced product numbers from descriptive numbers without prefiltering source', async () => {
+  const samples = ['7,000원, 1번.', '그레이 한 분, 7,000원. 번호 1번, 원단도 다 좋아',
+    '이 니트는 부드러워요', '7천원', '44~55', '면 100%', '두 장 남았어요'];
+  const evidence = { ...input(), comments: [], freshCommentIds: [], existingSignals: [], carry: [],
+    transcripts: samples.map((text, index) => ({ id: `number-${index}`, text,
+      recognizedAt: new Date(Date.parse('2026-10-05T12:00:00Z') + index * 1000).toISOString(), isFinal: true, utteranceEnded: true })),
+    freshTranscriptIds: samples.map((_, index) => `number-${index}`) };
+  const prompt = sellerLogicDetectionPrompt(normalizeSellerLogicDetectionInput(evidence));
+  assert.deepEqual(JSON.parse(prompt.userPrompt).timeline.map((row) => row[2]), samples, 'all descriptive and numbered source reaches AI unchanged');
+  assert.match(prompt.systemPrompt, /상품의 주문번호를 안내하는 말/);
+  assert.match(prompt.systemPrompt, /구매자 댓글이 아직 없어도 signals로 반환/);
+  assert.match(prompt.systemPrompt, /'주문하세요' 같은 명령이나 구매자 호명은 필수가 아닙니다/);
+  assert.match(prompt.systemPrompt, /설명·가격·재질·사이즈·수량 숫자만.*signals에 넣지 마세요/);
+  assert.match(prompt.systemPrompt, /숫자가 있다는 이유로 상품번호라고 간주하지/);
+  assert.match(prompt.systemPrompt, /그 자체가 구매 요청이나 판매 확정은 아닙니다/);
+  assert.match(prompt.systemPrompt, /이런 거래 행동에는 상품번호가 없어도 됩니다/);
+  for (const phrase of samples) assert.ok(prompt.systemPrompt.includes(phrase));
+  // This is a supplied AI result, not a local classifier: the contract must
+  // permit number announcements before any buyer appears, and preserve only
+  // the sources the AI selected from the complete input.
+  const result = await parse(answer({ signals: [{ id: null, summary: '고객에게 1번 상품과 가격을 안내하여 후속 구매 연결을 기다림',
+    commentIds: [], transcriptIds: ['S0', 'S1'] }] }), evidence);
+  assert.equal(result.signals.length, 1);
+  assert.deepEqual(result.signals[0].commentIds, []);
+  assert.deepEqual(result.signals[0].transcriptIds, ['number-0', 'number-1']);
+  assert.equal(result.signals[0].unitPrice, undefined);
+});
+
+test('AI-selected no-signal output for a complete plain description stays empty without inventing carry or a sale', async () => {
+  const evidence = { ...input(), comments: [], freshCommentIds: [], existingSignals: [], carry: [],
+    transcripts: [{ id: 'description', text: '이 니트는 부드러워요. 7천원이고 면 100%, 44~55 사이즈예요.',
+      recognizedAt: '2026-10-05T12:00:00Z', isFinal: true, utteranceEnded: true }], freshTranscriptIds: ['description'] };
+  const result = await parse({ summary: '상품 설명과 가격·재질·사이즈만 있으며 주문번호 안내나 거래 행동이 없음', signals: [], carry: [] }, evidence);
+  assert.deepEqual(result.signals, []);
+  assert.deepEqual(result.carry, []);
+});
+
+test('standalone buyer price and size questions are explicitly excluded from first-stage signals while remaining unfiltered AI input', async () => {
+  for (const content of ['그레이 니트 얼마인가요?', '이 니트 44~55도 맞나요?']) {
+    const evidence = { ...input(), comments: [{ ...input().comments[0], content }], transcripts: [],
+      freshCommentIds: ['c1'], freshTranscriptIds: [], existingSignals: [], carry: [] };
+    const prompt = sellerLogicDetectionPrompt(normalizeSellerLogicDetectionInput(evidence));
+    assert.equal(JSON.parse(prompt.userPrompt).timeline[0][3], content);
+    assert.match(prompt.systemPrompt, /구매 요청이나 기존 거래의 정정·협상 맥락 없이 단순 가격·사이즈 질문만 있으면 signals에 넣지 마세요/);
+    assert.match(prompt.systemPrompt, /상품명이나 숫자가 포함돼도 단순 문의이면 해당 댓글은 signals에서 제외/);
+    assert.match(prompt.systemPrompt, /입력 전체가 이런 문의뿐이면 signals:\[\]이며, 다른 후보의 구매·후속 신호는 유지/);
+    assert.match(prompt.systemPrompt, /막연히 구매 가능성이 있다는 이유로 2차 후보에 넘기지/);
+    // The model's no-signal response is accepted without adding a candidate.
+    const result = await parse({ summary: '구매 요청이나 기존 거래 후속 없는 단순 문의', signals: [], carry: [] }, evidence);
+    assert.deepEqual(result.signals, []);
+  }
+});
+
+test('a price-correction question about an existing transaction remains an eligible AI-selected follow-up', async () => {
+  const evidence = { ...input(), comments: [
+    { ...input().comments[0], id: 'purchase', content: '저요' },
+    { ...input().comments[0], id: 'correction', content: '아까 7천원이라면서요?', capturedAt: '2026-10-05T12:00:04Z' },
+  ], freshCommentIds: ['correction'], freshTranscriptIds: [], carry: [],
+    existingSignals: [{ id: 'slsig:existing-purchase', summary: '이미 구매 요청과 배정을 연결 중', commentIds: ['purchase'], transcriptIds: ['s1'] }] };
+  const prompt = sellerLogicDetectionPrompt(evidence);
+  assert.match(prompt.systemPrompt, /이미 요청·배정된 거래에 대해.*가격 정정을 요구하거나 기존 협상을 이어가는 질문은 거래 후속이므로 signals로 반환/);
+  assert.match(prompt.systemPrompt, /질문형이라는 형식만으로 제외하지/);
+  const result = await parse(answer({ signals: [{ id: 'G0', summary: '기존 거래의 가격 정정 요청',
+    commentIds: ['C0', 'C1'], transcriptIds: ['S0'] }] }), evidence);
+  assert.equal(result.signals.length, 1);
+  assert.equal(result.signals[0].id, 'slsig:existing-purchase');
+  assert.deepEqual(result.signals[0].commentIds, ['purchase', 'correction']);
+});
+
 test('signal IDs are stable by session and source sets, independent of reference order or model wording', async () => {
   const first = await parse(answer());
   const reordered = answer();
