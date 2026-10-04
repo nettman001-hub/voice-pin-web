@@ -99,7 +99,7 @@ async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, 
       model,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
-      max_tokens: 'systemPrompt' in request ? 4096 : 1024,
+      max_tokens: 'systemPrompt' in request ? (request.maxOutputTokens ?? 4096) : 1024,
       temperature: 0.1,
     };
   } else if (provider === 'GOOGLE' || (provider as string) === 'GEMINI') {
@@ -115,7 +115,7 @@ async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, 
       generationConfig: {
         responseMimeType: 'application/json',
         temperature: 0.1,
-        maxOutputTokens: 'systemPrompt' in request ? 4096 : 1024,
+        maxOutputTokens: 'systemPrompt' in request ? (request.maxOutputTokens ?? 4096) : 1024,
       },
     };
   } else {
@@ -163,8 +163,9 @@ async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, 
       // defaults to high-effort thinking; explicitly disable it for Flash/V4.
       // https://api-docs.deepseek.com/guides/thinking_mode/
       if (!isDeepSeekReasoner) requestBody.thinking = { type: 'disabled' };
-      requestBody.max_tokens = 4096;
+      requestBody.max_tokens = request.maxOutputTokens ?? 4096;
     }
+    if ('systemPrompt' in request && request.maxOutputTokens !== undefined) requestBody.max_tokens = request.maxOutputTokens;
   }
 
   let rawResponseText = '';

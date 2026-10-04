@@ -14,6 +14,9 @@ eulerstream_key.txt
 server/.env
 .env.local
 .env.*.local
+*.local
+scratch/
+.tools/
 
 # 로컬 진단/문서 파일
 chrome-net-export-log.json

@@ -123,11 +123,13 @@ async function runSelfHostedCompletion(request: AiResolutionRequest | AiPromptIn
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      // LM Studio, vLLM 등 로컬/자체 호스팅 엔진은 'response_format.type' must be 'json_schema' or 'text' 오류를 내거나
-      // response_format: { type: 'json_object' }를 지원하지 않으므로 제외합니다.
-      // systemPrompt의 명확한 JSON 지시와 common.ts의 파서가 완벽히 파싱 및 정규화합니다.
+      // Only generic prompts explicitly opting in use LM Studio's documented
+      // JSON Schema format. Existing resolution calls and other engines retain
+      // their payload, including omission of unsupported json_object formats.
+      ...('systemPrompt' in request && request.responseSchema && slotConfig.provider === 'LM_STUDIO'
+        ? { response_format: { type: 'json_schema', json_schema: { ...request.responseSchema, strict: true } } } : {}),
       temperature: 0.1,
-      ...('systemPrompt' in request ? { max_tokens: 4096 } : {}),
+      ...('systemPrompt' in request ? { max_tokens: request.maxOutputTokens ?? 4096 } : {}),
     };
   } else {
     // Ollama 기본 규격 (/api/chat)
@@ -144,7 +146,7 @@ async function runSelfHostedCompletion(request: AiResolutionRequest | AiPromptIn
       stream: false,
       options: {
         temperature: 0.1,
-        ...('systemPrompt' in request ? { num_predict: 4096 } : {}),
+        ...('systemPrompt' in request ? { num_predict: request.maxOutputTokens ?? 4096 } : {}),
       },
     };
   }

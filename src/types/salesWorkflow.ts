@@ -18,8 +18,18 @@ export interface AppliedSalesWorkflow {
 export interface WorkflowTranscript {
   id: string;
   text: string;
+  /** Capture-clock start of this fragment; not provider response arrival time. */
   recognizedAt: string;
+  /** Stable transcription tokens do not imply a completed utterance. */
   isFinal?: boolean;
+  startedAt?: string;
+  endedAt?: string;
+  receivedAt?: string;
+  utteranceId?: string;
+  utteranceEnded?: boolean;
+  /** Same-ID updates revise boundary metadata without appending the text again. */
+  revision?: number;
+  endReason?: 'endpoint' | 'flush' | 'finalize' | 'stream_end' | 'rotation';
 }
 export interface WorkflowDecision {
   id: string;

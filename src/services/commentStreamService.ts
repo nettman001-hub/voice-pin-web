@@ -75,7 +75,7 @@ function mapServerState(state?: string): CommentStreamStatus {
   }
 }
 
-class CommentStreamService {
+export class CommentStreamService {
   private socket: Socket | null = null;
   private url = '';
   private socketConnected = false;

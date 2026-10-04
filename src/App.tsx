@@ -55,6 +55,7 @@ import { ReportManagementPage } from './pages/admin/ReportManagementPage';
 import { AdminStatsPage } from './pages/admin/AdminStatsPage';
 import { AdminAiSettingsPage } from './pages/admin/AdminAiSettingsPage';
 const SellerAnalysisPage = lazy(() => import('./pages/admin/SellerAnalysisPage'));
+const SellerLogicAnalysisPage = lazy(() => import('./pages/admin/SellerLogicAnalysisPage'));
 
 const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated } = useAuth();
@@ -238,6 +239,7 @@ export const App: React.FC = () => {
                       <Route path="/admin/stats" element={<AdminStatsPage />} />
                       <Route path="/admin/ai" element={<AdminAiSettingsPage />} />
                       <Route path="/admin/seller-analysis" element={<Suspense fallback={<div className="p-8">판매방식 분석 화면을 불러오는 중…</div>}><SellerAnalysisPage /></Suspense>} />
+                      <Route path="/admin/seller-logic-analysis-01" element={<Suspense fallback={<div className="p-8">판매자 로직분석01 화면을 불러오는 중…</div>}><SellerLogicAnalysisPage /></Suspense>} />
                     </Route>
                   </Route>
 
