@@ -213,6 +213,12 @@ export async function runSellerLogicPipeline(input: SellerLogicAnalysisInput, ca
     if (!Array.isArray(detected.signals) || !Array.isArray(detected.carry) || [...detected.signals, ...detected.carry].some((item) =>
       !Array.isArray(item.commentIds) || !Array.isArray(item.transcriptIds) || !references(item).length ||
       item.commentIds.some((id) => !allowedC.has(id)) || item.transcriptIds.some((id) => !allowedS.has(id)))) throw new Error('1차 AI가 원문에 없는 근거를 반환했습니다.');
+    const earlyIntents = detected.purchaseIntentCommentIds || [];
+    if (!Array.isArray(earlyIntents) || new Set(earlyIntents).size !== earlyIntents.length || earlyIntents.some((id) =>
+      !allowedC.has(id) || !detected.signals.some((signal) => signal.commentIds.includes(id)))) {
+      throw new Error('1차 AI의 구매 의사 댓글 근거가 올바르지 않습니다.');
+    }
+    for (const id of earlyIntents) intents.add(id);
     for (const event of fresh) pipeline.seenRevisions[event.key] = event.signature;
     const replaced = new Set(selectedCarry.map(carryKey));
     pipeline.carry = [...new Map([...pipeline.carry.filter((item) => !replaced.has(carryKey(item))), ...detected.carry].map((item) => [carryKey(item), item])).values()];

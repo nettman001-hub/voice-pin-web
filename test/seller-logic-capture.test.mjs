@@ -18,6 +18,43 @@ function load(name, dependencies = {}, globals = {}) {
 
 const vocabulary = load('sellerLogicVocabulary', { './nicknameMatcher': load('nicknameMatcher') });
 
+test('Codex purchase hints rotate first buyer immediately and coalesce later buyers at the five-second boundary', async (t) => {
+  const ctx = await fixture({ purchaseOnlyHints: true }); t.after(ctx.shutdown);
+  const initial = ctx.sockets[0]; initial.open(); initial.respond();
+  ctx.comment('루비'); ctx.capture.prioritizeNicknames(['루비']);
+  assert.equal(ctx.sockets.length, 2, 'first AI purchase intent is immediate');
+  const next = ctx.sockets[1]; next.open(); next.respond();
+  assert.deepEqual(JSON.parse(next.sent[0]).context.terms, ['루비']);
+  ctx.advance(1000); ctx.comment('u'); ctx.capture.prioritizeNicknames(['u']);
+  ctx.advance(1000); ctx.comment('지성이👻'); ctx.capture.prioritizeNicknames(['지성이👻']);
+  ctx.advance(2999); assert.equal(ctx.sockets.length, 2);
+  ctx.advance(1); assert.equal(ctx.sockets.length, 3);
+  const combined = ctx.sockets[2]; combined.open(); combined.respond();
+  const terms = JSON.parse(combined.sent[0]).context.terms;
+  for (const name of ['루비', 'u', '유', '지성이👻']) assert.ok(terms.includes(name));
+});
+
+test('AI buyer arriving during replacement authentication survives promotion and its update still waits five seconds', async (t) => {
+  const ctx = await fixture({ purchaseOnlyHints: true }); t.after(ctx.shutdown);
+  ctx.sockets[0].open(); ctx.sockets[0].respond();
+  ctx.comment('첫 구매자'); ctx.capture.prioritizeNicknames(['첫 구매자']);
+  ctx.advance(1000); ctx.comment('둘째 구매자'); ctx.capture.prioritizeNicknames(['둘째 구매자']);
+  const first = ctx.sockets[1]; first.open(); first.respond();
+  ctx.advance(3999); assert.equal(ctx.sockets.length, 2);
+  ctx.advance(1); assert.equal(ctx.sockets.length, 3);
+  const second = ctx.sockets[2]; second.open(); second.respond();
+  assert.ok(JSON.parse(second.sent[0]).context.terms.includes('둘째 구매자'));
+});
+
+test('Codex mode does not replace the session for unclassified recent comments even after thirty seconds', async (t) => {
+  const ctx = await fixture({ purchaseOnlyHints: true }); t.after(ctx.shutdown);
+  ctx.sockets[0].open(); ctx.sockets[0].respond();
+  ctx.comment('가격 문의자'); ctx.advance(40000);
+  assert.equal(ctx.sockets.length, 1);
+  ctx.capture.prioritizeNicknames(['없는 닉네임']); assert.equal(ctx.sockets.length, 1);
+  ctx.capture.prioritizeNicknames(['가격 문의자']); assert.equal(ctx.sockets.length, 2);
+});
+
 test('admin Soniox vocabulary keeps 50 distinct platform names and their Latin Korean readings', () => {
   const comments = Array.from({ length: 70 }, (_, i) => ({
     nickname: `고객${i}`, capturedAt: new Date(1_000_000 + i * 1_000).toISOString(),
@@ -38,7 +75,7 @@ test('admin Soniox vocabulary keeps 50 distinct platform names and their Latin K
   assert.ok(!manyEnglish.includes('user50'));
 });
 
-async function fixture({ selection, created } = {}) {
+async function fixture({ selection, created, purchaseOnlyHints = false } = {}) {
   const sockets = [], events = [], transcripts = [], audios = [], commentServices = [];
   let now = 2_000_000;
   class Audio {
@@ -84,7 +121,7 @@ async function fixture({ selection, created } = {}) {
   const capture = new SellerLogicCapture();
   created?.(capture);
   await capture.start({
-    username: 'seller', serverUrl: 'http://127.0.0.1:2137', sessionId: 'test',
+    username: 'seller', serverUrl: 'http://127.0.0.1:2137', sessionId: 'test', purchaseOnlyHints,
     stt: { provider: 'SONIOX', apiKey: 'not-a-real-api-key' },
     comment: (comment) => events.push(comment), transcript: (event) => transcripts.push(event),
     status: (message) => events.push({ message }),

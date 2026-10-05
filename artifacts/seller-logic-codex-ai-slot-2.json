@@ -1,0 +1,249 @@
+{
+  "startedAt": "2026-10-05T15:28:14.706Z",
+  "slotNumber": 2,
+  "realProviderCalls": true,
+  "simulatedAdminBoundary": true,
+  "scope": "Representative bounded windows of free purchase and numbered purchase; not a full broadcast replay or physical printing test",
+  "sources": {
+    "src/services/sellerLogicDetection.ts": "b9b1d83bbb098806ba3557fbbc4c29afd6f1b78a8f5cdcde47337540ce630b2f",
+    "src/services/sellerLogicContract.ts": "805abc88055c89596a7d9ccbc1b1b294a75ada383aebbffae39a0c5f3feb6390"
+  },
+  "cases": [
+    {
+      "name": "free-purchase-exact-platform-name",
+      "detectStatus": 200,
+      "provider": "DEEPSEEK",
+      "model": "deepseek-flash",
+      "appliedVersion": 33,
+      "purchaseIntentCommentIds": [
+        "c0"
+      ],
+      "signals": [
+        {
+          "id": "slsig:6e1b7bc1ca5dbde7aee77330892029734ca8eabecf4284ee2b9bf520b2f2832a",
+          "summary": "후드 아이보리 니트 집업 2만 원 상품에 대한 구매 요청과 판매자의 배정 발화로 거래 연결 확인 필요",
+          "commentIds": [
+            "c0"
+          ],
+          "transcriptIds": [
+            "s0",
+            "s1"
+          ]
+        }
+      ],
+      "pass": true,
+      "linkStatus": 200,
+      "decisions": [
+        {
+          "status": "CONFIRMED",
+          "nickname": "😚JJEONG😚",
+          "unitPrice": 20000,
+          "quantity": 1,
+          "reason": "구매자 😚JJEONG😚의 '저용' 구매 요청(C0)에 대해 판매자가 '쩡 언니'로 호명하며 후드 아이보리 니트 집업 2만원을 배정(S1)함. STT 호칭 '쩡'과 닉네임 'JJEONG'의 발음 유사성 및 상품·가격 일치로 동일 거래로 판단.",
+          "commentIds": [
+            "c0"
+          ],
+          "transcriptIds": [
+            "s0",
+            "s1"
+          ],
+          "decidedAt": "2026-10-05T06:26:38.000Z",
+          "productName": "후드 아이보리 니트 집업",
+          "spokenNickname": "쩡 언니",
+          "lineKey": "후드아이보리니트집업-기본",
+          "id": "sla:[\"codex-validation-free-2\",\"c0\",\"s0\",\"후드아이보리니트집업-기본\"]"
+        }
+      ],
+      "elapsedMs": 4215
+    },
+    {
+      "name": "numbered-simultaneous-buyers-split-speech",
+      "detectStatus": 200,
+      "provider": "DEEPSEEK",
+      "model": "deepseek-flash",
+      "appliedVersion": 33,
+      "purchaseIntentCommentIds": [
+        "c0",
+        "c1",
+        "c2"
+      ],
+      "signals": [
+        {
+          "id": "slsig:232afb6c0dd1b77de7d1279a8c425a7c4e8569b9833296acb52a81157976bba5",
+          "summary": "블랙 니트 2번 상품에 대한 구매 요청 댓글들이 연달아 달렸고, 판매자가 은하수용인과 곰곰에게 순차적으로 배정하고 생강에게는 수량이 없다고 안내하여 거래 연결 확인이 필요함",
+          "commentIds": [
+            "c0",
+            "c1",
+            "c2"
+          ],
+          "transcriptIds": [
+            "s0",
+            "s1",
+            "s2",
+            "s3"
+          ]
+        }
+      ],
+      "pass": true,
+      "linkStatus": 200,
+      "decisions": [
+        {
+          "status": "CONFIRMED",
+          "nickname": "은하수용인",
+          "unitPrice": 7000,
+          "quantity": 1,
+          "reason": "은하수용인이 2번 상품에 '2'로 구매 요청했고, 판매자가 '은하수 용인 언니 2번 블랙 니트 드릴게요'라며 호명·배정했으며 가격은 앞선 '블랙 니트 7천원' 안내로 확인됨",
+          "commentIds": [
+            "c0"
+          ],
+          "transcriptIds": [
+            "s0",
+            "s1"
+          ],
+          "decidedAt": "2026-10-05T06:26:37.000Z",
+          "productName": "블랙 니트",
+          "orderCode": "2",
+          "spokenNickname": "은하수 용인",
+          "lineKey": "블랙 니트-2번",
+          "id": "sla:[\"codex-validation-number-2\",\"c0\",\"s0\",\"블랙 니트-2번\"]"
+        },
+        {
+          "status": "CONFIRMED",
+          "nickname": "곰곰🐼",
+          "unitPrice": 7000,
+          "quantity": 1,
+          "reason": "곰곰🐼이 2번 상품에 '2'로 구매 요청했고, 판매자가 '2번 공곰 언니도'에 이어 '블랙 니트 7천원 드릴게요'로 배정했으며 STT 호칭 '공곰'은 닉네임 곰곰🐼의 발음 유사 호칭으로 판단됨",
+          "commentIds": [
+            "c1"
+          ],
+          "transcriptIds": [
+            "s0",
+            "s2",
+            "s3"
+          ],
+          "decidedAt": "2026-10-05T06:26:40.000Z",
+          "productName": "블랙 니트",
+          "orderCode": "2",
+          "spokenNickname": "공곰 언니",
+          "lineKey": "블랙 니트-2번",
+          "id": "sla:[\"codex-validation-number-2\",\"c1\",\"s0\",\"블랙 니트-2번\"]"
+        },
+        {
+          "status": "CANCELLED",
+          "nickname": "생강♡까꿍사랑♡",
+          "unitPrice": null,
+          "quantity": 1,
+          "reason": "생강♡까꿍사랑♡이 2번 상품에 '2'로 구매 요청했으나 판매자가 '생강 언니는 수량이 없어요'라고 안내하여 재고 부족으로 거래가 성립되지 않음",
+          "commentIds": [
+            "c2"
+          ],
+          "transcriptIds": [
+            "s3"
+          ],
+          "decidedAt": "2026-10-05T06:26:40.000Z",
+          "productName": "블랙 니트",
+          "orderCode": "2",
+          "spokenNickname": "생강 언니",
+          "lineKey": "블랙 니트-2번",
+          "id": "sla:[\"codex-validation-number-2\",\"c2\",\"s3\",\"블랙 니트-2번\"]"
+        }
+      ],
+      "elapsedMs": 5180
+    },
+    {
+      "name": "price-correction-and-reused-number",
+      "detectStatus": 200,
+      "provider": "DEEPSEEK",
+      "model": "deepseek-flash",
+      "appliedVersion": 33,
+      "purchaseIntentCommentIds": [
+        "c0",
+        "c1"
+      ],
+      "signals": [
+        {
+          "id": "slsig:b7aa39016c6e76a513bc5f08a5f6afa0f7e7a3026c4baa9b64dccab08402739e",
+          "summary": "아이보리 골지 니트 1번에 대한 구매 요청과 판매자의 배정, 이어서 가격을 1만5천원으로 정정한 거래 후속.",
+          "commentIds": [
+            "c0"
+          ],
+          "transcriptIds": [
+            "s0",
+            "s1",
+            "s2"
+          ]
+        },
+        {
+          "id": "slsig:9b391f00ca8bd239b4490e71322953c39bc38b234260f52517013f2cc968811c",
+          "summary": "블랙 가디건 1번 상품 안내 후 구매 요청과 판매자의 배정이 이어진 거래.",
+          "commentIds": [
+            "c1"
+          ],
+          "transcriptIds": [
+            "s3",
+            "s4"
+          ]
+        }
+      ],
+      "pass": true,
+      "linkStatus": 200,
+      "decisions": [
+        {
+          "status": "CONFIRMED",
+          "nickname": "루비",
+          "unitPrice": 15000,
+          "quantity": 1,
+          "reason": "루비가 '1번 저요'로 구매 요청, 판매자가 '루비 언니 1번 아이보리 골지 니트 드릴게요'로 배정했고, 이어 '1만5천원으로 정정'이라 최종 가격은 15000원입니다.",
+          "commentIds": [
+            "c0"
+          ],
+          "transcriptIds": [
+            "s0",
+            "s1",
+            "s2"
+          ],
+          "decidedAt": "2026-10-05T06:26:38.000Z",
+          "productName": "아이보리 골지 니트",
+          "orderCode": "1번",
+          "spokenNickname": "루비 언니",
+          "lineKey": "아이보리 골지 니트-1번",
+          "id": "sla:[\"codex-validation-correction-2\",\"c0\",\"s0\",\"아이보리 골지 니트-1번\"]"
+        },
+        {
+          "status": "CONFIRMED",
+          "nickname": "루비",
+          "unitPrice": 20000,
+          "quantity": 1,
+          "reason": "판매자가 '블랙 가디건 2만원, 주문번호 1번'을 안내한 뒤 루비가 '1번 블랙 저요'로 요청, 판매자가 '루비 언니 1번 블랙 가디건 2만원 드릴게요'로 배정했습니다.",
+          "commentIds": [
+            "c1"
+          ],
+          "transcriptIds": [
+            "s3",
+            "s4"
+          ],
+          "decidedAt": "2026-10-05T06:26:58.000Z",
+          "productName": "블랙 가디건",
+          "orderCode": "1번",
+          "spokenNickname": "루비 언니",
+          "lineKey": "블랙 가디건-1번",
+          "id": "sla:[\"codex-validation-correction-2\",\"c1\",\"s3\",\"블랙 가디건-1번\"]"
+        }
+      ],
+      "elapsedMs": 4265
+    },
+    {
+      "name": "description-and-question-no-purchase",
+      "detectStatus": 200,
+      "provider": "DEEPSEEK",
+      "model": "deepseek-flash",
+      "appliedVersion": 33,
+      "purchaseIntentCommentIds": [],
+      "signals": [],
+      "pass": true,
+      "elapsedMs": 1211
+    }
+  ],
+  "pass": true,
+  "completedAt": "2026-10-05T15:28:29.585Z"
+}

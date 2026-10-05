@@ -41,6 +41,8 @@ export interface SellerLogicDetectionInput {
 export interface SellerLogicDetectionResult {
   signals: SellerLogicDetectedSignal[];
   carry: SellerLogicCarry[];
+  /** AI-classified purchase requests, available before stage-two sale linking. */
+  purchaseIntentCommentIds?: string[];
   summary: string;
   provider: string;
   model: string;

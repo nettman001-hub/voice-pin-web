@@ -94,7 +94,7 @@ function fixture(options = {}) {
     },
     render() {
       index = 0;
-      const tree = page();
+      const tree = page(options.pageProps);
       while (effects.length) { const cleanup = effects.shift()(); if (cleanup) cleanups.push(cleanup); }
       return tree;
     },
@@ -146,6 +146,27 @@ function completeResult(input, extra = {}) {
 }
 
 const captureSpeech = (id, text, extra = {}) => ({ id, text, recognizedAt: '2026-10-05T15:00:00Z', isFinal: true, ...extra });
+
+test('Codex tools receive source provenance and cumulative decisions while capture uses AI-only hint refreshes', async () => {
+  let tools;
+  const f = fixture({ pageProps: { title: '판매자 로직분석01codex', purchaseOnlyHints: true,
+    renderSalesTools(context) { tools = context; return { type: 'sales-tools', props: {} }; } } });
+  assert.ok(visible(f.render()).includes('판매자 로직분석01codex'));
+  assert.equal(tools.sourceKind, 'EMPTY');
+  await f.import(); f.render(); assert.equal(tools.sourceKind, 'IMPORTED');
+  f.click('새 분석'); f.click('실시간 청취 시작'); await settle();
+  const capture = f.captures[0]; assert.equal(capture.options.purchaseOnlyHints, true);
+  f.render(); assert.equal(tools.sourceKind, 'LIVE');
+  capture.options.comment({ id: 'buyer', sessionId: capture.options.sessionId, nickname: '구매자', content: '저요', capturedAt: '2026-10-05T15:00:00Z' });
+  capture.options.transcript(captureSpeech('seller', '구매자 언니 니트 2만원 드릴게요'));
+  f.click('지금 AI 분석'); const result = decisionResult(f.calls[0].input);
+  f.calls[0].analysisOptions.onProgress(result); f.render();
+  assert.equal(tools.decisions[0].id, result.decisions[0].id);
+  f.calls[0].resolve(result); await settle();
+  f.click('청취 종료'); capture.stopped.resolve(); await settle(); f.render();
+  assert.equal(tools.sourceKind, 'LIVE', 'final drained confirmations still belong to live capture');
+  f.unmount();
+});
 
 function signal(id, input, extra = {}) {
   return { id, summary: `${id} 판매 발화`, commentIds: input.comments.map((row) => row.id), transcriptIds: input.transcripts.map((row) => row.id),

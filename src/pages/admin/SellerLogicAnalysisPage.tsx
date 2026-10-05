@@ -18,7 +18,19 @@ const statusLabels = { CONFIRMED: '판매 확정', PENDING: '대화 진행 중',
 const statusColors = { CONFIRMED: 'bg-emerald-50 text-emerald-700', PENDING: 'bg-amber-50 text-amber-700', REVIEW: 'bg-orange-50 text-orange-700', CANCELLED: 'bg-slate-100 text-slate-500' };
 type QueuedAnalysis = SellerLogicAnalysisInput & { live: boolean; restart?: boolean };
 
-export default function SellerLogicAnalysisPage() {
+export interface SellerLogicSalesToolsContext {
+  sessionId: string;
+  decisions: SellerLogicAnalysisResult['decisions'];
+  serverUrl: string;
+  sourceKind: 'EMPTY' | 'LIVE' | 'IMPORTED';
+}
+interface SellerLogicAnalysisPageProps {
+  title?: string;
+  purchaseOnlyHints?: boolean;
+  renderSalesTools?: (context: SellerLogicSalesToolsContext) => React.ReactNode;
+}
+
+export default function SellerLogicAnalysisPage({ title = '판매자 로직분석01', purchaseOnlyHints = false, renderSalesTools }: SellerLogicAnalysisPageProps = {}) {
   const live = useLive();
   const commentCapture = useCommentCapture();
   const [slot, setSlot] = useState<1 | 2>(1);
@@ -47,6 +59,7 @@ export default function SellerLogicAnalysisPage() {
   const captureFailure = useRef('');
   const prioritizedCommentIds = useRef(new Set<string>());
   const sessionRef = useRef(crypto.randomUUID());
+  const sourceKind = useRef<SellerLogicSalesToolsContext['sourceKind']>('EMPTY');
   const slotRef = useRef(slot);
   const analysisIntervalRef = useRef(analysisInterval);
   const selectedSlotExplicitly = useRef(false);
@@ -233,6 +246,7 @@ export default function SellerLogicAnalysisPage() {
     queueRef.current?.dispose();
     queueRef.current = makeQueue();
     sessionRef.current = crypto.randomUUID();
+    sourceKind.current = 'EMPTY';
     rowsRef.current = emptyEvidence();
     resultRef.current = null;
     resultSlotRef.current = null;
@@ -253,6 +267,7 @@ export default function SellerLogicAnalysisPage() {
     try {
       parseSellerLogicText(paste, date, 'import');
       reset();
+      sourceKind.current = 'IMPORTED';
       // Reparse with the final session identity so source IDs remain stable across every AI request.
       acceptEvidence(parseSellerLogicText(paste, date, sessionRef.current));
       setStatus('대화 자료를 불러왔습니다. 선택한 슬롯으로 AI 분석을 실행해 주세요.');
@@ -270,6 +285,7 @@ export default function SellerLogicAnalysisPage() {
       setError('새 방송을 청취하려면 현재 결과를 내려받은 뒤 새 분석을 눌러 주세요.'); return;
     }
     const currentGeneration = ++generation.current;
+    sourceKind.current = 'LIVE';
     captureFailure.current = '';
     liveMode.current = true;
     setStarting(true); setCapturing(true); setError('');
@@ -282,6 +298,7 @@ export default function SellerLogicAnalysisPage() {
       await service.start({
         username: username.trim().replace(/^@/u, ''), serverUrl: commentCapture.config.serverUrl,
         sessionId: sessionRef.current,
+        purchaseOnlyHints,
         stt: { provider: 'SONIOX', apiKey: live.sonioxApiKey, model: 'nova-3', language: 'ko', keyterms: [],
           punctuate: true, interimResults: true, endpointing: 800, allowBrowserSpeechFallback: false },
         comment: (c) => {
@@ -323,7 +340,7 @@ export default function SellerLogicAnalysisPage() {
       slotNumber: resultSlot, analyzedEventCount: analyzedCount, ...rowsRef.current, result: resultRef.current,
     }, null, 2)], { type: 'application/json;charset=utf-8' }));
     const anchor = document.createElement('a'); anchor.href = url;
-    anchor.download = `판매자-로직분석01-${sessionRef.current}.json`; anchor.click();
+    anchor.download = `${title}-${sessionRef.current}.json`; anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   const decisions = result?.decisions || [];
@@ -340,7 +357,7 @@ export default function SellerLogicAnalysisPage() {
   return <div className="mx-auto max-w-[1560px] space-y-6 p-4 md:p-8">
     <header className="flex flex-wrap items-start justify-between gap-4">
       <div><div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-brand-600"><Bot size={16} /> AI LIVE ANALYSIS</div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">판매자 로직분석01</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">{title}</h1>
         <p className="mt-2 text-sm text-slate-500">AI가 판매 발화를 찾고, 발화 전후 60초 대화에서 구매자와 최종 가격을 연결합니다.</p></div>
       <div className="flex gap-2"><button className={`${button} border border-slate-200 bg-white`} disabled={!count} onClick={download}><Download size={16} /> 결과 내려받기</button>
         <button className={`${button} border border-slate-200 bg-white`} disabled={starting || capturing || running} onClick={() => { reset(); setStatus('새 분석을 준비했습니다.'); }}><RotateCcw size={16} /> 새 분석</button></div>
@@ -387,6 +404,8 @@ export default function SellerLogicAnalysisPage() {
         }}><Play size={14} />{running ? '분석 중' : '지금 AI 분석'}</button></div>
     </div>
 
+    {renderSalesTools?.({ sessionId: sessionRef.current, decisions, serverUrl: commentCapture.config.serverUrl, sourceKind: sourceKind.current })}
+
     <section aria-label="실시간 댓글" className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 p-5">
         <div><h2 className="flex items-center gap-2 font-bold text-slate-900"><MessageSquareText size={18} /> 실시간 댓글</h2>
@@ -422,7 +441,7 @@ export default function SellerLogicAnalysisPage() {
         {!decisions.length ? <div className="px-6 py-16 text-center text-sm text-slate-500"><Bot className="mx-auto mb-3 text-slate-300" size={34} />{result ? 'AI가 아직 판매 후보를 찾지 못했습니다.' : '댓글과 판매자 멘트를 연결해 판매 판단을 기다립니다.'}</div>
           : <div className="divide-y divide-slate-100">{decisions.filter((d) => filter === 'ALL' || d.status === filter).map((d) => <article key={d.id} className="p-5">
             <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${statusColors[d.status]}`}>{statusLabels[d.status]}</span><h3 className="font-bold text-slate-900">{d.nickname || '구매자 확인 필요'}</h3></div><div className="text-lg font-bold tabular-nums text-slate-900">{d.unitPrice === null ? '가격 확인 필요' : `${(d.unitPrice * d.quantity).toLocaleString()}원`}</div></div>
-            <div className="mt-2 flex flex-wrap gap-x-3 text-xs text-slate-500"><span>{time(d.decidedAt)}</span>{d.productName && <span>{d.productName}</span>}{d.orderCode && <span>상품번호 {d.orderCode}</span>}<span>수량 {d.quantity}</span>{d.spokenNickname && d.spokenNickname !== d.nickname && <span>STT 호칭: {d.spokenNickname}</span>}</div>
+            <div className="mt-2 flex flex-wrap gap-x-3 text-xs text-slate-500"><span>{time(d.decidedAt)}</span>{d.productName && <span>{d.productName}</span>}{d.option && <span>{d.option}</span>}{d.orderCode && <span>상품번호 {d.orderCode}</span>}<span>수량 {d.quantity}</span>{d.spokenNickname && d.spokenNickname !== d.nickname && <span>STT 호칭: {d.spokenNickname}</span>}</div>
             <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{d.reason}</p>
             <details className="mt-3 rounded-xl bg-slate-50 p-3 text-xs"><summary className="cursor-pointer font-semibold text-slate-600">근거 대화 {d.commentIds.length + d.transcriptIds.length}개</summary><div className="mt-3 space-y-2">{timeline.filter((r) => (r.kind === 'comment' ? d.commentIds : d.transcriptIds).includes(r.id)).reverse().map((r) => <div key={`${r.kind}:${r.id}`} className="leading-relaxed"><span className="text-slate-400">{time(r.at)}</span> <strong>{r.author}</strong> · {r.text}</div>)}</div></details>
           </article>)}</div>}

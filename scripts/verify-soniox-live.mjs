@@ -25,6 +25,7 @@ const report = {
   provider: 'SONIOX', model: 'stt-rt-v5',
   statuses: [], transcripts: [], transcriptEvents: [], comments: [], connections: [],
   sentChunks: 0, capturedBytes: 0, maxBufferedBytes: 0,
+  purchaseOnlyHints: argumentsByName['purchase-only'] === 'true',
 };
 const chunkIds = new WeakMap();
 const counts = new Map();
@@ -64,7 +65,7 @@ function load(name, dependencies = {}, globals = {}) {
 class TrackedWebSocket extends WebSocket {
   constructor(url) {
     super(url);
-    this.stats = { number: report.connections.length + 1, openedAt: null, firstResponseAt: null, closedAt: null,
+    this.stats = { number: report.connections.length + 1, startedAt: new Date().toISOString(), openedAt: null, firstResponseAt: null, closedAt: null,
       terms: [], sentBytes: 0, chunks: [], finalizedText: '', maxFinalAudioMs: 0, maxTotalAudioMs: 0, finished: false };
     report.connections.push(this.stats);
     this.addEventListener('open', () => { this.stats.openedAt = new Date().toISOString(); });
@@ -160,6 +161,7 @@ try {
   await capture.start({
     username: 'generated-integration-test', serverUrl: 'unused', sessionId: `live-check-${webcrypto.randomUUID()}`,
     stt: { provider: 'SONIOX', apiKey },
+    purchaseOnlyHints: report.purchaseOnlyHints,
     initialComments: [{ nickname: '루비' }],
     comment: (value) => report.comments.push(value),
     transcript: recordTranscript,
@@ -178,6 +180,8 @@ try {
   await capture.stop();
   await delay(100);
   assert.equal(report.connections.length, 3, 'Initial connection and two real vocabulary rotations');
+  if (report.purchaseOnlyHints) assert.ok(Date.parse(report.connections[2].startedAt) - Date.parse(report.connections[1].startedAt) >= 5000,
+    'Subsequent purchase-hint session updates are at least five seconds apart');
   assert.ok(report.maxBufferedBytes > 0, 'Audio buffered during startup or rotation');
   assert.equal(counts.size, report.sentChunks, 'Every captured chunk reached a real WebSocket');
   assert.ok([...counts.values()].every((count) => count === 1), 'Each captured chunk sent exactly once');

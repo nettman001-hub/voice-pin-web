@@ -33,6 +33,8 @@ export interface SellerLogicCaptureOptions {
   interim?: (text: string) => void;
   level?: (level: number) => void;
   initialComments?: SellerLogicNicknameSource[];
+  /** Refresh nickname hints only after AI purchase intent, apart from provider expiry. */
+  purchaseOnlyHints?: boolean;
 }
 
 interface AudioChunk { data: ArrayBuffer; capturedAt: number }
@@ -52,6 +54,7 @@ interface Connection {
 }
 
 const CONNECT_TIMEOUT_MS = 12_000;
+const PURCHASE_HINT_INTERVAL_MS = 5_000;
 const MAX_BUFFER_BYTES = 16000 * 2 * 60;
 const SAME_NAMES = (a: string[], b: string[]) => a.length === b.length && a.every((name) => b.includes(name));
 
@@ -78,6 +81,8 @@ export class SellerLogicCapture {
   private utteranceSequence = 0;
   private runId = '';
   private lastRotationAt = 0;
+  private lastPurchaseRotationAt = -Infinity;
+  private purchaseRotationTimer: number | null = null;
   private retryAfter = 0;
   private ownsScreen = false;
   private lastAudioEndMs = 0;
@@ -173,10 +178,17 @@ export class SellerLogicCapture {
     if (!this.options || this.stopping) return;
     const now = Date.now();
     const urgent = this.priority.some((name) => !this.active?.nicknames.includes(name));
-    if (!this.pending && now >= this.retryAfter && this.active && (
-      urgent || now - this.lastRotationAt >= 4 * 60 * 60 * 1000 ||
-      (now - this.lastRotationAt >= 30_000 && !SAME_NAMES(this.active.nicknames, this.desiredNames()))
-    )) this.openConnection();
+    if (!this.pending && now >= this.retryAfter && this.active && (!urgent || now >= this.lastPurchaseRotationAt + PURCHASE_HINT_INTERVAL_MS) && (
+      (urgent && now >= this.lastPurchaseRotationAt + PURCHASE_HINT_INTERVAL_MS) || now - this.lastRotationAt >= 4 * 60 * 60 * 1000 ||
+      (!this.options.purchaseOnlyHints && now - this.lastRotationAt >= 30_000 && !SAME_NAMES(this.active.nicknames, this.desiredNames()))
+    )) this.openConnection(urgent);
+    if (urgent && this.active && !this.pending && this.purchaseRotationTimer === null) {
+      const wait = Math.max(1, this.retryAfter - now, this.lastPurchaseRotationAt + PURCHASE_HINT_INTERVAL_MS - now);
+      this.purchaseRotationTimer = window.setTimeout(() => {
+        this.purchaseRotationTimer = null;
+        this.tick();
+      }, wait);
+    }
     for (const connection of this.connections) {
       if (connection.firstFinalAt && now - connection.firstFinalAt >= 3_000) this.emitTranscript(connection);
       if (!connection.draining && connection.socket.readyState === WebSocket.OPEN) {
@@ -207,7 +219,7 @@ export class SellerLogicCapture {
     } catch { this.connectionFailed(connection, 'STT 오디오 전송 실패'); }
   }
 
-  private openConnection(): void {
+  private openConnection(purchaseUpdate = false): void {
     if (!this.options || this.pending || this.stopping) return;
     let socket: WebSocket;
     try { socket = new WebSocket('wss://stt-rt.soniox.com/transcribe-websocket'); }
@@ -218,6 +230,7 @@ export class SellerLogicCapture {
       } else this.fail('Soniox 연결을 시작하지 못했습니다.');
       return;
     }
+    if (purchaseUpdate) this.lastPurchaseRotationAt = Date.now();
     const connection: Connection = {
       socket, nicknames: this.desiredNames(), origin: null, sentMs: 0,
       finalTokens: [], draining: false, timeout: null,
@@ -285,6 +298,9 @@ export class SellerLogicCapture {
     this.priority = this.priority.filter((name) => !connection.nicknames.includes(name));
     if (!this.stopping) this.report('CONNECTED', `Soniox 연결됨 · 최근 닉네임 ${connection.nicknames.length}명`);
     if (previous) this.drain(previous, 'rotation');
+    // A second buyer may arrive while the replacement is still authenticating.
+    // Keep the latest names and schedule their coalesced update after promotion.
+    if (this.priority.length) this.tick();
   }
 
   private drain(connection: Connection, reason: 'stream_end' | 'rotation' = 'stream_end'): void {
@@ -389,6 +405,8 @@ export class SellerLogicCapture {
     ++this.generation;
     if (this.timer !== null) window.clearInterval(this.timer);
     this.timer = null;
+    if (this.purchaseRotationTimer !== null) window.clearTimeout(this.purchaseRotationTimer);
+    this.purchaseRotationTimer = null;
     this.audio.stopCapture();
     this.disposers.splice(0).forEach((dispose) => dispose());
     this.comments.disconnect();
@@ -426,6 +444,7 @@ export class SellerLogicCapture {
       this.sequence = 0;
       this.utteranceSequence = 0;
       this.retryAfter = 0;
+      this.lastPurchaseRotationAt = -Infinity;
       this.stopPromise = null;
     });
     return this.stopPromise;

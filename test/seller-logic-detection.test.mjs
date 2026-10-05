@@ -15,9 +15,20 @@ const input = () => ({
 });
 const answer = (extra = {}) => ({ summary: '이어진 발화에 거래 연결 가능성이 있습니다.',
   signals: [{ id: null, summary: '구매 댓글 뒤 호명과 상품 배정으로 보이는 발화가 이어짐', commentIds: ['C0'], transcriptIds: ['S0', 'S1', 'S2'] }],
-  carry: [], ...extra,
+  carry: [], purchaseIntentCommentIds: [], ...extra,
 });
 const parse = (raw, evidence = input()) => parseSellerLogicDetectionResult(JSON.stringify(raw), evidence);
+
+test('AI purchase-intent aliases restore exact comment IDs and require cited signal evidence', async () => {
+  const result = await parse(answer({ purchaseIntentCommentIds: ['C0'] }));
+  assert.deepEqual(result.purchaseIntentCommentIds, ['c1']);
+  await assert.rejects(parse(answer({ purchaseIntentCommentIds: ['C999'] })), /purchaseIntentCommentIds/);
+  await assert.rejects(parse(answer({ purchaseIntentCommentIds: ['C0', 'C0'] })), /중복/);
+  await assert.rejects(parse(answer({ signals: [], purchaseIntentCommentIds: ['C0'] })), /댓글 근거/);
+  await assert.rejects(parse(answer({ purchaseIntentCommentIds: undefined })), /purchaseIntentCommentIds/);
+  const evidence = { ...input(), freshCommentIds: [], carry: [] };
+  assert.deepEqual((await parse(answer({ purchaseIntentCommentIds: ['C0'] }), evidence)).purchaseIntentCommentIds, [], 'overlap cannot repeatedly trigger a purchase hint');
+});
 
 test('detection schema requires complete signals and carry with only available source and existing signal aliases', () => {
   const evidence = input();
@@ -25,7 +36,7 @@ test('detection schema requires complete signals and carry with only available s
   const prompt = sellerLogicDetectionPrompt(evidence), format = prompt.responseSchema;
   assert.equal(format.name, 'seller_logic_detection');
   assert.equal(prompt.maxOutputTokens, 4096);
-  assert.deepEqual(format.schema.required, ['summary', 'signals', 'carry']);
+  assert.deepEqual(format.schema.required, ['summary', 'signals', 'carry', 'purchaseIntentCommentIds']);
   assert.equal(format.schema.additionalProperties, false);
   const { signals, carry } = format.schema.properties;
   assert.deepEqual(signals.items.required, ['id', 'summary', 'commentIds', 'transcriptIds']);
@@ -93,7 +104,7 @@ test('AI-selected no-signal output for a complete plain description stays empty 
   const evidence = { ...input(), comments: [], freshCommentIds: [], existingSignals: [], carry: [],
     transcripts: [{ id: 'description', text: '이 니트는 부드러워요. 7천원이고 면 100%, 44~55 사이즈예요.',
       recognizedAt: '2026-10-05T12:00:00Z', isFinal: true, utteranceEnded: true }], freshTranscriptIds: ['description'] };
-  const result = await parse({ summary: '상품 설명과 가격·재질·사이즈만 있으며 주문번호 안내나 거래 행동이 없음', signals: [], carry: [] }, evidence);
+  const result = await parse({ summary: '상품 설명과 가격·재질·사이즈만 있으며 주문번호 안내나 거래 행동이 없음', signals: [], carry: [], purchaseIntentCommentIds: [] }, evidence);
   assert.deepEqual(result.signals, []);
   assert.deepEqual(result.carry, []);
 });
@@ -109,7 +120,7 @@ test('standalone buyer price and size questions are explicitly excluded from fir
     assert.match(prompt.systemPrompt, /입력 전체가 이런 문의뿐이면 signals:\[\]이며, 다른 후보의 구매·후속 신호는 유지/);
     assert.match(prompt.systemPrompt, /막연히 구매 가능성이 있다는 이유로 2차 후보에 넘기지/);
     // The model's no-signal response is accepted without adding a candidate.
-    const result = await parse({ summary: '구매 요청이나 기존 거래 후속 없는 단순 문의', signals: [], carry: [] }, evidence);
+    const result = await parse({ summary: '구매 요청이나 기존 거래 후속 없는 단순 문의', signals: [], carry: [], purchaseIntentCommentIds: [] }, evidence);
     assert.deepEqual(result.signals, []);
   }
 });
@@ -246,7 +257,7 @@ test('no signal and unfinished speech are different valid outputs; carry can lat
   assert.deepEqual(unfinished.signals, []);
   assert.deepEqual(unfinished.carry[0].transcriptIds, ['s2']);
   const cleared = await parse(answer({ signals: [], carry: [] }));
-  assert.deepEqual(cleared, { summary: answer().summary, signals: [], carry: [] });
+  assert.deepEqual(cleared, { summary: answer().summary, signals: [], carry: [], purchaseIntentCommentIds: [] });
 });
 
 test('seller-only and comment-only evidence can produce a candidate without buyer or price decisions', async () => {

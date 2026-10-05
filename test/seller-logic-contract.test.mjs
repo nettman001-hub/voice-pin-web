@@ -21,6 +21,15 @@ const decision = () => ({
 });
 const result = (d = decision()) => JSON.stringify({ summary: "가격 협상과 호명을 분석했습니다.", purchaseIntentCommentIds: ["c1"], decisions: [d] });
 
+test('AI product and option survive result validation and the next window without parsing them locally', () => {
+  const evidence = input();
+  const parsed = parseSellerLogicResult(result({ ...decision(), productName: '후드 니트 집업', option: '아이보리 · 55' }), evidence);
+  assert.equal(parsed.decisions[0].option, '아이보리 · 55');
+  evidence.previousDecisions = parsed.decisions;
+  assert.equal(normalizeSellerLogicInput(evidence).previousDecisions[0].option, '아이보리 · 55');
+  assert.ok(sellerLogicWindowPrompt(prepareSellerLogicWindow(evidence, 7)).userPrompt.includes('아이보리 · 55'));
+});
+
 test('window response schema types nullable transaction fields, optional descriptions, evidence, memory and candidate links', () => {
   const evidence = input();
   evidence.previousDecisions = parseSellerLogicResult(result(), evidence).decisions;
@@ -38,7 +47,7 @@ test('window response schema types nullable transaction fields, optional descrip
   assert.deepEqual(d.unitPrice, { type: ['integer', 'null'], minimum: 1, maximum: 99_999_999 });
   assert.deepEqual(d.quantity, { type: 'integer', minimum: 1, maximum: 99 });
   assert.equal(d.reason.maxLength, 4000);
-  for (const key of ['productName', 'orderCode', 'spokenNickname', 'lineKey']) {
+  for (const key of ['productName', 'option', 'orderCode', 'spokenNickname', 'lineKey']) {
     assert.ok(!item.required.includes(key));
     assert.deepEqual(d[key], { type: ['string', 'null'], maxLength: 500 });
   }

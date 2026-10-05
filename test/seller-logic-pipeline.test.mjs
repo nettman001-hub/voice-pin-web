@@ -32,6 +32,36 @@ function recorder(detect = () => detection(), link = (packet) => linked(packet))
 }
 const live = (seconds) => ({ live: true, now: epoch + seconds * 1000 });
 
+test('first-stage AI purchase intent is published before the second-stage link response or a sale exists', async () => {
+  let resolveLink;
+  const snapshots = [];
+  const work = runSellerLogicPipeline(input([comment('request', 0, 'ㅈㅇ')]), {
+    async detect() { return { ...detection([candidate('buyer', ['request'])]), purchaseIntentCommentIds: ['request'] }; },
+    link(packet) { assert.equal(snapshots[0].decisions.length, 0); return new Promise((resolve) => { resolveLink = () => resolve(linked(packet)); }); },
+  }, { ...live(1), onProgress: (value) => snapshots.push(value) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(snapshots[0].purchaseIntentCommentIds, ['request']);
+  assert.deepEqual(snapshots[0].analysisState.purchaseIntentCommentIds, ['request']);
+  assert.equal(snapshots[0].decisions.length, 0);
+  resolveLink(); const result = await work;
+  assert.deepEqual(result.purchaseIntentCommentIds, ['request']);
+});
+
+test('stage-two AI can retract an early purchase intent after linking more context', async () => {
+  const r = recorder(() => ({ ...detection([candidate('buyer', ['request'])]), purchaseIntentCommentIds: ['request'] }),
+    (packet) => ({ ...linked(packet), retractedPurchaseIntentCommentIds: ['request'] }));
+  const result = await runSellerLogicPipeline(input([comment('request', 0)]), r.calls, live(1));
+  assert.deepEqual(result.purchaseIntentCommentIds, []);
+});
+
+test('fabricated or uncited early purchase IDs fail before any linking request', async () => {
+  for (const ids of [['missing'], ['request', 'request'], ['request']]) {
+    const r = recorder(() => ({ ...detection(ids.length === 1 && ids[0] === 'request' ? [] : [candidate('buyer', ['request'])]), purchaseIntentCommentIds: ids }));
+    await assert.rejects(runSellerLogicPipeline(input([comment('request', 0)]), r.calls, live(1)), /구매 의사/);
+    assert.equal(r.links.length, 0);
+  }
+});
+
 test('a seller-first order-code signal remains visible without inventing a buyer or transaction', async () => {
   const archive = input([], [speech('number-announcement', 0, '그레이 니트 7,000원, 1번입니다.')]);
   const r = recorder(() => detection([candidate('order-code', [], ['number-announcement'])]));

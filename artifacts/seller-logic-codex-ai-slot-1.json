@@ -1,0 +1,173 @@
+{
+  "startedAt": "2026-10-05T15:23:35.252Z",
+  "slotNumber": 1,
+  "realProviderCalls": true,
+  "simulatedAdminBoundary": true,
+  "scope": "Representative bounded windows of free purchase and numbered purchase; not a full broadcast replay or physical printing test",
+  "sources": {
+    "src/services/sellerLogicDetection.ts": "a7020fd0d5a2bbd260003f7ae8b8456972e4044f429d517052fb5edbb2da9a27",
+    "src/services/sellerLogicContract.ts": "805abc88055c89596a7d9ccbc1b1b294a75ada383aebbffae39a0c5f3feb6390"
+  },
+  "cases": [
+    {
+      "name": "free-purchase-exact-platform-name",
+      "detectStatus": 200,
+      "provider": "LM_STUDIO",
+      "model": "gemma-4-e4b-it",
+      "appliedVersion": 33,
+      "purchaseIntentCommentIds": [
+        "c0"
+      ],
+      "signals": [
+        {
+          "id": "slsig:ca83ccc9f39397c5b34400099af72f6716e172f67c67085366f2b6667d746d4b",
+          "summary": "판매자가 후드 아이보리 니트 집업 2만 원을 소개했고, 고객 C0가 '저용'이라고 구매 의사를 밝혔으며, 판매자는 C0에게 해당 상품을 배정함.",
+          "commentIds": [
+            "c0"
+          ],
+          "transcriptIds": [
+            "s0",
+            "s1"
+          ]
+        }
+      ],
+      "pass": true,
+      "linkStatus": 200,
+      "decisions": [
+        {
+          "status": "CONFIRMED",
+          "nickname": "😚JJEONG😚",
+          "unitPrice": 20000,
+          "quantity": 1,
+          "reason": "구매자 C0의 '저용' 요청에 판매자가 S1에서 해당 상품을 배정함.",
+          "commentIds": [
+            "c0"
+          ],
+          "transcriptIds": [
+            "s0",
+            "s1"
+          ],
+          "decidedAt": "2026-10-05T06:26:38.000Z",
+          "productName": "후드 아이보리 니트 집업",
+          "orderCode": "null",
+          "spokenNickname": "쩡 언니",
+          "lineKey": "후드아이보리-집업",
+          "id": "sla:[\"codex-validation-free-1\",\"c0\",\"s0\",\"후드아이보리-집업\"]"
+        }
+      ],
+      "elapsedMs": 8500
+    },
+    {
+      "name": "numbered-simultaneous-buyers-split-speech",
+      "detectStatus": 200,
+      "provider": "LM_STUDIO",
+      "model": "gemma-4-e4b-it",
+      "appliedVersion": 33,
+      "purchaseIntentCommentIds": [
+        "c0",
+        "c1",
+        "c2"
+      ],
+      "signals": [
+        {
+          "id": "slsig:537cd9fe6a9dadd881328e23b14b4be4f28917ece7fba60e92988ec3568a1496",
+          "summary": "판매자는 블랙 니트 7천원(2번)을 두 분만 가능하다고 안내했고, C0, C1, C2 세 명의 사용자가 모두 '2'를 언급하며 구매 의사를 보였습니다. 판매자는 이후 C0에게 배정하고, S3에서 C1에게는 수량이 없다고 알리며 거래가 진행되었습니다.",
+          "commentIds": [
+            "c0",
+            "c1",
+            "c2"
+          ],
+          "transcriptIds": [
+            "s0",
+            "s1",
+            "s3"
+          ]
+        }
+      ],
+      "pass": false,
+      "linkStatus": 200,
+      "decisions": [
+        {
+          "status": "CONFIRMED",
+          "nickname": "은하수용인",
+          "unitPrice": 7000,
+          "quantity": 1,
+          "reason": "판매자가 2번 블랙 니트(7천원)를 안내했고, C0이 '2'로 구매 의사를 보였으며 S1에서 판매자가 C0에게 배정했습니다.",
+          "commentIds": [
+            "c0"
+          ],
+          "transcriptIds": [
+            "s0",
+            "s1"
+          ],
+          "decidedAt": "2026-10-05T06:26:37.000Z",
+          "productName": "블랙 니트",
+          "orderCode": "2",
+          "spokenNickname": "은하수 용인 언니",
+          "id": "sla:[\"codex-validation-number-1\",\"c0\",\"s0\",\"블랙 니트\"]"
+        },
+        {
+          "status": "CANCELLED",
+          "nickname": "곰곰🐼",
+          "unitPrice": 7000,
+          "quantity": 1,
+          "reason": "판매자가 2번 블랙 니트(7천원)를 안내했고, C1이 '2'로 구매 의사를 보였으나 S3에서 판매자가 수량이 없다고 알렸습니다.",
+          "commentIds": [
+            "c1"
+          ],
+          "transcriptIds": [
+            "s0",
+            "s3"
+          ],
+          "decidedAt": "2026-10-05T06:26:40.000Z",
+          "productName": "블랙 니트",
+          "orderCode": "2",
+          "spokenNickname": "공곰 언니",
+          "id": "sla:[\"codex-validation-number-1\",\"c1\",\"s0\",\"블랙 니트\"]"
+        },
+        {
+          "status": "PENDING",
+          "nickname": "생강♡까꿍사랑♡",
+          "unitPrice": 7000,
+          "quantity": 1,
+          "reason": "판매자가 2번 블랙 니트(7천원)를 안내했고, C2가 '2'로 구매 의사를 보였으나 판매자의 명확한 배정이나 확정이 없어 PENDING 상태입니다.",
+          "commentIds": [
+            "c2"
+          ],
+          "transcriptIds": [
+            "s0"
+          ],
+          "decidedAt": "2026-10-05T06:26:35.000Z",
+          "productName": "블랙 니트",
+          "orderCode": "2",
+          "spokenNickname": "null",
+          "id": "sla:[\"codex-validation-number-1\",\"c2\",\"s0\",\"블랙 니트\"]"
+        }
+      ],
+      "elapsedMs": 12063
+    },
+    {
+      "name": "price-correction-and-reused-number",
+      "detectStatus": 502,
+      "error": {
+        "code": "INVALID_AI_DETECTION",
+        "message": "1차 탐지 결과를 적용하지 않았습니다: 1차 AI 응답은 완전한 JSON 객체여야 합니다."
+      },
+      "pass": false,
+      "elapsedMs": 7303
+    },
+    {
+      "name": "description-and-question-no-purchase",
+      "detectStatus": 200,
+      "provider": "LM_STUDIO",
+      "model": "gemma-4-e4b-it",
+      "appliedVersion": 33,
+      "purchaseIntentCommentIds": [],
+      "signals": [],
+      "pass": true,
+      "elapsedMs": 856
+    }
+  ],
+  "pass": false,
+  "completedAt": "2026-10-05T15:24:03.986Z"
+}

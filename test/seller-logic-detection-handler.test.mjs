@@ -24,6 +24,7 @@ const input = () => ({ sessionId: 'detector', slotNumber: 2,
   freshCommentIds: ['c'], freshTranscriptIds: ['s'], existingSignals: [], carry: [],
 });
 const output = () => ({ summary: '구매 연결 확인이 필요하며 호명 뒤 발화는 미완료입니다.',
+  purchaseIntentCommentIds: ['C0'],
   signals: [{ id: null, summary: '구매 요청과 호명 연결 가능성', commentIds: ['C0'], transcriptIds: ['S0'] }],
   carry: [{ reason: '호명 다음 말을 이어 읽어야 함', commentIds: [], transcriptIds: ['S0'] }],
 });

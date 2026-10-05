@@ -22,6 +22,7 @@ export interface SellerLogicDecision {
   commentIds: string[];
   transcriptIds: string[];
   productName?: string;
+  option?: string;
   orderCode?: string;
   decidedAt: string;
   spokenNickname?: string;
