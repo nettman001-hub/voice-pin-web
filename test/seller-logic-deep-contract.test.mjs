@@ -110,3 +110,21 @@ test('transport validation rejects evidence that is not inside this time-bucket 
   assert.throws(() => normalizeSellerLogicDeepInput({ ...base, context: [{ text: '없는 근거', commentIds: ['c9'], transcriptIds: [] }] }), /원문 ID/);
   assert.throws(() => normalizeSellerLogicDeepInput({ ...base, segment: { ...base.segment, commentIds: [], transcriptIds: [] } }), /원문 근거/);
 });
+
+test('an evidence-less context item is preserved for manual review instead of rejecting the deep result', async () => {
+  const input = normalizeSellerLogicDeepInput(payload());
+  const withEmpty = answer();
+  withEmpty.context = [
+    { text: '근거 없는 요약', commentIds: [], transcriptIds: [] },
+    { text: '맨투맨 18,000원 안내', commentIds: [], transcriptIds: ['S0'] },
+  ];
+  const parsed = await parse(withEmpty, input);
+  assert.deepEqual(parsed.context.map((item) => item.text), ['근거 없는 요약', '맨투맨 18,000원 안내']);
+  assert.equal(parsed.context[0].sourcesMissing, true);
+  assert.equal(parsed.context[1].sourcesMissing, undefined);
+});
+
+test('the engine still may not import a context item without source evidence', () => {
+  const base = payload();
+  assert.throws(() => normalizeSellerLogicDeepInput({ ...base, context: [{ text: '근거 없는 문맥', commentIds: [], transcriptIds: [] }] }), /원문 근거/);
+});

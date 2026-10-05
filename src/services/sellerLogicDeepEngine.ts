@@ -75,7 +75,8 @@ export async function runSellerLogicDeep(
   const segments = segmentSellerLogicDeepEvents(input.comments, input.transcripts, { now: options.now ?? Date.now() });
   const state: SellerLogicDeepEngineState = input.state && input.state.slotNumber === input.slotNumber
     ? structuredClone(input.state)
-    : { slotNumber: input.slotNumber, processedSegments: {}, context: [], decisions: [], stats: { segmentCalls: 0, segmentMs: 0 } };
+    : { slotNumber: input.slotNumber, processedSegments: {}, context: [], unreviewedContext: [], decisions: [], stats: { segmentCalls: 0, segmentMs: 0 } };
+  if (!Array.isArray(state.unreviewedContext)) state.unreviewedContext = [];
   const decisions = new Map(state.decisions.map((row) => [row.id, row]));
   const eventExists = new Set([
     ...input.comments.map((row) => `C:${row.id}`),
@@ -94,7 +95,8 @@ export async function runSellerLogicDeep(
     state.model = model;
     state.appliedVersion = appliedVersion;
     return {
-      decisions: ordered, signals, context: state.context, segments, summary, provider, model, appliedVersion,
+      decisions: ordered, signals, context: state.context, unreviewedContext: state.unreviewedContext,
+      segments, summary, provider, model, appliedVersion,
       stats: { ...state.stats }, state: structuredClone(state),
     };
   };
@@ -108,7 +110,9 @@ export async function runSellerLogicDeep(
     const keys = new Set<string>();
     segment.commentIds.forEach((id) => keys.add(`C:${id}`));
     segment.transcriptIds.forEach((id) => keys.add(`S:${id}`));
-    for (const item of state.context) {
+    // Evidence-less carry is preserved for the screen but never sent back to the AI.
+    const sendableContext = state.context.filter((item) => item.commentIds.length > 0 || item.transcriptIds.length > 0);
+    for (const item of sendableContext) {
       for (const key of [...item.commentIds.map((id) => `C:${id}`), ...item.transcriptIds.map((id) => `S:${id}`)]) {
         if (eventExists.has(key)) keys.add(key);
       }
@@ -123,7 +127,7 @@ export async function runSellerLogicDeep(
       const refs = [...decision.commentIds.map((id) => `C:${id}`), ...decision.transcriptIds.map((id) => `S:${id}`)]
         .filter((key) => eventExists.has(key) && !keys.has(key));
       refs.forEach((key) => keys.add(key));
-      const candidatePacket = assemblePacket(input.sessionId, input.slotNumber, segment, keys, state.context,
+      const candidatePacket = assemblePacket(input.sessionId, input.slotNumber, segment, keys, sendableContext,
         [...previousDecisions, decision], input.comments, input.transcripts);
       if (JSON.stringify(candidatePacket).length > packetLimit) {
         refs.forEach((key) => keys.delete(key));
@@ -131,7 +135,7 @@ export async function runSellerLogicDeep(
       }
       previousDecisions.push(decision);
     }
-    const packet = assemblePacket(input.sessionId, input.slotNumber, segment, keys, state.context, previousDecisions, input.comments, input.transcripts);
+    const packet = assemblePacket(input.sessionId, input.slotNumber, segment, keys, sendableContext, previousDecisions, input.comments, input.transcripts);
     const started = Date.now();
     state.stats.segmentCalls++;
     const result = await call(packet);
@@ -139,6 +143,11 @@ export async function runSellerLogicDeep(
     state.stats.segmentMs += Date.now() - started;
     for (const decision of result.decisions) decisions.set(decision.id, decision);
     state.context = result.context;
+    const unreviewed = new Map(state.unreviewedContext.map((item) => [item.text, item]));
+    for (const item of result.context) {
+      if (!item.commentIds.length && !item.transcriptIds.length) unreviewed.set(item.text, { ...item, sourcesMissing: true });
+    }
+    state.unreviewedContext = [...unreviewed.values()];
     signals = result.signals;
     summary = result.summary;
     provider = result.provider;

@@ -19,6 +19,8 @@ export interface SellerLogicDeepContextItem {
   text: string;
   commentIds: string[];
   transcriptIds: string[];
+  /** AI kept a carry item without any source reference; shown for manual review only. */
+  sourcesMissing?: boolean;
 }
 
 export interface SellerLogicDeepDecision {
@@ -76,6 +78,8 @@ export interface SellerLogicDeepResult {
   decisions: SellerLogicDeepDecision[];
   signals: SellerLogicDeepSignal[];
   context: SellerLogicDeepContextItem[];
+  /** Evidence-less carry accumulated for manual review; never sent to the AI. */
+  unreviewedContext: SellerLogicDeepContextItem[];
   segments: SellerLogicDeepSegment[];
   summary: string;
   provider: string;
@@ -88,6 +92,7 @@ export interface SellerLogicDeepEngineState {
   slotNumber: 1 | 2;
   processedSegments: Record<string, string>;
   context: SellerLogicDeepContextItem[];
+  unreviewedContext: SellerLogicDeepContextItem[];
   decisions: SellerLogicDeepDecision[];
   provider?: string;
   model?: string;

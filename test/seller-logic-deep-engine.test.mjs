@@ -24,8 +24,10 @@ function recorder() {
   return { calls, call: async (packet) => {
     calls.push(packet);
     if (packet.segment.index === 0) {
-      return { decisions: [decisionA], signals: [], context: [{ text: '맨투맨 1.5 안내', commentIds: [], transcriptIds: ['s1'] }],
-        summary: '1구간 심층 판단', provider: 'EXISTING', model: 'deep-model', appliedVersion: 9 };
+      return { decisions: [decisionA], signals: [], context: [
+        { text: '맨투맨 1.5 안내', commentIds: [], transcriptIds: ['s1'] },
+        { text: '근거 없는 후속 후보', commentIds: [], transcriptIds: [] },
+      ], summary: '1구간 심층 판단', provider: 'EXISTING', model: 'deep-model', appliedVersion: 9 };
     }
     return { decisions: [decisionB], signals: [], context: [], summary: '2구간 심층 판단', provider: 'EXISTING', model: 'deep-model', appliedVersion: 9 };
   } };
@@ -40,6 +42,9 @@ test('each changed time bucket is one deep call and later bucket receives prior 
   assert.equal(calls[1].segment.index, 1);
   assert.deepEqual(calls[1].previousDecisions.map((row) => row.id), ['sld:a']);
   assert.ok(calls[1].transcripts.some((row) => row.id === 's1'), 'carry evidence reaches the next bucket');
+  assert.equal(calls[1].context.length, 1, 'evidence-less carry never reaches the AI');
+  assert.equal(first.unreviewedContext.length, 1, 'evidence-less carry stays on screen for review');
+  assert.equal(first.unreviewedContext[0].sourcesMissing, true);
   assert.deepEqual(first.decisions.map((row) => row.id), ['sld:a', 'sld:b']);
   assert.equal(first.stats.segmentCalls, 2);
   assert.equal(Object.keys(first.state.processedSegments).length, 2);
@@ -54,6 +59,7 @@ test('re-running the same archive with the saved state makes no paid call', asyn
   const second = await runSellerLogicDeep({ ...input, state: first.state }, quiet.call, { now: epoch + 600_000 });
   assert.equal(quiet.calls.length, 0);
   assert.deepEqual(second.decisions.map((row) => row.id), ['sld:a', 'sld:b']);
+  assert.equal(second.unreviewedContext.length, 1, 'manual-review carry survives quiet runs');
 });
 
 test('a revised transcript re-opens only its own bucket', async () => {

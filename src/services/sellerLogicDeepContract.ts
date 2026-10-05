@@ -29,7 +29,11 @@ function references(value: unknown, valid: Set<string>, label: string): string[]
   return value as string[];
 }
 
-function validateContextItems(raw: unknown, source: Pick<SellerLogicDeepInput, "comments" | "transcripts">): SellerLogicDeepContextItem[] {
+function validateContextItems(
+  raw: unknown,
+  source: Pick<SellerLogicDeepInput, "comments" | "transcripts">,
+  requireSources = true,
+): SellerLogicDeepContextItem[] {
   if (!Array.isArray(raw) || raw.length > SELLER_LOGIC_DEEP_LIMITS.contextItems) {
     return invalid(`이어 읽기 문맥은 ${SELLER_LOGIC_DEEP_LIMITS.contextItems}개 이하여야 합니다.`);
   }
@@ -39,7 +43,7 @@ function validateContextItems(raw: unknown, source: Pick<SellerLogicDeepInput, "
     if (!object(item) || !text(item.text, 2000)) return invalid("문맥 항목에는 다음 구간에 필요한 설명이 필요합니다.");
     const commentIds = references(item.commentIds, knownComments, "context.commentIds");
     const transcriptIds = references(item.transcriptIds, knownTranscripts, "context.transcriptIds");
-    if (!commentIds.length && !transcriptIds.length) return invalid("문맥 항목에는 원문 근거가 필요합니다.");
+    if (requireSources && !commentIds.length && !transcriptIds.length) return invalid("문맥 항목에는 원문 근거가 필요합니다.");
     return { text: item.text, commentIds, transcriptIds };
   });
 }
@@ -219,7 +223,7 @@ timeline은 이번 분석 시간대의 원문입니다. role="new"는 이번에 
 확정 규칙: CONFIRMED는 판매자가 그 구매자를 호명해 배정·확정한 발화 근거가 있을 때만입니다. 고객 댓글만으로 확정하지 마세요. 판매자 발화의 소수 무단위 가격은 만원 단위(0.9=9,000원)입니다. 가격은 그 거래의 확정 발화 가격 → 같은 거래의 후속 가격 발화 → 같은 상품 구간에서 앞서 안내한 가격 순으로 확보하세요. 가격 근거가 없으면 unitPrice는 null로 두고 REVIEW입니다. 0원은 쓰지 마세요.
 상태: CONFIRMED(판매자 확정+구매자 확정), PENDING(대화 진행 중, 후속 발화 대기), REVIEW(닉네임·가격·상품·옵션·재고 확인 필요), CANCELLED(취소·번복·부정). 질문("얼마예요?", "66 가능?"), 조건("있으면 살게요"), 과거 언급, 농담, 사이즈 문의는 확정이 아닙니다. 판매자가 안내한 재고·품절 수량을 넘는 배정은 REVIEW로 남기세요.
 이전 판단 갱신: previousDecisions의 거래를 바꿀 때는 같은 D별칭 id를 유지하고 그 거래의 기존 근거를 하나 이상 함께 인용하세요. 새 거래는 id null입니다. 응답에는 이번에 판단한 거래만 넣어도 되며, 변경하지 않은 거래는 코드가 유지합니다. 같은 거래의 가격 협상 단계를 별도 거래로 중복 출력하지 말고 마지막 상태 하나로 합치세요. 한 발화에서 여러 구매자가 확정되면 구매자별로 별도 거래 줄을 만드세요. 여러 상품·옵션은 lineKey로 구분하세요.
-context: 다음 시간대에 필요한 현재 상품·주문번호·가격·미해결 후보·구매 요청만 남겨 전체 배열로 반환하세요. 해소된 항목은 빼세요. 각 항목은 실제 원문 ID 근거를 1개 이상 포함해야 합니다.
+context: 다음 시간대에 필요한 현재 상품·주문번호·가격·미해결 후보·구매 요청만 남겨 전체 배열로 반환하세요. 해소된 항목은 빼세요. 각 항목은 실제 원문 ID 근거를 1개 이상 포함해야 하며, 근거 ID가 없는 문맥은 항목을 만들지 말고 생략하세요.
 signals: 이번 시간대 신호를 kind(BUYER_INTENT/SELLER_ALLOCATE/PRODUCT_ANNOUNCE/PRICE_QUOTE/PRICE_CORRECTION/STOCK/CANCEL/INQUIRY/NOISE)와 함께 기록하세요.
 출력은 JSON 하나입니다. 필수: {"summary":"이번 시간대 요약","signals":[{"kind":"BUYER_INTENT","summary":"신호 요약","commentIds":["C0"],"transcriptIds":[]}],"decisions":[{"id":null,"status":"CONFIRMED","nickname":"인용 댓글의 정확한 닉네임 또는 null","unitPrice":15000,"quantity":1,"reason":"선정 또는 보류 이유","commentIds":["C0"],"transcriptIds":["S1"],"productName":"상품명(선택)","orderCode":"상품번호(선택)","spokenNickname":"STT 호칭(선택)","lineKey":"상품-옵션 구분(선택)"}],"context":[{"text":"다음 시간대에 필요한 문맥","commentIds":[],"transcriptIds":["S1"]}]}. 모르는 nickname·unitPrice는 문자열 "null"이 아닌 JSON null입니다. 판단할 거래가 없으면 decisions:[]입니다. 공급자 정보·시간·근거 ID를 만들어 넣지 마세요.`,
     userPrompt: JSON.stringify({
@@ -308,6 +312,6 @@ export async function parseSellerLogicDeepResult(
       commentIds: decodeIds(item.commentIds, commentByAlias, "context.commentIds"),
       transcriptIds: decodeIds(item.transcriptIds, transcriptByAlias, "context.transcriptIds"),
     };
-  }), input);
+  }), input, false).map((item) => item.commentIds.length || item.transcriptIds.length ? item : { ...item, sourcesMissing: true });
   return { decisions, signals, context, summary: raw.summary };
 }

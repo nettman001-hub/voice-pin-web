@@ -20,6 +20,11 @@ const time = (value: string) => new Date(value).toLocaleTimeString('ko-KR', { ti
 const statusLabels = { CONFIRMED: '판매 확정', PENDING: '대화 진행 중', REVIEW: '확인 필요', CANCELLED: '취소' };
 const statusColors = { CONFIRMED: 'bg-emerald-50 text-emerald-700', PENDING: 'bg-amber-50 text-amber-700', REVIEW: 'bg-orange-50 text-orange-700', CANCELLED: 'bg-slate-100 text-slate-500' };
 type QueuedAnalysis = { sessionId: string; slotNumber: 1 | 2; comments: SellerLogicEvidence['comments']; transcripts: SellerLogicEvidence['transcripts'] };
+type DeepDebugStatus = 'REQUEST' | 'RESPONSE' | 'ERROR';
+interface DeepDebugEntry {
+  id: string; at: string; segmentId: string; status: DeepDebugStatus;
+  request: unknown; response?: unknown; error?: string;
+}
 
 export default function SellerLogicAnalysis03DeepPage() {
   const live = useLive();
@@ -42,6 +47,8 @@ export default function SellerLogicAnalysis03DeepPage() {
   const [error, setError] = useState('');
   const [resultSlot, setResultSlot] = useState<1 | 2 | null>(null);
   const [filter, setFilter] = useState('ALL');
+  const [debugLog, setDebugLog] = useState<DeepDebugEntry[]>([]);
+  const debugSeq = useRef(0);
   const rowsRef = useRef(evidence);
   const resultRef = useRef<SellerLogicDeepRunResult | null>(null);
   const stateRef = useRef<SellerLogicDeepRunResult['state'] | null>(null);
@@ -120,7 +127,22 @@ export default function SellerLogicAnalysis03DeepPage() {
       const state = stateSlotRef.current === input.slotNumber && stateRef.current ? stateRef.current : undefined;
       return runSellerLogicDeep(
         { sessionId: input.sessionId, slotNumber: input.slotNumber, comments: input.comments, transcripts: input.transcripts, state },
-        (packet) => analyzeSellerLogicDeep(packet, { signal: controller.signal }),
+        (packet) => {
+          const exchangeId = `${Date.now()}-${++debugSeq.current}`;
+          const at = new Date().toISOString();
+          setDebugLog((prev) => [{ id: exchangeId, at, segmentId: packet.segment.id, status: 'REQUEST' as const, request: packet }, ...prev].slice(0, 30));
+          return analyzeSellerLogicDeep(packet, { signal: controller.signal }).then(
+            (response) => {
+              setDebugLog((prev) => prev.map((row) => row.id === exchangeId ? { ...row, status: 'RESPONSE' as const, response } : row));
+              return response;
+            },
+            (error) => {
+              setDebugLog((prev) => prev.map((row) => row.id === exchangeId
+                ? { ...row, status: 'ERROR' as const, error: error instanceof Error ? error.message : String(error) } : row));
+              throw error;
+            },
+          );
+        },
         {
           signal: controller.signal,
           onProgress: (partial) => {
@@ -225,6 +247,7 @@ export default function SellerLogicAnalysis03DeepPage() {
     setRunning(false);
     setAutomatic(false);
     setFilter('ALL');
+    setDebugLog([]);
   };
   const loadText = () => {
     try {
@@ -308,6 +331,9 @@ export default function SellerLogicAnalysis03DeepPage() {
   ].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   const segmentDecisions = (commentIds: string[], transcriptIds: string[]) =>
     decisions.filter((d) => d.commentIds.some((id) => commentIds.includes(id)) || d.transcriptIds.some((id) => transcriptIds.includes(id)));
+  const sellerTranscripts = evidence.transcripts.slice(-visibleTimelineLimit).reverse()
+    .map((t) => ({ id: t.id, at: t.recognizedAt, text: t.text }));
+  const unreferencedContext = result?.unreviewedContext || [];
 
   return <div className="mx-auto max-w-[1560px] space-y-6 p-4 md:p-8">
     <header className="flex flex-wrap items-start justify-between gap-4">
@@ -392,8 +418,7 @@ export default function SellerLogicAnalysis03DeepPage() {
         })}</div>}
     </section>
 
-    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.65fr)_minmax(320px,1fr)]">
-      <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5"><div><h2 className="font-bold text-slate-900">판매 적재함</h2>
           <p className="mt-1 text-xs text-slate-500">{result ? `슬롯 ${resultSlot} · ${result.provider} / ${result.model}` : 'AI 심층 분석을 실행하면 구매자 후보와 가격이 표시됩니다.'}</p></div>
           <select aria-label="판매 상태 필터" className="rounded-lg border border-slate-200 p-2 text-xs" value={filter} onChange={(e) => setFilter(e.target.value)}><option value="ALL">전체 상태</option>{Object.entries(statusLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></div>
@@ -409,12 +434,12 @@ export default function SellerLogicAnalysis03DeepPage() {
         <p className="border-t border-slate-100 px-5 py-3 text-xs leading-relaxed text-slate-400">이 화면의 AI 심층 분석 결과이며 판매 장부에는 자동 등록되지 않습니다. 결과와 근거 대화는 내려받아 보관할 수 있습니다.</p>
       </section>
 
-      <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 p-5"><h2 className="flex items-center gap-2 font-bold text-slate-900"><MessageSquareText size={18} /> 대화 타임라인</h2><p className="mt-1 text-xs text-slate-500">댓글 {evidence.comments.length}개 · 판매자 멘트 {evidence.transcripts.length}개 · 한국 시각</p></div>
-        <div className="max-h-[720px] overflow-auto p-4">{!timeline.length ? <p className="py-16 text-center text-sm text-slate-400">수집된 대화가 없습니다.</p> : timeline.slice(0, visibleTimelineLimit).map((r) => <div key={r.id} className={`mb-3 rounded-xl p-3 text-sm ${r.kind === 'speech' ? 'bg-brand-50' : 'bg-slate-50'}`}><div className="mb-1 flex justify-between gap-2 text-xs"><strong className={r.kind === 'speech' ? 'text-brand-700' : 'text-slate-700'}>{r.author}</strong><time className="shrink-0 text-slate-400">{time(r.at)}</time></div><p className="whitespace-pre-wrap break-words leading-relaxed">{r.text}</p></div>)}{timeline.length > visibleTimelineLimit && <p className="text-center text-xs text-slate-400">화면은 최근 {visibleTimelineLimit}개를 표시합니다. 분석과 내려받기에는 전체 대화가 포함됩니다.</p>}</div>
+    <div className="grid items-start gap-6 xl:grid-cols-2">
+      <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 p-5"><h2 className="flex items-center gap-2 font-bold text-slate-900"><MessageSquareText size={18} /> 판매멘트 전사</h2><p className="mt-1 text-xs text-slate-500">판매자 멘트 {evidence.transcripts.length}개 · 최신순 · 한국 시각</p></div>
+        <div className="max-h-[520px] overflow-auto p-4">{!sellerTranscripts.length ? <p className="py-16 text-center text-sm text-slate-400">수집된 판매자 멘트가 없습니다.</p> : sellerTranscripts.map((r) => <div key={r.id} className="mb-3 rounded-xl bg-brand-50 p-3 text-sm"><div className="mb-1 flex justify-between gap-2 text-xs"><strong className="text-brand-700">판매자</strong><time className="shrink-0 text-slate-400">{time(r.at)}</time></div><p className="whitespace-pre-wrap break-words leading-relaxed">{r.text}</p></div>)}{evidence.transcripts.length > visibleTimelineLimit && <p className="text-center text-xs text-slate-400">화면은 최근 {visibleTimelineLimit}개를 표시합니다. 분석과 내려받기에는 전체 멘트가 포함됩니다.</p>}</div>
       </section>
-    </div>
 
-    <section aria-label="실시간 댓글" className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <section aria-label="실시간 댓글" className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 p-5">
         <div><h2 className="flex items-center gap-2 font-bold text-slate-900"><MessageSquareText size={18} /> 실시간 댓글</h2>
           <p className="mt-1 text-xs text-slate-500">수집한 댓글을 바로 표시합니다. 최근 수집한 댓글이 위에 표시됩니다.</p></div>
@@ -430,6 +455,16 @@ export default function SellerLogicAnalysis03DeepPage() {
           </li>)}
         </ul>}
       {evidence.comments.length > visibleCommentLimit && <p className="border-t border-slate-100 px-5 py-3 text-xs text-slate-400">화면에는 최근 {visibleCommentLimit}개를 표시합니다. 전체 댓글은 분석과 내려받기에 포함됩니다.</p>}
+      </section>
+    </div>
+
+    <section aria-label="근거 없는 AI 문맥" className="overflow-hidden rounded-2xl border border-amber-200 bg-amber-50/40 shadow-sm">
+      <div className="border-b border-amber-100 p-5"><h2 className="font-bold text-slate-900">근거 없는 AI 문맥 <span className="ml-1 text-sm font-normal text-slate-500">{unreferencedContext.length}건</span></h2>
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">AI가 다음 구간으로 넘기려 했지만 원문 근거 ID를 붙이지 않은 항목입니다. 자동 분석에는 사용하지 않으며 여기서 직접 확인하세요.</p></div>
+      {!unreferencedContext.length ? <p className="px-5 py-6 text-sm text-slate-400">근거 없는 문맥 항목이 없습니다.</p>
+        : <ul className="divide-y divide-amber-100">{unreferencedContext.map((item, index) => <li key={`${index}:${item.text}`} className="flex items-start gap-3 px-5 py-3 text-sm text-slate-700">
+          <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">근거 없음</span>
+          <span className="whitespace-pre-wrap break-words leading-relaxed">{item.text}</span></li>)}</ul>}
     </section>
 
     <details open={!count} className="rounded-2xl border border-slate-200 bg-white p-5"><summary className="cursor-pointer font-bold text-slate-900">대화 텍스트로 분석하기</summary>
@@ -446,6 +481,30 @@ export default function SellerLogicAnalysis03DeepPage() {
         <textarea aria-label="분석할 대화 텍스트" className={`${field} min-h-[230px] font-mono leading-relaxed`} value={paste} onChange={(e) => setPaste(e.target.value)} disabled={capturing || running} placeholder={'[고객 댓글]\n오후 11:58:22 · 루비: 저요\n\n[판매자 멘트]\n오후 11:58:31 · 루비 언니 2만 원에 드릴게요.'} />
         <button className={`${button} bg-slate-900 text-white`} disabled={capturing || running || !paste.trim()} onClick={loadText}>대화 자료 적용</button>
         <p className="text-xs text-slate-400">전체 대화는 이 화면을 열어 둔 동안 보관합니다. 자료 적용 시 새 회차로 바뀌므로 필요한 결과는 먼저 내려받아 주세요.</p>
+      </div>
+    </details>
+
+    <details className="rounded-2xl border border-slate-300 bg-slate-50 p-5 shadow-sm">
+      <summary className="cursor-pointer font-bold text-slate-900">AI 요청·응답 디버그 콘솔 (임시) <span className="ml-1 text-sm font-normal text-slate-500">{debugLog.length}건</span></summary>
+      <div className="mt-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs leading-relaxed text-slate-500">AI에 전송한 분석 구간 원문과 응답을 최신순으로 표시합니다. 이 화면은 임시 디버그용이며 저장되지 않습니다.</p>
+          <button className={`${button} border border-slate-200 bg-white`} disabled={!debugLog.length} onClick={() => setDebugLog([])}>기록 지우기</button>
+        </div>
+        {!debugLog.length ? <p className="py-6 text-center text-sm text-slate-400">아직 AI 요청이 없습니다.</p>
+          : debugLog.map((entry) => <article key={entry.id} className="rounded-xl border border-slate-200 bg-white p-3">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className={`rounded-full px-2 py-0.5 font-bold ${entry.status === 'RESPONSE' ? 'bg-emerald-50 text-emerald-700' : entry.status === 'ERROR' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>
+                {entry.status === 'REQUEST' ? '전송' : entry.status === 'RESPONSE' ? '응답' : '오류'}</span>
+              <span className="tabular-nums text-slate-500">{time(entry.at)}</span>
+              <span className="font-mono text-[11px] text-slate-400">{entry.segmentId}</span>
+            </div>
+            <details className="mt-2"><summary className="cursor-pointer text-xs font-semibold text-slate-600">요청 JSON</summary>
+              <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-slate-900 p-3 text-[11px] leading-relaxed text-slate-100">{JSON.stringify(entry.request, null, 2)}</pre></details>
+            {entry.response !== undefined && <details className="mt-1"><summary className="cursor-pointer text-xs font-semibold text-slate-600">응답 JSON</summary>
+              <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-slate-900 p-3 text-[11px] leading-relaxed text-slate-100">{JSON.stringify(entry.response, null, 2)}</pre></details>}
+            {entry.error && <p className="mt-2 rounded-lg bg-rose-50 p-2 text-xs text-rose-700">오류: {entry.error}</p>}
+          </article>)}
       </div>
     </details>
   </div>;
