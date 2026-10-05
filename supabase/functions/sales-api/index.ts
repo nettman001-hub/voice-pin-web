@@ -50,6 +50,7 @@ import { handleSellerLogicAnalysis, handleSellerLogicSlots } from './handlers/se
 import { handleSellerLogicDetection } from './handlers/sellerLogicDetection.ts'
 import { handleSellerLogicDeep } from './handlers/sellerLogicDeep.ts'
 import { handleSellerWorkflow } from './handlers/sellerWorkflow.ts'
+import { handleLogicOpus } from './handlers/logicOpus.ts'
 
 import {
   handleClaimPrintJobs,
@@ -146,6 +147,15 @@ serve(async (req: Request) => {
       case 'seller-analysis-verify':
       case 'seller-analysis-approve':
         return await handleSellerAnalysis(auth, body)
+      case 'logic-opus-slots':
+      case 'logic-opus-run-start':
+      case 'logic-opus-run-end':
+      case 'logic-opus-judge':
+      case 'logic-opus-pronounce':
+      case 'logic-opus-ledger-save':
+      case 'logic-opus-run-list':
+      case 'logic-opus-run-get':
+        return await handleLogicOpus(auth, body)
       case 'seller-workflow-current':
         requireCapability(body.sessionId ? 'SALES_WRITE' : 'SALES_READ')
         return await handleSellerWorkflow(auth, body)
