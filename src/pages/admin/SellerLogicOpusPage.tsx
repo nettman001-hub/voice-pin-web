@@ -8,10 +8,12 @@ import { OpusCapture } from "../../services/logicOpus/opusCapture";
 import { HintRotationScheduler } from "../../services/logicOpus/opusHintPlanner";
 import { ledgerTotals, type LedgerApplyResult } from "../../services/logicOpus/opusLedger";
 import { mergeTimeline, parseTranscript, replayWindows } from "../../services/logicOpus/opusReplay";
+import { buildCommentFeed, COMMENT_FEED_LIMIT } from "../../services/logicOpus/opusCommentFeed";
 import type { SttManagerStatus } from "../../services/logicOpus/opusSttManager";
 import {
   LOGIC_OPUS_SALES_MODE_LABELS,
   type LogicOpusClassification,
+  type LogicOpusCommentEvent,
   type LogicOpusEvent,
   type LogicOpusProductState,
   type LogicOpusRunSummary,
@@ -90,6 +92,9 @@ export default function SellerLogicOpusPage() {
   const [replayProgress, setReplayProgress] = useState<{ done: number; total: number } | null>(null);
 
   const [events, setEvents] = useState<LogicOpusEvent[]>([]);
+  // AI 판단을 기다리지 않고 받은 즉시 보여 주는 실시간 댓글
+  const [liveComments, setLiveComments] = useState<LogicOpusCommentEvent[]>([]);
+  const [commentConn, setCommentConn] = useState("");
   const [classes, setClasses] = useState<Map<string, LogicOpusClassification>>(new Map());
   const [product, setProduct] = useState<LogicOpusProductState | null>(null);
   const [sales, setSales] = useState<LogicOpusSale[]>([]);
@@ -221,6 +226,8 @@ export default function SellerLogicOpusPage() {
     );
     loopRef.current = loop;
     setEvents([]);
+    setLiveComments([]);
+    setCommentConn("");
     setSales([]);
     setClasses(new Map());
     setProduct(null);
@@ -282,11 +289,15 @@ export default function SellerLogicOpusPage() {
         serverUrl: capture.config.serverUrl,
         sonioxApiKey: live.sonioxApiKey,
         initialTerms: fixed,
-        onComment: (e) => loop.addEvent(e),
+        onComment: (e) => {
+          setLiveComments((prev) => [...prev.slice(-(COMMENT_FEED_LIMIT - 1)), e]);
+          loop.addEvent(e);
+        },
         onSpeech: (e) => loop.addEvent(e),
         onInterim: setInterim,
         onSttStatus: setSttStatus,
         onStatus: (m) => {
+          if (m.startsWith("댓글: ")) setCommentConn(m.slice(4));
           setStatus(m);
           if (m.startsWith("청취 중지")) void stopLive();
         },
@@ -368,6 +379,8 @@ export default function SellerLogicOpusPage() {
       runIdRef.current = null;
       setSales(saved);
       setEvents([]);
+      setLiveComments([]);
+      setCommentConn("");
       setClasses(new Map());
       setTab("LIVE");
       setStatus("지난 기록을 불러왔습니다 (읽기 전용).");
@@ -381,6 +394,10 @@ export default function SellerLogicOpusPage() {
   const selectedSale = sales.find((s) => s.id === selected) || null;
   const editable = Boolean(loopRef.current);
   const recentEvents = events.slice(-120).reverse();
+  const commentFeed = useMemo(
+    () => buildCommentFeed(liveComments, events, classes, splitList(sellerNicks)),
+    [liveComments, events, classes, sellerNicks],
+  );
   const buyers = useMemo(() => {
     const map = new Map<string, { count: number; amount: number }>();
     sales.filter((s) => s.status === "CONFIRMED").forEach((s) => {
@@ -639,6 +656,8 @@ export default function SellerLogicOpusPage() {
             ) : <p className="text-sm text-slate-400">아직 없음</p>}
           </section>
 
+          <LiveCommentPanel feed={commentFeed} connection={running === "LIVE" ? commentConn : ""} />
+
           {tab === "LIVE" && sttStatus && (
             <section className="rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-600">
               <h2 className="mb-1 text-sm font-black text-slate-900">STT 상태</h2>
@@ -680,6 +699,46 @@ export default function SellerLogicOpusPage() {
         </aside>
       </div>
     </div>
+  );
+}
+
+function LiveCommentPanel({ feed, connection }: { feed: ReturnType<typeof buildCommentFeed>; connection: string }) {
+  return (
+    <section aria-label="실시간 댓글" className="rounded-2xl border border-slate-200 bg-white">
+      <div className="flex items-start justify-between gap-3 border-b border-slate-100 p-4">
+        <div>
+          <h2 className="font-black">실시간 댓글</h2>
+          <p className="mt-0.5 text-xs text-slate-500">받은 즉시 표시 · 최신순{connection ? ` · ${connection}` : ""}</p>
+        </div>
+        <p className="shrink-0 text-xs font-bold text-slate-600">누적 {feed.total.toLocaleString("ko-KR")}개</p>
+      </div>
+      {!feed.items.length ? (
+        <p className="px-4 py-8 text-center text-sm text-slate-400">아직 받은 댓글이 없습니다.<br />실시간 청취를 시작하면 여기에 표시됩니다.</p>
+      ) : (
+        <ul aria-label="실시간 댓글 목록" className="max-h-[45vh] divide-y divide-slate-100 overflow-y-auto overscroll-contain">
+          {feed.items.map((c) => {
+            const label = c.classification ? TYPE_LABEL[c.classification] : null;
+            const intent = c.classification === "PURCHASE_INTENT";
+            return (
+              <li key={c.id} className={`px-4 py-2 ${intent ? "bg-amber-50/70" : ""}`}>
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="min-w-0 break-words">
+                    <b className={c.isSeller ? "text-brand-700" : "text-slate-800"}>{c.nickname}</b>
+                    {c.isSeller && <span className="ml-1 rounded bg-brand-50 px-1 font-bold text-brand-700">판매자</span>}
+                    {label && c.classification !== "CHATTER" && <span className={`ml-1 rounded px-1 font-bold ${label.cls}`}>{label.label}</span>}
+                  </span>
+                  <time dateTime={c.at} className="shrink-0 tabular-nums text-slate-400">{time(c.at)}</time>
+                </div>
+                <p className="mt-0.5 whitespace-pre-wrap break-words text-sm leading-snug text-slate-700">{c.text}</p>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {feed.total > feed.items.length && (
+        <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-400">화면에는 최근 {feed.items.length}개만 표시합니다.</p>
+      )}
+    </section>
   );
 }
 
