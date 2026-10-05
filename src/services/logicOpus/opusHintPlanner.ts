@@ -68,8 +68,8 @@ export interface HintSchedulerDeps {
   now: () => number;
   setTimer: (fn: () => void, ms: number) => unknown;
   clearTimer: (handle: unknown) => void;
-  /** 실제 세션 교체. 성공 여부를 돌려준다 */
-  rotate: () => Promise<boolean>;
+  /** 실제 세션 교체. 성공 여부를 돌려준다. 바뀐 힌트가 없어 교체하지 않았으면 "skipped" */
+  rotate: () => Promise<boolean | "skipped">;
   minIntervalMs?: number;
   onSkip?: (waitMs: number) => void;
 }
@@ -95,9 +95,18 @@ export class HintRotationScheduler {
     return this.deps.minIntervalMs ?? LOGIC_OPUS_LIMITS.HINT_MIN_INTERVAL_MS;
   }
 
+  /**
+   * 새 구매의사자가 감지됐을 때 부른다.
+   * 직전 교체 후 5초가 지났으면(첫 번째 구매의사자) 타이머 없이 바로 교체하고,
+   * 5초 안에 들어온 두 번째 이후 구매의사자는 5초가 되는 순간 한 번으로 합쳐 교체한다.
+   */
   request(): void {
     if (this.stopped) return;
     this.pending = true;
+    if (!this.busy && this.timer === null && this.deps.now() >= this.lastStartAt + this.interval) {
+      void this.run();
+      return;
+    }
     this.schedule();
   }
 
@@ -115,17 +124,24 @@ export class HintRotationScheduler {
     if (this.busy || !this.pending || this.stopped) return;
     this.busy = true;
     this.pending = false;
+    const prevStartAt = this.lastStartAt;
     this.lastStartAt = this.deps.now();
     this.starts.push(this.lastStartAt);
-    let ok = false;
+    let result: boolean | "skipped" = false;
     try {
-      ok = await this.deps.rotate();
+      result = await this.deps.rotate();
     } catch {
-      ok = false;
+      result = false;
     } finally {
       this.busy = false;
     }
-    if (!ok) this.pending = true; // 실패하면 다음 간격에 다시 시도
+    if (result === "skipped") {
+      // STT에 아무것도 보내지 않았으니 5초 간격도 쓰지 않은 것으로 되돌린다
+      this.lastStartAt = prevStartAt;
+      this.starts.pop();
+    } else if (!result) {
+      this.pending = true; // 실패하면 다음 간격에 다시 시도
+    }
     this.schedule();
   }
 

@@ -258,17 +258,18 @@ export default function SellerLogicOpusPage() {
       const cap = new OpusCapture();
       captureRef.current = cap;
       const fixed = splitList(fixedWords);
-      lastTermsKeyRef.current = fixed.join("|");
+      lastTermsKeyRef.current = [...fixed].sort().join("|");
       schedulerRef.current = new HintRotationScheduler({
         now: () => Date.now(),
         setTimer: (fn, ms) => setTimeout(fn, ms),
         clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
         rotate: async () => {
           const manager = cap.manager;
-          if (!manager) return true;
+          if (!manager) return "skipped";
           const { terms } = loop.hintTerms(fixed);
-          const key = terms.join("|");
-          if (key === lastTermsKeyRef.current) return true; // 바뀐 닉네임이 없으면 교체하지 않음
+          // 순서만 바뀐 것은 같은 힌트로 본다 (이미 힌트에 있던 닉네임이면 교체하지 않음)
+          const key = [...terms].sort().join("|");
+          if (key === lastTermsKeyRef.current) return "skipped";
           const ok = await manager.rotate(terms);
           if (ok) lastTermsKeyRef.current = key;
           return ok;

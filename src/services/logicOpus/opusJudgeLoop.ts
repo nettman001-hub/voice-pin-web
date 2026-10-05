@@ -37,7 +37,8 @@ export interface JudgeLoopDeps {
   onLedger: (result: LedgerApplyResult) => void;
   onChange?: () => void;
   /** AI가 구매의사를 감지해 STT 힌트 갱신이 필요할 때 */
-  onHintRequest?: () => void;
+  /** 새 구매의사자(처음 구매의사를 밝힌 닉네임)가 감지됐을 때 */
+  onHintRequest?: (newPurchasers: string[]) => void;
   onError?: (message: string) => void;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (h: unknown) => void;
@@ -267,11 +268,14 @@ export class OpusJudgeLoop {
       this.deps.onChange?.();
       return;
     }
+    const newPurchasers: string[] = [];
     for (const c of judgement.classifications) {
       if (!this.eventById(c.eventId)) continue;
       this.classifications.set(c.eventId, c);
       const ev = this.eventById(c.eventId);
       if (c.type === "PURCHASE_INTENT" && ev?.kind === "COMMENT") {
+        if (!this.intentOrder.includes(ev.nickname) && !newPurchasers.includes(ev.nickname) &&
+          !this.config.sellerNicknames.includes(ev.nickname)) newPurchasers.push(ev.nickname);
         this.intentOrder = [ev.nickname, ...this.intentOrder.filter((n) => n !== ev.nickname)].slice(0, 200);
       }
     }
@@ -287,7 +291,8 @@ export class OpusJudgeLoop {
     });
     this.sales = result.sales;
     if (result.changedIds.length || result.rejected.length) this.deps.onLedger(result);
-    if (judgement.sttHintRequest) this.deps.onHintRequest?.();
+    // 같은 사람이 다시 구매의사를 밝힌 것은 힌트가 바뀌지 않으므로 요청하지 않는다
+    if (newPurchasers.length) this.deps.onHintRequest?.(newPurchasers);
     this.deps.onChange?.();
   }
 

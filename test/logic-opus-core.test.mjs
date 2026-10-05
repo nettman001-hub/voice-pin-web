@@ -184,40 +184,57 @@ test("힌트 단어: 구매의사 닉네임 우선, 이모지 닉네임은 발�
   assert.ok(r.terms.length <= 100);
 });
 
-test("힌트 교체: 여러 명이 동시에 구매의사를 밝혀도 5초에 한 번만 교체", async () => {
-  let now = 0;
+function fakeScheduler(rotate = async () => true) {
+  const clock = { now: 0 };
   const timers = [];
-  const deps = {
-    now: () => now,
-    setTimer: (fn, ms) => { const t = { at: now + ms, fn }; timers.push(t); return t; },
+  const s = new HintRotationScheduler({
+    now: () => clock.now,
+    setTimer: (fn, ms) => { const t = { at: clock.now + ms, fn }; timers.push(t); return t; },
     clearTimer: (t) => { const i = timers.indexOf(t); if (i >= 0) timers.splice(i, 1); },
-    rotate: async () => true,
-  };
-  const s = new HintRotationScheduler(deps);
+    rotate,
+  });
   const advance = async (to) => {
     while (true) {
       timers.sort((x, y) => x.at - y.at);
       const t = timers[0];
       if (!t || t.at > to) break;
       timers.shift();
-      now = t.at;
+      clock.now = t.at;
       t.fn();
       await new Promise((r) => setImmediate(r));
     }
-    now = to;
+    clock.now = to;
+    await new Promise((r) => setImmediate(r));
   };
-  s.request(); s.request(); s.request();
-  await advance(100);
-  for (let ms = 500; ms <= 4500; ms += 500) { now = ms; s.request(); }
-  await advance(4999);
-  assert.deepEqual(s.starts, [0]);
-  await advance(5000);
-  assert.deepEqual(s.starts, [0, 5000]);
+  return { s, clock, timers, advance };
+}
+
+test("힌트 교체: 첫 구매의사자는 타이머 없이 즉시, 두 번째부터는 5초 간격으로 합쳐 교체", async () => {
+  const { s, clock, timers, advance } = fakeScheduler();
+  clock.now = 1000;
+  s.request();
+  assert.deepEqual(s.starts, [1000], "첫 구매의사자는 요청한 그 순간 바로 교체");
+  assert.equal(timers.length, 0, "타이머를 거치지 않음");
+  for (let ms = 1500; ms <= 5500; ms += 500) { clock.now = ms; s.request(); }
+  await advance(5999);
+  assert.deepEqual(s.starts, [1000], "5초 안의 두 번째 이후 구매의사자는 기다림");
+  await advance(6000);
+  assert.deepEqual(s.starts, [1000, 6000], "직전 교체 5초 뒤 한 번으로 합쳐 교체");
   await advance(20000);
-  assert.deepEqual(s.starts, [0, 5000], "새 요청이 없으면 더 교체하지 않음");
-  now = 21000; s.request();
-  await advance(21000);
-  assert.deepEqual(s.starts, [0, 5000, 21000]);
+  assert.deepEqual(s.starts, [1000, 6000], "새 요청이 없으면 더 교체하지 않음");
+  clock.now = 21000; s.request();
+  assert.deepEqual(s.starts, [1000, 6000, 21000], "조용하다가 새 구매의사자가 오면 다시 즉시");
+  s.stop();
+});
+
+test("힌트 교체: 바뀐 힌트가 없어 건너뛴 교체는 5초 간격을 쓰지 않는다", async () => {
+  const results = ["skipped", true];
+  const { s, clock, timers } = fakeScheduler(async () => results.shift());
+  clock.now = 0; s.request();
+  await new Promise((r) => setImmediate(r));
+  clock.now = 1000; s.request();
+  assert.deepEqual(s.starts, [1000], "건너뛴 교체 직후의 새 구매의사자도 즉시 교체");
+  assert.equal(timers.length, 0);
   s.stop();
 });
 

@@ -133,9 +133,9 @@ test("PC 도우미 경유 로컬 슬롯은 사용 불가로 표시한다", async
   assert.equal(data.slots[1].ready, true);
 });
 
-test("판단 루프: 묶음 전송, 구매의사 후 힌트 갱신 요청, 실패 시 한 번 재시도", async () => {
+test("판단 루프: 묶음 전송, 새 구매의사자일 때만 힌트 갱신 요청, 실패 시 한 번 재시도", async () => {
   const requests = [];
-  let hint = 0;
+  const hints = [];
   let fail = true;
   const loop = new OpusJudgeLoop(
     { runId: RUN, slotNumber: 1, autoFallback: true, salesMode: "AUTO", sellerNicknames: ["네네"] },
@@ -157,7 +157,7 @@ test("판단 루프: 묶음 전송, 구매의사 후 힌트 갱신 요청, 실�
         };
       },
       onLedger: () => {},
-      onHintRequest: () => { hint += 1; },
+      onHintRequest: (nicks) => { hints.push(nicks); },
       debounceMs: 5,
     },
   );
@@ -168,7 +168,14 @@ test("판단 루프: 묶음 전송, 구매의사 후 힌트 갱신 요청, 실�
   assert.deepEqual(requests[1].newEvents.map((e) => e.id), ["c_1", "s_1"]);
   assert.equal(requests[1].nicknameCandidates[0].candidates[0].nickname, "체리나무");
   assert.equal(loop.sales[0].status, "CONFIRMED");
-  assert.equal(hint, 1);
+  assert.deepEqual(hints, [["체리나무"]]);
   assert.deepEqual(loop.intentNicknames, ["체리나무"]);
+  loop.addEvent({ id: "c_2", kind: "COMMENT", at: "2026-10-04T14:40:20.000Z", nickname: "체리나무", text: "저요 하나 더" });
+  await loop.flush();
+  assert.deepEqual(hints, [["체리나무"]], "같은 사람이 다시 구매의사를 밝히면 힌트 요청 안 함");
+  loop.addEvent({ id: "c_3", kind: "COMMENT", at: "2026-10-04T14:40:22.000Z", nickname: "루비", text: "저요" });
+  loop.addEvent({ id: "c_4", kind: "COMMENT", at: "2026-10-04T14:40:22.500Z", nickname: "네네", text: "저요" });
+  await loop.flush();
+  assert.deepEqual(hints, [["체리나무"], ["루비"]], "새 구매의사자만, 판매자 닉네임은 제외");
   loop.stop();
 });
