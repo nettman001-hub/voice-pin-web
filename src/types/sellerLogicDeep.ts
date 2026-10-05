@@ -1,0 +1,107 @@
+import type { CommentRecord } from "./comment.ts";
+import type { WorkflowTranscript } from "./salesWorkflow.ts";
+
+export type SellerLogicDeepStatus = "CONFIRMED" | "PENDING" | "REVIEW" | "CANCELLED";
+
+export type SellerLogicDeepSignalKind =
+  | "BUYER_INTENT"
+  | "SELLER_ALLOCATE"
+  | "PRODUCT_ANNOUNCE"
+  | "PRICE_QUOTE"
+  | "PRICE_CORRECTION"
+  | "STOCK"
+  | "CANCEL"
+  | "INQUIRY"
+  | "NOISE";
+
+/** AI-authored carry for the next time bucket. */
+export interface SellerLogicDeepContextItem {
+  text: string;
+  commentIds: string[];
+  transcriptIds: string[];
+}
+
+export interface SellerLogicDeepDecision {
+  /**
+   * sld: evidence identity. The same ID is revised when the AI updates or
+   * cancels a transaction so the browser merges instead of duplicating.
+   */
+  id: string;
+  status: SellerLogicDeepStatus;
+  nickname: string | null;
+  unitPrice: number | null;
+  quantity: number;
+  reason: string;
+  commentIds: string[];
+  transcriptIds: string[];
+  decidedAt: string;
+  spokenNickname?: string;
+  productName?: string;
+  orderCode?: string;
+  /** AI distinguishes multiple product lines sharing the same evidence. */
+  lineKey?: string;
+}
+
+export interface SellerLogicDeepSignal {
+  id: string;
+  kind: SellerLogicDeepSignalKind;
+  summary: string;
+  commentIds: string[];
+  transcriptIds: string[];
+}
+
+/** One time bucket of the broadcast. Boundaries are mechanical, meaning is AI. */
+export interface SellerLogicDeepSegment {
+  id: string;
+  index: number;
+  startedAt: string;
+  endedAt: string;
+  closed: boolean;
+  commentIds: string[];
+  transcriptIds: string[];
+}
+
+export interface SellerLogicDeepInput {
+  sessionId: string;
+  slotNumber: 1 | 2;
+  segment: SellerLogicDeepSegment;
+  comments: CommentRecord[];
+  transcripts: WorkflowTranscript[];
+  context: SellerLogicDeepContextItem[];
+  previousDecisions: SellerLogicDeepDecision[];
+}
+
+export interface SellerLogicDeepResult {
+  /** Complete cumulative decision snapshot for the session. */
+  decisions: SellerLogicDeepDecision[];
+  signals: SellerLogicDeepSignal[];
+  context: SellerLogicDeepContextItem[];
+  segments: SellerLogicDeepSegment[];
+  summary: string;
+  provider: string;
+  model: string;
+  appliedVersion: number;
+  stats: { segmentCalls: number; segmentMs: number };
+}
+
+export interface SellerLogicDeepEngineState {
+  slotNumber: 1 | 2;
+  processedSegments: Record<string, string>;
+  context: SellerLogicDeepContextItem[];
+  decisions: SellerLogicDeepDecision[];
+  provider?: string;
+  model?: string;
+  appliedVersion?: number;
+  stats: { segmentCalls: number; segmentMs: number };
+}
+
+export const SELLER_LOGIC_DEEP_LIMITS = {
+  segmentEvents: 120,
+  segmentIdleMs: 30_000,
+  segmentMaxMs: 15 * 60_000,
+  decisions: 200,
+  contextItems: 30,
+  signals: 50,
+  timeoutSeconds: 120,
+  promptCharacters: 30_000,
+} as const;

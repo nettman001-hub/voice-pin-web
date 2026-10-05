@@ -108,6 +108,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { name: '판매 AI 설정 (보류·정정)', path: '/admin/ai', icon: Sparkles },
         { name: '판매자 판매방식 분석', path: '/admin/seller-analysis', icon: BookOpenText },
         { name: '판매자 로직분석01', path: '/admin/seller-logic-analysis-01', icon: Sparkles },
+        { name: '판매자 로직분석03deep', path: '/admin/seller-logic-analysis-03-deep', icon: Sparkles },
         { name: '신고 처리 센터', path: '/admin/reports', icon: AlertTriangle },
         { name: '이용 통계 & 시스템 로그', path: '/admin/stats', icon: BarChart3 },
       ]
