@@ -101,6 +101,11 @@ export default function SellerLogicAnalysis02AntiPage() {
 
   const vocabManagerRef = useRef<SttVocabularyManager | null>(null);
   const captureServiceRef = useRef<SttSeamlessCaptureService | null>(null);
+  const liveHeartbeatRef = useRef<any>(null);
+  const debounceTimerRef = useRef<any>(null);
+  const isAnalyzingRef = useRef(false);
+  const lastAnalyzedCountRef = useRef(0);
+  const slotRef = useRef(slot);
 
   // 슬롯 정보 로드
   const loadSlots = async () => {
@@ -168,8 +173,15 @@ export default function SellerLogicAnalysis02AntiPage() {
       if (captureServiceRef.current) captureServiceRef.current.stopCapture();
       if (captureRef.current) captureRef.current.stop();
       if (simTimerRef.current) clearInterval(simTimerRef.current);
+      if (liveHeartbeatRef.current) clearInterval(liveHeartbeatRef.current);
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
   }, []);
+
+  // 슬롯 변경 시 동기화
+  useEffect(() => {
+    slotRef.current = slot;
+  }, [slot]);
 
   // 콘솔 자동 스크롤
   useEffect(() => {
@@ -187,6 +199,55 @@ export default function SellerLogicAnalysis02AntiPage() {
   // AI 디버그 로그 핸들러
   const handleAiDebugLog = (log: AiDebugLog) => {
     setAiDebugLogs((prev) => [...prev.slice(-150), log]);
+  };
+
+  // 실시간 AI 자율 분석 실행 함수
+  const triggerLiveAnalysis = async () => {
+    if (!mounted.current || isAnalyzingRef.current) return;
+    const rows = rowsRef.current;
+    const currentCount = rows.comments.length + rows.transcripts.length;
+    if (currentCount === 0 || currentCount === lastAnalyzedCountRef.current) return;
+
+    isAnalyzingRef.current = true;
+    lastAnalyzedCountRef.current = currentCount;
+    setIsAnalyzing(true);
+
+    try {
+      const res = await runSellerLogic02AntiAnalysis(
+        {
+          sessionId: sessionRef.current,
+          slotNumber: slotRef.current,
+          comments: [...rows.comments],
+          transcripts: [...rows.transcripts]
+        },
+        { onDebugLog: handleAiDebugLog }
+      );
+      if (mounted.current) {
+        setAnalysisResult(res);
+      }
+    } catch (err: any) {
+      handleAiDebugLog({
+        id: `err-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
+        type: 'ERROR',
+        slotNumber: slotRef.current,
+        model: AI_SLOT_CONFIGS[slotRef.current]?.name,
+        message: `실시간 AI 분석 오류: ${err.message}`,
+        payload: err
+      });
+    } finally {
+      if (mounted.current) {
+        setIsAnalyzing(false);
+      }
+      isAnalyzingRef.current = false;
+    }
+  };
+
+  const scheduleDebouncedAnalysis = () => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      void triggerLiveAnalysis();
+    }, 2500);
   };
 
   // 1. 실시간 청취 시작 / 종료 (이미지 1의 핵심 동작)
@@ -208,10 +269,17 @@ export default function SellerLogicAnalysis02AntiPage() {
     setCapturing(true);
     setErrorMessage('');
     setStatusMessage('실시간 청취 연결 중… 음성과 댓글을 기다립니다.');
+    lastAnalyzedCountRef.current = 0;
 
     const service = new SellerLogicCapture();
     captureRef.current = service;
     if (captureServiceRef.current) captureServiceRef.current.startCapture();
+
+    // 5초 주기 실시간 AI 분석 하트비트 가동
+    if (liveHeartbeatRef.current) clearInterval(liveHeartbeatRef.current);
+    liveHeartbeatRef.current = setInterval(() => {
+      void triggerLiveAnalysis();
+    }, 5000);
 
     try {
       await service.start({
@@ -242,6 +310,9 @@ export default function SellerLogicAnalysis02AntiPage() {
           if (vocabManagerRef.current) {
             vocabManagerRef.current.registerNickname(c.nickname, isIntent);
           }
+
+          // 새 댓글 유입 시 2.5초 디바운스로 신속 분석 트리거
+          scheduleDebouncedAnalysis();
         },
         transcript: (t) => {
           if (!mounted.current) return;
@@ -253,6 +324,9 @@ export default function SellerLogicAnalysis02AntiPage() {
           const updated = { ...rows, transcripts: updatedTranscripts };
           rowsRef.current = updated;
           setEvidence(updated);
+
+          // 새 멘트 유입 시 2.5초 디바운스로 신속 분석 트리거
+          scheduleDebouncedAnalysis();
         },
         status: (msg) => {
           if (!mounted.current) return;
@@ -263,7 +337,7 @@ export default function SellerLogicAnalysis02AntiPage() {
           }
         }
       });
-      setStatusMessage(`방송 [${username}] 실시간 청취 중 · AI 자율 판단 대기`);
+      setStatusMessage(`방송 [${username}] 실시간 청취 및 5초 주기 AI 자율 분석 가동 중`);
     } catch (err: any) {
       setErrorMessage(err.message || '청취 시작 실패');
       await handleStopLiveCapture();
@@ -275,6 +349,14 @@ export default function SellerLogicAnalysis02AntiPage() {
   const handleStopLiveCapture = async () => {
     setStarting(true);
     setStatusMessage('청취를 종료하고 잔여 음성을 마무리합니다…');
+    if (liveHeartbeatRef.current) {
+      clearInterval(liveHeartbeatRef.current);
+      liveHeartbeatRef.current = null;
+    }
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
     if (captureRef.current) {
       await captureRef.current.stop();
       captureRef.current = null;
@@ -282,9 +364,13 @@ export default function SellerLogicAnalysis02AntiPage() {
     if (captureServiceRef.current) {
       captureServiceRef.current.stopCapture();
     }
+
+    // 마감 시점에 마지막 1회 완결 AI 분석 실행
+    await triggerLiveAnalysis();
+
     setCapturing(false);
     setStarting(false);
-    setStatusMessage('실시간 청취 종료 완료.');
+    setStatusMessage('실시간 청취 종료 및 마감 분석 완료.');
   };
 
   // 프리셋 로드
