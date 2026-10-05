@@ -15,7 +15,10 @@ import {
   Volume2,
   Zap,
   MessageSquareText,
-  RotateCcw
+  RotateCcw,
+  History,
+  PlusCircle,
+  AlertCircle
 } from 'lucide-react';
 import { useLive } from '../../context/LiveContext';
 import { useCommentCapture } from '../../context/CommentCaptureContext';
@@ -24,6 +27,7 @@ import { SellerLogicCapture } from '../../services/sellerLogicCapture';
 import type { SellerLogicSlots } from '../../types/sellerLogicAnalysis';
 import type {
   AiDebugLog,
+  AntiSessionRecord,
   SellerLogic02AntiDecision,
   SellerLogic02AntiResult,
   SttDebugLog
@@ -51,11 +55,53 @@ const visibleCommentLimit = 200;
 const visibleTimelineLimit = 200;
 const time = (value: string) => new Date(value).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });
 
+const SESSIONS_STORAGE_KEY = 'voicecap_seller_logic_02anti_sessions';
+
+/**
+ * 회차 표시 방식: 날짜시간 + "anti" (예: "2026-10-05 22:45:09 anti")
+ */
+function formatAntiSessionName(date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const y = date.getFullYear();
+  const m = pad(date.getMonth() + 1);
+  const d = pad(date.getDate());
+  const hh = pad(date.getHours());
+  const mm = pad(date.getMinutes());
+  const ss = pad(date.getSeconds());
+  return `${y}-${m}-${d} ${hh}:${mm}:${ss} anti`;
+}
+
+function loadStoredSessions(): AntiSessionRecord[] {
+  try {
+    const raw = localStorage.getItem(SESSIONS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredSessions(sessions: AntiSessionRecord[]): void {
+  try {
+    localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions));
+  } catch {}
+}
+
 export default function SellerLogicAnalysis02AntiPage() {
   const live = useLive();
   const commentCapture = useCommentCapture();
 
-  // 1. 상태 변수: 슬롯 및 방송 설정
+  // 1. 회차(Session) 관리 상태
+  const [savedSessions, setSavedSessions] = useState<AntiSessionRecord[]>(loadStoredSessions);
+  const [currentSessionId, setCurrentSessionId] = useState<string>(() => crypto.randomUUID());
+  const [currentSessionName, setCurrentSessionName] = useState<string>(() => formatAntiSessionName());
+  const currentSessionTiktokRef = useRef<string>(commentCapture.config.tiktokUsername || 'gonow_74');
+
+  // 회차 이어서 하기 / 새 회차 선택 확인 모달 상태
+  const [showResumeModal, setShowResumeModal] = useState(false);
+
+  // 2. 슬롯 및 방송 설정
   const [username, setUsername] = useState(commentCapture.config.tiktokUsername || 'gonow_74');
   const [slot, setSlot] = useState<1 | 2>(1);
   const [slotSettings, setSlotSettings] = useState<SellerLogicSlots | null>(null);
@@ -95,7 +141,6 @@ export default function SellerLogicAnalysis02AntiPage() {
   const sttConsoleRef = useRef<HTMLDivElement>(null);
   const simTimerRef = useRef<any>(null);
   const captureRef = useRef<SellerLogicCapture | null>(null);
-  const sessionRef = useRef(crypto.randomUUID());
   const rowsRef = useRef(evidence);
   const mounted = useRef(true);
 
@@ -130,6 +175,34 @@ export default function SellerLogicAnalysis02AntiPage() {
     mounted.current = true;
     void loadSlots();
 
+    // 저장된 지난 회차가 있으면 가장 최근 회차를 자동 로드
+    const stored = loadStoredSessions();
+    if (stored.length > 0) {
+      const latest = stored[0];
+      setCurrentSessionId(latest.id);
+      setCurrentSessionName(latest.name);
+      if (latest.tiktokUsername) {
+        setUsername(latest.tiktokUsername);
+        currentSessionTiktokRef.current = latest.tiktokUsername;
+      }
+      const ev: SellerLogic02AntiEvidence = {
+        comments: latest.comments || [],
+        transcripts: latest.transcripts || []
+      };
+      setEvidence(ev);
+      rowsRef.current = ev;
+      setAnalysisResult(latest.analysisResult);
+      if (latest.aiDebugLogs) setAiDebugLogs(latest.aiDebugLogs);
+      if (latest.sttDebugLogs) setSttDebugLogs(latest.sttDebugLogs);
+    } else {
+      // 최초 기본 예시 데이터 파싱
+      try {
+        const parsed = parseSellerLogic02AntiText(inputText, broadcastDate, currentSessionId);
+        setEvidence(parsed);
+        rowsRef.current = parsed;
+      } catch (_err) {}
+    }
+
     // STT 어휘 매니저 초기화 (첫번째 즉시 0ms + 두번째부터 5초 쿨다운 룰)
     vocabManagerRef.current = new SttVocabularyManager({
       maxVocabularySize: 50,
@@ -156,16 +229,6 @@ export default function SellerLogicAnalysis02AntiPage() {
         setSttDebugLogs((prev) => [...prev.slice(-150), log]);
       }
     });
-
-    // 기본 예시 데이터 파싱
-    try {
-      const parsed = parseSellerLogic02AntiText(inputText, broadcastDate, sessionRef.current);
-      setEvidence(parsed);
-      rowsRef.current = parsed;
-      const nicks = parsed.comments.map((c) => c.nickname);
-      vocabManagerRef.current.seedInitialNicknames(nicks);
-      setCurrentVocabulary(vocabManagerRef.current.getSttPayloadVocabulary());
-    } catch (_err) {}
 
     return () => {
       mounted.current = false;
@@ -196,6 +259,113 @@ export default function SellerLogicAnalysis02AntiPage() {
     }
   }, [sttDebugLogs, autoScrollStt]);
 
+  // 회차 데이터 자동 저장 (데이터가 갱신될 때마다 localStorage 동기화)
+  useEffect(() => {
+    if (!currentSessionId) return;
+
+    setSavedSessions((prev) => {
+      const nowIso = new Date().toISOString();
+      const existingIndex = prev.findIndex((s) => s.id === currentSessionId);
+      const sessionData: AntiSessionRecord = {
+        id: currentSessionId,
+        name: currentSessionName,
+        tiktokUsername: username.trim(),
+        createdAt: existingIndex >= 0 ? prev[existingIndex].createdAt : nowIso,
+        updatedAt: nowIso,
+        comments: evidence.comments,
+        transcripts: evidence.transcripts,
+        analysisResult: analysisResult,
+        aiDebugLogs: aiDebugLogs.slice(-80),
+        sttDebugLogs: sttDebugLogs.slice(-80)
+      };
+
+      let next: AntiSessionRecord[];
+      if (existingIndex >= 0) {
+        next = [...prev];
+        next[existingIndex] = sessionData;
+      } else {
+        next = [sessionData, ...prev];
+      }
+      saveStoredSessions(next);
+      return next;
+    });
+  }, [evidence, analysisResult, aiDebugLogs.length, sttDebugLogs.length, currentSessionId, currentSessionName, username]);
+
+  // 회차 풀다운 메뉴에서 다른 회차 선택
+  const handleSelectSession = (sessionId: string) => {
+    if (capturing || simulating) {
+      alert('청취 또는 시뮬레이션 중에는 회차를 변경할 수 없습니다.');
+      return;
+    }
+    const found = savedSessions.find((s) => s.id === sessionId);
+    if (!found) return;
+
+    setCurrentSessionId(found.id);
+    setCurrentSessionName(found.name);
+    setUsername(found.tiktokUsername || 'gonow_74');
+    currentSessionTiktokRef.current = found.tiktokUsername || 'gonow_74';
+
+    const ev: SellerLogic02AntiEvidence = {
+      comments: found.comments || [],
+      transcripts: found.transcripts || []
+    };
+    setEvidence(ev);
+    rowsRef.current = ev;
+    setAnalysisResult(found.analysisResult || null);
+    setAiDebugLogs(found.aiDebugLogs || []);
+    setSttDebugLogs(found.sttDebugLogs || []);
+
+    if (vocabManagerRef.current) {
+      vocabManagerRef.current.seedInitialNicknames(ev.comments.map((c) => c.nickname));
+      setCurrentVocabulary(vocabManagerRef.current.getSttPayloadVocabulary());
+    }
+
+    setStatusMessage(`회차 [${found.name}] 데이터를 불러왔습니다.`);
+  };
+
+  // 신규 회차 생성
+  const handleCreateNewSession = () => {
+    if (capturing || simulating) {
+      alert('청취 중에는 새 회차를 생성할 수 없습니다.');
+      return;
+    }
+    const newId = crypto.randomUUID();
+    const newName = formatAntiSessionName();
+    setCurrentSessionId(newId);
+    setCurrentSessionName(newName);
+    currentSessionTiktokRef.current = username.trim();
+
+    const empty: SellerLogic02AntiEvidence = { comments: [], transcripts: [] };
+    setEvidence(empty);
+    rowsRef.current = empty;
+    setAnalysisResult(null);
+    setAiDebugLogs([]);
+    setSttDebugLogs([]);
+    setStatusMessage(`새로운 회차 [${newName}]가 생성되었습니다.`);
+  };
+
+  // 선택된 회차 삭제
+  const handleDeleteCurrentSession = () => {
+    if (capturing || simulating) {
+      alert('청취 중에는 회차를 삭제할 수 없습니다.');
+      return;
+    }
+    if (!confirm(`'${currentSessionName}' 회차를 정말 삭제하시겠습니까?`)) {
+      return;
+    }
+
+    const filtered = savedSessions.filter((s) => s.id !== currentSessionId);
+    setSavedSessions(filtered);
+    saveStoredSessions(filtered);
+
+    if (filtered.length > 0) {
+      handleSelectSession(filtered[0].id);
+    } else {
+      handleCreateNewSession();
+    }
+    setStatusMessage('회차가 삭제되었습니다.');
+  };
+
   // AI 디버그 로그 핸들러
   const handleAiDebugLog = (log: AiDebugLog) => {
     setAiDebugLogs((prev) => [...prev.slice(-150), log]);
@@ -215,7 +385,7 @@ export default function SellerLogicAnalysis02AntiPage() {
     try {
       const res = await runSellerLogic02AntiAnalysis(
         {
-          sessionId: sessionRef.current,
+          sessionId: currentSessionId,
           slotNumber: slotRef.current,
           comments: [...rows.comments],
           transcripts: [...rows.transcripts]
@@ -250,8 +420,63 @@ export default function SellerLogicAnalysis02AntiPage() {
     }, 2500);
   };
 
-  // 1. 실시간 청취 시작 / 종료 (이미지 1의 핵심 동작)
-  const handleStartLiveCapture = async () => {
+  // =========================================================================
+  // 사용자 핵심 요구사항:
+  // 실시간 청취 시작 클릭 시
+  // - 기존 자료가 있을 때:
+  //   1) tiktok 아이디가 같을 경우 -> 계속 이어서 할지 새로운 회차로 시작할지 선택 팝업
+  //   2) tiktok 아이디가 틀릴 경우 -> 자동으로 새로운 회차로 시작
+  // - 기존 자료가 없을 때: 바로 청취 시작
+  // =========================================================================
+  const handleStartLiveCaptureClick = () => {
+    const currentCount = evidence.comments.length + evidence.transcripts.length;
+    const currentTiktok = (currentSessionTiktokRef.current || '').trim().replace(/^@/u, '');
+    const inputTiktok = username.trim().replace(/^@/u, '');
+
+    if (currentCount > 0) {
+      if (currentTiktok === inputTiktok) {
+        // TikTok 아이디가 같을 경우: 계속 이어서 할지 새 회차로 시작할지 선택 모달 오픈
+        setShowResumeModal(true);
+        return;
+      } else {
+        // TikTok 아이디가 다를 경우: 자동으로 새로운 회차 생성 후 즉시 청취 시작
+        handleStartNewSessionAndCapture();
+        return;
+      }
+    }
+
+    // 기존 자료가 없을 때는 바로 청취 시작
+    currentSessionTiktokRef.current = inputTiktok;
+    void executeStartLiveCapture();
+  };
+
+  // 새로운 회차를 생성하고 청취 시작 (새 tiktok 아이디 또는 사용자 선택 시)
+  const handleStartNewSessionAndCapture = () => {
+    setShowResumeModal(false);
+    const newId = crypto.randomUUID();
+    const newName = formatAntiSessionName();
+    setCurrentSessionId(newId);
+    setCurrentSessionName(newName);
+    currentSessionTiktokRef.current = username.trim();
+
+    const empty: SellerLogic02AntiEvidence = { comments: [], transcripts: [] };
+    setEvidence(empty);
+    rowsRef.current = empty;
+    setAnalysisResult(null);
+    setAiDebugLogs([]);
+    setSttDebugLogs([]);
+
+    void executeStartLiveCapture(newId);
+  };
+
+  // 기존 회차에 이어서 청취 계속
+  const handleResumeCapture = () => {
+    setShowResumeModal(false);
+    void executeStartLiveCapture();
+  };
+
+  // 실제 실시간 청취 구동 함수
+  const executeStartLiveCapture = async (targetSessionId = currentSessionId) => {
     if (live.isListening || commentCapture.isActive) {
       setErrorMessage('기존 청취와 댓글 수집을 종료한 뒤 시작해 주세요.');
       return;
@@ -285,7 +510,7 @@ export default function SellerLogicAnalysis02AntiPage() {
       await service.start({
         username: username.trim().replace(/^@/u, ''),
         serverUrl: commentCapture.config.serverUrl,
-        sessionId: sessionRef.current,
+        sessionId: targetSessionId,
         stt: {
           provider: 'SONIOX',
           apiKey: live.sonioxApiKey,
@@ -378,7 +603,7 @@ export default function SellerLogicAnalysis02AntiPage() {
     const text = method === 1 ? SELLER_LOGIC_METHOD1_EXAMPLE : SELLER_LOGIC_METHOD2_EXAMPLE;
     setInputText(text);
     try {
-      const parsed = parseSellerLogic02AntiText(text, broadcastDate, `session-preset-${method}`);
+      const parsed = parseSellerLogic02AntiText(text, broadcastDate, currentSessionId);
       setEvidence(parsed);
       rowsRef.current = parsed;
       setAnalysisResult(null);
@@ -402,7 +627,7 @@ export default function SellerLogicAnalysis02AntiPage() {
     try {
       const res = await runSellerLogic02AntiAnalysis(
         {
-          sessionId: sessionRef.current,
+          sessionId: currentSessionId,
           slotNumber: slot,
           comments: evidence.comments,
           transcripts: evidence.transcripts
@@ -466,7 +691,7 @@ export default function SellerLogicAnalysis02AntiPage() {
         try {
           const partialResult = await runSellerLogic02AntiAnalysis(
             {
-              sessionId: 'session-sim',
+              sessionId: currentSessionId,
               slotNumber: slot,
               comments: [...accumulatedComments],
               transcripts: [...accumulatedTranscripts]
@@ -488,15 +713,28 @@ export default function SellerLogicAnalysis02AntiPage() {
   const resetAll = () => {
     handleStopSimulation();
     if (capturing) void handleStopLiveCapture();
-    sessionRef.current = crypto.randomUUID();
-    const empty: SellerLogic02AntiEvidence = { comments: [], transcripts: [] };
-    setEvidence(empty);
-    rowsRef.current = empty;
-    setAnalysisResult(null);
-    setStatusMessage('새 분석을 준비했습니다.');
-    setErrorMessage('');
-    setAiDebugLogs([]);
-    setSttDebugLogs([]);
+    handleCreateNewSession();
+  };
+
+  const downloadSessionJson = () => {
+    const data = {
+      schemaVersion: 1,
+      sessionId: currentSessionId,
+      sessionName: currentSessionName,
+      tiktokUsername: username,
+      exportedAt: new Date().toISOString(),
+      slotNumber: slot,
+      ...evidence,
+      result: analysisResult
+    };
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' })
+    );
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${currentSessionName}.json`;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   // 통계 계산
@@ -529,11 +767,69 @@ export default function SellerLogicAnalysis02AntiPage() {
           >
             <RotateCcw size={16} /> 새 분석
           </button>
+          <button
+            className={`${button} border border-slate-200 bg-white hover:bg-slate-100 text-slate-700`}
+            disabled={!evidence.comments.length && !evidence.transcripts.length}
+            onClick={downloadSessionJson}
+          >
+            <Download size={16} /> 결과 내려받기
+          </button>
         </div>
       </header>
 
       {/* =========================================================================
-          사용자 요청 이미지 1: 실시간 청취 및 판매 AI 슬롯 설정 카드
+          사용자 요청 신규 기능: 지난 회차 풀다운 메뉴 & 삭제 & 새 회차 관리 바
+          ========================================================================= */}
+      <section className="rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50/70 to-blue-50/70 p-4 shadow-sm flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 text-xs font-bold text-indigo-900">
+            <History size={16} className="text-indigo-600" />
+            <span>회차 선택:</span>
+          </div>
+
+          <select
+            className="rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-md"
+            value={currentSessionId}
+            onChange={(e) => handleSelectSession(e.target.value)}
+            disabled={capturing || simulating}
+          >
+            {savedSessions.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} (@{s.tiktokUsername || '미지정'} · 멘트 {s.transcripts.length}개, 댓글 {s.comments.length}개, 확정 {s.analysisResult?.decisions.filter((d) => d.status === 'CONFIRMED').length ?? 0}건)
+              </option>
+            ))}
+            {savedSessions.length === 0 && (
+              <option value={currentSessionId}>{currentSessionName} (현재 신규 회차)</option>
+            )}
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleCreateNewSession}
+            disabled={capturing || simulating}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-indigo-700 text-xs font-semibold rounded-xl border border-indigo-200 shadow-sm transition"
+          >
+            <PlusCircle size={14} />
+            새 회차 만들기
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDeleteCurrentSession}
+            disabled={capturing || simulating}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 text-xs font-semibold rounded-xl border border-rose-200 shadow-sm transition"
+            title="현재 선택된 회차 삭제"
+          >
+            <Trash2 size={14} />
+            회차 삭제
+          </button>
+        </div>
+      </section>
+
+      {/* =========================================================================
+          실시간 청취 및 판매 AI 슬롯 설정 카드 (이미지 1)
           ========================================================================= */}
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="grid items-end gap-4 md:grid-cols-[1fr_1fr_auto]">
@@ -589,9 +885,9 @@ export default function SellerLogicAnalysis02AntiPage() {
           ) : (
             <button
               type="button"
-              className={`${button} bg-brand-600 hover:bg-brand-700 text-white shadow-sm bg-blue-600`}
+              className={`${button} bg-blue-600 hover:bg-blue-700 text-white shadow-sm`}
               disabled={starting || simulating}
-              onClick={() => void handleStartLiveCapture()}
+              onClick={handleStartLiveCaptureClick}
             >
               <Radio size={16} />
               실시간 청취 시작
@@ -728,7 +1024,7 @@ export default function SellerLogicAnalysis02AntiPage() {
       </section>
 
       {/* =========================================================================
-          사용자 요청 이미지 2: 2열 그리드 실시간 패널 (판매멘트 전사 + 실시간 댓글)
+          2열 그리드 실시간 패널 (판매멘트 전사 + 실시간 댓글) (이미지 2)
           ========================================================================= */}
       <div className="grid items-start gap-6 xl:grid-cols-2">
         {/* 좌측 패널: 판매멘트 전사 */}
@@ -1060,6 +1356,67 @@ export default function SellerLogicAnalysis02AntiPage() {
           )}
         </div>
       </section>
+
+      {/* =========================================================================
+          회차 이어서 하기 / 새로운 회차 선택 모달 팝업
+          ========================================================================= */}
+      {showResumeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-slate-100 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">실시간 청취 회차 선택</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  동일한 방송 TikTok 아이디(<span className="font-semibold text-slate-700">@{username}</span>)의 이전 자료가 있습니다.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 text-xs text-slate-600 space-y-1">
+              <p>
+                <strong className="text-slate-800">현재 회차:</strong> {currentSessionName}
+              </p>
+              <p>
+                <strong className="text-slate-800">기존 수집 데이터:</strong> 댓글 {evidence.comments.length}개, 판매자 멘트 {evidence.transcripts.length}개
+              </p>
+              <p className="text-slate-500 text-[11px] pt-1">
+                기존 자료에 이어서 계속 청취하시겠습니까, 아니면 깨끗한 새 회차로 시작하시겠습니까?
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handleResumeCapture}
+                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2"
+              >
+                <Radio className="w-4 h-4" />
+                기존 회차에 계속 이어서 청취
+              </button>
+
+              <button
+                type="button"
+                onClick={handleStartNewSessionAndCapture}
+                className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2"
+              >
+                <PlusCircle className="w-4 h-4" />
+                새로운 회차로 시작 (기존 자료 자동 보관)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowResumeModal(false)}
+                className="w-full py-2.5 px-4 bg-white hover:bg-slate-100 text-slate-600 font-semibold text-xs rounded-xl border border-slate-200 transition"
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

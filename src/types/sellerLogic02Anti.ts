@@ -52,3 +52,17 @@ export interface SttDebugLog {
   message: string;
   details?: any;
 }
+
+export interface AntiSessionRecord {
+  id: string;
+  name: string; // "날짜시간 + anti", 예: "2026-10-05 22:45:09 anti"
+  tiktokUsername: string;
+  createdAt: string;
+  updatedAt: string;
+  comments: CommentRecord[];
+  transcripts: WorkflowTranscript[];
+  analysisResult: SellerLogic02AntiResult | null;
+  aiDebugLogs?: AiDebugLog[];
+  sttDebugLogs?: SttDebugLog[];
+}
+
