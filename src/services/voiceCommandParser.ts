@@ -8,6 +8,9 @@ export interface VoiceCommandResult {
   rawText: string;
 }
 
+/** "댓글 삭제됐네요"처럼 판매와 무관한 "삭제"는 명령이 아니다. */
+export const DELETE_LAST_PATTERN = /(?:방금|마지막)\s*(?:건|거|것|판매|주문)?\s*(?:을|를)?\s*삭제/u;
+
 export function parseVoiceCommand(text: string, isCurrentlyEditing: boolean): VoiceCommandResult {
   if (!text) return { type: 'NONE', rawText: '' };
   const clean = text.trim();
@@ -29,8 +32,8 @@ export function parseVoiceCommand(text: string, isCurrentlyEditing: boolean): Vo
     };
   }
 
-  // 3. "방금 건 삭제", "삭제해줘"
-  if (clean.includes('방금 건 삭제') || clean.includes('방금거 삭제') || clean.includes('삭제')) {
+  // 3. "방금 건 삭제", "마지막 판매 삭제": 실제 판매를 지우므로 대상이 분명한 말만 받는다.
+  if (DELETE_LAST_PATTERN.test(clean)) {
     return {
       type: 'DELETE_LAST',
       rawText: clean,

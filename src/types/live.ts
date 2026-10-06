@@ -81,6 +81,7 @@ export interface SttTranscriptLog {
     | 'SCREEN_CAPTURED'
     | 'VOICE_EDIT_START'
     | 'VOICE_EDIT_DONE'
+    | 'SALE_DELETED'
     | 'CORRECTION_APPLIED'
     | 'CORRECTION_IGNORED'
     | 'CORRECTION_CANCELLED'

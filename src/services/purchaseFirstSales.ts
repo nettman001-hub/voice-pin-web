@@ -100,7 +100,9 @@ export function matchPurchaseRequest(
   // considered a candidate, but never outweighs a different exact account.
   const available = requests.filter((request) => {
     const delay = when - Date.parse(request.capturedAt);
-    return !request.withdrawn && !request.conditional && !request.requiresReview
+    // 수량·옵션 댓글("빨강 2개 저요")도 판매자가 배정하면 판매가 된다. 금액은 판매자가
+    // 부른 금액 그대로이고 수량·옵션은 연결된 댓글 원문으로 남는다. 조건부 의사만 뺀다.
+    return !request.withdrawn && !request.conditional
       && !consumedRequestIds.has(request.id)
       && delay >= -10_000 && delay <= 5 * 60_000;
   });

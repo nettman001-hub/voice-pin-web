@@ -46,7 +46,8 @@ export function extractSpeechPrice(text: string): SpeechPriceEvidence | null {
   for (const match of text.matchAll(/(\d[\d,]{2,8})\s*원/gu)) {
     add(match[0], Number(match[1].replace(/,/g, '')), 'EXPLICIT_WON', match.index);
   }
-  for (const match of text.matchAll(/([일이삼사오육칠팔구]?만)?\s*([일이삼사오육칠팔구]?천)?\s*([일이삼사오육칠팔구]?백)?\s*원/gu)) {
+  // "2만원"·"3만5천원"의 꼬리("만원", "천원")를 한글 금액으로 다시 읽지 않도록 숫자 바로 뒤는 건너뛴다.
+  for (const match of text.matchAll(/(?<![\d,]\s*)([일이삼사오육칠팔구]?만)?\s*([일이삼사오육칠팔구]?천)?\s*([일이삼사오육칠팔구]?백)?\s*원/gu)) {
     if (!match[1] && !match[2] && !match[3]) continue;
     const before = text.slice(Math.max(0, match.index - 10), match.index);
     if (/(?:\d+\s*(?:\.|점)\s*\d+|[영공일이삼사오육칠팔구]\s*점\s*[영공일이삼사오육칠팔구])\s*$/u.test(before)) continue;
