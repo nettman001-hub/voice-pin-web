@@ -69,11 +69,10 @@ export function selectHintNicknames(
   return result;
 }
 
-/** 힌트에 아직 없는 구매의사자. 있으면 즉시(두 번째부터는 5초 간격) STT를 갱신한다. */
-export function findUnsentPurchasers(purchaserNicknames: string[], sentNicknames: string[]): string[] {
+/** 아직 STT에 보내지 않은 닉네임. 구매의사자면 즉시(두 번째부터는 5초 간격), 평상시에는 5초마다 확인해 보낸다. */
+export function findUnsentNicknames(nicknames: string[], sentNicknames: string[]): string[] {
   const sent = new Set(sentNicknames.map(hintNicknameKey));
-  const recent = purchaserNicknames.slice(0, LIVE_HINT_NICKNAME_LIMIT);
-  return recent.filter((nickname) => !sent.has(hintNicknameKey(nickname)));
+  return nicknames.slice(0, LIVE_HINT_NICKNAME_LIMIT).filter((nickname) => !sent.has(hintNicknameKey(nickname)));
 }
 
 /* ------------------------------------------------------------------ */

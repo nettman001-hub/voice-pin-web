@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import {
   buildNicknameHintTerms,
-  findUnsentPurchasers,
+  findUnsentNicknames,
   getPurchaserNicknames,
   koreanPronunciationsForNickname,
   selectHintNicknames,
@@ -28,8 +28,8 @@ test('라이브 청취 홈 힌트 닉네임은 구매의사자 먼저, 최근 �
   assert.deepEqual(selected.slice(0, 3), ['minji', '먼저산사람', '구경꾼']);
   assert.equal(selected.filter((n) => n.toLowerCase() === 'minji').length, 1);
 
-  assert.deepEqual(findUnsentPurchasers(purchasers, ['먼저산사람']), ['minji']);
-  assert.deepEqual(findUnsentPurchasers(purchasers, ['Minji', '먼저산사람']), []);
+  assert.deepEqual(findUnsentNicknames(purchasers, ['먼저산사람']), ['minji']);
+  assert.deepEqual(findUnsentNicknames(purchasers, ['Minji', '먼저산사람']), []);
 });
 
 test('영어 닉네임은 원문과 한국어 발음을 함께 보낸다', () => {

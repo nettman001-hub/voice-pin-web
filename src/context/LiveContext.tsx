@@ -38,10 +38,10 @@ import { aiSettingsApi } from '../services/aiSettingsApi';
 import { useSttVocabulary } from './SttVocabularyContext';
 import { buildCloudSttTerms, getRecentCommentNicknames } from '../services/sttVocabularyService';
 import { getVoiceReviewRequests, shouldReviewVoiceSale, voiceReviewFingerprint, isVoiceReviewReady } from '../services/voicePendingReviewService';
-import { decideSttSessionRotation, STT_ROTATION_POLICY } from '../services/sttSessionRotationService';
+import { STT_ROTATION_POLICY } from '../services/sttSessionRotationService';
 import {
   buildNicknameHintTerms,
-  findUnsentPurchasers,
+  findUnsentNicknames,
   getPurchaserNicknames,
   LIVE_HINT_MIN_INTERVAL_MS,
   selectHintNicknames,
@@ -297,7 +297,6 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const activeCloudSttConfigRef = useRef<SttConfig | null>(null);
   const activeCloudNicknameTermsRef = useRef<string[]>([]);
   const lastSuccessfulSttConnectionAtRef = useRef<number>(0);
-  const nextSttRotationAttemptAtRef = useRef<number>(0);
   const sttRotationBusyRef = useRef(false);
   const currentSessionIdRef = useRef<string>(currentSessionId);
   const transcriptWorkspaceIdRef = useRef<string>(workspaceId || user?.id || 'local');
@@ -2067,7 +2066,6 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         activeCloudSttConfigRef.current = cloudSttConfig;
         activeCloudNicknameTermsRef.current = recentNicknameTerms;
         lastSuccessfulSttConnectionAtRef.current = Date.now();
-        nextSttRotationAttemptAtRef.current = 0;
         sttRotationBusyRef.current = false;
 
         deepgramService.startLiveStream(
@@ -2142,7 +2140,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [isListening]);
 
   // STT 닉네임 힌트 갱신: 새 구매의사자가 생기면 바로 보내고, 직전 갱신 5초 안에 더 생긴 구매의사자는
-  // 5초가 되는 순간 한 번에 모아 보낸다. 구매의사자가 아닌 댓글 작성자 변화는 기존 정책(최소 60초)대로 반영한다.
+  // 5초가 되는 순간 한 번에 모아 보낸다. 평상시에는 5초마다 새 닉네임(구매의사자 아닌 댓글 작성자 포함)이 있는지 확인해 보낸다.
   useEffect(() => {
     if (!isListening || sttMode !== 'CLOUD') return;
 
@@ -2208,38 +2206,32 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       minIntervalMs: LIVE_HINT_MIN_INTERVAL_MS,
     });
 
-    const evaluate = () => {
+    // 구매의사 이벤트: 새 구매의사자가 있으면 바로 교체 요청
+    const checkPurchasers = () => {
+      if (disposed || !isListeningRef.current || !activeCloudSttConfigRef.current) return;
+      const { purchasers } = collectHintNicknames(currentSessionIdRef.current);
+      if (findUnsentNicknames(purchasers, activeCloudNicknameTermsRef.current).length > 0) scheduler.request();
+    };
+    // 평상시: 5초마다 아직 STT에 안 보낸 닉네임이 있는지 확인해 있으면 보낸다
+    const checkAll = () => {
       if (disposed || !isListeningRef.current) return;
-      const config = activeCloudSttConfigRef.current;
       const connectedAt = lastSuccessfulSttConnectionAtRef.current;
-      if (!config || !connectedAt) return;
-
-      const { purchasers, nicknames } = collectHintNicknames(currentSessionIdRef.current);
-      if (findUnsentPurchasers(purchasers, activeCloudNicknameTermsRef.current).length > 0) {
-        scheduler.request();
-        return;
-      }
-      if (Date.now() < nextSttRotationAttemptAtRef.current) return;
-      const decision = decideSttSessionRotation(
-        activeCloudNicknameTermsRef.current,
-        nicknames,
-        Date.now() - connectedAt,
-      );
-      if (decision.shouldRotate) {
-        // 구매의사자가 아닌 댓글 작성자 변화는 급하지 않으니 한 번 시도 후 잠시 쉰다
-        nextSttRotationAttemptAtRef.current = Date.now() + 15_000;
+      if (!activeCloudSttConfigRef.current || !connectedAt) return;
+      const { nicknames } = collectHintNicknames(currentSessionIdRef.current);
+      const providerLimitReached = Date.now() - connectedAt >= STT_ROTATION_POLICY.PROVIDER_LIMIT_REFRESH_MS;
+      if (providerLimitReached || findUnsentNicknames(nicknames, activeCloudNicknameTermsRef.current).length > 0) {
         scheduler.request();
       }
     };
 
-    evaluate();
-    const timer = window.setInterval(evaluate, STT_ROTATION_POLICY.CHECK_INTERVAL_MS);
-    window.addEventListener('voicecap_purchase_requests_updated', evaluate);
+    checkAll();
+    const timer = window.setInterval(checkAll, LIVE_HINT_MIN_INTERVAL_MS);
+    window.addEventListener('voicecap_purchase_requests_updated', checkPurchasers);
     return () => {
       disposed = true;
       scheduler.stop();
       window.clearInterval(timer);
-      window.removeEventListener('voicecap_purchase_requests_updated', evaluate);
+      window.removeEventListener('voicecap_purchase_requests_updated', checkPurchasers);
     };
   }, [isListening, sttMode, getWordsForConnection, collectHintNicknames]);
 
@@ -2268,7 +2260,6 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     activeCloudSttConfigRef.current = null;
     activeCloudNicknameTermsRef.current = [];
     lastSuccessfulSttConnectionAtRef.current = 0;
-    nextSttRotationAttemptAtRef.current = 0;
 
     if (cloudSttStartTimeRef.current && activeCloudProviderRef.current) {
       const durationSeconds = Math.max(1, Math.round((Date.now() - cloudSttStartTimeRef.current) / 1000));
