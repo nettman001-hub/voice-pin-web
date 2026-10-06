@@ -102,3 +102,10 @@ test('formatMultiSaleAmount - 다건 구매자 건당 소숫점 금액(+) 및 �
   assert.equal(multi3.displayFull, '0.9 + 1.5 + 2.0 = 44,000원');
 });
 
+
+test('digit amounts with 만/천 are not re-read as their trailing Korean unit', () => {
+  for (const [text, amount] of [['햇살님 2만원 드릴게요.', 20000], ['2만 원', 20000],
+    ['러블리님 3만5천원 드릴게요', 35000], ['3만 5천 원', 35000], ['삼만오천원', 35000], ['만원', 10000]]) {
+    assert.equal(parseKoreanAmount(text), amount, text);
+  }
+});
