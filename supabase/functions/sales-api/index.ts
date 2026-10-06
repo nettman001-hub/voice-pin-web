@@ -44,6 +44,13 @@ import {
   handleGetOperation,
   handleGetProductSales,
 } from './handlers/sales.ts'
+import { handleCommitVoiceSale } from './handlers/voiceSales.ts'
+import { handleSellerAnalysis } from './handlers/sellerAnalysis.ts'
+import { handleSellerLogicAnalysis, handleSellerLogicSlots } from './handlers/sellerLogicAnalysis.ts'
+import { handleSellerLogicDetection } from './handlers/sellerLogicDetection.ts'
+import { handleSellerLogicDeep } from './handlers/sellerLogicDeep.ts'
+import { handleSellerWorkflow } from './handlers/sellerWorkflow.ts'
+import { handleLogicOpus } from './handlers/logicOpus.ts'
 
 import {
   handleClaimPrintJobs,
@@ -125,6 +132,42 @@ serve(async (req: Request) => {
     }
 
     switch (action) {
+      case 'seller-logic-slots':
+        return await handleSellerLogicSlots(auth)
+      case 'seller-logic-analysis':
+        return await handleSellerLogicAnalysis(auth, body)
+      case 'seller-logic-detect':
+        return await handleSellerLogicDetection(auth, body)
+      case 'seller-logic-deep':
+        return await handleSellerLogicDeep(auth, body)
+      case 'seller-analysis-list':
+      case 'seller-analysis-get':
+      case 'seller-analysis-save':
+      case 'seller-analysis-analyze':
+      case 'seller-analysis-verify':
+      case 'seller-analysis-approve':
+        return await handleSellerAnalysis(auth, body)
+      case 'logic-opus-slots':
+      case 'logic-opus-run-start':
+      case 'logic-opus-run-end':
+      case 'logic-opus-judge':
+      case 'logic-opus-pronounce':
+      case 'logic-opus-ledger-save':
+      case 'logic-opus-run-list':
+      case 'logic-opus-run-get':
+        return await handleLogicOpus(auth, body)
+      case 'seller-workflow-current':
+        requireCapability(body.sessionId ? 'SALES_WRITE' : 'SALES_READ')
+        return await handleSellerWorkflow(auth, body)
+      case 'seller-workflow-observe':
+        requireCapability('SALES_WRITE')
+        return await handleSellerWorkflow(auth, body)
+      case 'seller-workflow-state':
+      case 'seller-workflow-deploy':
+      case 'seller-workflow-review-shadow':
+      case 'seller-workflow-activate':
+      case 'seller-workflow-rollback':
+        return await handleSellerWorkflow(auth, body)
       // Sessions & Bootstrap
       case 'get-bootstrap':
         requireCapability('SALES_READ')
@@ -203,6 +246,9 @@ serve(async (req: Request) => {
       case 'commit-sales':
         requireCapability('SALES_WRITE')
         return await handleCommitSales(workspaceId, actorId, body)
+      case 'commit-voice-sale':
+        requireCapability('SALES_WRITE')
+        return await handleCommitVoiceSale(workspaceId, actorId, body)
       case 'get-product-sales':
         requireCapability('SALES_READ')
         return await handleGetProductSales(workspaceId, body)

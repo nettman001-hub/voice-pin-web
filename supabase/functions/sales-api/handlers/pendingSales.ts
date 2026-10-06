@@ -5,6 +5,7 @@ import type {
   PendingEvidenceSnapshot,
   SaleHistoryRecord,
   BatchConfirmResult,
+  AiVerificationMeta,
 } from '../../../../src/types/pendingSale.ts';
 import type { SaleRecord } from '../../../../src/types/live.ts';
 import {
@@ -17,6 +18,9 @@ import {
 } from './pendingSalesCore.ts';
 import { createAiTaskObject, processAiTask } from './aiTaskCore.ts';
 import { AI_TASK_CONFIG } from './aiTaskConfig.ts';
+import { getOperationalAiSetting, getPrimaryAiSlot } from './aiOperationalSettings.ts';
+import { normalizeCommentIntentForPrompt } from './aiAdapters/common.ts';
+import { handleReviewVoicePendingSale } from './voicePendingReview.ts';
 
 /**
  * 1. 단건 판매 보류 해결 및 원자적 확정 (Revision 충돌 검증 포함)
@@ -131,7 +135,7 @@ export async function handleResolvePendingSale(
 
     const validation = validateAiResolutionForSale(aiResult, sale, {
       sessionComments: normalizedComments,
-      registeredBuyers: buyers || [],
+      sessionBuyers: buyers || [],
       sessionProducts: products || [],
     });
 
@@ -153,12 +157,9 @@ export async function handleResolvePendingSale(
     effectiveResolutionDetails = effectiveResolutionDetails || aiResult.evidenceSummary || 'AI 분석 및 서버 교차 검증 통과';
 
     verifiedAiMeta = {
-      verified: true,
-      adapterType: aiResult.execution?.adapterType || 'CLOUD',
-      verifiedAt: new Date().toISOString(),
-      evidenceIds: aiResult.evidenceIds || [],
-      evidenceSummary: aiResult.evidenceSummary || '서버 교차 검증 완료',
-      checksPassed: validation.checksPassed || [],
+      aiStatus: 'RESOLVED',
+      validatedAt: new Date().toISOString(),
+      resolutionSummary: aiResult.evidenceSummary || '서버 교차 검증 완료',
     };
   }
 
@@ -436,6 +437,10 @@ export async function handleTriggerPendingAiResolution(
     });
   }
 
+  if (sale.source === 'WEB_VOICE') {
+    return await handleReviewVoicePendingSale(workspaceId, actorId, auth, sale, body);
+  }
+
   // 2. 관련 방송 회차 및 댓글/상품 컨텍스트 조회
   const sessionId = sale.session_id;
 
@@ -478,7 +483,8 @@ export async function handleTriggerPendingAiResolution(
     sale,
     comments: normalizedComments,
     buyers: buyers || [],
-    activeProduct: products?.find((p) => p.id === sale.product_id || p.product_code === sale.product_code_snapshot),
+    activeProduct: products?.map((p) => ({id:p.id,productCode:p.product_code,name:p.name,unitPrice:p.unit_price}))
+      .find((p) => p.id === sale.product_id || p.productCode === sale.product_code_snapshot),
     sessionProducts: products || [],
     followUpUtterance,
   });
@@ -544,7 +550,7 @@ export async function handleTriggerPendingAiResolution(
       relevantComments: normalizedComments.slice(0, 10).map((c) => ({
         commentId: c.id,
         nickname: c.nickname,
-        text: c.text,
+        text: normalizeCommentIntentForPrompt(c.text),
         timestamp: c.created_at,
       })),
       activeProduct: products?.[0] ? {
@@ -555,7 +561,14 @@ export async function handleTriggerPendingAiResolution(
     },
   };
 
-  const aiTaskObj = createAiTaskObject(aiPayload);
+  let aiSetting: any;
+  try {
+    aiSetting = await getOperationalAiSetting();
+  } catch (err: any) {
+    return errorResponse('DATABASE_ERROR', `운영 AI 설정 조회 실패: ${err.message}`, 500);
+  }
+  aiPayload.settingVersion = aiSetting?.applied_version || 1;
+  const aiTaskObj = createAiTaskObject(aiPayload, getPrimaryAiSlot(aiSetting));
 
   // DB에 AI 작업 등록
   await admin.from('ai_tasks').insert({

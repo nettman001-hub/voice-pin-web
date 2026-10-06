@@ -240,7 +240,8 @@ export async function handleApplyVoiceCorrection(
     history: saleRow.history || [],
     pendingReasons: saleRow.pending_reasons || [],
     printStatus: saleRow.print_status || 'NOT_REQUESTED',
-    createdAt: saleRow.created_at,
+    recognizedAt: saleRow.recognized_at || saleRow.created_at,
+    rawTranscript: saleRow.raw_transcript || '',
   };
 
   const { updatedSale, historyRecord, printJobRequired } = applyCorrectionToSale(
@@ -387,7 +388,8 @@ export async function handleLinkFollowUpCorrection(
     status: s.status,
     revision: s.revision || 1,
     printStatus: s.print_status || 'NOT_REQUESTED',
-    createdAt: s.created_at,
+    recognizedAt: s.recognized_at || s.created_at,
+    rawTranscript: s.raw_transcript || '',
   }));
 
   const linkResult = linkFollowUpToPendingCorrection(
@@ -525,7 +527,8 @@ export async function handleRollbackVoiceCorrection(
     history: targetSaleRow.history || [],
     pendingReasons: targetSaleRow.pending_reasons || [],
     printStatus: targetSaleRow.print_status || 'NOT_REQUESTED',
-    createdAt: targetSaleRow.created_at,
+    recognizedAt: targetSaleRow.recognized_at || targetSaleRow.created_at,
+    rawTranscript: targetSaleRow.raw_transcript || '',
   };
 
   const rollbackRes = rollbackCorrection(saleRecord);

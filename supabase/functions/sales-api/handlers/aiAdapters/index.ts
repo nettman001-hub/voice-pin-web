@@ -5,6 +5,25 @@ import type {
 import type { AiSlotConfig } from '../../../../../src/types/aiSettings.ts';
 import { runSelfHostedResolution, type HelperDispatcherFn } from './selfHostedAdapter.ts';
 import { runCloudResolution } from './cloudAdapter.ts';
+import type { ConversationTraceListener } from './conversationTrace.ts';
+export type { HelperDispatcherFn } from './selfHostedAdapter.ts';
+import { runCloudPrompt } from './cloudAdapter.ts';
+import { runSelfHostedPrompt } from './selfHostedAdapter.ts';
+import type { AiPromptInput, AiPromptResult } from './promptTypes.ts';
+
+export async function executeAiPrompt(prompt: AiPromptInput, options: ExecuteResolutionOptions): Promise<AiPromptResult> {
+  const controller=new AbortController();
+  const signal=options.signal?AbortSignal.any([options.signal,controller.signal]):controller.signal;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline=new Promise<AiPromptResult>(resolve=>{
+    timer=setTimeout(()=>{controller.abort();resolve({content:null,error:'AI 응답 대기시간 초과',errorCode:'TIMEOUT'});},options.slotConfig.timeoutSeconds*1000);
+  });
+  try {
+    return await Promise.race([deadline,options.slotConfig.type === 'LOCAL'
+      ? runSelfHostedPrompt(prompt, {...options,signal})
+      : runCloudPrompt(prompt, { ...options,signal,secretApiKey: options.secretValue || '' })]);
+  } finally {clearTimeout(timer);}
+}
 
 export {
   parseKoreanSpokenPrice,
@@ -23,6 +42,8 @@ export interface ExecuteResolutionOptions {
   secretValue?: string;
   helperDispatcher?: HelperDispatcherFn;
   allowInsecureHttpForExternal?: boolean;
+  signal?: AbortSignal;
+  onConversationTrace?: ConversationTraceListener;
 }
 
 /**
@@ -34,7 +55,7 @@ export async function executeAiResolution(
   request: AiResolutionRequest,
   options: ExecuteResolutionOptions
 ): Promise<AiResolutionResult> {
-  const { slotConfig, secretValue, helperDispatcher, allowInsecureHttpForExternal } = options;
+  const { slotConfig, secretValue, helperDispatcher, allowInsecureHttpForExternal, signal, onConversationTrace } = options;
 
   if (slotConfig.type === 'LOCAL') {
     return await runSelfHostedResolution(request, {
@@ -42,11 +63,15 @@ export async function executeAiResolution(
       secretValue,
       helperDispatcher,
       allowInsecureHttpForExternal,
+      signal,
+      onConversationTrace,
     });
   } else {
     return await runCloudResolution(request, {
       slotConfig,
       secretApiKey: secretValue || '',
+      signal,
+      onConversationTrace,
     });
   }
 }

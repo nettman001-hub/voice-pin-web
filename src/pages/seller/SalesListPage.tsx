@@ -5,6 +5,7 @@ import { productSalesApi } from '../../services/productSalesApi';
 import { LiveSession } from '../../types/productSales';
 import { SaleRecord } from '../../types/live';
 import { BuyerReconciliationPanel, BuyerStatusBadges } from '../../components/sales/BuyerReconciliationPanel';
+import { AiSaleBadge } from '../../components/sales/AiSaleBadge';
 import {
   ShoppingBag,
   Search,
@@ -15,12 +16,18 @@ import {
   Download,
   Layers,
   ArrowRight,
-  Clock
+  Clock,
+  ZoomIn
 } from 'lucide-react';
 import { formatAmountAsDecimal, formatMultiSaleAmount } from '../../services/salesExtractor';
 import { areNicknamesSimilar } from '../../services/nicknameMatcher';
+import { formatSessionDisplay } from '../../utils/sessionFormatter';
+import { ImageViewerModal } from '../../components/common/ImageViewerModal';
+import { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults } from '../../services/promiseDefaultService';
+import { calculateSalesListRevenue } from '../../services/salesListRevenue';
 
 interface BuyerGroupedSale {
+  groupKey: string;
   buyerNickname: string;
   totalAmount: number;
   orderCount: number;
@@ -34,16 +41,38 @@ interface BuyerGroupedSale {
 }
 
 export const SalesListPage: React.FC = () => {
-  const { sales, exportCsv, refreshSales } = useSales();
+  const { sales, promiseDefaults, setPromiseDefault, exportCsv, refreshSales } = useSales();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [searchTerm, setSearchTerm] = useState('');
-  const sessionFilter = searchParams.get('session') || 'ALL';
   const [viewMode, setViewMode] = useState<'BUYER_GROUPED' | 'INDIVIDUAL'>('BUYER_GROUPED');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [sortOrder, setSortOrder] = useState<'AMOUNT_DESC' | 'COUNT_DESC' | 'LATEST' | 'OLDEST'>('AMOUNT_DESC');
   const [expandedBuyers, setExpandedBuyers] = useState<string[]>([]);
+  const [promiseDefaultBusy, setPromiseDefaultBusy] = useState<string | null>(null);
+  const [promiseDefaultError, setPromiseDefaultError] = useState<{ key: string; message: string } | null>(null);
   const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
+  const [viewerModal, setViewerModal] = useState<{
+    isOpen: boolean;
+    images: string[];
+    initialIndex: number;
+    title: string;
+  }>({
+    isOpen: false,
+    images: [],
+    initialIndex: 0,
+    title: ''
+  });
+
+  const openImageViewer = (images: string[], index = 0, title = '이미지') => {
+    if (!images || images.length === 0) return;
+    setViewerModal({
+      isOpen: true,
+      images,
+      initialIndex: index,
+      title
+    });
+  };
 
   useEffect(() => {
     let active = true;
@@ -63,7 +92,7 @@ export const SalesListPage: React.FC = () => {
       if (sale.sessionId && !sessionsById.has(sale.sessionId)) {
         sessionsById.set(sale.sessionId, {
           id: sale.sessionId,
-          displayCode: sale.sessionId,
+          displayCode: formatSessionDisplay(sale.sessionId, { recognizedAt: sale.recognizedAt }),
           status: 'ENDED',
           revision: 1,
           startedAt: sale.recognizedAt,
@@ -75,6 +104,31 @@ export const SalesListPage: React.FC = () => {
     ));
   }, [cloudSessions, sales]);
 
+  // 가장 최근 회차 세션 (진행 중인 세션 우선, 없으면 시작시각 기준 가장 최근 회차)
+  const latestSessionId = useMemo(() => {
+    if (availableSessions.length === 0) return null;
+    const active = availableSessions.find((s) => s.status === 'ACTIVE');
+    return active ? active.id : availableSessions[0].id;
+  }, [availableSessions]);
+
+  // URL 파라미터가 없으면 최근 회차를 기본값으로 지정
+  const sessionFilter = useMemo(() => {
+    const raw = searchParams.get('session');
+    if (raw !== null) {
+      return raw;
+    }
+    return latestSessionId || 'ALL';
+  }, [searchParams, latestSessionId]);
+
+  // 초기 진입 시 URL에 session 파라미터가 없으면 최근 회차로 URL 동기화 (기본값 최근회차)
+  useEffect(() => {
+    if (searchParams.get('session') === null && latestSessionId) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set('session', latestSessionId);
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [searchParams, latestSessionId, setSearchParams]);
+
   const selectedSession = sessionFilter === 'ALL'
     ? null
     : availableSessions.find((session) => session.id === sessionFilter) || null;
@@ -82,17 +136,14 @@ export const SalesListPage: React.FC = () => {
 
   const handleSessionFilterChange = (nextSessionId: string) => {
     const nextParams = new URLSearchParams(searchParams);
-    if (nextSessionId === 'ALL') {
-      nextParams.delete('session');
-    } else {
-      nextParams.set('session', nextSessionId);
-    }
+    nextParams.set('session', nextSessionId);
     setSearchParams(nextParams);
   };
 
   // 1차 필터링
   const filteredSales = useMemo(() => {
     return sales.filter((item) => {
+      if (item.aiVerification?.reviewDecision === 'NOT_SALE') return false;
       if (sessionFilter !== 'ALL' && item.sessionId !== sessionFilter) return false;
       const matchesSearch =
         item.buyerNickname.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -110,10 +161,11 @@ export const SalesListPage: React.FC = () => {
     const map: { [nickname: string]: BuyerGroupedSale } = {};
 
     filteredSales.forEach((sale) => {
-      const key = sale.buyerNickname.trim() || '미확인(보류)';
+      const key = promiseDefaultBuyerKey(sale.buyerId, sale.buyerNickname.trim() || '미확인(보류)');
       if (!map[key]) {
         map[key] = {
-          buyerNickname: key,
+          groupKey: key,
+          buyerNickname: sale.buyerNickname.trim() || '미확인(보류)',
           totalAmount: 0,
           orderCount: 0,
           records: [],
@@ -127,7 +179,9 @@ export const SalesListPage: React.FC = () => {
       }
 
       const group = map[key];
-      group.totalAmount += sale.amount || 0;
+      if (sale.status !== '보류' && sale.status !== '취소' && sale.syncStatus !== 'PENDING') {
+        group.totalAmount += sale.amount || 0;
+      }
       group.orderCount += 1;
       group.records.push(sale);
       if (sale.status === '보류') group.hasPending = true;
@@ -150,6 +204,23 @@ export const SalesListPage: React.FC = () => {
       }
     });
 
+    // The decision survives deleting the original sale. Keep a small buyer card
+    // so the seller can still find and reverse that explicit decision.
+    if (statusFilter === 'ALL') for (const decision of promiseDefaults) {
+      if (decision.status !== 'CONFIRMED' || (sessionFilter !== 'ALL' && decision.sessionId !== sessionFilter)
+        || !decision.buyerNickname.toLowerCase().includes(searchTerm.toLowerCase())) continue;
+      if (!map[decision.buyerKey]) {
+        map[decision.buyerKey] = {
+          groupKey: decision.buyerKey, buyerNickname: decision.buyerNickname,
+          totalAmount: 0, orderCount: 0, records: [], hasPending: false,
+          hasManualEdited: false, latestRecognizedAt: decision.updatedAt,
+          productImageUrls: [], captureImageUrls: [], sessionIds: [decision.sessionId],
+        };
+      } else if (!map[decision.buyerKey].sessionIds.includes(decision.sessionId)) {
+        map[decision.buyerKey].sessionIds.push(decision.sessionId);
+      }
+    }
+
     const list = Object.values(map);
 
     list.sort((a, b) => {
@@ -161,7 +232,7 @@ export const SalesListPage: React.FC = () => {
     });
 
     return list;
-  }, [filteredSales, sortOrder]);
+  }, [filteredSales, promiseDefaults, searchTerm, sessionFilter, sortOrder, statusFilter]);
 
   const sortedIndividualSales = useMemo(() => {
     const list = [...filteredSales];
@@ -175,25 +246,37 @@ export const SalesListPage: React.FC = () => {
   }, [filteredSales, sortOrder]);
 
   const currentSessionSummary = useMemo(() => {
-    const targetSales = sessionFilter === 'ALL' ? sales : sales.filter((s) => s.sessionId === sessionFilter);
-    const valid = targetSales.filter((s) => s.status !== '보류');
-    const totalAmount = valid.reduce((sum, item) => sum + item.amount, 0);
-    const uniqueBuyers = new Set(valid.map((s) => s.buyerNickname.trim()).filter(Boolean));
+    const targetSales = sales.filter((s) => s.aiVerification?.reviewDecision !== 'NOT_SALE'
+      && (sessionFilter === 'ALL' || s.sessionId === sessionFilter));
+    const revenue = calculateSalesListRevenue(targetSales, promiseDefaults);
     const pendingCount = targetSales.filter((s) => s.status === '보류').length;
 
     return {
       sessionName: sessionFilter === 'ALL' ? '전체 방송 회차 합산' : `회차: ${selectedSession?.displayCode || sessionFilter}`,
       totalCount: targetSales.length,
-      totalAmount,
-      uniqueBuyerCount: uniqueBuyers.size,
+      ...revenue,
       pendingCount
     };
-  }, [sales, sessionFilter, selectedSession?.displayCode]);
+  }, [sales, promiseDefaults, sessionFilter, selectedSession?.displayCode]);
 
-  const toggleBuyerExpand = (nickname: string) => {
+  const toggleBuyerExpand = (groupKey: string) => {
     setExpandedBuyers((prev) =>
-      prev.includes(nickname) ? prev.filter((n) => n !== nickname) : [...prev, nickname]
+      prev.includes(groupKey) ? prev.filter((key) => key !== groupKey) : [...prev, groupKey]
     );
+  };
+
+  const handlePromiseDefault = async (buyer: BuyerGroupedSale, nextStatus: 'CONFIRMED' | 'CANCELLED') => {
+    if (sessionFilter === 'ALL' || promiseDefaultBusy) return;
+    setPromiseDefaultBusy(buyer.groupKey);
+    setPromiseDefaultError(null);
+    try {
+      await setPromiseDefault(buyer.groupKey, buyer.buyerNickname, sessionFilter, nextStatus);
+    } catch (error) {
+      setPromiseDefaultError({ key: buyer.groupKey,
+        message: error instanceof Error ? error.message : '약속 미이행 기록을 저장하지 못했습니다.' });
+    } finally {
+      setPromiseDefaultBusy(null);
+    }
   };
 
   const handleExportCurrentView = () => {
@@ -201,42 +284,42 @@ export const SalesListPage: React.FC = () => {
   };
 
   return (
-    <div className="p-3.5 sm:p-6 max-w-6xl mx-auto space-y-4 sm:space-y-6">
+    <div className="p-2.5 sm:p-4 max-w-7xl mx-auto space-y-2.5 sm:space-y-3">
       {/* 헤더 & 상단 액션 */}
-      <div className="bg-white border border-slate-200 p-4 sm:p-6 rounded-3xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200 px-3 py-2 sm:px-4 sm:py-2.5 rounded-2xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
         <div>
           <div className="flex items-center space-x-2">
-            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">판매 내역 목록</h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 text-[10px] sm:text-xs font-bold border border-brand-200">
+            <h1 className="text-sm sm:text-base font-black text-slate-900 tracking-tight">판매 내역 목록</h1>
+            <span className="px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 text-[10px] font-bold border border-brand-200">
               회차별 묶음
             </span>
           </div>
-          <p className="text-[11px] sm:text-xs text-slate-500 mt-1">
+          <p className="text-[10px] sm:text-[11px] text-slate-500 mt-0.5">
             방송 회차별로 판매 내역을 확인하고, 동일 구매자의 중복 주문을 하나로 합산하여 정산합니다.
           </p>
         </div>
 
-        <div className="grid grid-cols-2 sm:flex items-center gap-2 sm:space-x-3 w-full sm:w-auto">
+        <div className="flex items-center gap-1.5 w-full sm:w-auto">
           <Link
             to="/sales/review"
-            className="px-3.5 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold flex items-center justify-center space-x-1.5 transition active:scale-95 text-center"
+            className="h-8 px-2.5 sm:px-3 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold flex items-center justify-center space-x-1 transition active:scale-95 text-center flex-1 sm:flex-initial"
           >
-            <CheckSquare className="w-4 h-4 text-amber-600 flex-shrink-0" />
+            <CheckSquare className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
             <span>일괄 확인</span>
           </Link>
           <button
             onClick={handleExportCurrentView}
-            className="px-3.5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-500/20 flex items-center justify-center space-x-1.5 transition active:scale-95 text-center"
+            className="h-8 px-2.5 sm:px-3 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-xs flex items-center justify-center space-x-1 transition active:scale-95 text-center flex-1 sm:flex-initial"
           >
-            <Download className="w-4 h-4 flex-shrink-0" />
+            <Download className="w-3.5 h-3.5 flex-shrink-0" />
             <span>CSV 저장</span>
           </button>
         </div>
       </div>
 
       {/* 회차 선택 탭 & 회차 요약 카드 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
-        <div className="flex items-center gap-3 pb-2 border-b border-slate-100">
+      <div className="bg-white border border-slate-200 rounded-2xl p-2.5 sm:p-3 shadow-sm space-y-2">
+        <div className="flex items-center gap-3 pb-1.5 border-b border-slate-100">
           <label htmlFor="sales-session-filter" className="text-xs font-bold text-slate-700 flex items-center flex-shrink-0">
             <Layers className="w-3.5 h-3.5 mr-1.5 text-brand-600" /> 회차 선택:
           </label>
@@ -244,54 +327,67 @@ export const SalesListPage: React.FC = () => {
             id="sales-session-filter"
             value={sessionFilter}
             onChange={(event) => handleSessionFilterChange(event.target.value)}
-            className="min-w-0 flex-1 max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
+            className="min-w-0 flex-1 max-w-md rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-brand-500"
           >
-            <option value="ALL">전체 회차</option>
-            {availableSessions.map((session) => (
-              <option key={session.id} value={session.id}>
-                {session.displayCode}{session.status === 'ACTIVE' ? ' · 진행 중' : ''}
-              </option>
-            ))}
+            {availableSessions.map((session) => {
+              const isLatest = session.id === latestSessionId;
+              return (
+                <option key={session.id} value={session.id}>
+                  {session.displayCode}
+                  {session.status === 'ACTIVE' ? ' · 진행 중 (실시간)' : isLatest ? ' (최근 회차)' : ''}
+                </option>
+              );
+            })}
+            <option value="ALL">전체 회차 (모든 방송 합산)</option>
           </select>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 pt-1">
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200">
-            <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">선택 회차 총 매출액</span>
-            <div className="text-lg sm:text-xl font-black text-brand-600 mt-1 truncate">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2 pt-0.5">
+          <div className="p-2 sm:p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] text-slate-500 font-medium">선택 회차 총 매출액</span>
+            <div className="text-base sm:text-lg font-black text-brand-600 mt-0.5 truncate">
               {currentSessionSummary.totalAmount.toLocaleString()}{' '}
-              <span className="text-xs font-normal text-slate-500">원</span>
+              <span className="text-[10px] font-normal text-slate-500">원</span>
             </div>
           </div>
 
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200">
-            <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">고유 구매자 수</span>
-            <div className="text-lg sm:text-xl font-black text-purple-700 mt-1">
+          <div className="p-2 sm:p-2.5 rounded-xl bg-emerald-50/60 border border-emerald-200">
+            <span className="text-[10px] text-slate-600 font-medium">선택 회차 확정매출액</span>
+            <div className="text-base sm:text-lg font-black text-emerald-700 mt-0.5 truncate">
+              {currentSessionSummary.confirmedAmount.toLocaleString()}{' '}
+              <span className="text-[10px] font-normal text-slate-500">원</span>
+            </div>
+            <span className="text-[10px] text-slate-500">약속 미이행 확정분 제외</span>
+          </div>
+
+          <div className="p-2 sm:p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] text-slate-500 font-medium">고유 구매자 수</span>
+            <div className="text-base sm:text-lg font-black text-purple-700 mt-0.5">
               {currentSessionSummary.uniqueBuyerCount}{' '}
-              <span className="text-xs font-normal text-slate-500">명</span>
+              <span className="text-[10px] font-normal text-slate-500">명</span>
             </div>
           </div>
 
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200">
-            <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">총 주문 건수</span>
-            <div className="text-lg sm:text-xl font-black text-slate-900 mt-1">
+          <div className="p-2 sm:p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] text-slate-500 font-medium">총 주문 건수</span>
+            <div className="text-base sm:text-lg font-black text-slate-900 mt-0.5">
               {currentSessionSummary.totalCount}{' '}
-              <span className="text-xs font-normal text-slate-500">건</span>
+              <span className="text-[10px] font-normal text-slate-500">건</span>
             </div>
           </div>
 
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200">
-            <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">보류 건수</span>
-            <div className="text-lg sm:text-xl font-black text-amber-600 mt-1">
+          <div className="p-2 sm:p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] text-slate-500 font-medium">보류 건수</span>
+            <div className="text-base sm:text-lg font-black text-amber-600 mt-0.5">
               {currentSessionSummary.pendingCount}{' '}
-              <span className="text-xs font-normal text-slate-500">건</span>
+              <span className="text-[10px] font-normal text-slate-500">건</span>
             </div>
           </div>
         </div>
       </div>
 
       {/* 필터 & 뷰 모드 전환 바 */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 shadow-sm space-y-3 sm:space-y-4">
+      <div className="bg-white border border-slate-200 rounded-2xl p-2.5 sm:p-3 shadow-sm space-y-2">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           <div className="grid grid-cols-2 sm:flex items-center gap-1.5 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
             <button
@@ -373,8 +469,18 @@ export const SalesListPage: React.FC = () => {
               </div>
             ) : (
               buyerGroupedList.map((buyer) => {
-                const isExpanded = expandedBuyers.includes(buyer.buyerNickname);
+                const isExpanded = expandedBuyers.includes(buyer.groupKey);
                 const buyerSaleIds = buyer.records.map((record) => record.id);
+                const promiseDefault = sessionFilter === 'ALL' ? undefined
+                  : getPromiseDefault(promiseDefaults, buyer.groupKey, sessionFilter);
+                const hasConfirmedPromiseDefault = sessionFilter === 'ALL'
+                  ? promiseDefaults.some((decision) => decision.buyerKey === buyer.groupKey && decision.status === 'CONFIRMED')
+                  : promiseDefault?.status === 'CONFIRMED';
+                const promiseDefaultCount = summarizePromiseDefaults(promiseDefaults, buyer.groupKey).confirmedCount;
+                const hasConfirmedSale = sessionFilter !== 'ALL' && buyer.records.some((record) =>
+                  record.sessionId === sessionFilter && record.syncStatus !== 'PENDING'
+                    && record.status !== '보류' && record.status !== '취소'
+                    && record.recordState !== 'CANCELLED' && record.buyerNickname !== '미확인(보류)');
                 const buyerThumbnail = buyer.productImageUrls[0]
                   || buyer.captureImageUrls[0]
                   || buyer.records.find((r) => r.productImageUrl)?.productImageUrl
@@ -382,7 +488,7 @@ export const SalesListPage: React.FC = () => {
 
                 return (
                   <div
-                    key={buyer.buyerNickname}
+                    key={buyer.groupKey}
                     className={`rounded-2xl border transition overflow-hidden ${
                       buyer.hasPending
                         ? 'bg-amber-50/70 border-amber-300'
@@ -391,16 +497,38 @@ export const SalesListPage: React.FC = () => {
                   >
                     <button
                       type="button"
-                      onClick={() => toggleBuyerExpand(buyer.buyerNickname)}
+                      onClick={() => toggleBuyerExpand(buyer.groupKey)}
                       aria-expanded={isExpanded}
                       className="w-full p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left cursor-pointer hover:bg-slate-50/80 transition"
                     >
                       <div className="flex items-center space-x-3.5">
                         {buyerThumbnail ? (
-                          <div className="relative w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex-shrink-0 shadow-sm flex items-center justify-center">
-                            <img src={buyerThumbnail} alt={`${buyer.buyerNickname} 구매 상품`} className="w-full h-full object-cover" />
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const allImages = Array.from(new Set([
+                                ...buyer.productImageUrls,
+                                ...buyer.captureImageUrls,
+                                ...buyer.records.map((r) => r.productImageUrl).filter(Boolean),
+                                ...buyer.records.flatMap((r) => r.captureImageUrls || []).filter(Boolean)
+                              ] as string[]));
+                              openImageViewer(
+                                allImages.length > 0 ? allImages : [buyerThumbnail],
+                                0,
+                                `${buyer.buyerNickname}님 관련 이미지`
+                              );
+                            }}
+                            className="group/thumb relative w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex-shrink-0 shadow-sm flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-brand-500 transition"
+                            title="클릭하여 원본 이미지 보기"
+                          >
+                            <img src={buyerThumbnail} alt={`${buyer.buyerNickname} 구매 상품`} className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform" />
+                            <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center text-white">
+                              <ZoomIn className="w-4 h-4" />
+                            </div>
                             {buyer.orderCount > 1 && (
-                              <span className="absolute bottom-0 right-0 bg-slate-900/80 text-white text-[9px] px-1 rounded-tl font-bold">
+                              <span className="absolute bottom-0 right-0 bg-slate-900/80 text-white text-[9px] px-1 rounded-tl font-bold z-10">
                                 +{buyer.orderCount}
                               </span>
                             )}
@@ -415,7 +543,7 @@ export const SalesListPage: React.FC = () => {
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-bold text-base text-slate-900">{buyer.buyerNickname}</span>
                             <span className="text-xs px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 font-bold border border-brand-200">
-                              총 {buyer.orderCount}건 구매
+                              {buyer.orderCount ? `총 ${buyer.orderCount}건 구매` : '원본 판매내역 없음'}
                             </span>
                             {buyer.orderCount > 1 && (
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200">
@@ -427,12 +555,17 @@ export const SalesListPage: React.FC = () => {
                                 보류 포함
                               </span>
                             )}
-                            <BuyerStatusBadges saleIds={buyerSaleIds} />
+                            {hasConfirmedPromiseDefault && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold border border-rose-200">
+                                약속 미이행 확정
+                              </span>
+                            )}
+                            {buyerSaleIds.length > 0 && <BuyerStatusBadges saleIds={buyerSaleIds} />}
                           </div>
                           <div className="text-[11px] text-slate-500 mt-1 flex items-center space-x-2">
                             <span>최근 주문: {new Date(buyer.latestRecognizedAt).toLocaleTimeString('ko-KR')}</span>
                             <span>•</span>
-                            <span>회차: {buyer.sessionIds.join(', ')}</span>
+                            <span>회차: {buyer.sessionIds.map((id) => formatSessionDisplay(id, { sessions: availableSessions, recognizedAt: buyer.latestRecognizedAt })).join(', ')}</span>
                           </div>
                         </div>
                       </div>
@@ -470,11 +603,43 @@ export const SalesListPage: React.FC = () => {
 
                     {isExpanded && (
                       <div className="p-4 border-t border-slate-100 bg-slate-50/70 space-y-4">
-                        <BuyerReconciliationPanel
-                          buyerNickname={buyer.buyerNickname}
-                          records={buyer.records}
-                          captureImageUrls={buyer.captureImageUrls}
-                        />
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3">
+                          <div>
+                            <p className="text-xs font-bold text-slate-800">{buyer.buyerNickname}님 약속 미이행</p>
+                            <p className="text-[11px] font-semibold text-rose-700 mt-0.5">누적 확정 {promiseDefaultCount}회</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              {sessionFilter === 'ALL' ? '방송 회차를 하나 선택하면 기록할 수 있습니다.'
+                                : '이 회차의 구매가 여러 건이어도 미이행은 1회만 기록합니다. 사유 입력은 필요하지 않습니다.'}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={sessionFilter === 'ALL' || (!hasConfirmedSale && promiseDefault?.status !== 'CONFIRMED') || Boolean(promiseDefaultBusy)}
+                            onClick={() => void handlePromiseDefault(buyer,
+                              promiseDefault?.status === 'CONFIRMED' ? 'CANCELLED' : 'CONFIRMED')}
+                            className={`rounded-lg px-3 py-2 text-xs font-bold border disabled:opacity-50 disabled:cursor-not-allowed ${
+                              promiseDefault?.status === 'CONFIRMED'
+                                ? 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                                : 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700'
+                            }`}
+                          >
+                            {promiseDefaultBusy === buyer.groupKey ? '저장 중…'
+                              : promiseDefault?.status === 'CONFIRMED' ? '약속미이행취소' : '약속미이행확정'}
+                          </button>
+                        </div>
+                        {promiseDefaultError?.key === buyer.groupKey && promiseDefaultBusy === null && (
+                          <p role="alert" className="text-xs font-semibold text-rose-700">{promiseDefaultError.message}</p>
+                        )}
+                        {buyer.records.length > 0 ? (
+                          <BuyerReconciliationPanel
+                            buyerNickname={buyer.buyerNickname}
+                            records={buyer.records}
+                            captureImageUrls={buyer.captureImageUrls}
+                            availableSessions={availableSessions}
+                          />
+                        ) : (
+                          <p className="text-xs text-slate-500">원본 판매내역이 삭제되어도 확정한 미이행 기록은 보존됩니다.</p>
+                        )}
 
                         <div className="text-[11px] font-bold text-slate-600 mb-2 flex items-center justify-between">
                           <span>{buyer.buyerNickname}님의 상세 구매 목록 ({buyer.records.length}건):</span>
@@ -489,9 +654,31 @@ export const SalesListPage: React.FC = () => {
                             className="p-3 rounded-xl bg-white border border-slate-200 hover:border-brand-400 flex items-center justify-between text-xs transition block shadow-sm group"
                           >
                             <div className="flex items-center space-x-3 min-w-0 flex-1 mr-2">
-                              <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200/80 bg-slate-100 flex-shrink-0 flex items-center justify-center shadow-xs">
+                              <div
+                                className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200/80 bg-slate-100 flex-shrink-0 flex items-center justify-center shadow-xs relative group/thumb cursor-pointer"
+                                onClick={(e) => {
+                                  if (recImage) {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    const images = rec.captureImageUrls && rec.captureImageUrls.length > 0
+                                      ? rec.captureImageUrls
+                                      : [recImage];
+                                    openImageViewer(
+                                      images,
+                                      0,
+                                      `${rec.buyerNickname} 상품/캡처`
+                                    );
+                                  }
+                                }}
+                                title={recImage ? '클릭하여 원본 크기로 보기' : undefined}
+                              >
                                 {recImage ? (
-                                  <img src={recImage} alt={rec.productCode || rec.productName || '상품'} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200" />
+                                  <>
+                                    <img src={recImage} alt={rec.productCode || rec.productName || '상품'} className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform duration-200" />
+                                    <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center text-white">
+                                      <ZoomIn className="w-3.5 h-3.5" />
+                                    </div>
+                                  </>
                                 ) : (
                                   <ShoppingBag className="w-4 h-4 text-brand-600/70" />
                                 )}
@@ -509,6 +696,7 @@ export const SalesListPage: React.FC = () => {
                                   >
                                     {rec.status}
                                   </span>
+                                  <AiSaleBadge sale={rec} />
                                   {(rec.productCode || rec.productName) && (
                                     <span className="text-[11px] font-semibold text-slate-700">
                                       상품 {rec.productCode || ''}{rec.productName ? ` · ${rec.productName}` : ''}
@@ -558,13 +746,35 @@ export const SalesListPage: React.FC = () => {
                   >
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                       <div className="flex items-start space-x-3.5 sm:space-x-4 min-w-0 flex-1">
-                        <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-slate-100 border border-slate-200/80 flex items-center justify-center overflow-hidden flex-shrink-0 shadow-sm">
+                        <div
+                          className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-slate-100 border border-slate-200/80 flex items-center justify-center overflow-hidden flex-shrink-0 shadow-sm relative group/thumb cursor-pointer"
+                          onClick={(e) => {
+                            if (saleImage) {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const images = sale.captureImageUrls && sale.captureImageUrls.length > 0
+                                ? sale.captureImageUrls
+                                : [saleImage];
+                              openImageViewer(
+                                images,
+                                0,
+                                `${sale.buyerNickname} 상품/캡처`
+                              );
+                            }
+                          }}
+                          title={saleImage ? '클릭하여 원본 크기로 보기' : undefined}
+                        >
                           {saleImage ? (
-                            <img
-                              src={saleImage}
-                              alt={sale.productName || sale.productCode || '상품'}
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                            />
+                            <>
+                              <img
+                                src={saleImage}
+                                alt={sale.productName || sale.productCode || '상품'}
+                                className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform duration-200"
+                              />
+                              <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center text-white">
+                                <ZoomIn className="w-4 h-4" />
+                              </div>
+                            </>
                           ) : (
                             <div className="flex flex-col items-center justify-center text-slate-400 p-1">
                               <ShoppingBag className="w-5 h-5 text-brand-600/70" />
@@ -598,9 +808,10 @@ export const SalesListPage: React.FC = () => {
                             >
                               {sale.status}
                             </span>
+                            <AiSaleBadge sale={sale} />
                             <BuyerStatusBadges saleIds={[sale.id]} />
-                            <span className="text-[10px] text-slate-600 font-mono bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                              회차: {sale.sessionId}
+                            <span className="text-[10px] text-slate-700 font-semibold bg-slate-100 px-2 py-0.5 rounded border border-slate-200" title={`방송 회차: ${sale.sessionId}`}>
+                              회차: {formatSessionDisplay(sale.sessionId, { sessions: availableSessions, recognizedAt: sale.recognizedAt })}
                             </span>
                           </div>
 
@@ -647,6 +858,16 @@ export const SalesListPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {viewerModal.isOpen && (
+        <ImageViewerModal
+          isOpen={viewerModal.isOpen}
+          onClose={() => setViewerModal((prev) => ({ ...prev, isOpen: false }))}
+          images={viewerModal.images}
+          initialIndex={viewerModal.initialIndex}
+          titlePrefix={viewerModal.title}
+        />
+      )}
     </div>
   );
 };

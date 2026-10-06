@@ -9,6 +9,7 @@ export async function handleIngestComments(workspaceId: string, actorId: string,
 
   const acceptedIds: string[] = []
   const duplicateIds: string[] = []
+  const acknowledgedComments: any[] = []
 
   for (const c of comments) {
     let buyerId = null
@@ -23,7 +24,7 @@ export async function handleIngestComments(workspaceId: string, actorId: string,
       if (existingBuyer) {
         buyerId = existingBuyer.id
       } else {
-        const { data: newBuyer } = await admin
+        const { data: newBuyer, error: buyerError } = await admin
           .from('buyers')
           .insert({
             workspace_id: workspaceId,
@@ -36,11 +37,17 @@ export async function handleIngestComments(workspaceId: string, actorId: string,
           .select('id')
           .single()
         buyerId = newBuyer?.id || null
+        if (buyerError?.code === '23505') {
+          const { data: concurrentBuyer } = await admin.from('buyers').select('id')
+            .eq('workspace_id', workspaceId).eq('platform_user_id', c.platformUserId).maybeSingle()
+          buyerId = concurrentBuyer?.id || null
+        }
+        if (!buyerId) return errorResponse('DATABASE_ERROR', '댓글 구매자 정보를 저장하지 못했습니다.', 500)
       }
     }
 
     const commentId = crypto.randomUUID()
-    const { error: insertErr } = await admin.from('live_comments').insert({
+    const row = {
       id: commentId,
       workspace_id: workspaceId,
       session_id: sessionId,
@@ -51,14 +58,21 @@ export async function handleIngestComments(workspaceId: string, actorId: string,
       content: c.content || '',
       captured_at: c.capturedAt || new Date().toISOString(),
       ingest_sequence: Number(c.ingestSequence || Date.now()),
-    })
+    }
+    const { error: insertErr } = await admin.from('live_comments').insert(row)
 
     if (insertErr?.code === '23505') {
       duplicateIds.push(c.platformMessageId)
+      const { data: existing, error: existingError } = await admin.from('live_comments')
+        .select('*').eq('workspace_id', workspaceId).eq('session_id', sessionId)
+        .eq('collector_id', collectorId || actorId).eq('platform_message_id', c.platformMessageId).single()
+      if (existingError || !existing) return errorResponse('DATABASE_ERROR', '중복 댓글의 저장 결과를 확인하지 못했습니다.', 500)
+      acknowledgedComments.push(existing)
     } else if (insertErr) {
       return errorResponse('DATABASE_ERROR', `댓글 적재 실패: ${insertErr.message}`, 500)
     } else {
       acceptedIds.push(commentId)
+      acknowledgedComments.push(row)
     }
   }
 
@@ -66,12 +80,21 @@ export async function handleIngestComments(workspaceId: string, actorId: string,
     acceptedIds,
     duplicateIds,
     nextIngestCursor: `cursor-seq-${Date.now()}`,
+    comments: acknowledgedComments.map((c) => ({
+      id: c.id, sessionId: c.session_id, collectorId: c.collector_id,
+      platformMessageId: c.platform_message_id, buyerId: c.buyer_id,
+      nicknameSnapshot: c.nickname_snapshot, content: c.content,
+      capturedAt: c.captured_at, ingestSequence: Number(c.ingest_sequence),
+    })),
   })
 }
 
 export async function handleGetSalesFeed(workspaceId: string, body: any) {
-  const { sessionId, watchedBuyerIds = [], limit = 50 } = body
+  const { sessionId, watchedBuyerIds = [], limit = 50, knownCommentIds = [] } = body
   if (!sessionId) return errorResponse('VALIDATION_ERROR', 'sessionId는 필수입니다.', 400)
+  if (!Array.isArray(knownCommentIds) || knownCommentIds.length > 1000) {
+    return errorResponse('VALIDATION_ERROR', '확인할 댓글 ID는 최대 1000건입니다.', 400)
+  }
 
   const { data: session } = await admin
     .from('live_sessions')
@@ -112,6 +135,20 @@ export async function handleGetSalesFeed(workspaceId: string, body: any) {
     .order('ingest_sequence', { ascending: false })
     .limit(limit)
 
+  // A latest-50 feed cannot prove deletion of older comments. Confirm only the
+  // explicit canonical IDs held by this client, within its workspace/session.
+  const knownIds: string[] = [...new Set<string>(knownCommentIds.filter((id: unknown): id is string =>
+    typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)))]
+  const deletedCommentIds: string[] = []
+  for (let offset = 0; offset < knownIds.length; offset += 100) {
+    const batch = knownIds.slice(offset, offset + 100)
+    const { data: existing, error } = await admin.from('live_comments').select('id')
+      .eq('workspace_id', workspaceId).eq('session_id', sessionId).in('id', batch)
+    if (error) return errorResponse('DATABASE_ERROR', '댓글 삭제 상태를 확인하지 못했습니다.', 500)
+    const existingIds = new Set((existing || []).map((comment: any) => comment.id))
+    deletedCommentIds.push(...batch.filter((id) => !existingIds.has(id)))
+  }
+
   const summary = await calculateSummary(workspaceId, sessionId)
   const buyerStats = await calculateBuyerStats(workspaceId, sessionId, watchedBuyerIds.slice(0, 100))
 
@@ -133,6 +170,7 @@ export async function handleGetSalesFeed(workspaceId: string, body: any) {
     sessionRevision: session?.revision || 1,
     nextCursor: comments?.length ? `cursor-seq-${comments[0].ingest_sequence}` : null,
     hasMore: false,
+    deletedCommentIds,
   })
 }
 

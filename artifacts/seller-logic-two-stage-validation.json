@@ -1,0 +1,188 @@
+{
+  "generatedAt": "2026-10-04T20:22:59.724Z",
+  "mode": "LOCAL_HANDLERS_REAL_APPLIED_PROVIDERS",
+  "appliedVersion": 33,
+  "automation": {
+    "total": 817,
+    "passed": 817,
+    "failed": 0,
+    "productionBuild": "passed"
+  },
+  "cases": [
+    {
+      "mode": "soniox",
+      "slotNumber": 1,
+      "startedAt": "2026-10-04T20:07:41.196Z",
+      "finishedAt": "2026-10-04T20:08:34.881Z",
+      "model": "gemma-4-e4b-it",
+      "completed": true,
+      "checks": {
+        "expectedTransactions": true
+      },
+      "error": null,
+      "processedRows": 9,
+      "requests": 7,
+      "providerCalls": 8,
+      "providerHttpErrorCount": 0,
+      "maximumPacketCharacters": 8319,
+      "detectLatency": {
+        "count": 3,
+        "minMs": 1391,
+        "medianMs": 2982,
+        "maxMs": 9799
+      },
+      "linkLatency": {
+        "count": 4,
+        "minMs": 6210,
+        "medianMs": 13484,
+        "maxMs": 13557
+      },
+      "decisionStates": {
+        "CONFIRMED": 3
+      }
+    },
+    {
+      "mode": "soniox",
+      "slotNumber": 2,
+      "startedAt": "2026-10-04T19:44:30.609Z",
+      "finishedAt": "2026-10-04T19:44:44.880Z",
+      "model": "deepseek-flash",
+      "completed": true,
+      "checks": {
+        "expectedTransactions": true
+      },
+      "error": null,
+      "processedRows": 9,
+      "requests": 7,
+      "providerCalls": 8,
+      "providerHttpErrorCount": 0,
+      "maximumPacketCharacters": 8587,
+      "detectLatency": {
+        "count": 3,
+        "minMs": 1115,
+        "medianMs": 1267,
+        "maxMs": 2364
+      },
+      "linkLatency": {
+        "count": 4,
+        "minMs": 1847,
+        "medianMs": 2523,
+        "maxMs": 2794
+      },
+      "decisionStates": {
+        "CONFIRMED": 3
+      }
+    },
+    {
+      "mode": "regression",
+      "slotNumber": 1,
+      "startedAt": "2026-10-04T20:19:49.996Z",
+      "finishedAt": "2026-10-04T20:22:36.616Z",
+      "model": "gemma-4-e4b-it",
+      "completed": true,
+      "checks": {
+        "expectedTransactions": true
+      },
+      "error": null,
+      "processedRows": 12,
+      "requests": 15,
+      "providerCalls": 19,
+      "providerHttpErrorCount": 0,
+      "maximumPacketCharacters": 3857,
+      "detectLatency": {
+        "count": 7,
+        "minMs": 1751,
+        "medianMs": 3904,
+        "maxMs": 7360
+      },
+      "linkLatency": {
+        "count": 8,
+        "minMs": 11925,
+        "medianMs": 17792,
+        "maxMs": 25808
+      },
+      "decisionStates": {
+        "CONFIRMED": 3
+      }
+    },
+    {
+      "mode": "regression",
+      "slotNumber": 2,
+      "startedAt": "2026-10-04T19:45:35.723Z",
+      "finishedAt": "2026-10-04T19:45:59.515Z",
+      "model": "deepseek-flash",
+      "completed": true,
+      "checks": {
+        "expectedTransactions": true
+      },
+      "error": null,
+      "processedRows": 12,
+      "requests": 13,
+      "providerCalls": 14,
+      "providerHttpErrorCount": 0,
+      "maximumPacketCharacters": 3203,
+      "detectLatency": {
+        "count": 7,
+        "minMs": 829,
+        "medianMs": 1215,
+        "maxMs": 2034
+      },
+      "linkLatency": {
+        "count": 6,
+        "minMs": 2116,
+        "medianMs": 2466,
+        "maxMs": 2968
+      },
+      "decisionStates": {
+        "CONFIRMED": 3
+      }
+    },
+    {
+      "mode": "real",
+      "slotNumber": 2,
+      "startedAt": "2026-10-04T20:13:28.781Z",
+      "finishedAt": "2026-10-04T20:19:39.262Z",
+      "model": "deepseek-flash",
+      "completed": true,
+      "checks": {
+        "expectedTransactions": false,
+        "priceQuestionNotConfirmed": true,
+        "exactlyTwoProductsForRepeatedBuyer": true
+      },
+      "error": null,
+      "processedRows": 125,
+      "requests": 117,
+      "providerCalls": 118,
+      "providerHttpErrorCount": 0,
+      "maximumPacketCharacters": 25917,
+      "detectLatency": {
+        "count": 62,
+        "minMs": 1149,
+        "medianMs": 3731,
+        "maxMs": 7989
+      },
+      "linkLatency": {
+        "count": 55,
+        "minMs": 931,
+        "medianMs": 2425,
+        "maxMs": 6193
+      },
+      "decisionStates": {
+        "PENDING": 3,
+        "CONFIRMED": 3,
+        "REVIEW": 2,
+        "CANCELLED": 1
+      }
+    }
+  ],
+  "releaseGatePassed": false,
+  "committed": false,
+  "deployed": false,
+  "limitations": [
+    "AI cases use chronological archive replay, not wall-clock live browser capture.",
+    "The real original-source regression uses 29 comments and 96 STT rows from three selected time ranges, not the complete 666-row broadcast.",
+    "Soniox transport uses generated Korean speech and synthetic comments, not real TikTok capture.",
+    "A correct JSON/source contract does not prove semantic accuracy.",
+    "No model settings, commerce records, or production deployment were changed."
+  ]
+}

@@ -1,10 +1,16 @@
-import { SaleRecord, CaptureItem, LiveSession, SttTranscriptLog } from '../types/live';
+import { SaleRecord, CaptureItem, LiveSession, SttTranscriptLog, SellerTranscriptRecord } from '../types/live';
 import { RecognitionWordRule, CaptureAreaConfig } from '../types/rules';
 import { TrainingSentence } from '../types/training';
 import { PaymentHistoryItem, PaymentCard } from '../types/subscription';
 import { ReportItem, SystemErrorLog, NotificationSetting } from '../types/admin';
 import { CommentRecord, CommentCaptureConfig, DEFAULT_COMMENT_CAPTURE_CONFIG, DEFAULT_COMMENT_SERVER_URL } from '../types/comment';
 import { CommerceState } from '../types/commerce';
+import type { ProductSalesProduct, ProductSalesSession, ProductSalesBootstrapData, BuyerStats, SessionSummary } from '../types/productSales';
+import type { SalesLocalState } from './salesSyncController';
+import { durableStorage } from './durableStorage';
+import { normalizeSttVocabulary } from './sttVocabularyService';
+import type { PurchaseRequest } from './purchaseFirstSales';
+import type { PromiseDefaultRecord } from './promiseDefaultService';
 
 export interface CaptureAreaSnapshot {
   imageUrl: string;
@@ -20,7 +26,17 @@ export function generateSessionId(): string {
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d} 임시 회차`;
+  return `${y}-${m}-${d} 라이브 회차`;
+}
+
+// 서버 정식 UUID 세션인지 임시 세션 ID인지 판별 (P1-3: 정식 방송 간 전환 시 댓글 혼입 차단용)
+export function isTemporarySessionId(sessionId?: string | null): boolean {
+  if (!sessionId) return false;
+  // 표준 UUID 형식 (8-4-4-4-12)이면 정식 발급된 서버 세션
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId.trim())) {
+    return false;
+  }
+  return true;
 }
 
 // 해당 회차의 판매 시작 시 1번부터 자동으로 상품번호 부여
@@ -117,17 +133,6 @@ export const DEFAULT_RULES: RecognitionWordRule[] = [
   { id: 'r4', word: '금액', action: 'DB_SAVE', isEnabled: true, isEssential: true, priority: 4, description: '결제 금액 파싱' },
   { id: 'r5', word: '캡처하세요', action: 'SCREEN_CAPTURE', isEnabled: true, isEssential: false, priority: 5, description: '고객 상품 확인 및 화면 영역 자동 캡처' },
   { id: 'r6', word: '결제완료', action: 'DB_SAVE_AND_CAPTURE', isEnabled: true, isEssential: false, priority: 6, description: 'DB 저장 및 화면 캡처 동시 실행' },
-];
-
-// 초기 음성 학습 문장
-export const DEFAULT_TRAINING_SENTENCES: TrainingSentence[] = [
-  { id: 't1', sentence: '구매 확정됐습니다', category: '멘트', recordCount: 3, isCompleted: true, expectedAccuracy: 98, lastTrainedAt: '2026-08-20' },
-  { id: 't2', sentence: '구매하신 분은 닉네임님입니다', category: '닉네임', recordCount: 3, isCompleted: true, expectedAccuracy: 96, lastTrainedAt: '2026-08-21' },
-  { id: 't3', sentence: '가격은 삼만 오천원입니다', category: '금액', recordCount: 2, isCompleted: false, expectedAccuracy: 88, lastTrainedAt: '2026-08-22' },
-  { id: 't4', sentence: '결제 완료되셨습니다', category: '멘트', recordCount: 1, isCompleted: false, expectedAccuracy: 82, lastTrainedAt: '2026-08-23' },
-  { id: 't5', sentence: '캡처 부탁드립니다', category: '명령', recordCount: 0, isCompleted: false, expectedAccuracy: 75 },
-  { id: 't6', sentence: '수정 시작', category: '명령', recordCount: 0, isCompleted: false, expectedAccuracy: 70 },
-  { id: 't7', sentence: '수정 완료', category: '명령', recordCount: 0, isCompleted: false, expectedAccuracy: 70 },
 ];
 
 // 초기 기본 판매 내역 목업 데이터
@@ -280,6 +285,7 @@ export const INITIAL_COMMERCE_STATE: CommerceState = {
 const KEYS = {
   RULES: 'dadryeo_rules',
   TRAINING: 'dadryeo_training',
+  STT_VOCABULARY: 'voicecap_stt_vocabulary',
   SALES: 'dadryeo_sales',
   CAPTURES: 'dadryeo_captures',
   PAYMENTS: 'dadryeo_payments',
@@ -293,26 +299,345 @@ const KEYS = {
   CAPTURE_AREA_SNAPSHOT: 'voicecap_capture_area_snapshot',
   COMMENT_RECORDS: 'voicecap_comment_records',
   COMMENT_CAPTURE_CONFIG: 'voicecap_comment_capture_config',
-  COMMERCE_STATE: 'voicecap_commerce_state'
+  COMMERCE_STATE: 'voicecap_commerce_state',
+  ACTIVE_PRODUCT: 'voicecap_active_product',
+  ACTIVE_SESSION: 'voicecap_active_session',
+  BOOTSTRAP: 'voicecap_bootstrap_cache'
 };
 
 export class StorageService {
   private captureAreaSnapshotCache: CaptureAreaSnapshot | null | undefined;
+  private currentWorkspaceId: string | null = null;
+  private memoryFallback = new Map<string, unknown>();
+  private failures = new Set<string>();
+  private writeVersion = 0;
+  private latestWrites = new Map<string, number>();
+  private pendingWrites = new Map<string, Promise<void>>();
+  private channel = typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined'
+    ? new BroadcastChannel('voicecap-local-sync') : null;
+
+  constructor() {
+    if (this.channel) this.channel.onmessage = (event) => {
+      const owner = event.data?.workspaceId;
+      if (owner && owner === this.currentWorkspaceId) {
+        void this.restoreWorkspace(owner).then(() => {
+          this.notifySales(owner);
+          if (event.data.kind === 'comments') {
+            const tombstones = this.getCommentTombstones(owner);
+            this.notifyCommentDeletion(owner, tombstones.map((item) => item.id), tombstones.flatMap((item) => item.key ? [item.key] : []));
+          }
+        });
+      }
+    };
+  }
+
+  private notifySales(workspaceId: string) {
+    if (typeof window !== 'undefined') {
+      const event = new Event('voicecap_sales_updated');
+      Object.assign(event, { detail: { workspaceId } });
+      window.dispatchEvent(event);
+    }
+  }
+
+  public getPersistenceError(): boolean {
+    const owner = this.currentWorkspaceId;
+    if (!owner) return false;
+    const encodedOwner = encodeURIComponent(owner);
+    return [...this.failures].some((key) => key.endsWith(`:${encodedOwner}`)
+      || key.startsWith(`voicecap_transcripts:${encodedOwner}:`));
+  }
+
+  public retryPersistence(): void {
+    for (const key of [...this.failures]) {
+      if (!this.currentWorkspaceId || !this.memoryFallback.has(key)) continue;
+      const encodedOwner = encodeURIComponent(this.currentWorkspaceId);
+      if (key.startsWith(`voicecap_transcripts:${encodedOwner}:`)) {
+        this.saveIndexedDbFirst(key, this.memoryFallback.get(key));
+      } else if (key.endsWith(`:${encodedOwner}`)) this.saveRecoverable(key, this.memoryFallback.get(key));
+    }
+  }
+
+  private notifyPersistence() {
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('voicecap_persistence_changed'));
+  }
+
+  private saveRecoverable(key: string, value: unknown) {
+    // Workspace records can be large. Keep Web Storage only as a fallback if
+    // IndexedDB is unavailable; unscoped legacy settings retain their format.
+    if (key.includes(':')) {
+      void this.saveIndexedDbFirst(key, value);
+      return;
+    }
+    const version = Math.max(Date.now() * 1000, this.writeVersion + 1);
+    this.writeVersion = version;
+    this.latestWrites.set(key, version);
+    const envelope = { __voicecapRecovery: 1, updatedAt: version, data: value };
+    this.memoryFallback.set(key, value);
+    const saved = this.setItem(key, envelope);
+    if (saved) {
+      this.memoryFallback.delete(key);
+      this.failures.delete(key);
+    }
+    // Mirror critical data even on a successful Web Storage write. This gives
+    // reloads a complete recovery copy and preserves the pending operation log.
+    void Promise.resolve().then(() => durableStorage.set(key, envelope)).then(() => {
+      if (this.latestWrites.get(key) !== version) return;
+      this.failures.delete(key);
+      this.notifyPersistence();
+      if (key.startsWith(`${KEYS.COMMENT_RECORDS}:`) || key.startsWith('voicecap_comment_tombstones:')) {
+        this.channel?.postMessage({ workspaceId: decodeURIComponent(key.slice(key.lastIndexOf(':') + 1)), kind: 'comments' });
+      }
+    }).catch((error) => {
+      if (this.latestWrites.get(key) !== version) return;
+      // A failed Web Storage write is recoverable when IndexedDB succeeds.
+      // Report an error only after both stores have failed.
+      if (!saved) {
+        this.failures.add(key);
+        console.error(`[Storage] Both local stores failed for key: ${key}`, error);
+      }
+      this.notifyPersistence();
+    });
+    this.notifyPersistence();
+  }
+
+  private saveIndexedDbFirst(key: string, value: unknown): Promise<void> {
+    const version = Math.max(Date.now() * 1000, this.writeVersion + 1);
+    this.writeVersion = version;
+    this.latestWrites.set(key, version);
+    const envelope = { __voicecapRecovery: 1, updatedAt: version, data: value };
+    this.memoryFallback.set(key, value);
+    let previousWebCopy: string | null = null;
+    try { previousWebCopy = localStorage.getItem(key); } catch {}
+    const write = Promise.resolve().then(() => durableStorage.update<typeof envelope>(key, (current) =>
+      current && current.updatedAt > version ? current : envelope
+    )).then((committed) => {
+      if (this.latestWrites.get(key) !== version) return;
+      if (committed.updatedAt > version) {
+        this.memoryFallback.set(key, committed.data);
+        this.latestWrites.set(key, committed.updatedAt);
+        this.writeVersion = Math.max(this.writeVersion, committed.updatedAt);
+      }
+      // Remove only this key's old Web Storage copy after the new copy has
+      // committed. This frees quota without discarding unsynced records.
+      try {
+        if (localStorage.getItem(key) === previousWebCopy) localStorage.removeItem(key);
+      } catch {}
+      this.failures.delete(key);
+      this.notifyPersistence();
+      if (key.startsWith(`${KEYS.COMMENT_RECORDS}:`) || key.startsWith('voicecap_comment_tombstones:')) {
+        this.channel?.postMessage({ workspaceId: decodeURIComponent(key.slice(key.lastIndexOf(':') + 1)), kind: 'comments' });
+      }
+    }).catch((error) => {
+      if (this.latestWrites.get(key) !== version) return;
+      if (this.setItem(key, envelope)) {
+        this.memoryFallback.delete(key);
+        this.failures.delete(key);
+      } else {
+        this.failures.add(key);
+        console.error(`[Storage] Both local stores failed for key: ${key}`, error);
+      }
+      this.notifyPersistence();
+    });
+    this.pendingWrites.set(key, write);
+    void write.finally(() => {
+      if (this.pendingWrites.get(key) === write) this.pendingWrites.delete(key);
+    });
+    return write;
+  }
+
+  public async awaitCommentOutboxPersistence(workspaceId: string): Promise<void> {
+    const key = this.scopedKey('voicecap_comment_outbox', workspaceId);
+    await this.pendingWrites.get(key);
+    if (this.failures.has(key)) throw new Error('댓글 전송 대기열을 이 기기에 저장하지 못했습니다.');
+  }
+
+  public async restoreWorkspace(workspaceId: string): Promise<void> {
+    for (const baseKey of ['voicecap_sales_state', 'voicecap_promise_defaults', 'voicecap_comment_outbox', KEYS.COMMENT_RECORDS, 'voicecap_comment_tombstones', 'voicecap_purchase_requests', KEYS.SALES]) {
+      const key = this.scopedKey(baseKey, workspaceId);
+      const beforeVersion = this.latestWrites.get(key) || 0;
+      let before: string | null = null;
+      try { before = localStorage.getItem(key); } catch {}
+      try {
+        const recovered = await durableStorage.get<any>(key);
+        let current: string | null = null;
+        try { current = localStorage.getItem(key); } catch {}
+        if ((this.latestWrites.get(key) || 0) !== beforeVersion || current !== before) continue;
+        const parsed = current ? JSON.parse(current) : null;
+        const local = parsed === null ? null : parsed?.__voicecapRecovery === 1
+          ? parsed : { __voicecapRecovery: 1, updatedAt: 0, data: parsed };
+        const latest = local && (!recovered || (local.updatedAt || 0) >= (recovered.updatedAt || 0))
+          ? await durableStorage.update<typeof local>(key, (existing) =>
+            existing && (existing.updatedAt || 0) > (local.updatedAt || 0) ? existing : local)
+          : recovered;
+        let after: string | null = null;
+        try { after = localStorage.getItem(key); } catch {}
+        if ((this.latestWrites.get(key) || 0) !== beforeVersion || after !== current) continue;
+        if (latest !== null) {
+          // A failed in-flight write may exist only in memory. Never replace it
+          // with an older durable snapshot during another-tab refresh.
+          if (this.memoryFallback.has(key) && beforeVersion > (latest.updatedAt || 0)) continue;
+          this.memoryFallback.set(key, latest.__voicecapRecovery === 1 ? latest.data : latest);
+          this.latestWrites.set(key, latest.updatedAt || 0);
+          if (current !== null) localStorage.removeItem(key);
+        }
+      } catch { /* Empty/new databases can still operate from Web Storage. */ }
+    }
+    const transcriptPrefix = `voicecap_transcripts:${encodeURIComponent(workspaceId)}:`;
+    const legacyTranscriptKeys: string[] = [];
+    try {
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (key?.startsWith(transcriptPrefix)) legacyTranscriptKeys.push(key);
+      }
+    } catch {}
+    for (const key of legacyTranscriptKeys) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const beforeVersion = this.latestWrites.get(key) || 0;
+        const parsed = JSON.parse(raw);
+        const envelope = parsed?.__voicecapRecovery === 1
+          ? parsed : { __voicecapRecovery: 1, updatedAt: 0, data: parsed };
+        const latest = await durableStorage.update<typeof envelope>(key, (existing) =>
+          existing && (existing.updatedAt || 0) > (envelope.updatedAt || 0) ? existing : envelope
+        );
+        if ((this.latestWrites.get(key) || 0) !== beforeVersion || localStorage.getItem(key) !== raw) continue;
+        this.memoryFallback.set(key, latest.data);
+        this.latestWrites.set(key, latest.updatedAt || 0);
+        localStorage.removeItem(key);
+      } catch (error) {
+        console.warn('[Storage] 판매 멘트 로컬 기록 이전 실패:', error);
+      }
+    }
+    try {
+      const transcripts = await durableStorage.entries<{ __voicecapRecovery?: number; updatedAt?: number; data?: SttTranscriptLog[] }>(transcriptPrefix);
+      for (const [key, envelope] of transcripts) {
+        if (this.latestWrites.has(key)) continue;
+        this.memoryFallback.set(key, envelope?.__voicecapRecovery === 1 ? envelope.data || [] : envelope);
+        this.latestWrites.set(key, envelope?.updatedAt || 0);
+      }
+    } catch (error) {
+      console.warn('[Storage] 판매 멘트 로컬 기록 복원 실패:', error);
+    }
+  }
+
+  public getSalesLocalState(workspaceId: string): SalesLocalState {
+    return this.getItem<SalesLocalState>(this.scopedKey('voicecap_sales_state', workspaceId), {
+      records: this.getSales(workspaceId), pending: [],
+    });
+  }
+
+  public saveSalesLocalState(workspaceId: string, state: SalesLocalState): void {
+    this.saveRecoverable(this.scopedKey('voicecap_sales_state', workspaceId), state);
+  }
+
+  public async updateSalesLocalState(workspaceId: string, change: (current: SalesLocalState) => SalesLocalState): Promise<SalesLocalState> {
+    const key = this.scopedKey('voicecap_sales_state', workspaceId);
+    const update = async () => {
+      let envelope: { __voicecapRecovery: number; updatedAt: number; data: SalesLocalState };
+      try {
+        envelope = await durableStorage.update<typeof envelope>(key, (recovered) => {
+          let local: typeof envelope | null = null;
+          try { const raw = localStorage.getItem(key); if (raw) local = JSON.parse(raw); } catch {}
+          const memoryVersion = this.memoryFallback.has(key) ? this.latestWrites.get(key) || 0 : 0;
+          const latest = recovered && (!local || recovered.updatedAt >= local.updatedAt) ? recovered : local;
+          const current = memoryVersion > (latest?.updatedAt || 0)
+            ? this.memoryFallback.get(key) as SalesLocalState
+            : latest?.data || this.getSalesLocalState(workspaceId);
+          const version = Math.max(Date.now() * 1000, this.writeVersion + 1, (latest?.updatedAt || 0) + 1);
+          return { __voicecapRecovery: 1, updatedAt: version, data: change(current) };
+        });
+      } catch {
+        // Web Locks still serialize the Web Storage fallback between tabs.
+        const next = change(this.getSalesLocalState(workspaceId));
+        const version = Math.max(Date.now() * 1000, this.writeVersion + 1);
+        this.writeVersion = version;
+        this.latestWrites.set(key, version);
+        const fallback = { __voicecapRecovery: 1, updatedAt: version, data: next };
+        if (this.setItem(key, fallback)) {
+          this.memoryFallback.delete(key);
+          this.failures.delete(key);
+        } else {
+          this.memoryFallback.set(key, next);
+          this.failures.add(key);
+        }
+        this.notifyPersistence();
+        this.notifySales(workspaceId);
+        this.channel?.postMessage({ workspaceId });
+        return next;
+      }
+      this.writeVersion = Math.max(this.writeVersion, envelope.updatedAt);
+      this.latestWrites.set(key, envelope.updatedAt);
+      this.memoryFallback.set(key, envelope.data);
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw && (JSON.parse(raw)?.updatedAt || 0) <= envelope.updatedAt && localStorage.getItem(key) === raw) {
+          localStorage.removeItem(key);
+        }
+      } catch {}
+      this.failures.delete(key); // The transaction completed durably, even if Web Storage failed.
+      this.notifyPersistence();
+      this.notifySales(workspaceId);
+      this.channel?.postMessage({ workspaceId });
+      return envelope.data;
+    };
+    return typeof navigator !== 'undefined' && navigator.locks
+      ? navigator.locks.request(key, update) : update();
+  }
+
+  public getCommentOutbox<T>(workspaceId: string): T[] {
+    return this.getItem<T[]>(this.scopedKey('voicecap_comment_outbox', workspaceId), []);
+  }
+
+  public saveCommentOutbox<T>(workspaceId: string, entries: T[]): void {
+    this.saveRecoverable(this.scopedKey('voicecap_comment_outbox', workspaceId), entries);
+  }
+
+  public setWorkspaceId(workspaceId: string | null) {
+    this.currentWorkspaceId = workspaceId;
+    this.notifyPersistence();
+  }
+
+  public getWorkspaceId(): string | null {
+    return this.currentWorkspaceId;
+  }
+
+  private scopedKey(baseKey: string, workspaceIdOverride?: string | null): string {
+    const ws = workspaceIdOverride !== undefined ? workspaceIdOverride : this.currentWorkspaceId;
+    return ws ? `${baseKey}:${encodeURIComponent(ws)}` : baseKey;
+  }
 
   private getItem<T>(key: string, defaultValue: T): T {
+    if (this.memoryFallback.has(key)) return this.memoryFallback.get(key) as T;
     try {
       const data = localStorage.getItem(key);
-      return data ? JSON.parse(data) : defaultValue;
+      if (!data) return defaultValue;
+      const parsed = JSON.parse(data);
+      return parsed?.__voicecapRecovery === 1 ? parsed.data : parsed;
     } catch {
       return defaultValue;
     }
   }
 
-  private setItem<T>(key: string, value: T): void {
+  private setItem<T>(key: string, value: T, options?: { allowEviction?: boolean }): boolean {
     try {
       localStorage.setItem(key, JSON.stringify(value));
+      return true;
     } catch (e) {
       console.error(`[Storage] Failed to save key: ${key}`, e);
+      // P1-1: 절대 판매(SALES), 결제(PAYMENTS), 정산(COMMERCE) 등 금융/판매 데이터는 자동 절삭 금지!
+      // 오직 allowEviction이 명시적으로 허용된 비필수 캐시(예: 실시간 댓글)만 과거 데이터 50% 절삭 시도
+      if (options?.allowEviction && Array.isArray(value) && value.length > 50) {
+        try {
+          const trimmed = value.slice(0, Math.floor(value.length / 2));
+          localStorage.setItem(key, JSON.stringify(trimmed));
+          console.warn(`[Storage] 비필수 캐시 용량 초과 자동 대응: ${key} 데이터 50% 절삭 저장 완료`);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      return false;
     }
   }
 
@@ -328,7 +653,29 @@ export class StorageService {
 
   public saveSessionTranscripts(workspaceId: string, sessionId: string, logs: SttTranscriptLog[]): void {
     if (!workspaceId || !sessionId) return;
-    this.setItem(this.transcriptSessionKey(workspaceId, sessionId), logs);
+    void this.saveIndexedDbFirst(this.transcriptSessionKey(workspaceId, sessionId), logs);
+  }
+
+  public getTranscriptHistory(workspaceId: string): SellerTranscriptRecord[] {
+    if (!workspaceId) return [];
+    const prefix = this.transcriptSessionKey(workspaceId, '');
+    const keys = new Set<string>();
+    try {
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (key?.startsWith(prefix)) keys.add(key);
+      }
+    } catch { /* Live in-memory transcripts can still be downloaded. */ }
+    for (const key of this.memoryFallback.keys()) {
+      if (key.startsWith(prefix)) keys.add(key);
+    }
+    return [...keys].flatMap((key) => {
+      try {
+        const sessionId = decodeURIComponent(key.slice(prefix.length));
+        if (!sessionId) return [];
+        return this.getSessionTranscripts(workspaceId, sessionId).map((log) => ({ ...log, sessionId }));
+      } catch { return []; }
+    });
   }
 
   // 초기화 및 시딩
@@ -336,9 +683,6 @@ export class StorageService {
     this.clearLegacyMemberData();
     if (!localStorage.getItem(KEYS.RULES)) {
       this.setItem(KEYS.RULES, DEFAULT_RULES);
-    }
-    if (!localStorage.getItem(KEYS.TRAINING)) {
-      this.setItem(KEYS.TRAINING, DEFAULT_TRAINING_SENTENCES);
     }
     if (!localStorage.getItem(KEYS.SALES)) {
       this.setItem(KEYS.SALES, INITIAL_SALES);
@@ -406,6 +750,7 @@ export class StorageService {
       captures: this.getCaptures(),
       rules: this.getRules(),
       trainingSentences: this.getTrainingSentences(),
+      sttVocabulary: this.currentWorkspaceId ? this.getSttVocabulary(this.currentWorkspaceId) : [],
       payments: this.getPayments(),
       notifications: this.getNotifications(),
       commerce: this.getCommerceState(),
@@ -424,6 +769,9 @@ export class StorageService {
       if (data.captures) localStorage.setItem(KEYS.CAPTURES, JSON.stringify(data.captures));
       if (data.rules) this.saveRules(data.rules);
       if (data.trainingSentences) this.saveTrainingSentences(data.trainingSentences);
+      if (Array.isArray(data.sttVocabulary) && this.currentWorkspaceId) {
+        this.saveSttVocabulary(this.currentWorkspaceId, data.sttVocabulary, true);
+      }
       if (data.payments) localStorage.setItem(KEYS.PAYMENTS, JSON.stringify(data.payments));
       if (data.notifications) localStorage.setItem(KEYS.NOTIFICATIONS, JSON.stringify(data.notifications));
       if (data.commerce) this.saveCommerceState(data.commerce);
@@ -447,28 +795,94 @@ export class StorageService {
   public getRules(): RecognitionWordRule[] { return this.getItem(KEYS.RULES, DEFAULT_RULES); }
   public saveRules(rules: RecognitionWordRule[]) { this.setItem(KEYS.RULES, rules); }
 
-  // 음성 학습
-  public getTrainingSentences(): TrainingSentence[] { return this.getItem(KEYS.TRAINING, DEFAULT_TRAINING_SENTENCES); }
+  // 이전 버전의 모의 훈련 기록은 기존 백업 복원 호환용으로만 읽고 저장한다.
+  public getTrainingSentences(): TrainingSentence[] { return this.getItem(KEYS.TRAINING, []); }
   public saveTrainingSentences(sentences: TrainingSentence[]) { this.setItem(KEYS.TRAINING, sentences); }
 
-  // 판매 내역
-  public getSales(): SaleRecord[] { return this.getItem(KEYS.SALES, INITIAL_SALES); }
-  public saveSales(sales: SaleRecord[]) { this.setItem(KEYS.SALES, sales); }
-
-  public addSale(sale: SaleRecord) {
-    const list = this.getSales();
-    list.unshift(sale);
-    this.saveSales(list);
+  // STT 발음 힌트는 계정/작업공간별로 분리해 다른 판매자의 단어가 섞이지 않게 한다.
+  private getSttVocabularyRecord(workspaceId: string): { words: string[]; pending: boolean } {
+    if (!workspaceId) return { words: [], pending: false };
+    const saved = this.getItem<unknown>(this.scopedKey(KEYS.STT_VOCABULARY, workspaceId), []);
+    if (Array.isArray(saved)) return { words: normalizeSttVocabulary(saved), pending: false };
+    if (saved && typeof saved === 'object' && 'words' in saved) {
+      const record = saved as { words?: unknown; pending?: unknown };
+      return { words: normalizeSttVocabulary(record.words), pending: record.pending === true };
+    }
+    return { words: [], pending: false };
   }
 
-  public updateSale(updated: SaleRecord) {
-    const list = this.getSales().map(s => s.id === updated.id ? updated : s);
-    this.saveSales(list);
+  public getSttVocabulary(workspaceId: string): string[] {
+    return this.getSttVocabularyRecord(workspaceId).words;
   }
 
-  public deleteSale(id: string) {
-    const list = this.getSales().filter(s => s.id !== id);
-    this.saveSales(list);
+  public isSttVocabularyPending(workspaceId: string): boolean {
+    return this.getSttVocabularyRecord(workspaceId).pending;
+  }
+
+  public saveSttVocabulary(workspaceId: string, words: string[], pending = false): boolean {
+    if (!workspaceId) return false;
+    const saved = this.setItem(this.scopedKey(KEYS.STT_VOCABULARY, workspaceId), {
+      words: normalizeSttVocabulary(words), pending,
+    });
+    if (saved && typeof window !== 'undefined') window.dispatchEvent(new Event('voicecap_stt_vocabulary_updated'));
+    return saved;
+  }
+
+  // 판매 내역 (workspace별 격리 지원)
+  public getSales(workspaceIdOverride?: string | null): SaleRecord[] {
+    const ws = workspaceIdOverride !== undefined ? workspaceIdOverride : this.currentWorkspaceId;
+    if (ws) {
+      const state = this.getItem<SalesLocalState | null>(this.scopedKey('voicecap_sales_state', ws), null);
+      if (state) return state.records;
+    }
+    const key = this.scopedKey(KEYS.SALES, workspaceIdOverride);
+    const data = this.getItem<SaleRecord[] | null>(key, null);
+    if (data) return data;
+    // workspace가 지정된 경우 타 계정/공용 데이터가 혼입되지 않도록 빈 배열 반환 (P1-4 해결)
+    if (ws) {
+      return [];
+    }
+    // workspace가 아예 없는 비로그인/단독 상태일 때만 공용 키 조회
+    return this.getItem<SaleRecord[]>(KEYS.SALES, INITIAL_SALES);
+  }
+  public saveSales(sales: SaleRecord[], workspaceIdOverride?: string | null) {
+    const key = this.scopedKey(KEYS.SALES, workspaceIdOverride);
+    this.saveRecoverable(key, sales);
+    const ws = workspaceIdOverride !== undefined ? workspaceIdOverride : this.currentWorkspaceId;
+    if (ws) {
+      const state = this.getItem<SalesLocalState | null>(this.scopedKey('voicecap_sales_state', ws), null);
+      if (state) this.saveSalesLocalState(ws, { ...state, records: sales });
+    }
+  }
+
+  public addSale(sale: SaleRecord, workspaceIdOverride?: string | null) {
+    const list = this.getSales(workspaceIdOverride);
+    const withoutSame = list.filter((s) => s.id !== sale.id);
+    this.saveSales([sale, ...withoutSame], workspaceIdOverride);
+  }
+
+  public updateSale(updated: SaleRecord, workspaceIdOverride?: string | null) {
+    const list = this.getSales(workspaceIdOverride).map((s) => s.id === updated.id ? updated : s);
+    this.saveSales(list, workspaceIdOverride);
+  }
+
+  public deleteSale(id: string, workspaceIdOverride?: string | null) {
+    const list = this.getSales(workspaceIdOverride).filter((s) => s.id !== id);
+    this.saveSales(list, workspaceIdOverride);
+  }
+
+  public getPromiseDefaults(workspaceIdOverride?: string | null): PromiseDefaultRecord[] {
+    return this.getItem<PromiseDefaultRecord[]>(this.scopedKey('voicecap_promise_defaults', workspaceIdOverride), []);
+  }
+
+  public savePromiseDefaults(records: PromiseDefaultRecord[], workspaceIdOverride?: string | null): void {
+    this.saveRecoverable(this.scopedKey('voicecap_promise_defaults', workspaceIdOverride), records);
+  }
+
+  public savePromiseDefault(decision: PromiseDefaultRecord, workspaceIdOverride?: string | null): void {
+    const records = this.getPromiseDefaults(workspaceIdOverride)
+      .filter((record) => record.buyerKey !== decision.buyerKey || record.sessionId !== decision.sessionId);
+    this.savePromiseDefaults([decision, ...records], workspaceIdOverride);
   }
 
   // 캡처 목록
@@ -571,23 +985,275 @@ export class StorageService {
   }
 
   // 댓글 캡처 기록
-  public getCommentRecords(): CommentRecord[] {
-    return this.getItem<CommentRecord[]>(KEYS.COMMENT_RECORDS, []);
+  // 댓글 캡처 기록 (workspace별 격리 지원)
+  public getCommentRecords(workspaceIdOverride?: string | null): CommentRecord[] {
+    const ws = workspaceIdOverride !== undefined ? workspaceIdOverride : this.currentWorkspaceId;
+    const key = this.scopedKey(KEYS.COMMENT_RECORDS, workspaceIdOverride);
+    const data = this.getItem<CommentRecord[] | null>(key, null);
+    if (data) return data.filter((record) => !this.isCommentDeleted(record, workspaceIdOverride));
+    // workspace가 지정된 경우 타 계정/공용 데이터가 혼입되지 않도록 빈 배열 반환 (P1-4 해결)
+    if (ws) {
+      return [];
+    }
+    // workspace가 아예 없는 비로그인/단독 상태일 때만 공용 키 조회
+    return this.getItem<CommentRecord[]>(KEYS.COMMENT_RECORDS, []).filter((record) => !this.isCommentDeleted(record, workspaceIdOverride));
   }
-  public saveCommentRecords(records: CommentRecord[]) {
-    this.setItem(KEYS.COMMENT_RECORDS, records);
+  public saveCommentRecords(records: CommentRecord[], workspaceIdOverride?: string | null) {
+    // Comments are live-sale evidence: never discard them to make room for sales.
+    const key = this.scopedKey(KEYS.COMMENT_RECORDS, workspaceIdOverride);
+    this.saveRecoverable(key, records);
   }
-  public addCommentRecords(records: CommentRecord[]) {
+
+  public getPurchaseRequests(workspaceIdOverride?: string | null): PurchaseRequest[] {
+    return this.getItem<PurchaseRequest[]>(this.scopedKey('voicecap_purchase_requests', workspaceIdOverride), [])
+      .filter((request) => !this.isCommentDeleted({
+        id: request.commentId, sessionId: request.sessionId, platformMessageId: request.platformMessageId,
+      }, workspaceIdOverride));
+  }
+
+  public addPurchaseRequest(request: PurchaseRequest, workspaceIdOverride?: string | null): void {
+    const requests = this.getPurchaseRequests(workspaceIdOverride);
+    if (requests.some((item) => item.id === request.id)) return;
+    this.saveRecoverable(this.scopedKey('voicecap_purchase_requests', workspaceIdOverride),
+      [request, ...requests].slice(0, 2000));
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('voicecap_purchase_requests_updated'));
+  }
+
+  public withdrawPurchaseRequestsForComment(comment: CommentRecord, workspaceIdOverride?: string | null): void {
+    const accountKey = comment.buyerId || (comment.platformUserId
+      ? `platform:${comment.platformUserId}` : comment.uniqueId ? `handle:${comment.uniqueId.toLowerCase()}` : null);
+    if (!accountKey) return;
+    const requests = this.getPurchaseRequests(workspaceIdOverride);
+    if (!requests.some((request) => request.accountKey === accountKey && request.sessionId === comment.sessionId && !request.withdrawn)) return;
+    this.saveRecoverable(this.scopedKey('voicecap_purchase_requests', workspaceIdOverride), requests.map((request) =>
+      request.accountKey === accountKey && request.sessionId === comment.sessionId
+        ? { ...request, withdrawn: true } : request));
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('voicecap_purchase_requests_updated'));
+  }
+
+  public promotePurchaseRequests(fromSessionId: string, toSessionId: string, workspaceIdOverride?: string | null): void {
+    if (!isTemporarySessionId(fromSessionId) || !toSessionId || fromSessionId === toSessionId) return;
+    const requests = this.getPurchaseRequests(workspaceIdOverride);
+    if (!requests.some((item) => item.sessionId === fromSessionId)) return;
+    this.saveRecoverable(this.scopedKey('voicecap_purchase_requests', workspaceIdOverride), requests.map((item) =>
+      item.sessionId === fromSessionId
+        ? { ...item, sessionId: toSessionId, id: `${toSessionId}:${item.platformMessageId || item.commentId}` }
+        : item));
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('voicecap_purchase_requests_updated'));
+  }
+
+  private getCommentTombstones(workspaceIdOverride?: string | null): { id: string; key?: string }[] {
+    return this.getItem(this.scopedKey('voicecap_comment_tombstones', workspaceIdOverride), []);
+  }
+
+  public isCommentDeleted(comment: { id: string; sessionId: string; platformMessageId?: string }, workspaceIdOverride?: string | null): boolean {
+    return this.getCommentTombstones(workspaceIdOverride).some((item) => item.id === comment.id
+      || (item.key && item.key === `${comment.sessionId}:${comment.platformMessageId}`));
+  }
+
+  // 중복 제거(upsert), 정식 buyerId 보존, 최대 1,000건 안전 제한
+  public addCommentRecords(records: CommentRecord[], workspaceIdOverride?: string | null) {
     if (records.length === 0) return;
-    const list = this.getCommentRecords();
-    this.saveCommentRecords([...records, ...list].slice(0, 5000));
+    const list = this.getCommentRecords(workspaceIdOverride);
+    const map = new Map<string, CommentRecord>();
+
+    for (const item of list) {
+      const key = `${item.sessionId}:${item.platformMessageId || item.id}`;
+      map.set(key, item);
+    }
+    for (const item of records) {
+      if (this.isCommentDeleted(item, workspaceIdOverride)) continue;
+      const key = `${item.sessionId}:${item.platformMessageId || item.id}`;
+      const existing = map.get(key);
+      if (existing) {
+        const canonical = !item.id.startsWith('stream-');
+        map.set(key, { ...existing, ...item,
+          id: canonical ? item.id : existing.id,
+          buyerId: item.buyerId !== undefined ? item.buyerId : existing.buyerId,
+        });
+      } else {
+        map.set(key, item);
+      }
+    }
+
+    // 최신순 정렬 후 최대 1,000건 제한 (localStorage 5MB 쿼터 안전 방어)
+    const merged = Array.from(map.values())
+      .sort((a, b) => new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime())
+      .slice(0, 1000);
+
+    this.saveCommentRecords(merged, workspaceIdOverride);
   }
-  public deleteCommentRecord(id: string) {
-    this.saveCommentRecords(this.getCommentRecords().filter((r) => r.id !== id));
+
+  public deleteCommentRecord(id: string, workspaceIdOverride?: string | null) {
+    this.deleteCommentRecords([id], workspaceIdOverride);
   }
-  public deleteCommentRecords(ids: string[]) {
+  public deleteCommentRecords(ids: string[], workspaceIdOverride?: string | null) {
+    if (!ids.length) return;
     const idSet = new Set(ids);
-    this.saveCommentRecords(this.getCommentRecords().filter((r) => !idSet.has(r.id)));
+    const records = this.getCommentRecords(workspaceIdOverride);
+    const deleted = records.filter((record) => idSet.has(record.id));
+    const tombstones = new Map(this.getCommentTombstones(workspaceIdOverride).map((item) => [item.id, item]));
+    for (const id of ids) {
+      const record = deleted.find((item) => item.id === id);
+      tombstones.set(id, { id, key: record?.platformMessageId ? `${record.sessionId}:${record.platformMessageId}` : undefined });
+    }
+    this.saveRecoverable(this.scopedKey('voicecap_comment_tombstones', workspaceIdOverride), [...tombstones.values()]);
+    this.saveCommentRecords(records.filter((record) => !idSet.has(record.id)), workspaceIdOverride);
+    const workspaceId = workspaceIdOverride !== undefined ? workspaceIdOverride : this.currentWorkspaceId;
+    this.notifyCommentDeletion(workspaceId, ids, deleted.map((item) => `${item.sessionId}:${item.platformMessageId}`));
+  }
+
+  private notifyCommentDeletion(workspaceId: string | null, ids: string[], keys: string[]) {
+    if (typeof window !== 'undefined') {
+      const event = new Event('voicecap_comments_deleted');
+      Object.assign(event, { detail: { workspaceId, ids, keys } });
+      window.dispatchEvent(event);
+      const updated = new Event('voicecap_comments_updated');
+      Object.assign(updated, { detail: { workspaceId } });
+      window.dispatchEvent(updated);
+    }
+  }
+
+  // 최근 100건을 올바른 UI 순서(오래된 것 -> 최신 것)로 복원 (정렬 버그 수정)
+  public getSessionCommentRecords(sessionId: string, workspaceIdOverride?: string | null): CommentRecord[] {
+    if (!sessionId) return [];
+    const all = this.getCommentRecords(workspaceIdOverride).filter((r) => r.sessionId === sessionId);
+    // all은 newest-first이므로 최근 100건은 all.slice(0, 100)이고, UI는 시간 오름차순으로 렌더링
+    return all.slice(0, 100).sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime());
+  }
+
+  // 임시 세션 ID에서 정식 UUID로 전환 시 로컬 스토리지 댓글 세션 ID 승격
+  public promoteSessionComments(fromSessionId: string, toSessionId: string, workspaceIdOverride?: string | null) {
+    if (!fromSessionId || !toSessionId || fromSessionId === toSessionId) return;
+    // P1-3: fromSessionId가 임시 세션 ID(날짜명 등)일 때만 정식 UUID 세션으로 승격!
+    // 정식 UUID 세션 A에서 정식 UUID 세션 B로 바뀔 때는 절대 댓글을 옮기면 안 됨!
+    if (!isTemporarySessionId(fromSessionId)) {
+      return;
+    }
+    const list = this.getCommentRecords(workspaceIdOverride);
+    let changed = false;
+    const updated = list.map((item) => {
+      if (item.sessionId === fromSessionId) {
+        changed = true;
+        return { ...item, sessionId: toSessionId };
+      }
+      return item;
+    });
+    if (changed) {
+      this.saveCommentRecords(updated, workspaceIdOverride);
+    }
+  }
+
+  // 1. 활성 상품 로컬 동시 쓰기 / 로컬 읽기 (workspace 격리)
+  public getActiveProduct(workspaceIdOverride?: string | null): ProductSalesProduct | null {
+    return this.getItem<ProductSalesProduct | null>(this.scopedKey(KEYS.ACTIVE_PRODUCT, workspaceIdOverride), null);
+  }
+  public saveActiveProduct(product: ProductSalesProduct | null, workspaceIdOverride?: string | null): void {
+    const key = this.scopedKey(KEYS.ACTIVE_PRODUCT, workspaceIdOverride);
+    if (product) {
+      this.setItem(key, product);
+    } else {
+      localStorage.removeItem(key);
+    }
+  }
+
+  // 1-1. 활성 방송 회차(세션) 로컬 동시 쓰기 / 로컬 읽기
+  public getActiveSession(workspaceIdOverride?: string | null): ProductSalesSession | null {
+    return this.getItem<ProductSalesSession | null>(this.scopedKey(KEYS.ACTIVE_SESSION, workspaceIdOverride), null);
+  }
+  public saveActiveSession(session: ProductSalesSession | null, workspaceIdOverride?: string | null): void {
+    const key = this.scopedKey(KEYS.ACTIVE_SESSION, workspaceIdOverride);
+    if (session) {
+      this.setItem(key, session);
+    } else {
+      localStorage.removeItem(key);
+    }
+  }
+
+  // 1-2. 부트스트랩 초기 데이터 로컬 캐시 (네트워크 장애/재부팅 안전장치)
+  public getBootstrapCache(workspaceIdOverride?: string | null): ProductSalesBootstrapData | null {
+    return this.getItem<ProductSalesBootstrapData | null>(this.scopedKey(KEYS.BOOTSTRAP, workspaceIdOverride), null);
+  }
+  public saveBootstrapCache(data: ProductSalesBootstrapData | null, workspaceIdOverride?: string | null): void {
+    const key = this.scopedKey(KEYS.BOOTSTRAP, workspaceIdOverride);
+    if (data) {
+      this.setItem(key, data);
+    } else {
+      localStorage.removeItem(key);
+    }
+  }
+
+  // 계정 변경/로그아웃 시 세션 캐시 정리
+  public clearWorkspaceSessionData(workspaceIdOverride?: string | null): void {
+    localStorage.removeItem(this.scopedKey(KEYS.ACTIVE_PRODUCT, workspaceIdOverride));
+    localStorage.removeItem(this.scopedKey(KEYS.ACTIVE_SESSION, workspaceIdOverride));
+    localStorage.removeItem(this.scopedKey(KEYS.BOOTSTRAP, workspaceIdOverride));
+  }
+
+  // 3. 방송 누적 판매 통계 로컬 SUM / COUNT 집계 (서버 record_state === 'ACTIVE' 규칙과 100% 일치)
+  public getSessionSalesSummary(sessionId: string, workspaceIdOverride?: string | null): {
+    summary: SessionSummary;
+    buyerStats: Record<string, BuyerStats>;
+  } {
+    const sales = this.getSales(workspaceIdOverride);
+    const sessionSales = sessionId ? sales.filter((s) => s.sessionId === sessionId) : sales;
+
+    let sessionQuantity = 0;
+    let sessionAmount = 0;
+    const buyerMap = new Map<string, { quantity: number; amount: number; count: number; displayNickname: string }>();
+    const totals = new Map<string, { count: number; amount: number }>();
+    for (const sale of sales) {
+      if (sale.status === '보류' || sale.status === '취소' || sale.recordState === 'CANCELLED' || sale.syncStatus === 'PENDING') continue;
+      const key = sale.buyerId || (sale.buyerNickname || '익명').trim();
+      const total = totals.get(key) || { count: 0, amount: 0 };
+      totals.set(key, { count: total.count + 1, amount: total.amount + (Number(sale.amount) || 0) });
+    }
+
+    for (const sale of sessionSales) {
+      // 보류 건 및 취소 건 제외 (서버의 record_state === 'ACTIVE' 및 status !== '보류'와 완벽 일치)
+      if (sale.status === '보류' || sale.status === '취소' || sale.recordState === 'CANCELLED' || sale.syncStatus === 'PENDING') continue;
+
+      const qty = sale.quantity && sale.quantity > 0 ? sale.quantity : 1;
+      const amt = Number(sale.amount) || 0;
+      sessionQuantity += qty;
+      sessionAmount += amt;
+
+      const buyerKey = sale.buyerId || (sale.buyerNickname || '익명').trim();
+      if (!buyerKey || buyerKey === '미확인' || buyerKey === '미확인(보류)') continue;
+
+      const existing = buyerMap.get(buyerKey) || {
+        quantity: 0,
+        amount: 0,
+        count: 0,
+        displayNickname: sale.buyerNickname || buyerKey,
+      };
+      buyerMap.set(buyerKey, {
+        quantity: existing.quantity + qty,
+        amount: existing.amount + amt,
+        count: existing.count + 1,
+        displayNickname: sale.buyerNickname || existing.displayNickname,
+      });
+    }
+
+    const buyerStats: Record<string, BuyerStats> = {};
+    for (const [key, stat] of buyerMap.entries()) {
+      buyerStats[key] = {
+        buyerId: key,
+        displayNickname: stat.displayNickname,
+        sessionQuantity: stat.quantity,
+        sessionAmount: stat.amount,
+        totalPurchaseCount: totals.get(key)?.count || 0,
+        totalPurchaseAmount: totals.get(key)?.amount || 0,
+      };
+    }
+
+    return {
+      summary: {
+        sessionQuantity,
+        sessionAmount,
+      },
+      buyerStats,
+    };
   }
 }
 

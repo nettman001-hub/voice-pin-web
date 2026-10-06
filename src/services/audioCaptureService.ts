@@ -3,12 +3,28 @@ import { screenCaptureService } from './screenCaptureService';
 export type AudioDataCallback = (chunk: ArrayBuffer) => void;
 export type WaveformCallback = (waveform: Uint8Array, volume: number) => void;
 
+export interface AudioCaptureDiagnostics {
+  processor: 'NONE' | 'AUDIO_WORKLET' | 'SCRIPT_PROCESSOR';
+  contextState: string;
+  chunks: number;
+  audioSeconds: number;
+  lastChunkAt: number;
+  lastSignalAt: number;
+  trackMuted: boolean;
+  trackEnabled: boolean;
+}
+
 export class AudioCaptureService {
   private audioContext: AudioContext | null = null;
   private mediaStream: MediaStream | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
   private analyser: AnalyserNode | null = null;
   private scriptProcessor: ScriptProcessorNode | null = null;
+  private workletNode: AudioWorkletNode | null = null;
+  private diagnosticChunks = 0;
+  private diagnosticSamples = 0;
+  private lastChunkAt = 0;
+  private lastSignalAt = 0;
   private animationFrameId: number | null = null;
   private isCapturing: boolean = false;
   private isPaused: boolean = false;
@@ -34,7 +50,7 @@ export class AudioCaptureService {
   }
 
   /**
-   * AudioContext, SourceNode, Analyser, ScriptProcessor 등 Web Audio 노드들을 깨끗하게 정리한다.
+   * AudioContext와 오디오 처리 노드들을 정리한다.
    * 미디어 스트림 트랙은 종료(stop)하지 않는다.
    */
   private cleanupAudioNodes(): void {
@@ -49,6 +65,14 @@ export class AudioCaptureService {
         this.scriptProcessor.disconnect();
       } catch {}
       this.scriptProcessor = null;
+    }
+
+    if (this.workletNode) {
+      this.workletNode.port.onmessage = null;
+      this.workletNode.onprocessorerror = null;
+      this.workletNode.port.close();
+      try { this.workletNode.disconnect(); } catch {}
+      this.workletNode = null;
     }
 
     if (this.analyser) {
@@ -76,7 +100,7 @@ export class AudioCaptureService {
   }
 
   /**
-   * 신선한 AudioContext와 오디오 파이프라인 그래프(Source -> Analyser -> ScriptProcessor)를 구성한다.
+   * 새 AudioContext와 오디오 파이프라인(Source -> Analyser -> PCM 처리기)을 구성한다.
    */
   private async setupAudioPipeline(
     stream: MediaStream,
@@ -91,9 +115,10 @@ export class AudioCaptureService {
     }
 
     if (captureGeneration !== this.captureGeneration) {
-      this.cleanupAudioNodes();
+      void audioContext.close();
       throw this.createCancelledError();
     }
+    if (audioContext.state !== 'running') throw new Error('오디오 처리가 시작되지 않았습니다. 청취를 다시 시작해 주세요.');
 
     const source = audioContext.createMediaStreamSource(stream);
     this.sourceNode = source;
@@ -103,25 +128,72 @@ export class AudioCaptureService {
     this.analyser.smoothingTimeConstant = 0.8;
     source.connect(this.analyser);
 
-    // PCM 오디오 청크 추출용 ScriptProcessor (4096 샘플 = 16kHz 기준 약 256ms)
-    const scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-    this.scriptProcessor = scriptProcessor;
-    this.analyser.connect(scriptProcessor);
-    scriptProcessor.connect(audioContext.destination);
-
-    scriptProcessor.onaudioprocess = (e) => {
+    this.diagnosticChunks = 0;
+    this.diagnosticSamples = 0;
+    this.lastChunkAt = 0;
+    this.lastSignalAt = 0;
+    const deliverPcm = (buffer: ArrayBuffer) => {
       if (!this.isCapturing || captureGeneration !== this.captureGeneration) return;
-      const inputData = e.inputBuffer.getChannelData(0);
-      // Float32 -> 16bit Linear PCM 변환
-      const pcm16 = new Int16Array(inputData.length);
-      for (let i = 0; i < inputData.length; i++) {
-        const s = Math.max(-1, Math.min(1, inputData[i]));
-        pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-      }
-      this.onAudioChunk?.(pcm16.buffer);
+      const pcm = new Int16Array(buffer);
+      this.diagnosticChunks++;
+      this.diagnosticSamples += pcm.length;
+      this.lastChunkAt = Date.now();
+      if (pcm.some((value) => Math.abs(value) > 32)) this.lastSignalAt = this.lastChunkAt;
+      if (this.diagnosticChunks === 1) console.log('[AudioCapture] 첫 PCM 청크 생성:', this.getDiagnostics());
+      this.onAudioChunk?.(buffer);
     };
 
+    const WorkletNode = window.AudioWorkletNode;
+    if (audioContext.audioWorklet && WorkletNode) {
+      await audioContext.audioWorklet.addModule(new URL('./voicecapPcmWorklet.js?no-inline', import.meta.url));
+      if (captureGeneration !== this.captureGeneration) throw this.createCancelledError();
+      const worklet = new WorkletNode(audioContext, 'voicecap-pcm', {
+        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+      });
+      this.workletNode = worklet;
+      worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => deliverPcm(event.data);
+      worklet.onprocessorerror = () => {
+        console.error('[AudioCapture] AudioWorklet 오디오 처리 오류');
+      };
+      this.analyser.connect(worklet);
+      worklet.connect(audioContext.destination);
+    } else {
+      // Compatibility only; supported Chrome versions use the audio thread.
+      const scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+      this.scriptProcessor = scriptProcessor;
+      this.analyser.connect(scriptProcessor);
+      scriptProcessor.connect(audioContext.destination);
+      scriptProcessor.onaudioprocess = (event) => {
+        const inputData = event.inputBuffer.getChannelData(0);
+        const pcm16 = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          const value = Math.max(-1, Math.min(1, inputData[i]));
+          pcm16[i] = value < 0 ? value * 32768 : value * 32767;
+        }
+        deliverPcm(pcm16.buffer);
+      };
+    }
+
+    console.log('[AudioCapture] PCM 처리 준비:', {
+      processor: this.workletNode ? 'AUDIO_WORKLET' : 'SCRIPT_PROCESSOR',
+      contextState: audioContext.state,
+      sampleRate: audioContext.sampleRate,
+    });
     this.startWaveformLoop();
+  }
+
+  public getDiagnostics(): AudioCaptureDiagnostics {
+    const track = this.mediaStream?.getAudioTracks()[0];
+    return {
+      processor: this.workletNode ? 'AUDIO_WORKLET' : this.scriptProcessor ? 'SCRIPT_PROCESSOR' : 'NONE',
+      contextState: this.audioContext?.state || 'closed',
+      chunks: this.diagnosticChunks,
+      audioSeconds: this.diagnosticSamples / 16000,
+      lastChunkAt: this.lastChunkAt,
+      lastSignalAt: this.lastSignalAt,
+      trackMuted: Boolean(track?.muted),
+      trackEnabled: Boolean(track?.enabled),
+    };
   }
 
   /**
@@ -207,6 +279,11 @@ export class AudioCaptureService {
         throw this.createCancelledError();
       }
       console.warn('[AudioCapture] AudioContext 파이프라인 연결 실패:', e);
+      this.isCapturing = false;
+      this.cleanupAudioNodes();
+      if (mode === 'MIC') stream.getTracks().forEach((track) => track.stop());
+      this.mediaStream = null;
+      throw e;
     }
 
     if (captureGeneration !== this.captureGeneration) {
@@ -260,6 +337,7 @@ export class AudioCaptureService {
    * 단, 방송 탭 공유 트랙(screenCaptureService 소유)은 절대 stop하지 않고 live로 보존한다.
    */
   public pauseCapture(): void {
+    this.captureGeneration += 1;
     this.isPaused = true;
     this.isCapturing = false;
     this.cleanupAudioNodes();
@@ -268,7 +346,7 @@ export class AudioCaptureService {
   /**
    * 일시정지된 청취 파이프라인 재개.
    * 원본 방송 탭 오디오 트랙이 살아있다면, 신선한 AudioContext와 오디오 파이프라인을 즉시 생성하여
-   * Chrome의 suspend/resume 먹통 버그 없이 100% 정상 재개한다.
+   * 닫힌 AudioContext를 재사용하지 않고 재개한다.
    */
   public async resumeCapture(
     onAudioChunk?: AudioDataCallback,
@@ -305,6 +383,7 @@ export class AudioCaptureService {
       console.log('[AudioCapture] 방송 탭 오디오 파이프라인 성공적으로 재개됨');
       return true;
     } catch (err) {
+      if (captureGeneration !== this.captureGeneration) return false;
       console.warn('[AudioCapture] 파이프라인 재개 실패:', err);
       this.isCapturing = false;
       this.isPaused = true;

@@ -42,6 +42,7 @@ export const AdminAiSettingsPage: React.FC = () => {
   const [settings, setSettings] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<boolean>(false);
   const [toastMsg, setToastMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // 비밀정보 입력 임시 상태
@@ -62,6 +63,7 @@ export const AdminAiSettingsPage: React.FC = () => {
 
   const [isCheckingAll, setIsCheckingAll] = useState<boolean>(false);
   const [runtimeStatus, setRuntimeStatus] = useState<AiRuntimeStatus | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const lastAlertSignatureRef = React.useRef<string>('');
   const [syntheticModalData, setSyntheticModalData] = useState<{
     slotNumber: 1 | 2;
@@ -70,11 +72,16 @@ export const AdminAiSettingsPage: React.FC = () => {
 
   const loadData = async () => {
     setIsLoading(true);
+    setLoadError(false);
+    setRuntimeError(null);
     try {
       const [settingsData, healthData, runtimeData] = await Promise.all([
-        aiSettingsApi.getAiSettings(),
+        aiSettingsApi.getAiSettings(undefined, true),
         aiSettingsApi.getAiHealth().catch(() => null),
-        aiSettingsApi.getAiRuntimeStatus().catch(() => null),
+        aiSettingsApi.getAiRuntimeStatus().catch((err) => {
+          setRuntimeError(err instanceof Error ? err.message : '운영 AI 상태를 조회하지 못했습니다.');
+          return null;
+        }),
       ]);
       setSettings(settingsData);
       if (healthData) {
@@ -85,6 +92,7 @@ export const AdminAiSettingsPage: React.FC = () => {
         setRuntimeStatus(runtimeData.runtimeStatus);
       }
     } catch (err: any) {
+      setLoadError(true);
       showToast('error', err?.message || '설정 및 상태를 불러오지 못했습니다.');
     } finally {
       setIsLoading(false);
@@ -122,6 +130,21 @@ export const AdminAiSettingsPage: React.FC = () => {
       const targetKey = slotNum === 1 ? 'slot1' : 'slot2';
       const prevSlot = prev[targetKey];
       const updatedSlot = { ...prevSlot, [field]: value };
+
+      // 0. 인증 방식(authType)을 'NONE'으로 변경 시 비밀정보 즉시 삭제 대기 및 화면 상태 초기화
+      if (field === 'authType' && value === 'NONE') {
+        if (slotNum === 1) {
+          setSlot1ClearSecret(true);
+          setSlot1NewSecret('');
+          setShowSlot1SecretInput(false);
+        } else {
+          setSlot2ClearSecret(true);
+          setSlot2NewSecret('');
+          setShowSlot2SecretInput(false);
+        }
+        updatedSlot.hasSecret = false;
+        updatedSlot.maskedSecret = undefined;
+      }
 
       // 1. 실행 유형(type) 변경 시 위치 및 라우팅 모드 자동 동기화
       if (field === 'type') {
@@ -206,17 +229,46 @@ export const AdminAiSettingsPage: React.FC = () => {
           slot1: {
             ...cleanSlot1,
             newSecret: slot1NewSecret.trim() || undefined,
-            clearSecret: slot1ClearSecret,
+            // 인증 없음(NONE)인 경우 DB의 ai_secrets 키 레코드를 완전히 삭제하도록 명시적 지시
+            clearSecret: cleanSlot1.authType === 'NONE' ? true : slot1ClearSecret,
           },
           slot2: {
             ...cleanSlot2,
             newSecret: slot2NewSecret.trim() || undefined,
-            clearSecret: slot2ClearSecret,
+            // 인증 없음(NONE)인 경우 DB의 ai_secrets 키 레코드를 완전히 삭제하도록 명시적 지시
+            clearSecret: cleanSlot2.authType === 'NONE' ? true : slot2ClearSecret,
           },
         },
       });
 
-      setSettings(updated);
+      const finalSlot1Auth = cleanSlot1.authType === 'NONE' ? 'NONE' : (updated.slot1?.authType || 'NONE');
+      const finalSlot2Auth = cleanSlot2.authType === 'NONE' ? 'NONE' : (updated.slot2?.authType || 'API_KEY');
+
+      const sanitizedUpdated: AiSettings = {
+        ...updated,
+        slot1: {
+          ...updated.slot1,
+          authType: finalSlot1Auth,
+          hasSecret: finalSlot1Auth === 'NONE' ? false : (updated.slot1?.hasSecret ?? false),
+          maskedSecret: finalSlot1Auth === 'NONE' ? undefined : updated.slot1?.maskedSecret,
+        },
+        slot2: {
+          ...updated.slot2,
+          authType: finalSlot2Auth,
+          hasSecret: finalSlot2Auth === 'NONE' ? false : (updated.slot2?.hasSecret ?? false),
+          maskedSecret: finalSlot2Auth === 'NONE' ? undefined : updated.slot2?.maskedSecret,
+        },
+      };
+
+      setSettings(sanitizedUpdated);
+      const latestRuntime = await aiSettingsApi.getAiRuntimeStatus().catch((err) => {
+        setRuntimeError(err instanceof Error ? err.message : '운영 AI 상태를 조회하지 못했습니다.');
+        return null;
+      });
+      if (latestRuntime?.runtimeStatus) {
+        setRuntimeStatus(latestRuntime.runtimeStatus);
+        setRuntimeError(null);
+      }
       setSlot1NewSecret('');
       setSlot1ClearSecret(false);
       setShowSlot1SecretInput(false);
@@ -242,6 +294,14 @@ export const AdminAiSettingsPage: React.FC = () => {
     try {
       const updated = await aiSettingsApi.applyAiSettings(settings.version);
       setSettings(updated);
+      const latestRuntime = await aiSettingsApi.getAiRuntimeStatus().catch((err) => {
+        setRuntimeError(err instanceof Error ? err.message : '운영 AI 상태를 조회하지 못했습니다.');
+        return null;
+      });
+      if (latestRuntime?.runtimeStatus) {
+        setRuntimeStatus(latestRuntime.runtimeStatus);
+        setRuntimeError(null);
+      }
       showToast('success', `운영 설정이 버전 v${updated.appliedVersion}으로 성공적으로 적용되었습니다.`);
     } catch (err: any) {
       showToast('error', err?.message || '적용 중 오류가 발생했습니다.');
@@ -318,6 +378,21 @@ export const AdminAiSettingsPage: React.FC = () => {
         </div>
       )}
 
+      {loadError && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-xs font-bold text-rose-800">
+          <span>서버의 AI 설정을 확인하지 못해 저장과 운영 적용이 중지되었습니다.</span>
+          <button type="button" onClick={loadData} disabled={isLoading} className="rounded-lg bg-white px-3 py-1.5 text-rose-800 border border-rose-200">
+            다시 불러오기
+          </button>
+        </div>
+      )}
+
+      {runtimeError && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs font-bold text-amber-900">
+          운영 AI 상태를 확인하지 못했습니다: {runtimeError}
+        </div>
+      )}
+
       {/* Top Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
         <div>
@@ -357,7 +432,7 @@ export const AdminAiSettingsPage: React.FC = () => {
 
           <button
             type="button"
-            disabled={isSaving}
+            disabled={isLoading || isSaving || loadError}
             onClick={() => handleSave(false)}
             className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition border border-slate-300"
           >
@@ -366,7 +441,7 @@ export const AdminAiSettingsPage: React.FC = () => {
 
           <button
             type="button"
-            disabled={isSaving}
+            disabled={isLoading || isSaving || loadError}
             onClick={() => handleSave(true)}
             className="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold rounded-xl transition shadow-md shadow-brand-200 flex items-center gap-1.5"
           >
@@ -403,7 +478,7 @@ export const AdminAiSettingsPage: React.FC = () => {
         {settings.isDraft && (
           <button
             type="button"
-            disabled={isSaving}
+            disabled={isLoading || isSaving || loadError}
             onClick={handleApplyCurrentVersion}
             className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-lg transition"
           >
@@ -481,7 +556,7 @@ export const AdminAiSettingsPage: React.FC = () => {
               className="mt-1 w-4 h-4 text-brand-600 rounded border-slate-300 focus:ring-brand-500"
             />
             <div>
-              <div className="text-xs font-bold text-slate-900">1번 복구 시 자동 복귀</div>
+              <div className="text-xs font-bold text-slate-900">우선 슬롯 복구 시 자동 복귀</div>
               <div className="text-[11px] text-slate-500 mt-0.5">장애 복구 점검 연속 성공 시 우선 슬롯으로 자동 복귀</div>
             </div>
           </label>
@@ -633,17 +708,23 @@ export const AdminAiSettingsPage: React.FC = () => {
               우선순위 슬롯
             </span>
             <span className="text-sm font-black">
-              현재 [ 슬롯 {settings.primarySlot} ] 이 우선(Primary) 처리기로 지정됨
+              설정 화면 선택: 슬롯 {settings.primarySlot}번 우선(Primary)
             </span>
+            {runtimeStatus && (
+              <span className="text-xs font-bold text-emerald-300">
+                운영 우선: 슬롯 {runtimeStatus.activePrimarySlot}번
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-300">
-            기본적으로 1번 모델이 판매 보류·정정을 분석하며, 1번 사용 불가 시 2번 모델로 대체(Failover)됩니다.
+            운영 환경에 적용하면 선택한 슬롯이 먼저 분석합니다. 4초 안에 유효한 답변을 받지 못하거나 호출에 실패하면 다른 슬롯으로 넘깁니다.
           </p>
         </div>
 
         <button
           type="button"
           onClick={handleSwapPriority}
+          disabled={isLoading || isSaving || loadError}
           className="px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-950 font-black rounded-xl text-xs flex items-center gap-2 transition shadow-md whitespace-nowrap"
         >
           <ArrowRightLeft className="w-4 h-4 text-brand-600" />
@@ -1249,11 +1330,21 @@ const SlotCard: React.FC<SlotCardProps> = ({
             <KeyRound className="w-3.5 h-3.5 text-brand-600" />
             <span>인증 방식 및 비밀정보 격리 보관</span>
           </span>
-          {config.hasSecret && !clearSecret && (
-            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded font-mono text-[10px] font-bold">
-              {config.maskedSecret || '키 등록됨 (sk-***)'}
+          {config.hasSecret && !clearSecret ? (
+            config.authType === 'NONE' ? (
+              <span className="px-2 py-0.5 bg-slate-200 text-slate-600 border border-slate-300 rounded font-mono text-[10px] font-medium">
+                키 보관됨 (인증 미사용)
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded font-mono text-[10px] font-bold">
+                {config.maskedSecret || '키 등록됨 (sk-***)'}
+              </span>
+            )
+          ) : config.authType === 'NONE' ? (
+            <span className="px-2 py-0.5 bg-slate-100 text-slate-500 border border-slate-200 rounded text-[10px] font-medium">
+              인증 없이 호출
             </span>
-          )}
+          ) : null}
         </div>
 
         <div className="grid grid-cols-3 gap-2">
@@ -1272,6 +1363,41 @@ const SlotCard: React.FC<SlotCardProps> = ({
             </button>
           ))}
         </div>
+
+        {config.authType === 'NONE' && (
+          <div className="pt-1">
+            {config.hasSecret && !clearSecret ? (
+              <div className="flex items-center justify-between text-[11px] text-slate-500 bg-slate-100/70 px-3 py-2 rounded-xl border border-slate-200">
+                <span>기존 등록된 키가 보관 중이나, '인증 없음' 상태이므로 헤더에 전송되지 않습니다.</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClearSecret(true);
+                    setNewSecret('');
+                  }}
+                  className="px-2.5 py-1 text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-lg text-xs font-bold transition ml-2 whitespace-nowrap"
+                >
+                  보관된 키 완전 삭제
+                </button>
+              </div>
+            ) : clearSecret ? (
+              <div className="text-xs text-rose-600 font-bold bg-rose-50 px-3 py-2 rounded-xl border border-rose-200 flex items-center justify-between">
+                <span>[초안 저장 시 보관된 키 삭제 예정]</span>
+                <button
+                  type="button"
+                  onClick={() => setClearSecret(false)}
+                  className="underline text-slate-600 font-normal text-xs ml-2"
+                >
+                  삭제 취소
+                </button>
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-400">
+                헤더에 인증 키(Authorization / x-api-key)를 포함하지 않고 엔드포인트를 직접 호출합니다.
+              </p>
+            )}
+          </div>
+        )}
 
         {config.authType !== 'NONE' && (
           <div className="space-y-2 pt-1">

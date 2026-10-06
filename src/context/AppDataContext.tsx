@@ -1,10 +1,9 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { RecognitionWordRule, CaptureAreaConfig, CaptureAreaPreset } from '../types/rules';
-import { TrainingSentence } from '../types/training';
 import { PlanTier, PlanInfo, PaymentHistoryItem, PaymentCard } from '../types/subscription';
 import { AdminKpis, ReportItem, SystemErrorLog, NotificationSetting } from '../types/admin';
 import { User } from '../types/auth';
-import { storageService, DEFAULT_RULES, DEFAULT_TRAINING_SENTENCES } from '../services/storageService';
+import { storageService } from '../services/storageService';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
 import { useAuth } from './AuthContext';
@@ -40,7 +39,7 @@ export const SUBSCRIPTION_PLANS: PlanInfo[] = [
     salesCapacity: '무제한 저장',
     captureCapacity: '무제한 캡처',
     concurrentSessions: 2,
-    features: ['Deepgram Nova-3 무제한 청취', '개인화 음성 학습 모델 무제한', '모든 기능 무제한 지원', '다중 기기 세션 2대', '우선 기술 지원 & 전담 매니저']
+    features: ['Deepgram Nova-3 무제한 청취', 'STT 발음 힌트 단어 저장', '모든 기능 무제한 지원', '다중 기기 세션 2대', '우선 기술 지원 & 전담 매니저']
   }
 ];
 
@@ -60,12 +59,6 @@ interface AppDataContextType {
   toggleRule: (id: string) => void;
   captureAreaConfig: CaptureAreaConfig;
   setCaptureAreaConfig: (cfg: CaptureAreaConfig) => void;
-
-  // 음성 학습
-  trainingSentences: TrainingSentence[];
-  recordTrainingSentence: (id: string) => void;
-  trainVoiceModel: (id: string) => void;
-  completedTrainingCount: number;
 
   // 구독
   currentPlan: PlanTier;
@@ -116,9 +109,6 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  // 학습 상태
-  const [trainingSentences, setTrainingSentences] = useState<TrainingSentence[]>([]);
-
   // 구독 상태
   const [currentPlan, setCurrentPlan] = useState<PlanTier>('프로');
   const [subscriptionExpiresAt, setSubscriptionExpiresAt] = useState<string>('2026-09-24');
@@ -164,7 +154,6 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (savedArea) {
       setCaptureAreaConfigState(savedArea);
     }
-    setTrainingSentences(storageService.getTrainingSentences());
     setPaymentHistory(storageService.getPayments());
     setNotifications(storageService.getNotifications());
     setAllMembers([]);
@@ -183,7 +172,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, [user]);
 
-  // 클라우드 단어 규칙 및 음성 훈련 문장 동기화
+  // 클라우드 단어 규칙 및 캡처 영역 동기화
   useEffect(() => {
     if (!workspaceId) return;
     let active = true;
@@ -202,19 +191,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
           void remoteWorkspaceService.saveRecognitionRules(workspaceId, currentRules);
         }
 
-        // 2. 음성 학습 문장 목록 동기화
-        const cloudSentences = await remoteWorkspaceService.loadVoiceTraining(workspaceId);
-        if (!active) return;
-        if (cloudSentences && cloudSentences.length > 0) {
-          setTrainingSentences(cloudSentences);
-          storageService.saveTrainingSentences(cloudSentences);
-        } else {
-          // 클라우드에 아직 학습 문장이 없으면 현재 문장을 최초 시딩 저장
-          const currentSentences = storageService.getTrainingSentences();
-          void remoteWorkspaceService.saveVoiceTraining(workspaceId, currentSentences);
-        }
-
-        // 3. 캡처 영역 설정 동기화
+        // 2. 캡처 영역 설정 동기화
         const cloudArea = await remoteWorkspaceService.loadCaptureAreaConfig(workspaceId);
         if (!active) return;
         if (cloudArea) {
@@ -293,42 +270,6 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       void remoteWorkspaceService.saveRecognitionRules(workspaceId, updated);
     }
   };
-
-  // --- 음성 학습 메서드 ---
-  const recordTrainingSentence = (id: string) => {
-    const list = trainingSentences.map((s) => {
-      if (s.id === id) {
-        const nextCount = s.recordCount + 1;
-        const isCompleted = nextCount >= 3;
-        const nextAccuracy = Math.min(99, Math.round(s.expectedAccuracy + (100 - s.expectedAccuracy) * 0.4));
-        if (isCompleted && !s.isCompleted) {
-          try {
-            confetti({ particleCount: 60, spread: 60, origin: { y: 0.7 } });
-          } catch {}
-        }
-        return {
-          ...s,
-          recordCount: nextCount,
-          isCompleted,
-          expectedAccuracy: nextAccuracy,
-          lastTrainedAt: new Date().toISOString().split('T')[0]
-        };
-      }
-      return s;
-    });
-
-    storageService.saveTrainingSentences(list);
-    setTrainingSentences(list);
-    if (workspaceId) {
-      void remoteWorkspaceService.saveVoiceTraining(workspaceId, list);
-    }
-  };
-
-  const trainVoiceModel = (id: string) => {
-    recordTrainingSentence(id);
-  };
-
-  const completedTrainingCount = trainingSentences.filter((s) => s.isCompleted).length;
 
   // --- 구독 결제 메서드 ---
   const processPayment = (card: PaymentCard) => {
@@ -486,10 +427,6 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         toggleRule,
         captureAreaConfig,
         setCaptureAreaConfig,
-        trainingSentences,
-        recordTrainingSentence,
-        trainVoiceModel,
-        completedTrainingCount,
         currentPlan,
         subscriptionExpiresAt,
         isTrialActive,

@@ -5,8 +5,10 @@ export interface CommentRecord {
   sessionId: string;          // 방송 회차 (YYYYMMDD_HH)
   nickname: string;           // 댓글 작성자 닉네임
   uniqueId?: string;          // 틱톡 고유 ID (@ 제외)
+  platformUserId?: string;    // 플랫폼 내부 계정 ID (표시명과 별개)
   content: string;            // 댓글 내용
   capturedAt: string;         // 수집 시각 (ISO)
+  buyerId?: string | null;    // 정식 구매자 ID (서버 buyers.id)
   matchedAlertWord?: string;  // 알림 단어에 걸린 경우 해당 단어
 }
 

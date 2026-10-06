@@ -48,13 +48,14 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
       const active = isActiveRef.current;
       const currentLevel = audioLevelRef.current || 0;
       const currentWaveform = waveformRef.current;
+      const hasSignal = currentLevel > 0 || currentWaveform?.some((value) => value > 0);
       phaseRef.current += 0.05;
 
-      if (!active) {
+      if (!active || !hasSignal) {
         // [대기 상태] 은은한 중심 점선 가이드
         ctx.strokeStyle = '#cbd5e1';
         ctx.lineWidth = isCompact ? 1.5 : 2;
-        ctx.setLineDash([4, 4]);
+        ctx.setLineDash(active ? [] : [4, 4]);
         ctx.beginPath();
         ctx.moveTo(0, height / 2);
         ctx.lineTo(width, height / 2);

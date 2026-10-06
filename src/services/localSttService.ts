@@ -8,11 +8,12 @@ import {
 } from '../types/stt';
 import { OnTranscriptCallback, OnErrorCallback, OnStatusCallback } from './deepgramService';
 
-class LocalSttService {
+export class LocalSttService {
   private socket: Socket | null = null;
   private currentSessionId: string = '';
   private currentGeneration: number = 0;
   private isListening: boolean = false;
+  private startupTimer: ReturnType<typeof setTimeout> | null = null;
 
   private onTranscriptCallback: OnTranscriptCallback | null = null;
   private onErrorCallback: OnErrorCallback | null = null;
@@ -59,7 +60,7 @@ class LocalSttService {
         this.status.available = false;
         this.status.message = 'VoiceCAP 댓글 도우미 미실행 (127.0.0.1:2137 연결 끊김)';
         this.notifyStatusListeners();
-        this.onStatusCallback?.('DISCONNECTED', this.status.message);
+        if (this.isListening) this.failListening(this.status.message, 'DISCONNECTED');
       });
 
       this.socket.on('stt:status', (payload: LocalSttStatusPayload) => {
@@ -69,16 +70,14 @@ class LocalSttService {
         if (this.isListening) {
           if (payload.state === 'ERROR') {
             const errMsg = payload.error || payload.message || '로컬 STT 엔진 오류';
-            this.onErrorCallback?.(errMsg);
-            this.onStatusCallback?.('ERROR', errMsg);
-          } else if (payload.state === 'LISTENING') {
-            this.onStatusCallback?.('CONNECTED', `로컬 STT 청취 중 (${this.status.model})`);
+            this.failListening(errMsg);
           }
         }
       });
 
       this.socket.on('stt:listening_started', (data: { session_id: string; generation: number; model?: string }) => {
-        if (data.session_id === this.currentSessionId && data.generation === this.currentGeneration) {
+        if (this.isListening && data.session_id === this.currentSessionId && data.generation === this.currentGeneration) {
+          this.clearStartupTimer();
           this.isListening = true;
           this.status.state = 'LISTENING';
           if (data.model) this.status.model = data.model;
@@ -89,6 +88,7 @@ class LocalSttService {
 
       this.socket.on('stt:listening_stopped', (data: { session_id: string }) => {
         if (data.session_id === this.currentSessionId) {
+          this.clearStartupTimer();
           this.isListening = false;
           this.status.state = 'READY';
           this.notifyStatusListeners();
@@ -124,9 +124,8 @@ class LocalSttService {
         this.status.error = errMsg;
         this.notifyStatusListeners();
 
-        this.onErrorCallback?.(errMsg);
         if (this.isListening) {
-          this.onStatusCallback?.('ERROR', errMsg);
+          this.failListening(errMsg);
         }
       });
     } catch (err) {
@@ -138,6 +137,29 @@ class LocalSttService {
 
   public getStatus(): LocalSttStatusPayload {
     return this.status;
+  }
+
+  private clearStartupTimer(): void {
+    if (this.startupTimer !== null) clearTimeout(this.startupTimer);
+    this.startupTimer = null;
+  }
+
+  private failListening(message: string, status: 'ERROR' | 'DISCONNECTED' = 'ERROR'): void {
+    this.clearStartupTimer();
+    this.isListening = false;
+    this.currentGeneration += 1;
+    if (this.socket?.connected) this.socket.emit('stt:stop', { sessionId: this.currentSessionId });
+    this.status.state = status === 'ERROR' ? 'ERROR' : 'HELPER_OFFLINE';
+    this.status.error = message;
+    this.status.message = message;
+    this.notifyStatusListeners();
+    const onError = this.onErrorCallback;
+    const onStatus = this.onStatusCallback;
+    this.onTranscriptCallback = null;
+    this.onErrorCallback = null;
+    this.onStatusCallback = null;
+    onError?.(message);
+    onStatus?.(status, message);
   }
 
   public subscribeStatus(listener: (status: LocalSttStatusPayload) => void): () => void {
@@ -187,6 +209,7 @@ class LocalSttService {
     model?: LocalSttModel | string
   ): void {
     this.connect();
+    this.clearStartupTimer();
     this.currentSessionId = sessionId;
     this.currentGeneration = generation;
     this.isListening = true;
@@ -194,9 +217,23 @@ class LocalSttService {
     this.onErrorCallback = onError;
     this.onStatusCallback = onStatus ?? null;
 
+    // Socket.IO는 연결이 없어도 emit을 큐에 넣는다. 이를 청취 성공으로
+    // 취급하면 파형만 나오고 전사는 영원히 시작되지 않을 수 있다.
+    if (!this.socket?.connected) {
+      this.failListening('내 PC STT에 연결할 수 없습니다. 댓글 도우미를 실행하거나 판매자 설정에서 클라우드 STT를 선택해 주세요.');
+      return;
+    }
+
     const targetModel = model || this.status.requestedModel || this.status.model || 'base';
 
     onStatus?.('CONNECTING', `로컬 STT 워커 준비 확인 중 (${targetModel})...`);
+
+    this.startupTimer = setTimeout(() => {
+      if (this.isListening && this.currentSessionId === sessionId && this.currentGeneration === generation) {
+        this.failListening('내 PC STT가 60초 안에 청취 준비를 완료하지 못했습니다. 댓글 도우미의 엔진 상태를 확인하거나 클라우드 STT를 선택해 주세요.');
+      }
+    }, 60_000);
+    console.log('[LocalSTT] 청취 시작 요청', { model: targetModel });
 
     this.socket?.emit('stt:start', {
       sessionId,
@@ -214,11 +251,13 @@ class LocalSttService {
   }
 
   public stopListening(): void {
+    this.clearStartupTimer();
+    const wasListening = this.isListening;
     this.isListening = false;
     this.currentGeneration += 1; // 늦게 도착하는 패킷 폐기용
-    this.socket?.emit('stt:stop', {
-      sessionId: this.currentSessionId
-    });
+    if (wasListening && this.socket?.connected) {
+      this.socket.emit('stt:stop', { sessionId: this.currentSessionId });
+    }
     this.onTranscriptCallback = null;
     this.onErrorCallback = null;
     this.onStatusCallback?.('DISCONNECTED', '로컬 STT 청취 중지됨');

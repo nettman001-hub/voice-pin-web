@@ -155,14 +155,25 @@ export async function processAiTask(
     const startTime = Date.now();
     let slotResult: AiResolutionResult | null = null;
     let slotError: string | null = null;
+    let captureOpen = true;
 
     try {
-      slotResult = await executeAiResolution(task.requestPayload, {
-        slotConfig: slotConfigs[slotNum],
+      const timeoutSeconds = slotNum === primarySlot
+        ? AI_TASK_CONFIG.TIMEOUTS.PRIMARY_RESPONSE_SECONDS
+        : slotConfigs[slotNum].timeoutSeconds || (slotConfigs[slotNum].type === 'LOCAL'
+          ? AI_TASK_CONFIG.TIMEOUTS.SELF_HOSTED_SECONDS : AI_TASK_CONFIG.TIMEOUTS.CLOUD_SECONDS);
+      slotResult = await withAiDeadline(timeoutSeconds * 1000, (signal) => executeAiResolution(task.requestPayload, {
+        slotConfig: { ...slotConfigs[slotNum], timeoutSeconds },
         secretValue: slotSecrets[slotNum],
         helperDispatcher,
         allowInsecureHttpForExternal,
-      });
+        signal,
+        onConversationTrace: (trace) => {
+          if (captureOpen && task.currentAttemptId === attemptId && attempt.status === 'RUNNING') {
+            attempt.conversationTrace = { ...trace };
+          }
+        },
+      }));
 
       const isEngineError =
         slotResult.conflictReason === '추론 엔진 호출 실패' ||
@@ -171,6 +182,7 @@ export async function processAiTask(
         slotResult.conflictReason === '응답 형식 불일치' ||
         slotResult.conflictReason === 'HELPER_OFFLINE' ||
         slotResult.conflictReason === 'AUTHENTICATION_FAILED' ||
+        slotResult.conflictReason === '인증 정보 누락' ||
         slotResult.conflictReason === 'TIMEOUT' ||
         slotResult.conflictReason === 'TLS_ERROR' ||
         (slotResult.conflictReason && !slotResult.resolvable && slotResult.evidenceSummary?.includes('호출 실패'));
@@ -184,6 +196,10 @@ export async function processAiTask(
       if (err.code) {
         attempt.errorCode = err.code;
       }
+    } finally {
+      // Aborted transports/helpers may still finish. Their late responses must not
+      // modify a completed attempt or make the fallback's answer look like theirs.
+      captureOpen = false;
     }
 
     attempt.completedAt = new Date().toISOString();
@@ -251,6 +267,26 @@ export async function processAiTask(
   task.updatedAt = new Date().toISOString();
 
   return { task, slot1CircuitBreaker: cbMap[1], slot2CircuitBreaker: cbMap[2] };
+}
+
+/** Includes body reading and helper calls, even if a transport ignores abort.
+ * The losing promise cannot apply results; only the winning attempt is returned. */
+export async function withAiDeadline<T>(timeoutMs: number, execute: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      execute(controller.signal),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(Object.assign(new Error(`AI가 ${timeoutMs / 1000}초 내에 답변하지 않았습니다.`), { code: 'TIMEOUT' }));
+          controller.abort();
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

@@ -43,7 +43,17 @@ export interface AiVerificationMeta {
     nickname: string;
   };
   candidateAmount?: number;
+  nicknameVerified?: boolean;
+  saleConfirmed?: boolean;
+  suggestedNickname?: string;
+  candidatePurchaseRequestId?: string;
+  candidateCommentId?: string;
+  purchaseWindows?: import('./aiResolution.ts').AiPurchaseWindow[];
+  sellerUtterances?: import('./aiResolution.ts').AiUtteranceContext[];
   validatedAt?: string;
+  reviewDecision?: 'NOT_SALE' | 'NEEDS_CONFIRMATION' | 'INSUFFICIENT_DATA';
+  reviewFingerprint?: string;
+  errorMessage?: string;
 }
 
 export interface SaleHistoryRecord {

@@ -10,6 +10,7 @@ import type {
 import type { AiSlotConfig } from '../../../../src/types/aiSettings.ts';
 import { createAiTaskObject, processAiTask } from './aiTaskCore.ts';
 import { AI_TASK_CONFIG } from './aiTaskConfig.ts';
+import { getOperationalAiSetting, getPrimaryAiSlot } from './aiOperationalSettings.ts';
 
 /**
  * 1. 신규 AI 작업 등록 (Queue Enqueue)
@@ -53,7 +54,13 @@ export async function handleCreateAiTask(
     request,
   };
 
-  const task = createAiTaskObject(payload);
+  let setting: any;
+  try {
+    setting = await getOperationalAiSetting();
+  } catch (err: any) {
+    return errorResponse('DATABASE_ERROR', `운영 AI 설정 조회 실패: ${err.message}`, 500);
+  }
+  const task = createAiTaskObject(payload, getPrimaryAiSlot(setting));
 
   // DB ai_tasks 테이블에 적재
   const { error: insertErr } = await admin.from('ai_tasks').insert({
@@ -98,27 +105,36 @@ export async function handleProcessAiTask(
   body: any
 ) {
   const { taskId, task: inputTask, helperDispatcher, allowInsecureHttpForExternal } = body || {};
+  const requestedTaskId = taskId || inputTask?.taskId;
 
   let currentTask: AiTask;
 
-  if (taskId) {
+  if (requestedTaskId) {
+    // Never trust an incoming task's workspace or attempt IDs. Conversation
+    // records must come from the task owned by the authenticated workspace.
     const { data: dbTask, error: taskErr } = await admin
       .from('ai_tasks')
       .select('*')
-      .eq('task_id', taskId)
+      .eq('task_id', requestedTaskId)
       .eq('workspace_id', workspaceId)
       .maybeSingle();
 
-    if (taskErr || !dbTask) {
-      return errorResponse('NOT_FOUND', `AI 작업을 찾을 수 없습니다: ${taskId}`, 404);
+    if (taskErr) {
+      return errorResponse('DATABASE_ERROR', `AI 작업 조회 실패: ${taskErr.message}`, 500);
+    }
+    if (!dbTask) {
+      return errorResponse('NOT_FOUND', `AI 작업을 찾을 수 없습니다: ${requestedTaskId}`, 404);
     }
 
     // 기존 시도 이력 조회
-    const { data: dbAttempts } = await admin
+    const { data: dbAttempts, error: attemptsError } = await admin
       .from('ai_task_attempts')
       .select('*')
-      .eq('task_id', taskId)
+      .eq('task_id', requestedTaskId)
       .order('started_at', { ascending: true });
+    if (attemptsError) {
+      return errorResponse('DATABASE_ERROR', `AI 대화 이력 조회 실패: ${attemptsError.message}`, 500);
+    }
 
     const attempts: AiTaskAttempt[] = (dbAttempts || []).map((att) => ({
       attemptId: att.attempt_id,
@@ -132,6 +148,7 @@ export async function handleProcessAiTask(
       errorCode: att.error_code,
       errorMessage: att.error_message,
       result: att.result,
+      conversationTrace: att.conversation_trace ?? null,
     }));
 
     currentTask = {
@@ -156,18 +173,17 @@ export async function handleProcessAiTask(
       createdAt: dbTask.created_at,
       updatedAt: dbTask.updated_at,
     };
-  } else if (inputTask) {
-    currentTask = inputTask;
   } else {
     return errorResponse('VALIDATION_ERROR', 'taskId 또는 task 객체가 필요합니다.', 400);
   }
 
   // 1. AI 설정 조회
-  const { data: setting } = await admin
-    .from('ai_settings')
-    .select('*')
-    .eq('scope', 'GLOBAL')
-    .maybeSingle();
+  let setting: any;
+  try {
+    setting = await getOperationalAiSetting();
+  } catch (err: any) {
+    return errorResponse('DATABASE_ERROR', `운영 AI 설정 조회 실패: ${err.message}`, 500);
+  }
 
   const slot1Config: AiSlotConfig = setting?.slot1 || {
     slotNumber: 1,
@@ -246,13 +262,13 @@ export async function handleProcessAiTask(
     lastFailureReason: slot2BreakerRow?.last_failure_reason || null,
   };
 
-  // 4. 오케스트레이터 실행 (1번 시도 -> 실패 시 2번 전환)
+  // 4. 설정된 우선 슬롯부터 실행하고 실패 시 대체 슬롯으로 전환
   const result = await processAiTask(currentTask, {
     slot1Config,
     slot2Config,
     slot1Secret,
     slot2Secret,
-    primarySlot: 1,
+    primarySlot: getPrimaryAiSlot(setting),
     slot1CircuitBreaker,
     slot2CircuitBreaker,
     helperDispatcher,
@@ -263,7 +279,7 @@ export async function handleProcessAiTask(
 
   // 5. DB 상태 갱신
   // 5-1. ai_tasks 테이블 갱신
-  await admin
+  const { error: taskSaveError } = await admin
     .from('ai_tasks')
     .update({
       status: updatedTask.status,
@@ -274,12 +290,16 @@ export async function handleProcessAiTask(
       failure_reason: updatedTask.failureReason,
       updated_at: updatedTask.updatedAt,
     })
-    .eq('task_id', updatedTask.taskId);
+    .eq('task_id', updatedTask.taskId)
+    .eq('workspace_id', workspaceId);
+  if (taskSaveError) {
+    return errorResponse('DATABASE_ERROR', `AI 작업 결과 저장 실패: ${taskSaveError.message}`, 500);
+  }
 
   // 5-2. ai_task_attempts 테이블 갱신
   if (updatedTask.attempts && updatedTask.attempts.length > 0) {
     for (const att of updatedTask.attempts) {
-      await admin.from('ai_task_attempts').upsert(
+      const { error: attemptSaveError } = await admin.from('ai_task_attempts').upsert(
         {
           task_id: att.taskId,
           attempt_id: att.attemptId,
@@ -292,9 +312,13 @@ export async function handleProcessAiTask(
           error_code: att.errorCode,
           error_message: att.errorMessage,
           result: att.result,
+          conversation_trace: att.conversationTrace ?? null,
         },
         { onConflict: 'attempt_id' }
       );
+      if (attemptSaveError) {
+        return errorResponse('DATABASE_ERROR', `AI 질문·답변 기록 저장 실패: ${attemptSaveError.message}`, 500);
+      }
     }
   }
 
@@ -373,11 +397,14 @@ export async function handleGetAiTasks(
   const taskIds = dbTasks.map((t) => t.task_id);
 
   // 관련 attempts 조회
-  const { data: dbAttempts } = await admin
+  const { data: dbAttempts, error: attemptsError } = await admin
     .from('ai_task_attempts')
     .select('*')
     .in('task_id', taskIds)
     .order('started_at', { ascending: true });
+  if (attemptsError) {
+    return errorResponse('DATABASE_ERROR', `AI 대화 이력 조회 실패: ${attemptsError.message}`, 500);
+  }
 
   const attemptsByTask: Record<string, AiTaskAttempt[]> = {};
   if (dbAttempts) {
@@ -397,6 +424,7 @@ export async function handleGetAiTasks(
         errorCode: att.error_code,
         errorMessage: att.error_message,
         result: att.result,
+        conversationTrace: att.conversation_trace ?? null,
       });
     }
   }
@@ -463,14 +491,22 @@ export async function handleGetAiRuntimeStatus(
     lastFailureReason: slot2BreakerRow?.last_failure_reason || null,
   };
 
-  // 쿨다운 상태 확인
+  // 설정된 우선 슬롯을 기준으로 다음 작업의 실행 슬롯 계산
+  let setting: any;
+  try {
+    setting = await getOperationalAiSetting();
+  } catch (err: any) {
+    return errorResponse('DATABASE_ERROR', `운영 AI 설정 조회 실패: ${err.message}`, 500);
+  }
+  const configuredPrimarySlot = getPrimaryAiSlot(setting);
+  const primaryBreaker = configuredPrimarySlot === 1 ? slot1CircuitBreaker : slot2CircuitBreaker;
   const nowTime = Date.now();
-  const isSlot1Cooldown = Boolean(
-    slot1CircuitBreaker.cooldownUntil &&
-      new Date(slot1CircuitBreaker.cooldownUntil).getTime() > nowTime
+  const isPrimaryCooldown = Boolean(
+    primaryBreaker.cooldownUntil &&
+      new Date(primaryBreaker.cooldownUntil).getTime() > nowTime
   );
 
-  const activePrimarySlot: 1 | 2 = isSlot1Cooldown ? 2 : 1;
+  const activeSlot: 1 | 2 = isPrimaryCooldown ? (configuredPrimarySlot === 1 ? 2 : 1) : configuredPrimarySlot;
 
   // 작업 상태별 카운트 조회
   const { data: tasks } = await admin
@@ -504,8 +540,8 @@ export async function handleGetAiRuntimeStatus(
   }
 
   const runtimeStatus: AiRuntimeStatus = {
-    activeSlot: activePrimarySlot,
-    activePrimarySlot,
+    activeSlot,
+    activePrimarySlot: configuredPrimarySlot,
     slot1CircuitBreaker,
     slot2CircuitBreaker,
     queuedTaskCount: queued,

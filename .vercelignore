@@ -7,12 +7,16 @@ release/
 dist/
 .git/
 .vercel/
+supabase/.temp/
 
 # 로컬 비밀값과 개발용 환경 파일
 eulerstream_key.txt
 server/.env
 .env.local
 .env.*.local
+*.local
+scratch/
+.tools/
 
 # 로컬 진단/문서 파일
 chrome-net-export-log.json

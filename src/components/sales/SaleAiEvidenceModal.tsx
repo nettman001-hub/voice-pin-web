@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { SaleRecord } from '../../types/live';
 import {
@@ -13,7 +13,9 @@ import {
   ArrowRight,
   CheckCircle2,
   AlertTriangle,
+  ZoomIn
 } from 'lucide-react';
+import { ImageViewerModal } from '../common/ImageViewerModal';
 
 interface SaleAiEvidenceModalProps {
   sale: SaleRecord;
@@ -23,6 +25,7 @@ interface SaleAiEvidenceModalProps {
 export const SaleAiEvidenceModal: React.FC<SaleAiEvidenceModalProps> = ({ sale, onClose }) => {
   const snapshot = sale.evidenceSnapshot;
   const history = sale.history || [];
+  const [selectedImageIdx, setSelectedImageIdx] = useState<number | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -149,6 +152,26 @@ export const SaleAiEvidenceModal: React.FC<SaleAiEvidenceModalProps> = ({ sale, 
           )}
 
           {/* 4. 연결된 화면 캡처 이미지 */}
+          {Boolean(sale.aiVerification?.purchaseWindows?.length) && (
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+              <span className="font-bold text-slate-700">구매 댓글 기준 검토 구간 · 이전 30초 / 이후 70초</span>
+              {sale.aiVerification!.purchaseWindows!.map((window) => (
+                <p key={window.commentId} className="text-[11px] text-slate-600">
+                  <strong>{window.nickname}</strong> · {new Date(window.startAt).toLocaleTimeString('ko-KR')}
+                  {' ~ '}{new Date(window.endAt).toLocaleTimeString('ko-KR')}
+                </p>
+              ))}
+              <div className="max-h-60 overflow-y-auto space-y-1.5">
+                {sale.aiVerification?.sellerUtterances?.map((utterance) => (
+                  <p key={utterance.id} className="bg-white rounded-lg p-2 text-slate-800">
+                    <span className="text-slate-400 mr-2">{utterance.timestamp ? new Date(utterance.timestamp).toLocaleTimeString('ko-KR') : ''}</span>
+                    {utterance.text}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
           {sale.captureImageUrls && sale.captureImageUrls.length > 0 && (
             <div className="space-y-2">
               <span className="font-bold text-slate-700 flex items-center gap-1.5">
@@ -159,13 +182,18 @@ export const SaleAiEvidenceModal: React.FC<SaleAiEvidenceModalProps> = ({ sale, 
                 {sale.captureImageUrls.map((url, idx) => (
                   <div
                     key={idx}
-                    className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-video"
+                    onClick={() => setSelectedImageIdx(idx)}
+                    className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-video relative group cursor-pointer hover:ring-2 hover:ring-brand-500 transition"
+                    title="클릭하여 원본 크기로 보기"
                   >
                     <img
                       src={url}
                       alt={`캡처 근거 ${idx + 1}`}
-                      className="w-full h-full object-cover hover:scale-105 transition-transform"
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                     />
+                    <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                      <ZoomIn className="w-4 h-4" />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -271,6 +299,16 @@ export const SaleAiEvidenceModal: React.FC<SaleAiEvidenceModalProps> = ({ sale, 
           </button>
         </div>
       </div>
+
+      {selectedImageIdx !== null && (
+        <ImageViewerModal
+          isOpen={selectedImageIdx !== null}
+          onClose={() => setSelectedImageIdx(null)}
+          images={sale.captureImageUrls || []}
+          initialIndex={selectedImageIdx}
+          titlePrefix={`${sale.buyerNickname}님 캡처 근거`}
+        />
+      )}
     </div>,
     document.body
   );

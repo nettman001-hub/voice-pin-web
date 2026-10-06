@@ -172,6 +172,7 @@ export interface ProductSalesBootstrapData {
 }
 
 export interface ProductSalesFeedData {
+  deletedCommentIds?: string[];
   comments: LiveComment[];
   buyerStats: Record<string, BuyerStats>;
   summary: SessionSummary;

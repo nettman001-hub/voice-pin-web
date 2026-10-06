@@ -1,13 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SalesProvider } from './context/SalesContext';
 import { LiveProvider } from './context/LiveContext';
 import { CommentCaptureProvider } from './context/CommentCaptureContext';
+import { ListeningStopScheduleProvider } from './context/ListeningStopScheduleContext';
 import { AppDataProvider } from './context/AppDataContext';
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
 import { MobileBottomNav } from './components/common/MobileBottomNav';
+import { SyncStatusNotice } from './components/common/SyncStatusNotice';
+import { SaleAiConversationProvider } from './components/sales/SaleAiConversationWindow';
 import { PanelLeftOpen } from 'lucide-react';
 import { hasAutoLoginCredentials } from './services/authCredentialsService';
 
@@ -20,7 +23,7 @@ import { PricingPage } from './pages/auth/PricingPage';
 import { PrivacyPolicyPage } from './pages/legal/PrivacyPolicyPage';
 
 import { LiveHomePage } from './pages/seller/LiveHomePage';
-import { VoiceTrainingPage } from './pages/seller/VoiceTrainingPage';
+import { SttVocabularyPage } from './pages/seller/SttVocabularyPage';
 import { RecognitionRulesPage } from './pages/seller/RecognitionRulesPage';
 import { CommentRecordsPage } from './pages/seller/CommentRecordsPage';
 import { SalesListPage } from './pages/seller/SalesListPage';
@@ -35,6 +38,7 @@ import { ProductSalesPage } from './pages/seller/ProductSalesPage';
 import { CommentHelperPage } from './pages/seller/CommentHelperPage';
 import { CommerceProvider } from './context/CommerceContext';
 import { ProductSalesProvider } from './context/ProductSalesContext';
+import { SttVocabularyProvider } from './context/SttVocabularyContext';
 
 import { PlanSelectionPage } from './pages/subscription/PlanSelectionPage';
 import { PaymentPage } from './pages/subscription/PaymentPage';
@@ -50,6 +54,10 @@ import { MemberManagementPage } from './pages/admin/MemberManagementPage';
 import { ReportManagementPage } from './pages/admin/ReportManagementPage';
 import { AdminStatsPage } from './pages/admin/AdminStatsPage';
 import { AdminAiSettingsPage } from './pages/admin/AdminAiSettingsPage';
+const SellerAnalysisPage = lazy(() => import('./pages/admin/SellerAnalysisPage'));
+const SellerLogicAnalysisPage = lazy(() => import('./pages/admin/SellerLogicAnalysisPage'));
+const SellerLogicAnalysis03DeepPage = lazy(() => import('./pages/admin/SellerLogicAnalysis03DeepPage'));
+const SellerLogicOpusPage = lazy(() => import('./pages/admin/SellerLogicOpusPage'));
 
 const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated } = useAuth();
@@ -109,6 +117,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           </button>
         )}
         <main className={`flex-1 overflow-x-hidden min-h-[calc(100vh-4rem)] ${showNav ? 'pb-20 lg:pb-0' : ''}`}>
+          {showNav && <SyncStatusNotice />}
           {children}
         </main>
       </div>
@@ -156,14 +165,17 @@ export const App: React.FC = () => {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <SaleAiConversationProvider>
         <SalesProvider>
           <CommerceProvider>
             <ProductSalesProvider>
-              <LiveProvider>
-                <CommentCaptureProvider>
-                  <AppDataProvider>
-                    <AppLayout>
-                      <Routes>
+              <SttVocabularyProvider>
+                <LiveProvider>
+                  <CommentCaptureProvider>
+                    <ListeningStopScheduleProvider>
+                    <AppDataProvider>
+                      <AppLayout>
+                        <Routes>
                         {/* 루트 리다이렉트 */}
                         <Route path="/" element={<RootRedirect />} />
 
@@ -180,8 +192,9 @@ export const App: React.FC = () => {
                           <Route path="/live" element={<LiveHomePage />} />
                           <Route path="/seller/product-sales" element={<ProductSalesPage />} />
                           <Route path="/sales/product" element={<ProductSalesPage />} />
-                          <Route path="/voice-training" element={<VoiceTrainingPage />} />
-                          <Route path="/training" element={<VoiceTrainingPage />} />
+                          <Route path="/stt-vocabulary" element={<SttVocabularyPage />} />
+                          <Route path="/voice-training" element={<Navigate to="/stt-vocabulary" replace />} />
+                          <Route path="/training" element={<Navigate to="/stt-vocabulary" replace />} />
                           <Route path="/recognition-rules" element={<RecognitionRulesPage />} />
                           <Route path="/rules" element={<RecognitionRulesPage />} />
                           <Route path="/comments" element={<CommentRecordsPage />} />
@@ -227,19 +240,26 @@ export const App: React.FC = () => {
                       <Route path="/admin/reports" element={<ReportManagementPage />} />
                       <Route path="/admin/stats" element={<AdminStatsPage />} />
                       <Route path="/admin/ai" element={<AdminAiSettingsPage />} />
+                      <Route path="/admin/seller-analysis" element={<Suspense fallback={<div className="p-8">판매방식 분석 화면을 불러오는 중…</div>}><SellerAnalysisPage /></Suspense>} />
+                      <Route path="/admin/seller-logic-analysis-01" element={<Suspense fallback={<div className="p-8">판매자 로직분석01 화면을 불러오는 중…</div>}><SellerLogicAnalysisPage /></Suspense>} />
+                      <Route path="/admin/seller-logic-analysis-03-deep" element={<Suspense fallback={<div className="p-8">판매자 로직분석03deep 화면을 불러오는 중…</div>}><SellerLogicAnalysis03DeepPage /></Suspense>} />
+                      <Route path="/admin/seller-logic-opus" element={<Suspense fallback={<div className="p-8">판매자 로직분석01opus 화면을 불러오는 중…</div>}><SellerLogicOpusPage /></Suspense>} />
                     </Route>
                   </Route>
 
                   {/* 일치하지 않는 경로는 홈으로 리다이렉트 */}
                   <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-              </AppLayout>
-              </AppDataProvider>
-            </CommentCaptureProvider>
-          </LiveProvider>
-          </ProductSalesProvider>
+                        </Routes>
+                      </AppLayout>
+                    </AppDataProvider>
+                    </ListeningStopScheduleProvider>
+                  </CommentCaptureProvider>
+                </LiveProvider>
+              </SttVocabularyProvider>
+            </ProductSalesProvider>
           </CommerceProvider>
         </SalesProvider>
+        </SaleAiConversationProvider>
       </AuthProvider>
     </BrowserRouter>
   );

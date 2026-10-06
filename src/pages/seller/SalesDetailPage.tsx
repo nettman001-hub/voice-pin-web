@@ -1,10 +1,14 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
 import { SaleStatus } from '../../types/live';
 import { BuyerReconciliationPanel } from '../../components/sales/BuyerReconciliationPanel';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
 import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
+import { AiSaleBadge } from '../../components/sales/AiSaleBadge';
+import { productSalesApi } from '../../services/productSalesApi';
+import { LiveSession } from '../../types/productSales';
+import { formatSessionDisplay } from '../../utils/sessionFormatter';
 import {
   ShoppingBag,
   ArrowLeft,
@@ -15,8 +19,10 @@ import {
   AlertCircle,
   ExternalLink,
   Printer,
-  RotateCw
+  RotateCw,
+  ZoomIn
 } from 'lucide-react';
+import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 
 export const SalesDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -36,6 +42,24 @@ export const SalesDetailPage: React.FC = () => {
   const [captureImages, setCaptureImages] = useState<string[]>(sale?.captureImageUrls || []);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
+  const [viewerModal, setViewerModal] = useState<{
+    isOpen: boolean;
+    images: string[];
+    initialIndex: number;
+    title: string;
+  }>({
+    isOpen: false,
+    images: [],
+    initialIndex: 0,
+    title: ''
+  });
+
+  useEffect(() => {
+    productSalesApi.listSessions()
+      .then((data) => setCloudSessions(data.sessions))
+      .catch((err) => console.warn('[SalesDetail] 세션 목록 로드 실패 (무시):', err));
+  }, []);
 
   if (!sale) {
     return (
@@ -72,6 +96,10 @@ export const SalesDetailPage: React.FC = () => {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    if (sale.syncStatus === 'PENDING') {
+      alert('서버 저장 확인 후 판매 정보를 수정할 수 있습니다.');
+      return;
+    }
     const updated = {
       ...sale,
       buyerNickname,
@@ -135,17 +163,20 @@ export const SalesDetailPage: React.FC = () => {
             </div>
           </div>
 
-          <span
-            className={`px-3 py-1 rounded-full text-xs font-bold self-start sm:self-auto ${
-              sale.status === '보류'
-                ? 'bg-amber-400 text-slate-950'
-                : sale.status === '수동수정'
-                ? 'bg-purple-100 text-purple-700'
-                : 'bg-emerald-50 text-emerald-700'
-            }`}
-          >
-            현재 상태: {sale.status}
-          </span>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <span
+              className={`px-3 py-1 rounded-full text-xs font-bold ${
+                sale.status === '보류'
+                  ? 'bg-amber-400 text-slate-950'
+                  : sale.status === '수동수정'
+                  ? 'bg-purple-100 text-purple-700'
+                  : 'bg-emerald-50 text-emerald-700'
+              }`}
+            >
+              현재 상태: {sale.status}
+            </span>
+            <AiSaleBadge sale={sale} />
+          </div>
         </div>
 
         {/* 원본 발화 문장 */}
@@ -157,7 +188,7 @@ export const SalesDetailPage: React.FC = () => {
           <div className="text-[10px] sm:text-[11px] text-slate-400 mt-2 flex flex-wrap items-center gap-1.5 sm:gap-2">
             <span>인식 시각: {new Date(sale.recognizedAt).toLocaleString('ko-KR')}</span>
             <span>•</span>
-            <span>방송 회차: {sale.sessionId}</span>
+            <span>방송 회차: <strong className="font-semibold text-slate-700">{formatSessionDisplay(sale.sessionId, { sessions: cloudSessions, recognizedAt: sale.recognizedAt })}</strong></span>
           </div>
 
           {/* AI 보완·음성 정정 이력 배지, Diff 및 근거보기/되돌리기 버튼 */}
@@ -169,15 +200,36 @@ export const SalesDetailPage: React.FC = () => {
         {/* 구매자 누적 거래 및 신용 이력 */}
         <CustomerStatsBadge
           nickname={buyerNickname || sale.buyerNickname}
+          buyerId={sale.buyerId}
           variant="detailed"
           currentSessionId={sale.sessionId}
         />
 
         {/* 상품 대표 사진 및 캡처 이미지 등록/변경 카드 */}
         <div className="p-4 sm:p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-white border border-slate-200 overflow-hidden flex-shrink-0 shadow-sm flex items-center justify-center relative group">
+          <div
+            className={`w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-white border border-slate-200 overflow-hidden flex-shrink-0 shadow-sm flex items-center justify-center relative group ${
+              productImageUrl ? 'cursor-pointer hover:ring-2 hover:ring-brand-500' : ''
+            }`}
+            onClick={() => {
+              if (productImageUrl) {
+                setViewerModal({
+                  isOpen: true,
+                  images: [productImageUrl],
+                  initialIndex: 0,
+                  title: `${sale.productName || '상품'} 대표 사진`
+                });
+              }
+            }}
+            title={productImageUrl ? '클릭하여 원본 사진 보기' : undefined}
+          >
             {productImageUrl ? (
-              <img src={productImageUrl} alt="상품 사진" className="w-full h-full object-cover" />
+              <>
+                <img src={productImageUrl} alt="상품 사진" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                  <ZoomIn className="w-5 h-5" />
+                </div>
+              </>
             ) : (
               <div className="flex flex-col items-center justify-center text-slate-400 p-2 text-center">
                 <ShoppingBag className="w-6 h-6 text-brand-500 mb-1" />
@@ -317,16 +369,22 @@ export const SalesDetailPage: React.FC = () => {
               {sale.captureImageUrls.map((imgUrl: string, idx: number) => (
                 <div
                   key={idx}
-                  className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 relative group shadow-sm"
+                  onClick={() => {
+                    setViewerModal({
+                      isOpen: true,
+                      images: sale.captureImageUrls || [],
+                      initialIndex: idx,
+                      title: `${sale.buyerNickname}님 캡처 이미지`
+                    });
+                  }}
+                  className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 relative group shadow-sm cursor-pointer hover:ring-2 hover:ring-brand-500 transition"
+                  title="클릭하여 원본 크기로 보기"
                 >
-                  <img src={imgUrl} alt={`캡처 ${idx + 1}`} className="w-full h-36 sm:h-40 object-cover" />
-                  <Link
-                    to={`/sales/${sale.id}/capture${location.search}`}
-                    className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-xs text-white font-bold transition space-x-1"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    <span>전체화면 보기</span>
-                  </Link>
+                  <img src={imgUrl} alt={`캡처 ${idx + 1}`} className="w-full h-36 sm:h-40 object-cover group-hover:scale-105 transition-transform duration-200" />
+                  <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 flex items-center justify-center text-xs text-white font-bold transition space-x-1.5 backdrop-blur-[1px]">
+                    <ZoomIn className="w-4 h-4" />
+                    <span>원본 확대 보기</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -338,10 +396,11 @@ export const SalesDetailPage: React.FC = () => {
             buyerNickname={sale.buyerNickname}
             records={[sale]}
             captureImageUrls={sale.captureImageUrls || []}
+            availableSessions={cloudSessions}
           />
         </div>
 
-        {sale.status !== '보류' && (
+        {sale.status !== '보류' && sale.syncStatus !== 'PENDING' && (
           <div className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between ${
             sale.printStatus === 'PRINTED' ? 'bg-emerald-50 border-emerald-200' : sale.printStatus === 'FAILED' ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'
           }`}>
@@ -362,6 +421,16 @@ export const SalesDetailPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {viewerModal.isOpen && (
+        <ImageViewerModal
+          isOpen={viewerModal.isOpen}
+          onClose={() => setViewerModal((prev) => ({ ...prev, isOpen: false }))}
+          images={viewerModal.images}
+          initialIndex={viewerModal.initialIndex}
+          titlePrefix={viewerModal.title}
+        />
+      )}
     </div>
   );
 };

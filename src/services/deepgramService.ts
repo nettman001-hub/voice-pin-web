@@ -21,6 +21,14 @@ export type OnStatusCallback = (status: 'CONNECTING' | 'CONNECTED' | 'DISCONNECT
 
 export type ActiveSttEngine = SttProvider | 'WEB_SPEECH' | 'LOCAL_WHISPER' | 'NONE';
 
+export interface SttStreamDiagnostics {
+  engine: ActiveSttEngine;
+  audioSeconds: number;
+  receivedResponses: number;
+  receivedTextCharacters: number;
+  lastResponseAt: number;
+}
+
 export class DeepgramSttService {
   private ws: WebSocket | null = null;
   private speechRecognition: any = null;
@@ -38,6 +46,15 @@ export class DeepgramSttService {
   private sonioxAudioMsSinceFinalize: number = 0;
   private lastFinalText: string = '';
   private sessionGeneration: number = 0;
+  private activeDelegate: DeepgramSttService | null = null;
+  private pendingRotation: DeepgramSttService | null = null;
+  private rotationAttemptId: number = 0;
+  private quietAudioMs: number = 0;
+  private deepgramHasUnfinalizedTranscript: boolean = false;
+  private sentAudioBytes = 0;
+  private receivedResponses = 0;
+  private receivedTextCharacters = 0;
+  private lastResponseAt = 0;
 
   private isCurrentGeneration(generation: number): boolean {
     return this.sessionGeneration === generation;
@@ -47,10 +64,13 @@ export class DeepgramSttService {
     return this.isCurrentGeneration(generation) && this.isRecognitionActive;
   }
 
-  private closeWebSocket(socket: WebSocket | null = this.ws): void {
+  private closeWebSocket(
+    socket: WebSocket | null = this.ws,
+    providerOverride?: SttProvider | null,
+  ): void {
     if (!socket) return;
 
-    const provider = this.socketProvider;
+    const provider = providerOverride ?? this.socketProvider;
 
     if (this.ws === socket) {
       this.ws = null;
@@ -88,6 +108,17 @@ export class DeepgramSttService {
    * 현재 엔진을 외부 상태 알림 없이 폐기하고 다음 세션 generation을 발급한다.
    */
   private resetSessionSilently(): number {
+    this.rotationAttemptId += 1;
+    if (this.pendingRotation) {
+      const pending = this.pendingRotation;
+      this.pendingRotation = null;
+      pending.resetSessionSilently();
+    }
+    if (this.activeDelegate) {
+      const active = this.activeDelegate;
+      this.activeDelegate = null;
+      active.resetSessionSilently();
+    }
     this.sessionGeneration += 1;
     this.isRecognitionActive = false;
     this.currentEngine = 'NONE';
@@ -104,6 +135,12 @@ export class DeepgramSttService {
     this.sonioxSilenceMs = 0;
     this.sonioxFinalizeRequested = false;
     this.sonioxAudioMsSinceFinalize = 0;
+    this.quietAudioMs = 0;
+    this.deepgramHasUnfinalizedTranscript = false;
+    this.sentAudioBytes = 0;
+    this.receivedResponses = 0;
+    this.receivedTextCharacters = 0;
+    this.lastResponseAt = 0;
 
     return this.sessionGeneration;
   }
@@ -183,7 +220,10 @@ export class DeepgramSttService {
               num_channels: 1,
               language_hints: ['ko'],
               language_hints_strict: true,
-              enable_speaker_diarization: false
+              enable_speaker_diarization: false,
+              enable_endpoint_detection: true,
+              max_endpoint_delay_ms: 2000,
+              ...(config.keyterms.length > 0 ? { context: { terms: config.keyterms } } : {})
             }));
 
             this.currentEngine = 'SONIOX';
@@ -195,13 +235,22 @@ export class DeepgramSttService {
 
             try {
               const data: SonioxResponse = JSON.parse(event.data);
-              if (data.error_type || data.error_message) {
-                console.warn('[Soniox] STT 오류:', data.error_type, data.request_id);
+              this.receivedResponses++;
+              this.lastResponseAt = Date.now();
+              if (this.receivedResponses === 1) console.log('[Soniox] 첫 서버 응답 수신:', {
+                tokens: data.tokens?.length || 0,
+                processedAudioMs: data.total_audio_proc_ms || 0,
+                errorCode: data.error_code,
+              });
+              if (data.error_code || data.error_type || data.error_message) {
+                console.warn('[Soniox] STT 오류:', data.error_code, data.error_type, data.request_id);
                 handleCloudFailure(socket, 'Soniox 처리 오류로');
                 return;
               }
 
               const tokens = data.tokens || [];
+              this.receivedTextCharacters += tokens.filter((token) => token.text !== '<end>' && token.text !== '<fin>')
+                .reduce((count, token) => count + token.text.length, 0);
               const finalizationReached = tokens.some((token) => (
                 token.is_final && (token.text === '<fin>' || token.text === '<end>')
               ));
@@ -215,8 +264,11 @@ export class DeepgramSttService {
 
               if (confirmedTextDelta) {
                 this.sonioxFinalText += confirmedTextDelta;
-                if (this.sonioxFinalText.length > 1200) {
-                  this.sonioxFinalText = this.sonioxFinalText.slice(-1200);
+                // A long utterance must retain its original text for the log and
+                // purchase evidence. Ask for a boundary instead of dropping words.
+                if (!finalizationReached && this.sonioxFinalText.length >= 1200 && !this.sonioxFinalizeRequested) {
+                  this.sonioxFinalizeRequested = true;
+                  socket.send(JSON.stringify({ type: 'finalize' }));
                 }
               }
 
@@ -295,7 +347,8 @@ export class DeepgramSttService {
         ].filter(Boolean).join('&');
 
         const url = `wss://api.deepgram.com/v1/listen?${queryParams}`;
-        console.log('[Deepgram] WebSocket 연결 시도:', url);
+        // The URL contains seller-entered vocabulary; never log the full query string.
+        console.log('[Deepgram] WebSocket 연결 시도 (발음 힌트 개수):', config.keyterms?.length || 0);
         const socket = new WebSocket(url, ['token', cleanApiKey]);
         this.ws = socket;
         this.socketProvider = 'DEEPGRAM';
@@ -313,8 +366,16 @@ export class DeepgramSttService {
 
           try {
             const data: DeepgramResponse = JSON.parse(event.data);
+            this.receivedResponses++;
+            this.lastResponseAt = Date.now();
             if (data.type === 'Results' && data.channel?.alternatives?.[0]) {
               const alt = data.channel.alternatives[0];
+              this.receivedTextCharacters += alt.transcript?.length || 0;
+              if (data.is_final || data.speech_final) {
+                this.deepgramHasUnfinalizedTranscript = false;
+              } else if (alt.transcript && alt.transcript.trim()) {
+                this.deepgramHasUnfinalizedTranscript = true;
+              }
               if (alt.transcript && alt.transcript.trim()) {
                 console.log('[Deepgram] 🎯 전사 결과 수신:', alt.transcript);
                 if (!this.isActiveSession(generation) || this.ws !== socket) return;
@@ -524,28 +585,41 @@ export class DeepgramSttService {
     }
   }
 
+  private measurePcmChunk(chunk: ArrayBuffer): { rms: number; durationMs: number } {
+    const sampleCount = Math.floor(chunk.byteLength / 2);
+    if (sampleCount === 0) return { rms: 0, durationMs: 0 };
+
+    const pcm = new Int16Array(chunk, 0, sampleCount);
+    let squareSum = 0;
+    let measuredSamples = 0;
+    for (let i = 0; i < pcm.length; i += 8) {
+      const normalized = pcm[i] / 32768;
+      squareSum += normalized * normalized;
+      measuredSamples += 1;
+    }
+    return {
+      rms: measuredSamples > 0 ? Math.sqrt(squareSum / measuredSamples) : 0,
+      durationMs: (sampleCount / 16000) * 1000,
+    };
+  }
+
+  private observeRotationBoundary(chunk: ArrayBuffer): void {
+    const { rms, durationMs } = this.measurePcmChunk(chunk);
+    if (rms >= 0.012) {
+      this.quietAudioMs = 0;
+    } else {
+      this.quietAudioMs += durationMs;
+    }
+  }
+
   /**
    * Soniox 자동 엔드포인트 대신 로컬 PCM의 실제 무음을 보수적으로 감지한다.
    * 공식 권장 최소 무음(약 200ms)보다 긴 750ms를 사용해 문장 중간의 짧은 쉼을
    * 판매 멘트 종료로 오인할 가능성을 낮춘다.
    */
   private shouldFinalizeSonioxAfterChunk(chunk: ArrayBuffer): boolean {
-    const sampleCount = Math.floor(chunk.byteLength / 2);
-    if (sampleCount === 0) return false;
-
-    const pcm = new Int16Array(chunk, 0, sampleCount);
-    let squareSum = 0;
-    let measuredSamples = 0;
-
-    // 모든 샘플을 검사할 필요는 없으므로 8개마다 하나씩 측정한다.
-    for (let i = 0; i < pcm.length; i += 8) {
-      const normalized = pcm[i] / 32768;
-      squareSum += normalized * normalized;
-      measuredSamples += 1;
-    }
-
-    const rms = measuredSamples > 0 ? Math.sqrt(squareSum / measuredSamples) : 0;
-    const chunkDurationMs = (sampleCount / 16000) * 1000;
+    const { rms, durationMs: chunkDurationMs } = this.measurePcmChunk(chunk);
+    if (chunkDurationMs === 0) return false;
     this.sonioxAudioMsSinceFinalize += chunkDurationMs;
 
     if (rms >= 0.012) {
@@ -573,8 +647,21 @@ export class DeepgramSttService {
    * 탭 방송 소리 또는 마이크 오디오 바이너리 청크를 선택된 STT WebSocket으로 실시간 전송
    */
   public sendAudioChunk(chunk: ArrayBuffer | Blob) {
+    if (this.activeDelegate) {
+      this.activeDelegate.sendAudioChunk(chunk);
+      return;
+    }
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(chunk);
+      const bytes = chunk instanceof ArrayBuffer ? chunk.byteLength : chunk.size;
+      if (this.sentAudioBytes === 0 && bytes > 0) console.log('[STT] 첫 오디오 전송:', {
+        engine: this.currentEngine, bytes,
+      });
+      this.sentAudioBytes += bytes;
+
+      if (chunk instanceof ArrayBuffer) {
+        this.observeRotationBoundary(chunk);
+      }
 
       if (
         this.socketProvider === 'SONIOX' &&
@@ -584,6 +671,110 @@ export class DeepgramSttService {
         this.ws.send(JSON.stringify({ type: 'finalize' }));
       }
     }
+  }
+
+  /**
+   * STT 소켓만 교체해도 되는 발화 경계인지 확인한다.
+   * 방송 회차와 상위 판매 문맥은 이 서비스 밖에 있으므로 건드리지 않는다.
+   */
+  public isSafeToRotateLiveStream(): boolean {
+    if (this.activeDelegate) return this.activeDelegate.isSafeToRotateLiveStream();
+    if (
+      !this.isRecognitionActive ||
+      !this.ws ||
+      this.ws.readyState !== WebSocket.OPEN ||
+      (this.currentEngine !== 'SONIOX' && this.currentEngine !== 'DEEPGRAM') ||
+      this.quietAudioMs < 1_000
+    ) return false;
+
+    if (this.currentEngine === 'SONIOX') {
+      return !this.sonioxFinalizeRequested &&
+        !this.sonioxHasSpeechSinceFinalize &&
+        this.sonioxFinalText.length === 0;
+    }
+    return !this.deepgramHasUnfinalizedTranscript;
+  }
+
+  /**
+   * 기존 소켓으로 오디오를 계속 보내면서 새 소켓을 먼저 준비한다.
+   * 새 소켓이 열린 뒤에도 발화 경계가 유지된 경우에만 전송 대상을 원자적으로 바꾼다.
+   */
+  public async rotateLiveStream(config: SttConfig): Promise<boolean> {
+    if (!this.isSafeToRotateLiveStream() || this.pendingRotation) return false;
+
+    const transcriptCallback = this.onTranscript;
+    const errorCallback = this.onError;
+    const statusCallback = this.onStatus;
+    if (!transcriptCallback || !errorCallback) return false;
+
+    const attemptId = ++this.rotationAttemptId;
+    const candidate = new DeepgramSttService();
+    this.pendingRotation = candidate;
+    let promoted = false;
+
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const timeoutId = window.setTimeout(() => finish(false), 5_000);
+
+      const finish = (success: boolean) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeoutId);
+        if (this.pendingRotation === candidate) this.pendingRotation = null;
+        if (!success) candidate.resetSessionSilently();
+        resolve(success);
+      };
+
+      const promote = () => {
+        if (
+          settled ||
+          attemptId !== this.rotationAttemptId ||
+          !this.isRecognitionActive ||
+          !this.isSafeToRotateLiveStream()
+        ) {
+          finish(false);
+          return;
+        }
+
+        const oldDelegate = this.activeDelegate;
+        const oldSocket = oldDelegate ? null : this.ws;
+        const oldProvider = oldDelegate ? null : this.socketProvider;
+
+        promoted = true;
+        this.activeDelegate = candidate;
+        this.currentEngine = config.provider;
+        if (oldDelegate) {
+          oldDelegate.resetSessionSilently();
+        } else if (oldSocket) {
+          this.closeWebSocket(oldSocket, oldProvider);
+          this.currentEngine = config.provider;
+        }
+        statusCallback?.('CONNECTED', `${config.provider === 'SONIOX' ? 'Soniox' : 'Deepgram'} STT 연결을 안전하게 갱신했습니다.`);
+        finish(true);
+      };
+
+      candidate.startLiveStream(
+        { ...config, allowBrowserSpeechFallback: false },
+        (data) => {
+          if (promoted) transcriptCallback(data);
+        },
+        (message) => {
+          if (promoted) errorCallback(message);
+          else finish(false);
+        },
+        (status, message) => {
+          if (!promoted && status === 'CONNECTED') {
+            promote();
+            return;
+          }
+          if (!promoted && (status === 'ERROR' || status === 'DISCONNECTED')) {
+            finish(false);
+            return;
+          }
+          if (promoted && status !== 'CONNECTED') statusCallback?.(status, message);
+        },
+      );
+    });
   }
 
   /**
@@ -601,7 +792,19 @@ export class DeepgramSttService {
    * 현재 가동 중인 STT 엔진 타입 반환
    */
   public getCurrentEngine(): ActiveSttEngine {
+    if (this.activeDelegate) return this.activeDelegate.getCurrentEngine();
     return this.currentEngine;
+  }
+
+  public getDiagnostics(): SttStreamDiagnostics {
+    if (this.activeDelegate) return this.activeDelegate.getDiagnostics();
+    return {
+      engine: this.currentEngine,
+      audioSeconds: this.sentAudioBytes / (16000 * 2),
+      receivedResponses: this.receivedResponses,
+      receivedTextCharacters: this.receivedTextCharacters,
+      lastResponseAt: this.lastResponseAt,
+    };
   }
 
   /**

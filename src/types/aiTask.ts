@@ -15,6 +15,19 @@ export type AiAttemptStatus =
   | 'EXPIRED'   // 다른 슬롯 전환 등으로 시도 권한 만료됨
   | 'CANCELLED';// 시도 취소됨
 
+/** Captured at dispatch/receipt, never reconstructed from a later prompt version. */
+export interface AiConversationTrace {
+  systemPrompt: string;
+  userPrompt: string;
+  provider: string;
+  model: string;
+  requestStartedAt: string;
+  responseReceivedAt?: string;
+  responseText?: string;
+  httpStatus?: number;
+  responseKind?: 'MODEL_OUTPUT' | 'HTTP_ERROR';
+}
+
 export interface AiTaskAttempt {
   id?: string;
   attemptId: string;
@@ -28,6 +41,7 @@ export interface AiTaskAttempt {
   errorCode?: string;
   errorMessage?: string;
   result?: AiResolutionResult | null;
+  conversationTrace?: AiConversationTrace | null;
 }
 
 export interface AiTask {

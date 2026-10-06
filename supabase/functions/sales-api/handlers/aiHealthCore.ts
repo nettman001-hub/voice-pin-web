@@ -670,8 +670,9 @@ export function computeOverallStatus(
     return { overallStatus: 'RECOVERING', isExpired };
   }
 
-  // 8. 지연(DEGRADED) 검사 (추론 시간 > 10초 또는 연결 지연 > 3초)
-  if ((tier1.latencyMs && tier1.latencyMs > 3000) || tier3.totalLatencyMs > 10000) {
+  // 8. 지연(DEGRADED) 검사 (5대 합성 정정 문장 총 추론 시간 > 25초 또는 연결 지연 > 5초)
+  // 자체 운영 LLM(로컬/자체서버)의 현실적인 추론 속도(문장당 약 2~4초)를 고려하여 완화
+  if ((tier1.latencyMs && tier1.latencyMs > 5000) || tier3.totalLatencyMs > 25000) {
     return { overallStatus: 'DEGRADED', isExpired };
   }
 

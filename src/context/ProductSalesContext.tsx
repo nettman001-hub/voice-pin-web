@@ -8,13 +8,17 @@ import {
   ProductSalesFeedData,
   CommitSaleBuyer,
   ProductSalesResult,
-  ProductSalesDraft,
   ImageKind,
+  LiveComment,
 } from '../types/productSales';
 import { productSalesApi } from '../services/productSalesApi';
+import { storageService } from '../services/storageService';
 import { resolvePrivateImageUrl } from '../services/remoteWorkspaceService';
 import { createNumberProductImage, uploadProductImageDataUrl } from '../services/productImageService';
 import { useAuth } from './AuthContext';
+import { useSales } from './SalesContext';
+import { flushPendingComments } from '../services/commentSyncService';
+import type { SaleRecord } from '../types/live';
 import {
   VoiceSaleCandidate,
   VoiceCandidateController,
@@ -67,8 +71,6 @@ interface ProductSalesContextType {
 const ProductSalesContext = createContext<ProductSalesContextType | null>(null);
 
 const SALES_FEED_POLL_INTERVAL_MS = 2_000;
-const SALES_FEED_RETRY_BASE_MS = 4_000;
-const SALES_FEED_RETRY_MAX_MS = 30_000;
 const SALES_FEED_POLL_PATHS = new Set(['/live']);
 
 function isSameProduct(left: ProductSalesProduct | null, right: ProductSalesProduct | null) {
@@ -98,7 +100,8 @@ async function hydrateProduct(product: ProductSalesProduct | null): Promise<Prod
 }
 
 export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, workspaceId } = useAuth();
+  const { applyCommittedSales } = useSales();
   const location = useLocation();
   const [bootstrap, setBootstrap] = useState<ProductSalesBootstrapData | null>(null);
   const [feed, setFeed] = useState<ProductSalesFeedData | null>(null);
@@ -109,107 +112,234 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const controllerRef = useRef<VoiceCandidateController | null>(null);
   const activeSessionRef = useRef<ProductSalesSession | null>(null);
-  const feedPollInFlightRef = useRef(false);
-  const feedPollRequestIdRef = useRef(0);
-  const feedPollFailureCountRef = useRef(0);
+  const activeProductRef = useRef<ProductSalesProduct | null>(null);
+  const bootstrapRef = useRef<ProductSalesBootstrapData | null>(null);
+  const identityRef = useRef('');
+  const identityGenerationRef = useRef(0);
+  const stateGenerationRef = useRef(0);
+  const bootstrapRequestRef = useRef(0);
 
-  const activeProduct = bootstrap?.activeProduct || null;
-  const activeSession = bootstrap?.activeSession || null;
-  const settings = bootstrap?.settings || null;
+  const activeProduct = bootstrap?.workspaceId === workspaceId ? bootstrap.activeProduct : null;
+  const activeSession = bootstrap?.workspaceId === workspaceId ? bootstrap.activeSession : null;
+  const settings = bootstrap?.workspaceId === workspaceId ? bootstrap.settings : null;
   const normalizedPath = location.pathname.replace(/\/+$/, '') || '/';
   const shouldPollSalesFeed = isAuthenticated && feedPollingEnabled && SALES_FEED_POLL_PATHS.has(normalizedPath);
+
+  const workspaceIdRef = useRef<string | null>(workspaceId || null);
+  const identity = `${user?.id || ''}:${workspaceId || ''}`;
+  if (identityRef.current !== identity) {
+    identityRef.current = identity;
+    identityGenerationRef.current += 1;
+    stateGenerationRef.current += 1;
+    activeSessionRef.current = null;
+    activeProductRef.current = null;
+    bootstrapRef.current = null;
+  }
+  workspaceIdRef.current = workspaceId || null;
+  const captureRequest = useCallback(() => ({
+    workspaceId: workspaceIdRef.current,
+    identityGeneration: identityGenerationRef.current,
+    stateGeneration: stateGenerationRef.current,
+  }), []);
+  const isCurrentRequest = useCallback((request: ReturnType<typeof captureRequest>) => (
+    request.workspaceId !== null && request.workspaceId === workspaceIdRef.current
+    && request.identityGeneration === identityGenerationRef.current
+    && request.stateGeneration === stateGenerationRef.current
+  ), []);
+  const isCurrentIdentity = useCallback((request: ReturnType<typeof captureRequest>) => (
+    request.workspaceId !== null && request.workspaceId === workspaceIdRef.current
+    && request.identityGeneration === identityGenerationRef.current
+  ), []);
+  // 워크스페이스 변경 시 storageService 스코프 동기화
+  useEffect(() => {
+    storageService.setWorkspaceId(workspaceId || null);
+    activeSessionRef.current = null;
+    activeProductRef.current = null;
+    bootstrapRef.current = null;
+    setBootstrap(null);
+    setFeed(null);
+    setCandidate(null);
+  }, [workspaceId, user?.id]);
 
   useEffect(() => {
     activeSessionRef.current = activeSession;
   }, [activeSession]);
 
+  useEffect(() => {
+    activeProductRef.current = activeProduct;
+  }, [activeProduct]);
+
+  // 네트워크 조회 없이 로컬 판매·댓글 캐시로 피드를 구성한다.
+  const buildLocalFeed = useCallback((
+    sessionId: string,
+    sessionRevision?: number,
+    overrideActiveProduct?: ProductSalesProduct | null
+  ): ProductSalesFeedData => {
+    // 1. 로컬DB 판매 테이블에서 현재 세션 누적 판매 통계 SUM / COUNT 집계
+    const owner = workspaceIdRef.current;
+    const { summary, buyerStats } = storageService.getSessionSalesSummary(sessionId, owner);
+
+    // 2. 로컬DB 댓글 테이블에서 현재 세션 댓글 읽기 (정식 buyerId 보존)
+    // P1-8: localRecords는 시간 오름차순(과거->최신)이므로 최신 50건은 반드시 slice(-50)이어야 함
+    const localRecords = storageService.getSessionCommentRecords(sessionId, owner);
+    const comments: LiveComment[] = localRecords.slice(-50).map((r, index) => ({
+      id: r.id,
+      sessionId: r.sessionId,
+      collectorId: 'local-helper',
+      platformMessageId: r.platformMessageId || r.id,
+      buyerId: r.buyerId || null,
+      nicknameSnapshot: r.nickname,
+      content: r.content,
+      capturedAt: r.capturedAt,
+      ingestSequence: index + 1,
+    }));
+
+    // 3. 로컬DB 활성 상품 읽기
+    const currentActive = overrideActiveProduct !== undefined
+      ? overrideActiveProduct
+      : activeProductRef.current;
+
+    const currentSession = activeSessionRef.current;
+
+    return {
+      comments,
+      buyerStats,
+      summary,
+      activeProduct: currentActive,
+      sessionRevision: sessionRevision ?? currentSession?.revision ?? 1,
+      nextCursor: null,
+      hasMore: false,
+    };
+  }, []);
+
+  const applyProductState = useCallback((owner: string, session: ProductSalesSession | null, product: ProductSalesProduct | null, persist = true) => {
+    if (owner !== workspaceIdRef.current) return;
+    if (session?.id !== activeSessionRef.current?.id || session?.revision !== activeSessionRef.current?.revision
+      || session?.status !== activeSessionRef.current?.status || !isSameProduct(product, activeProductRef.current)) {
+      stateGenerationRef.current += 1;
+    }
+    activeSessionRef.current = session;
+    activeProductRef.current = product;
+    if (persist) {
+      storageService.saveActiveProduct(product, owner);
+      storageService.saveActiveSession(session, owner);
+    }
+    const previous = bootstrapRef.current;
+    if (previous?.workspaceId === owner) {
+      const next = { ...previous, activeSession: session, activeProduct: product };
+      bootstrapRef.current = next;
+      setBootstrap(next);
+      if (persist) storageService.saveBootstrapCache(next, owner);
+    }
+    setFeed(session ? buildLocalFeed(session.id, session.revision, product) : null);
+  }, [buildLocalFeed]);
+
+  // [안전장치 1회 동기화 (Bootstrap)]
+  // 방송 시작 또는 화면 새로고침 시 1회만 Supabase에서 최신 상태를 받아와 로컬DB를 초기화/동기화
   const loadBootstrap = useCallback(async (): Promise<ProductSalesBootstrapData | null> => {
+    let request = captureRequest();
+    const requestId = ++bootstrapRequestRef.current;
+    if (!request.workspaceId) return null;
     setIsLoading(true);
     try {
-      const data = await productSalesApi.getBootstrap();
+      const data = await productSalesApi.getBootstrap(request.workspaceId);
+      // P1-4: 요청 시점의 워크스페이스와 현재 워크스페이스가 다르면(계정 전환 등) 이전 응답 폐기
+      if (!isCurrentRequest(request) || requestId !== bootstrapRequestRef.current || data.workspaceId !== request.workspaceId) {
+        return null;
+      }
       const hydratedProduct = await hydrateProduct(data.activeProduct);
-      activeSessionRef.current = data.activeSession;
+      if (!isCurrentRequest(request) || requestId !== bootstrapRequestRef.current) return null;
       const hydratedData = { ...data, activeProduct: hydratedProduct };
-      setBootstrap(hydratedData);
+      bootstrapRef.current = hydratedData;
+      applyProductState(request.workspaceId, data.activeSession, hydratedProduct);
+      request = captureRequest();
       setError(null);
+
+      // 세션이 있다면 초기 1회 서버 피드/댓글도 동기화하여 로컬DB 채우기
+      if (data.activeSession?.id) {
+        try {
+          const initialFeed = await productSalesApi.getSalesFeed({
+            workspaceId: request.workspaceId!,
+            sessionId: data.activeSession.id,
+            limit: 50,
+            knownCommentIds: storageService.getCommentRecords(request.workspaceId).filter((comment) =>
+              comment.sessionId === data.activeSession!.id && !comment.id.startsWith('stream-')).map((comment) => comment.id),
+          });
+          if (!isCurrentRequest(request) || requestId !== bootstrapRequestRef.current) return null;
+          storageService.deleteCommentRecords(initialFeed.deletedCommentIds || [], request.workspaceId);
+          if (initialFeed.comments && initialFeed.comments.length > 0) {
+            const commentRecords = initialFeed.comments.map((c) => ({
+              id: c.id,
+              platformMessageId: c.platformMessageId,
+              sessionId: c.sessionId,
+              nickname: c.nicknameSnapshot,
+              buyerId: c.buyerId || null,
+              content: c.content,
+              capturedAt: c.capturedAt,
+            }));
+            storageService.addCommentRecords(commentRecords, request.workspaceId);
+          }
+        } catch (feedErr) {
+          console.warn('[ProductSalesContext] 초기 피드 서버 동기화 실패 (로컬DB로 시작):', feedErr);
+        }
+
+        // 초기 로컬 피드 즉시 설정
+        if (!isCurrentRequest(request) || requestId !== bootstrapRequestRef.current) return null;
+        const localFeed = buildLocalFeed(data.activeSession.id, data.activeSession.revision, hydratedProduct);
+        setFeed(localFeed);
+      }
+
       return hydratedData;
     } catch (err: any) {
+      if (!isCurrentRequest(request) || requestId !== bootstrapRequestRef.current) {
+        return null;
+      }
+      console.warn('[ProductSalesContext] 부트스트랩 API 실패, 로컬 캐시 복원 시도:', err);
+      // Permission failures are not an offline success path.
+      if (['AUTH_REQUIRED', 'CAPABILITY_DENIED', 'WORKSPACE_ACCESS_DENIED'].includes(err.code)) {
+        setError(err.message || '작업공간 접근 권한을 확인해 주세요.');
+        return null;
+      }
+      const cached = storageService.getBootstrapCache(request.workspaceId);
+      // 타 계정/타 워크스페이스 캐시 오염 원천 차단
+      if (cached && cached.workspaceId === request.workspaceId) {
+        bootstrapRef.current = cached;
+        applyProductState(request.workspaceId!, cached.activeSession, cached.activeProduct);
+        return cached;
+      }
       setError(err.message || '부트스트랩 로딩 실패');
       return null;
     } finally {
-      setIsLoading(false);
+      if (request.workspaceId === workspaceIdRef.current && request.identityGeneration === identityGenerationRef.current && requestId === bootstrapRequestRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, []);
+  }, [applyProductState, buildLocalFeed, captureRequest, isCurrentRequest]);
 
   const startNewSession = useCallback(async (): Promise<ProductSalesSession> => {
+    const request = captureRequest();
     await productSalesApi.startSession(crypto.randomUUID());
+    if (!isCurrentRequest(request)) throw new Error('작업공간 또는 방송 회차가 변경되었습니다.');
     const data = await loadBootstrap();
     if (!data?.activeSession) {
       throw new Error('새 방송 회차를 시작하지 못했습니다. 다시 시도해 주세요.');
     }
     return data.activeSession;
-  }, [loadBootstrap]);
+  }, [loadBootstrap, captureRequest, isCurrentRequest]);
 
   const setFeedPollingEnabled = useCallback((enabled: boolean) => {
     setFeedPollingEnabledState(enabled);
   }, []);
 
+  // [2초 주기 조회(읽기)]
+  // 화면 조회는 로컬에서 수행한다. 클라우드 반영 대기 상태는 별도로 표시한다.
   const pollFeed = useCallback(async () => {
     const session = activeSessionRef.current;
-    if (!session || feedPollInFlightRef.current) return;
+    if (!session) return;
 
-    const requestId = ++feedPollRequestIdRef.current;
-    const sessionId = session.id;
-    try {
-      feedPollInFlightRef.current = true;
-      const feedData = await productSalesApi.getSalesFeed({
-        sessionId,
-        limit: 50,
-      });
-      const hydratedProduct = await hydrateProduct(feedData.activeProduct);
-
-      // A newer request, session switch, or local write has made this response obsolete.
-      if (
-        requestId !== feedPollRequestIdRef.current
-        || activeSessionRef.current?.id !== sessionId
-        || (activeSessionRef.current?.revision ?? 0) > feedData.sessionRevision
-      ) {
-        return;
-      }
-
-      feedPollFailureCountRef.current = 0;
-      setFeed({ ...feedData, activeProduct: hydratedProduct });
-
-      setBootstrap((previous) => {
-        if (!previous?.activeSession || previous.activeSession.id !== sessionId) return previous;
-        if (previous.activeSession.revision > feedData.sessionRevision) return previous;
-
-        const sessionChanged = previous.activeSession.activeProductId !== (hydratedProduct?.id || null)
-          || previous.activeSession.revision !== feedData.sessionRevision;
-        const productChanged = !isSameProduct(previous.activeProduct, hydratedProduct);
-
-        if (!sessionChanged && !productChanged) return previous;
-
-        return {
-          ...previous,
-          activeProduct: productChanged ? hydratedProduct : previous.activeProduct,
-          activeSession: sessionChanged
-            ? {
-              ...previous.activeSession,
-              activeProductId: hydratedProduct?.id || null,
-              revision: feedData.sessionRevision,
-            }
-            : previous.activeSession,
-        };
-      });
-    } catch {
-      if (requestId === feedPollRequestIdRef.current && activeSessionRef.current?.id === sessionId) {
-        feedPollFailureCountRef.current = Math.min(feedPollFailureCountRef.current + 1, 10);
-      }
-    } finally {
-      feedPollInFlightRef.current = false;
-    }
-  }, []);
+    const localFeed = buildLocalFeed(session.id, session.revision);
+    setFeed(localFeed);
+  }, [buildLocalFeed]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -220,56 +350,169 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
       return;
     }
     void loadBootstrap();
-  }, [isAuthenticated, user?.id, loadBootstrap]);
+  }, [isAuthenticated, user?.id, workspaceId, loadBootstrap]);
 
+  // 2초 주기 로컬 피드 갱신 루프
   useEffect(() => {
     const sessionId = activeSession?.id;
     if (!shouldPollSalesFeed || !sessionId) {
-      feedPollRequestIdRef.current += 1;
-      feedPollFailureCountRef.current = 0;
       return;
     }
 
     let disposed = false;
     let timer: number | undefined;
 
-    const scheduleNextPoll = async () => {
-      const startedAt = Date.now();
-      await pollFeed();
-      if (disposed || activeSessionRef.current?.id !== sessionId) return;
-
-      const failures = feedPollFailureCountRef.current;
-      const delay = failures > 0
-        ? Math.min(SALES_FEED_RETRY_BASE_MS * (2 ** (failures - 1)), SALES_FEED_RETRY_MAX_MS)
-        : Math.max(0, SALES_FEED_POLL_INTERVAL_MS - (Date.now() - startedAt));
+    const scheduleNextPoll = () => {
+      if (disposed) return;
+      void pollFeed();
 
       timer = window.setTimeout(() => {
-        void scheduleNextPoll();
-      }, delay);
+        scheduleNextPoll();
+      }, SALES_FEED_POLL_INTERVAL_MS);
     };
 
-    void scheduleNextPoll();
+    scheduleNextPoll();
     return () => {
       disposed = true;
       if (timer !== undefined) window.clearTimeout(timer);
-      feedPollRequestIdRef.current += 1;
-      feedPollFailureCountRef.current = 0;
     };
   }, [activeSession?.id, pollFeed, shouldPollSalesFeed]);
+
+  // 멀티 탭(다른 창) 변경 실시간 감지 동기화
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (!e.key) return;
+      const owner = workspaceIdRef.current;
+      if (!owner || !e.key.endsWith(`:${encodeURIComponent(owner)}`)) return;
+      if (
+        e.key.includes('dadryeo_sales') ||
+        e.key.includes('voicecap_sales_state') ||
+        e.key.includes('voicecap_active_product') ||
+        e.key.includes('voicecap_active_session') ||
+        e.key.includes('voicecap_comment_records')
+        || e.key.includes('voicecap_comment_tombstones')
+      ) {
+        // P1-7: 활성 상품 및 세션도 로컬 저장소 최신값으로 동기화
+        if (e.key.includes('voicecap_active_')) {
+          const session = storageService.getActiveSession(owner);
+          const product = storageService.getActiveProduct(owner);
+          applyProductState(owner, session, product, false);
+        } else void storageService.restoreWorkspace(owner).then(() => {
+          if (owner === workspaceIdRef.current) void pollFeed();
+        });
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    const handleComments = (event: Event) => {
+      if ((event as CustomEvent).detail?.workspaceId === workspaceIdRef.current) void pollFeed();
+    };
+    window.addEventListener('voicecap_comments_updated', handleComments);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('voicecap_comments_updated', handleComments);
+    };
+  }, [applyProductState, pollFeed]);
+
+  // 저빈도(60초) 백그라운드 헬스체크 (서버와 로컬의 정합성 자동 보정)
+  useEffect(() => {
+    const sessionId = activeSession?.id;
+    if (!isAuthenticated || !sessionId || !shouldPollSalesFeed) return;
+
+    let disposed = false;
+    let inFlight = false;
+    const synchronize = async () => {
+      if (disposed || inFlight) return;
+      const request = captureRequest();
+      if (!request.workspaceId || activeSessionRef.current?.id !== sessionId) return;
+      inFlight = true;
+      try {
+        const remoteFeed = await productSalesApi.getSalesFeed({
+          workspaceId: request.workspaceId, sessionId, limit: 50,
+          knownCommentIds: storageService.getCommentRecords(request.workspaceId).filter((comment) =>
+            comment.sessionId === sessionId && !comment.id.startsWith('stream-')).map((comment) => comment.id),
+        });
+        if (disposed || !isCurrentRequest(request) || activeSessionRef.current?.id !== sessionId) return;
+        if (remoteFeed.sessionRevision < (activeSessionRef.current?.revision || 0)) return;
+        const hydrated = await hydrateProduct(remoteFeed.activeProduct);
+        if (disposed || !isCurrentRequest(request) || activeSessionRef.current?.id !== sessionId) return;
+        storageService.deleteCommentRecords(remoteFeed.deletedCommentIds || [], request.workspaceId);
+        if (remoteFeed.comments && remoteFeed.comments.length > 0) {
+          const records = remoteFeed.comments.map((c) => ({
+            id: c.id,
+            platformMessageId: c.platformMessageId,
+            sessionId: c.sessionId,
+            nickname: c.nicknameSnapshot,
+            buyerId: c.buyerId || null,
+            content: c.content,
+            capturedAt: c.capturedAt,
+          }));
+          storageService.addCommentRecords(records, request.workspaceId);
+        }
+        // P1-7: 활성 상품 및 세션 revision도 원격 피드에서 받아서 동기화
+        const currentSession = activeSessionRef.current;
+        if (currentSession) applyProductState(request.workspaceId, {
+          ...currentSession, revision: remoteFeed.sessionRevision,
+          activeProductId: hydrated?.id || null,
+        }, hydrated);
+      } catch {
+        // 백그라운드 헬스체크 실패는 조용히 무시
+      } finally { inFlight = false; }
+    };
+    const interval = window.setInterval(() => void synchronize(), 60_000);
+    window.addEventListener('online', synchronize);
+    return () => { disposed = true; window.clearInterval(interval); window.removeEventListener('online', synchronize); };
+  }, [activeSession?.id, isAuthenticated, shouldPollSalesFeed, applyProductState, captureRequest, isCurrentRequest]);
+
+  const resolveSaleBuyers = useCallback(async (owner: string, sessionId: string, buyers: CommitSaleBuyer[]) => {
+    const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+    if (buyers.some((buyer) => !isUuid(buyer.buyerId) || buyer.sourceCommentIds?.some((id) => !isUuid(id)))) {
+      await flushPendingComments(owner);
+    }
+    const comments = storageService.getCommentRecords(owner).filter((comment) => comment.sessionId === sessionId);
+    return buyers.map((buyer) => {
+      const sources = (buyer.sourceCommentIds || []).map((id) => {
+        const comment = comments.find((item) => item.id === id || `stream-${item.platformMessageId}` === id);
+        return { id: comment?.id || id, buyerId: comment?.buyerId };
+      });
+      const buyerId = isUuid(buyer.buyerId) ? buyer.buyerId : sources.find((item) => item.buyerId)?.buyerId;
+      if (!buyerId || !isUuid(buyerId) || sources.some((item) => !isUuid(item.id))) {
+        throw new Error('댓글 저장 확인 후 구매자를 다시 선택해 주세요.');
+      }
+      return { buyerId, quantity: buyer.quantity, sourceCommentIds: sources.map((item) => item.id) };
+    });
+  }, []);
+
+  const acceptCommittedSales = useCallback((owner: string, sessionId: string, result: ProductSalesResult) => {
+    const records: SaleRecord[] = (result.sales || []).map((sale) => ({
+      id: sale.id, sessionId, buyerNickname: sale.buyerNickname, buyerId: sale.buyerId,
+      amount: sale.amount, quantity: sale.quantity, unitPrice: sale.unitPrice,
+      status: '확정', recordState: sale.recordState || 'ACTIVE',
+      productCode: sale.productCodeSnapshot, productName: sale.productNameSnapshot,
+      productId: sale.productId, productImagePath: sale.productImagePathSnapshot,
+      recognizedAt: new Date().toISOString(), rawTranscript: '', revision: sale.revision || 1,
+      syncStatus: 'SYNCED',
+    }));
+    applyCommittedSales(owner, records);
+    const session = activeSessionRef.current;
+    if (session) setFeed(buildLocalFeed(session.id, session.revision));
+  }, [applyCommittedSales, buildLocalFeed]);
 
   // Handle automatic candidate commit
   const handleCommitCandidate = useCallback(
     async (cand: VoiceSaleCandidate) => {
       if (cand.type === 'SALE' && cand.productId) {
+        const request = captureRequest();
+        if (!request.workspaceId || activeSessionRef.current?.id !== cand.sessionId) return;
         const operationId = crypto.randomUUID();
-        const buyers = [
+        const buyers = await resolveSaleBuyers(request.workspaceId, cand.sessionId, [
           {
             buyerId: cand.buyerId || cand.buyerNickname || 'anon',
             quantity: cand.quantity,
             sourceCommentIds: cand.sourceCommentId ? [cand.sourceCommentId] : [],
           },
-        ];
-        await productSalesApi.commitSales({
+        ]);
+        if (!isCurrentRequest(request)) return;
+        const resp = await productSalesApi.commitSales({
           operationId,
           sessionId: cand.sessionId,
           productId: cand.productId,
@@ -277,29 +520,36 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
           expectedSessionRevision: cand.sessionRevision,
           buyers,
         });
-        await loadBootstrap();
+        if (isCurrentIdentity(request)) acceptCommittedSales(request.workspaceId, cand.sessionId, resp);
       }
     },
-    [loadBootstrap]
+    [acceptCommittedSales, captureRequest, isCurrentIdentity, isCurrentRequest, resolveSaleBuyers]
   );
 
   useEffect(() => {
     const previewMs = settings?.voicePreviewMs || 2500;
-    controllerRef.current = new VoiceCandidateController(
+    const controller = new VoiceCandidateController(
       previewMs,
       (c) => setCandidate(c),
       handleCommitCandidate
     );
+    controllerRef.current = controller;
+    return () => controller.cancel();
   }, [settings?.voicePreviewMs, handleCommitCandidate]);
 
   const updateSettings = useCallback(
     async (newSettings: Partial<ProductSalesSettings>) => {
       if (!settings) return;
+      const request = captureRequest();
       const operationId = crypto.randomUUID();
       const resp = await productSalesApi.updateSettings(operationId, settings.revision, newSettings);
-      setBootstrap((prev) => (prev ? { ...prev, settings: resp.settings } : null));
+      if (!isCurrentRequest(request) || !request.workspaceId || !bootstrapRef.current) return;
+      const next = { ...bootstrapRef.current, settings: resp.settings };
+      bootstrapRef.current = next;
+      setBootstrap(next);
+      storageService.saveBootstrapCache(next, request.workspaceId);
     },
-    [settings]
+    [settings, captureRequest, isCurrentRequest]
   );
 
   const prepareProduct = useCallback(
@@ -310,6 +560,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
       imageKind: 'PHOTO' | 'NUMBER_IMAGE' = 'PHOTO'
     ) => {
       const session = activeSessionRef.current;
+      const request = captureRequest();
       if (!session) throw new Error('활성 방송 회차가 없습니다.');
       const operationId = crypto.randomUUID();
       const resp = await productSalesApi.prepareProduct({
@@ -321,6 +572,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
         unitPrice,
         imageKind,
       });
+      if (!isCurrentRequest(request)) throw new Error('작업공간 또는 방송 회차가 변경되었습니다.');
 
       return {
         draftId: resp.draftId,
@@ -330,12 +582,13 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
         uploadUrl: resp.imageUpload?.uploadUrl,
       };
     },
-    []
+    [captureRequest, isCurrentRequest]
   );
 
   const commitProduct = useCallback(
     async (draftId: string, draftRevision: number) => {
       const session = activeSessionRef.current;
+      const request = captureRequest();
       if (!session) return null;
       const operationId = crypto.randomUUID();
       const response = await productSalesApi.commitProduct({
@@ -344,17 +597,14 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
         expectedDraftRevision: draftRevision,
         expectedSessionRevision: session.revision,
       });
+      if (!isCurrentRequest(request)) return null;
       const product = await hydrateProduct(response.product);
+      if (!isCurrentRequest(request) || !request.workspaceId) return null;
       const nextSession = { ...session, ...response.session };
-      activeSessionRef.current = nextSession;
-      setBootstrap((previous) => previous ? {
-        ...previous,
-        activeProduct: product,
-        activeSession: nextSession,
-      } : previous);
+      applyProductState(request.workspaceId, nextSession, product);
       return product;
     },
-    []
+    [applyProductState, captureRequest, isCurrentRequest]
   );
 
   const registerProduct = useCallback(
@@ -367,6 +617,7 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
       source?: 'WEB_VOICE' | 'MANUAL';
     }): Promise<ProductSalesProduct> => {
       const session = activeSessionRef.current;
+      const request = captureRequest();
       if (!session) throw new Error('활성 방송 회차가 없습니다.');
 
       const imageKind = params.imageDataUrl ? (params.imageKind || 'PHOTO') : 'NUMBER_IMAGE';
@@ -380,10 +631,12 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
         unitPrice: params.unitPrice ?? 0,
         imageKind,
       });
+      if (!isCurrentRequest(request)) throw new Error('작업공간 또는 방송 회차가 변경되었습니다.');
 
       const imageDataUrl = params.imageDataUrl || createNumberProductImage(prepared.productCode);
       if (!prepared.imageUpload?.uploadUrl) throw new Error('상품 이미지 업로드 주소를 만들지 못했습니다.');
       await uploadProductImageDataUrl(prepared.imageUpload.uploadUrl, imageDataUrl);
+      if (!isCurrentRequest(request)) throw new Error('작업공간 또는 방송 회차가 변경되었습니다.');
 
       const commitResponse = await productSalesApi.commitProduct({
         operationId: crypto.randomUUID(),
@@ -392,26 +645,27 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
         expectedSessionRevision: session.revision,
         source: params.source || 'MANUAL',
       });
+      if (!isCurrentRequest(request)) throw new Error('작업공간 또는 방송 회차가 변경되었습니다.');
       const product = await hydrateProduct(commitResponse.product);
+      if (!isCurrentRequest(request) || !request.workspaceId) throw new Error('작업공간 또는 방송 회차가 변경되었습니다.');
       if (!product) throw new Error('등록된 상품을 불러오지 못했습니다.');
 
       const nextSession = { ...session, ...commitResponse.session };
-      activeSessionRef.current = nextSession;
-      setBootstrap((previous) => previous ? {
-        ...previous,
-        activeProduct: product,
-        activeSession: nextSession,
-      } : previous);
+      applyProductState(request.workspaceId, nextSession, product);
       return product;
     },
-    []
+    [applyProductState, captureRequest, isCurrentRequest]
   );
 
   const commitSales = useCallback(
     async (buyers: CommitSaleBuyer[]): Promise<ProductSalesResult> => {
+      const request = captureRequest();
       if (!activeSession || !activeProduct) {
         throw new Error('활성 회차 또는 상품이 없습니다.');
       }
+      if (!request.workspaceId) throw new Error('로그인이 필요합니다.');
+      const resolvedBuyers = await resolveSaleBuyers(request.workspaceId, activeSession.id, buyers);
+      if (!isCurrentRequest(request)) throw new Error('작업공간 또는 방송 회차가 변경되었습니다.');
       const operationId = crypto.randomUUID();
       const resp = await productSalesApi.commitSales({
         operationId,
@@ -419,16 +673,13 @@ export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ 
         productId: activeProduct.id,
         expectedProductRevision: activeProduct.revision,
         expectedSessionRevision: activeSession.revision,
-        buyers: buyers.map((b) => ({
-          buyerId: b.buyerId,
-          quantity: b.quantity,
-          sourceCommentIds: b.sourceCommentIds || [],
-        })),
+        buyers: resolvedBuyers,
       });
-      await loadBootstrap();
+
+      if (isCurrentIdentity(request)) acceptCommittedSales(request.workspaceId, activeSession.id, resp);
       return resp;
     },
-    [activeSession, activeProduct, loadBootstrap]
+    [activeSession, activeProduct, acceptCommittedSales, captureRequest, isCurrentIdentity, isCurrentRequest, resolveSaleBuyers]
   );
 
   const processVoiceUtterance = useCallback(

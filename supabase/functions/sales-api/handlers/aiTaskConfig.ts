@@ -6,6 +6,7 @@
 export const AI_TASK_CONFIG = {
   // 시작 제한 시간 (초 단위 기본값)
   TIMEOUTS: {
+    PRIMARY_RESPONSE_SECONDS: 4, // 우선 AI의 완성된 응답 제한 (연결 + 본문 + 검증)
     CONNECT_SECONDS: 3,         // 연결 제한 시간: 3초
     SELF_HOSTED_SECONDS: 20,    // 자체 운영(로컬/외부) 분석 제한 시간: 20초
     CLOUD_SECONDS: 15,          // 클라우드 분석 제한 시간: 15초

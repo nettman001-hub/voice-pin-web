@@ -2,9 +2,9 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { AlertTriangle, X } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { useLive } from './LiveContext';
-import { storageService } from '../services/storageService';
+import { storageService, isTemporarySessionId } from '../services/storageService';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
-import { productSalesApi } from '../services/productSalesApi';
+import { enqueueCloudComment, flushPendingComments, promoteCommentOutbox, QueuedCloudComment } from '../services/commentSyncService';
 import { useProductSales } from './ProductSalesContext';
 import {
   commentDedupeKey,
@@ -13,6 +13,7 @@ import {
 } from '../services/commentStreamService';
 import type { CommentStreamStatus } from '../services/commentStreamService';
 import { CommentCaptureConfig, CommentRecord, DEFAULT_COMMENT_CAPTURE_CONFIG, DEFAULT_COMMENT_SERVER_URL } from '../types/comment';
+import { commentWithdrawsPurchase, purchaseRequestFromComment } from '../services/purchaseFirstSales';
 
 export interface CommentAlert {
   id: string;
@@ -20,17 +21,6 @@ export interface CommentAlert {
   word: string;
   content: string;
   firedAt: string;
-}
-
-interface QueuedCloudComment {
-  sessionId: string;
-  platformMessageId: string;
-  platformUserId?: string;
-  platformUniqueId?: string;
-  nickname: string;
-  content: string;
-  capturedAt: string;
-  ingestSequence: number;
 }
 
 interface CommentCaptureContextType {
@@ -61,7 +51,11 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   const [serverStatus, setServerStatus] = useState<CommentStreamStatus>('DISCONNECTED');
   const [serverMessage, setServerMessage] = useState<string>('VoiceCAP 댓글 도우미 미연결');
   const [newCount, setNewCount] = useState<number>(0);
-  const [liveComments, setLiveComments] = useState<CommentRecord[]>([]);
+  const [liveComments, setLiveComments] = useState<CommentRecord[]>(() => {
+    const session = storageService.getActiveSession(workspaceId);
+    const sid = session?.id || currentSessionId;
+    return storageService.getSessionCommentRecords(sid, workspaceId).slice(-100);
+  });
   const [activeAlert, setActiveAlert] = useState<CommentAlert | null>(null);
   const [config, setConfig] = useState<CommentCaptureConfig>(() => storageService.getCommentCaptureConfig());
 
@@ -71,7 +65,14 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   const isActiveRef = useRef<boolean>(false);
   const sessionIdRef = useRef<string>(currentSessionId);
   const pendingCommentsRef = useRef<Map<string, CommentRecord>>(new Map());
-  const cloudQueueRef = useRef<QueuedCloudComment[]>([]);
+  const workspaceRef = useRef(workspaceId);
+  if (workspaceRef.current !== workspaceId) {
+    seenKeysRef.current.clear();
+    pendingCommentsRef.current.clear();
+    isActiveRef.current = false;
+    sessionIdRef.current = activeSession?.id || currentSessionId;
+  }
+  workspaceRef.current = workspaceId;
   const cloudFlushTimerRef = useRef<number | null>(null);
   const cloudFlushInFlightRef = useRef(false);
   const cloudIngestSequenceRef = useRef(0);
@@ -91,21 +92,35 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
     // 임시 세션 ID에서 정식 활성 세션 UUID로 전환된 경우 기존 메모리 댓글의 세션 ID를 자동 승격
     if (nextSessionId && prevSessionId && prevSessionId !== nextSessionId) {
-      for (const [key, comment] of pendingCommentsRef.current.entries()) {
-        if (comment.sessionId === prevSessionId) {
-          pendingCommentsRef.current.set(key, { ...comment, sessionId: nextSessionId });
+      // P1-3: prevSessionId가 임시 세션 ID(날짜명 등)일 때만 정식 세션 UUID로 승격!
+      if (isTemporarySessionId(prevSessionId)) {
+        // 로컬 스토리지에 이미 저장된 댓글들의 sessionId도 일괄 승격
+        storageService.promoteSessionComments(prevSessionId, nextSessionId, workspaceId);
+        storageService.promotePurchaseRequests(prevSessionId, nextSessionId, workspaceId);
+        if (workspaceId) promoteCommentOutbox(workspaceId, prevSessionId, nextSessionId);
+
+        for (const [key, comment] of pendingCommentsRef.current.entries()) {
+          if (comment.sessionId === prevSessionId) {
+            pendingCommentsRef.current.set(key, { ...comment, sessionId: nextSessionId });
+          }
         }
+        setLiveComments((prev) => {
+          const updated = prev.map((c) => (c.sessionId === prevSessionId ? { ...c, sessionId: nextSessionId } : c));
+          // 로컬DB에 이미 저장되어 있는 해당 세션의 댓글도 합산
+          const localComments = storageService.getSessionCommentRecords(nextSessionId, workspaceId);
+          const idSet = new Set(updated.map((item) => item.platformMessageId || item.id));
+          const missing = localComments.filter((item) => !idSet.has(item.platformMessageId || item.id));
+          return [...updated, ...missing].slice(-100);
+        });
+      } else {
+        // 화면만 전환한다. 이전 회차의 미전송 댓글은 영속 큐에 보존한다.
+        pendingCommentsRef.current.clear();
+        const localComments = storageService.getSessionCommentRecords(nextSessionId, workspaceId);
+        setLiveComments(localComments.slice(-100));
       }
-      for (const item of cloudQueueRef.current) {
-        if (item.sessionId === prevSessionId) {
-          item.sessionId = nextSessionId;
-        }
-      }
-      setLiveComments((prev) =>
-        prev.map((c) => (c.sessionId === prevSessionId ? { ...c, sessionId: nextSessionId } : c))
-      );
     }
-  }, [activeSession?.id, currentSessionId]);
+    void flushCloudQueueRef.current();
+  }, [activeSession?.id, currentSessionId, workspaceId]);
 
   useEffect(() => {
     isActiveRef.current = isActive;
@@ -223,32 +238,18 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   // 설치 버전에 상관없이 로그인한 웹 세션이 댓글을 cloud live_comments에 적재한다.
   // 화면에는 소켓 댓글을 즉시 보여주고, 클라우드 반영 뒤 판매 피드를 다시 읽는다.
   const flushCloudQueue = useCallback(async () => {
-    if (cloudFlushInFlightRef.current || cloudQueueRef.current.length === 0) return;
-
-    const sessionId = cloudQueueRef.current[0].sessionId;
-    let batchSize = 0;
-    while (
-      batchSize < cloudQueueRef.current.length
-      && batchSize < 50
-      && cloudQueueRef.current[batchSize].sessionId === sessionId
-    ) {
-      batchSize += 1;
-    }
-    const batch = cloudQueueRef.current.splice(0, batchSize);
+    const owner = workspaceRef.current;
+    if (!owner || cloudFlushInFlightRef.current) return;
     cloudFlushInFlightRef.current = true;
-
     try {
-      await productSalesApi.ingestComments({
-        sessionId,
-        comments: batch.map(({ sessionId: _sessionId, ...comment }) => comment),
-      });
-      await pollFeed();
+      await flushPendingComments(owner);
+      if (workspaceRef.current === owner) await pollFeed();
     } catch (error) {
-      cloudQueueRef.current.unshift(...batch);
       console.warn('[CommentCaptureContext] 클라우드 댓글 적재 재시도:', error);
     } finally {
       cloudFlushInFlightRef.current = false;
-      if (cloudQueueRef.current.length > 0) {
+      const nextOwner = workspaceRef.current;
+      if (nextOwner && storageService.getCommentOutbox<QueuedCloudComment>(nextOwner).some((item) => !isTemporarySessionId(item.sessionId))) {
         scheduleCloudFlush(1_000);
       }
     }
@@ -256,10 +257,39 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
   flushCloudQueueRef.current = flushCloudQueue;
 
+  useEffect(() => {
+    seenKeysRef.current.clear();
+    pendingCommentsRef.current.clear();
+    setLiveComments([]);
+    setNewCount(0);
+    setIsActive(false);
+    const retry = () => scheduleCloudFlush();
+    retry();
+    window.addEventListener('online', retry);
+    return () => window.removeEventListener('online', retry);
+  }, [workspaceId, scheduleCloudFlush]);
+
+  useEffect(() => {
+    const handleDeleted = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.workspaceId !== workspaceRef.current) return;
+      const ids = new Set<string>(detail.ids || []);
+      const keys = new Set<string>(detail.keys || []);
+      const removed = (comment: CommentRecord) => ids.has(comment.id) || keys.has(`${comment.sessionId}:${comment.platformMessageId}`);
+      for (const [key, comment] of pendingCommentsRef.current) {
+        if (removed(comment)) pendingCommentsRef.current.delete(key);
+      }
+      setLiveComments((comments) => comments.filter((comment) => !removed(comment)));
+    };
+    window.addEventListener('voicecap_comments_deleted', handleDeleted);
+    return () => window.removeEventListener('voicecap_comments_deleted', handleDeleted);
+  }, []);
+
   // 댓글 도우미가 중계한 실시간 댓글 유입 처리
   const ingestComment = useCallback(
     (incoming: StreamedComment) => {
-      if (!isActiveRef.current) return;
+      const owner = workspaceRef.current;
+      if (!isActiveRef.current || !owner) return;
 
       const nickname = (incoming.nickname || incoming.uniqueId || '알 수 없음').trim();
       const content = String(incoming.content || '').trim();
@@ -269,7 +299,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         || `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
       // 메시지 ID 기반 중복 검사 (동일 시청자가 같은 내용의 댓글을 여러 번 남겨도 모두 정상 수신됨)
-      const key = commentDedupeKey(nickname, content, platformMessageId, incoming.receivedAt);
+      const key = `${sessionIdRef.current}:${commentDedupeKey(nickname, content, platformMessageId, incoming.receivedAt)}`;
       if (seenKeysRef.current.has(key)) return;
       seenKeysRef.current.add(key);
 
@@ -289,10 +319,18 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         sessionId: currentSession,
         nickname,
         uniqueId: incoming.uniqueId || undefined,
+        platformUserId: incoming.userId || undefined,
+        buyerId: undefined, // P1-2: 서버 buyers.id는 서버가 발급한 UUID여야 하므로 틱톡 ID 대입 중단
         content,
         capturedAt: incoming.receivedAt || new Date().toISOString(),
         ...(matchedWord ? { matchedAlertWord: matchedWord } : {})
       };
+
+      // [동시 쓰기 1: 로컬DB] 로컬 댓글 테이블에 즉시 INSERT
+      storageService.addCommentRecords([record], owner);
+      const purchaseRequest = purchaseRequestFromComment(record);
+      if (purchaseRequest) storageService.addPurchaseRequest(purchaseRequest, owner);
+      else if (commentWithdrawsPurchase(record.content)) storageService.withdrawPurchaseRequestsForComment(record, owner);
 
       pendingCommentsRef.current.set(platformMessageId, record);
 
@@ -307,7 +345,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
       if (record.sessionId) {
         cloudIngestSequenceRef.current += 1;
-        cloudQueueRef.current.push({
+        enqueueCloudComment(owner, {
           sessionId: record.sessionId,
           platformMessageId,
           platformUserId: incoming.userId || incoming.uniqueId || undefined,
@@ -389,9 +427,9 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       .filter((comment) => comment.sessionId === cloudSessionId);
 
     for (const comment of sessionComments) {
-      if (comment.platformMessageId) {
+      if (comment.platformMessageId && !comment.id.startsWith('stream-')) {
         pendingCommentsRef.current.delete(comment.platformMessageId);
-        seenKeysRef.current.add(`msg:${comment.platformMessageId}`);
+        seenKeysRef.current.add(`${cloudSessionId}:msg:${comment.platformMessageId}`);
       }
     }
 
@@ -400,6 +438,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       platformMessageId: comment.platformMessageId,
       sessionId: comment.sessionId,
       nickname: comment.nicknameSnapshot,
+      buyerId: comment.buyerId,
       content: comment.content,
       capturedAt: comment.capturedAt,
     }));
@@ -410,6 +449,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
       // 1. 기존 화면에 표시 중이던 댓글 보존
       for (const item of prevComments) {
+        if (storageService.isCommentDeleted(item, workspaceId)) continue;
         const isCurrentOrActive = !cloudSessionId || item.sessionId === cloudSessionId || item.sessionId === currentSessionId;
         if (isCurrentOrActive) {
           const migratedItem = cloudSessionId && item.sessionId !== cloudSessionId
@@ -423,8 +463,9 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         }
       }
 
-      // 2. 클라우드 판매 피드에서 반환된 최신 댓글 반영 (정식 레코드 ID로 갱신)
+      // 2. 클라우드 판매 피드에서 반환된 최신 댓글 반영 (정식 레코드 ID 및 buyerId로 갱신)
       for (const cloudRec of sessionRecords) {
+        if (storageService.isCommentDeleted(cloudRec, workspaceId)) continue;
         if (cloudRec.platformMessageId && byMsgId.has(cloudRec.platformMessageId)) {
           const existing = byMsgId.get(cloudRec.platformMessageId)!;
           byMsgId.set(cloudRec.platformMessageId, {
@@ -432,6 +473,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
             id: cloudRec.id,
             sessionId: cloudRec.sessionId,
             nickname: cloudRec.nickname || existing.nickname,
+            buyerId: cloudRec.buyerId,
             content: cloudRec.content || existing.content,
             capturedAt: cloudRec.capturedAt || existing.capturedAt,
           });
@@ -444,6 +486,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
 
       // 3. 아직 클라우드 피드에 반영 대기 중인 로컬 댓글 반영
       for (const pending of pendingCommentsRef.current.values()) {
+        if (storageService.isCommentDeleted(pending, workspaceId)) continue;
         const isCurrentOrActive = !cloudSessionId || pending.sessionId === cloudSessionId || pending.sessionId === currentSessionId;
         if (isCurrentOrActive) {
           const migratedPending = cloudSessionId && pending.sessionId !== cloudSessionId

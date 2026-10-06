@@ -16,6 +16,16 @@ export interface AiCommentContext {
   nickname: string;
   text: string;
   timestamp?: string;
+  buyerId?: string;
+  isPurchaseIntent?: boolean;
+}
+
+export interface AiPurchaseWindow {
+  commentId: string;
+  nickname: string;
+  capturedAt: string;
+  startAt: string;
+  endAt: string;
 }
 
 export interface AiSaleCandidate {
@@ -32,6 +42,7 @@ export interface AiSaleCandidate {
 }
 
 export interface AiResolutionRequest {
+  workflowProfile?: import('./salesWorkflow.ts').SalesWorkflowProfile;
   taskId?: string;
   taskType: AiTaskType;
   workspaceId: string;
@@ -41,6 +52,8 @@ export interface AiResolutionRequest {
   followingUtterances?: AiUtteranceContext[];
   followingUtterance?: string;
   relevantComments?: AiCommentContext[];
+  purchaseWindows?: AiPurchaseWindow[];
+  sellerUtterances?: AiUtteranceContext[];
   saleCandidates?: AiSaleCandidate[];
   activeProduct?: {
     productCode: string;
@@ -79,6 +92,7 @@ export interface AiStructuredChanges {
 
 export type AiResolutionAction =
   | 'UPDATE_SALE'        // 판매 값 정정/보완
+  | 'NOT_SALE'           // 측정·시연 등 거래가 아닌 발화
   | 'CANCEL_CORRECTION'  // 정정 요청 철회 (예: "방금 수정한 거 취소할게요")
   | 'KEEP_PENDING'       // 보류 유지 (추가 발화/댓글 대기)
   | 'INSUFFICIENT_DATA'; // 자료 부족

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { remoteWorkspaceService } from '../../services/remoteWorkspaceService';
 import { AdminSaleItem, SellerSalesGroup, SellerSttUsageSummary, SttUsageLogItem } from '../../types/admin';
+import { formatSessionDisplay } from '../../utils/sessionFormatter';
 
 export const AdminSalesManagementPage: React.FC = () => {
   const [sales, setSales] = useState<AdminSaleItem[]>([]);
@@ -401,8 +402,8 @@ export const AdminSalesManagementPage: React.FC = () => {
                                 <div className="text-slate-400">
                                   {isSessionExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
                                 </div>
-                                <span className="font-mono text-xs font-extrabold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-lg">
-                                  회차: {sess.sessionId}
+                                <span className="text-xs font-bold text-slate-800 bg-slate-100 px-2.5 py-0.5 rounded-lg border border-slate-200" title={`회차 ID: ${sess.sessionId}`}>
+                                  회차: {formatSessionDisplay(sess.sessionId, { recognizedAt: sess.sessionTime })}
                                 </span>
                                 <span className="text-[11px] text-slate-400">
                                   {new Date(sess.sessionTime).toLocaleString('ko-KR', {
@@ -543,8 +544,8 @@ export const AdminSalesManagementPage: React.FC = () => {
                         <div className="font-bold text-slate-900">{item.sellerNickname}</div>
                         <div className="text-[10px] text-slate-400">{item.sellerEmail}</div>
                       </td>
-                      <td className="py-3 px-4 font-mono text-slate-600 font-bold">
-                        {item.sessionId}
+                      <td className="py-3 px-4 text-slate-700 font-semibold" title={`회차 ID: ${item.sessionId}`}>
+                        {formatSessionDisplay(item.sessionId, { recognizedAt: item.recognizedAt || item.createdAt })}
                       </td>
                       <td className="py-3 px-4 font-bold text-slate-900">
                         {item.buyerNickname}
@@ -697,8 +698,8 @@ export const AdminSalesManagementPage: React.FC = () => {
                             {log.provider}
                           </span>
                         </td>
-                        <td className="py-2 px-3 font-mono text-slate-600 text-[11px]">
-                          {log.sessionId || '-'}
+                        <td className="py-2 px-3 text-slate-700 text-[11px] font-medium" title={log.sessionId ? `회차 ID: ${log.sessionId}` : undefined}>
+                          {log.sessionId ? formatSessionDisplay(log.sessionId, { recognizedAt: log.startedAt }) : '-'}
                         </td>
                         <td className="py-2 px-3 font-mono font-bold text-slate-900 text-right">
                           {formatSeconds(log.durationSeconds)}

@@ -4,12 +4,16 @@ import type {
   AiExecutionMeta,
 } from '../../../../../src/types/aiResolution.ts';
 import type { AiSlotConfig } from '../../../../../src/types/aiSettings.ts';
+import type { AiPromptInput, AiPromptResult } from './promptTypes.ts';
 import { safeFetch } from '../aiValidation.ts';
 import { buildResolutionPrompt, parseAndNormalizeAiOutput } from './common.ts';
+import { createConversationTraceRecorder, redactConversationSecrets, type ConversationTraceListener } from './conversationTrace.ts';
 
 export interface CloudAdapterOptions {
   slotConfig: AiSlotConfig;
   secretApiKey: string;
+  signal?: AbortSignal;
+  onConversationTrace?: ConversationTraceListener;
 }
 
 /**
@@ -21,6 +25,16 @@ export async function runCloudResolution(
   request: AiResolutionRequest,
   options: CloudAdapterOptions
 ): Promise<AiResolutionResult> {
+  return await runCloudCompletion(request, options) as AiResolutionResult;
+}
+
+export async function runCloudPrompt(request: AiPromptInput, options: CloudAdapterOptions): Promise<AiPromptResult> {
+  const result = await runCloudCompletion(request, options);
+  return 'content' in result ? result : { content: null, error: result.evidenceSummary,
+    errorCode: result.conflictReason === 'TIMEOUT' ? 'TIMEOUT' : 'PROVIDER_ERROR', execution: result.execution };
+}
+
+async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, options: CloudAdapterOptions): Promise<AiResolutionResult | AiPromptResult> {
   const { slotConfig } = options;
   const startTime = Date.now();
   const provider = slotConfig.provider || 'OPENAI';
@@ -67,7 +81,7 @@ export async function runCloudResolution(
   }
 
   // 2. 프롬프트 구성
-  const { systemPrompt, userPrompt } = buildResolutionPrompt(request);
+  const { systemPrompt, userPrompt } = 'systemPrompt' in request ? request : buildResolutionPrompt(request);
 
   // 3. 공급자별 엔드포인트 및 요청 바디 구성
   let url = (slotConfig.endpointUrl || '').trim();
@@ -85,7 +99,7 @@ export async function runCloudResolution(
       model,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
-      max_tokens: 1024,
+      max_tokens: 'systemPrompt' in request ? (request.maxOutputTokens ?? 4096) : 1024,
       temperature: 0.1,
     };
   } else if (provider === 'GOOGLE' || (provider as string) === 'GEMINI') {
@@ -101,7 +115,7 @@ export async function runCloudResolution(
       generationConfig: {
         responseMimeType: 'application/json',
         temperature: 0.1,
-        maxOutputTokens: 1024,
+        maxOutputTokens: 'systemPrompt' in request ? (request.maxOutputTokens ?? 4096) : 1024,
       },
     };
   } else {
@@ -122,8 +136,7 @@ export async function runCloudResolution(
     headers['Authorization'] = `Bearer ${secretApiKey.trim()}`;
     headers['x-api-key'] = secretApiKey.trim();
 
-    // DeepSeek 공식 문서 (https://api-docs.deepseek.com/):
-    // deepseek-reasoner(R1) 모델은 temperature, top_p, response_format 파라미터를 지원하지 않습니다 (전송 시 HTTP 400 반환).
+    // Preserve the legacy reasoner request shape for existing live resolution.
     const isDeepSeekReasoner = provider === 'DEEPSEEK' && model.includes('reasoner');
 
     if (isDeepSeekReasoner) {
@@ -145,44 +158,59 @@ export async function runCloudResolution(
         temperature: 0.1,
       };
     }
+    if ('systemPrompt' in request && provider === 'DEEPSEEK') {
+      // Workflow reports are concise structured extraction. Modern DeepSeek
+      // defaults to high-effort thinking; explicitly disable it for Flash/V4.
+      // https://api-docs.deepseek.com/guides/thinking_mode/
+      if (!isDeepSeekReasoner) requestBody.thinking = { type: 'disabled' };
+      requestBody.max_tokens = request.maxOutputTokens ?? 4096;
+    }
+    if ('systemPrompt' in request && request.maxOutputTokens !== undefined) requestBody.max_tokens = request.maxOutputTokens;
   }
 
   let rawResponseText = '';
   let tokenStats: { prompt?: number; completion?: number; total?: number } | undefined;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+  const trace = createConversationTraceRecorder(
+    { systemPrompt, userPrompt, provider, model }, options.onConversationTrace, [secretApiKey],
+  );
 
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     // safeFetch: SSRF 방지 및 HTTP 3xx 리디렉션 차단
+    trace.dispatched();
     const res = await safeFetch(
       url,
       {
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody),
-        signal: controller.signal,
+        signal,
       },
       {
         routingMode: 'SERVER_DIRECT',
         location: 'EXTERNAL_IP',
       }
     );
-    clearTimeout(timer);
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
+      trace.received(errText, res.status, 'HTTP_ERROR');
       throw new Error(`${provider} API 응답 오류 (HTTP ${res.status}): ${errText}`);
     }
 
     rawResponseText = await res.text();
     const latencyMs = Date.now() - startTime;
     let contentToParse = rawResponseText;
+    let outputLimited = false;
 
     try {
       const json = JSON.parse(rawResponseText);
       if (provider === 'ANTHROPIC') {
-        contentToParse = json.content?.[0]?.text || '';
+        outputLimited = json.stop_reason === 'max_tokens';
+        contentToParse = json.content?.[0]?.text ?? rawResponseText;
         if (json.usage) {
           tokenStats = {
             prompt: json.usage.input_tokens,
@@ -190,8 +218,9 @@ export async function runCloudResolution(
             total: (json.usage.input_tokens || 0) + (json.usage.output_tokens || 0),
           };
         }
-      } else if (provider === 'GOOGLE') {
-        contentToParse = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      } else if (provider === 'GOOGLE' || (provider as string) === 'GEMINI') {
+        outputLimited = json.candidates?.[0]?.finishReason === 'MAX_TOKENS';
+        contentToParse = json.candidates?.[0]?.content?.parts?.[0]?.text ?? rawResponseText;
         if (json.usageMetadata) {
           tokenStats = {
             prompt: json.usageMetadata.promptTokenCount,
@@ -201,7 +230,8 @@ export async function runCloudResolution(
         }
       } else {
         // OpenAI / DeepSeek / Custom
-        contentToParse = json.choices?.[0]?.message?.content || '';
+        outputLimited = json.choices?.[0]?.finish_reason === 'length';
+        contentToParse = json.choices?.[0]?.message?.content ?? rawResponseText;
         if (json.usage) {
           tokenStats = {
             prompt: json.usage.prompt_tokens,
@@ -213,6 +243,7 @@ export async function runCloudResolution(
     } catch {
       // raw text
     }
+    trace.received(typeof contentToParse === 'string' ? contentToParse : JSON.stringify(contentToParse), res.status, 'MODEL_OUTPUT');
 
     const executionMeta: AiExecutionMeta = {
       adapterType: 'CLOUD',
@@ -224,18 +255,24 @@ export async function runCloudResolution(
       tokensUsed: tokenStats,
     };
 
+    if ('systemPrompt' in request) {
+      if (outputLimited) return { content: null, errorCode: 'OUTPUT_LIMIT',
+        error: 'AI 답변이 출력 길이 제한에 도달해 잘렸습니다. 분석 자료를 나누어 다시 요청해 주세요.', execution: executionMeta };
+      return { content: redactConversationSecrets(String(contentToParse), [secretApiKey]), execution: executionMeta };
+    }
     return parseAndNormalizeAiOutput(contentToParse, request, executionMeta);
   } catch (err: any) {
     const latencyMs = Date.now() - startTime;
+    const safeError = redactConversationSecrets(err.message || '클라우드 API 호출 실패', [secretApiKey]);
     return {
       resolvable: false,
       targetSaleId: null,
       action: 'INSUFFICIENT_DATA',
       changes: null,
       evidenceIds: [],
-      evidenceSummary: `${provider} 클라우드 API 호출 실패: ${err.message || '네트워크 오류'}`,
-      missingInfo: [err.message || '클라우드 API 호출 실패'],
-      conflictReason: '클라우드 공급자 통신 오류',
+      evidenceSummary: `${provider} 클라우드 API 호출 실패: ${safeError}`,
+      missingInfo: [safeError],
+      conflictReason: signal.aborted ? 'TIMEOUT' : '클라우드 공급자 통신 오류',
       execution: {
         adapterType: 'CLOUD',
         routingMode: 'SERVER_DIRECT',
@@ -243,8 +280,10 @@ export async function runCloudResolution(
         provider,
         model,
         latencyMs,
-        rawResponse: rawResponseText || err.message,
+        rawResponse: redactConversationSecrets(rawResponseText || safeError, [secretApiKey]),
       },
     };
+  } finally {
+    clearTimeout(timer);
   }
 }

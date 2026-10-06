@@ -1,12 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { SaleRecord, SaleStatus } from '../types/live';
-import { getNextProductCodeForSession, formatSequentialProductName } from '../services/storageService';
+import { storageService, getNextProductCodeForSession, formatSequentialProductName } from '../services/storageService';
 import { exportSalesToCsv } from '../services/csvExporter';
 import { useAuth } from './AuthContext';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
 import { commentStreamService } from '../services/commentStreamService';
 import type { BatchConfirmResult, SaleHistoryRecord } from '../types/pendingSale';
 import { aiSettingsApi } from '../services/aiSettingsApi';
+import { SalesSyncController } from '../services/salesSyncController';
+import type { PromiseDefaultRecord } from '../services/promiseDefaultService';
 
 interface SettlementSummary {
   totalCount: number;
@@ -17,6 +19,9 @@ interface SettlementSummary {
 
 interface SalesContextType {
   sales: SaleRecord[];
+  promiseDefaults: PromiseDefaultRecord[];
+  setPromiseDefault: (buyerKey: string, buyerNickname: string, sessionId: string,
+    status: PromiseDefaultRecord['status']) => Promise<void>;
   addSale: (sale: Omit<SaleRecord, 'id'>) => SaleRecord;
   updateSale: (sale: SaleRecord) => void;
   retrySalePrint: (id: string) => void;
@@ -24,6 +29,9 @@ interface SalesContextType {
   confirmBatchSales: (saleIds: string[]) => BatchConfirmResult;
   exportCsv: (filteredRecords?: SaleRecord[], filename?: string) => boolean;
   refreshSales: () => Promise<SaleRecord[]>;
+  applyCommittedSales: (workspaceId: string, records: SaleRecord[]) => void;
+  syncError: string | null;
+  retrySync: () => void;
   getSalesBySession: (sessionId: string) => SaleRecord[];
   getSettlementSummary: (period: 'TODAY' | 'WEEK' | 'MONTH' | 'CUSTOM', customRange?: { start: string; end: string }) => {
     summary: SettlementSummary;
@@ -35,33 +43,114 @@ interface SalesContextType {
 const SalesContext = createContext<SalesContextType | undefined>(undefined);
 
 export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { workspaceId, isRemoteAuth } = useAuth();
-  // 판매 내역은 로그인한 작업공간의 Supabase sales 테이블만 원본으로 사용한다.
-  // 로컬 저장소에는 판매 이력을 복제하지 않아 다른 PC에서도 같은 목록을 바로 조회한다.
-  const [sales, setSales] = useState<SaleRecord[]>([]);
-  const salesRef = useRef<SaleRecord[]>([]);
+  const { workspaceId, isRemoteAuth, user } = useAuth();
+  const [sales, setSales] = useState<SaleRecord[]>(() => workspaceId ? storageService.getSales(workspaceId) : []);
+  const [promiseDefaultsState, setPromiseDefaultsState] = useState<{ workspaceId: string; records: PromiseDefaultRecord[] }>(
+    () => ({ workspaceId: workspaceId || '', records: workspaceId ? storageService.getPromiseDefaults(workspaceId) : [] }),
+  );
+  const promiseDefaultChangeRef = useRef(0);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const salesRef = useRef<SaleRecord[]>(sales);
+  const identityRef = useRef(workspaceId);
+  identityRef.current = workspaceId;
+  const identityKey = `${user?.id || ''}:${workspaceId || ''}:${isRemoteAuth}`;
+  const identityKeyRef = useRef(identityKey);
+  const identityGenerationRef = useRef(0);
+  if (identityKeyRef.current !== identityKey) {
+    identityKeyRef.current = identityKey;
+    identityGenerationRef.current += 1;
+    salesRef.current = [];
+  }
+  const controllerRef = useRef<{ workspaceId: string; generation: number; controller: SalesSyncController } | null>(null);
 
-  useEffect(() => {
-    salesRef.current = sales;
-  }, [sales]);
+  const getController = useCallback(() => {
+    if (!workspaceId || identityRef.current !== workspaceId || identityKeyRef.current !== identityKey) return null;
+    const generation = identityGenerationRef.current;
+    if (controllerRef.current?.workspaceId === workspaceId && controllerRef.current.generation === generation) return controllerRef.current.controller;
+    const controller: SalesSyncController = new SalesSyncController({
+      scope: workspaceId,
+      read: () => storageService.getSalesLocalState(workspaceId),
+      persist: (state) => storageService.saveSalesLocalState(workspaceId, state),
+      update: (change) => storageService.updateSalesLocalState(workspaceId, change),
+      save: (sale) => isRemoteAuth ? remoteWorkspaceService.saveSale(workspaceId, sale) : Promise.resolve(),
+      remove: (id) => isRemoteAuth ? remoteWorkspaceService.deleteSale(workspaceId, id) : Promise.resolve(),
+      load: () => isRemoteAuth ? remoteWorkspaceService.loadSales(workspaceId) : Promise.resolve(storageService.getSales(workspaceId)),
+      changed: (records) => {
+        const before = salesRef.current;
+        salesRef.current = records;
+        setSales(records);
+        // A queued receipt is dispatched only after the cloud acknowledges the
+        // allocation. A local optimistic row is never an invoice/print order.
+        for (const sale of records) {
+          const old = before.find((item) => item.id === sale.id);
+          if (sale.printStatus === 'QUEUED' && sale.syncStatus === 'SYNCED'
+            && old?.syncStatus === 'PENDING' && old.printRevision === sale.printRevision) {
+            sendToPrinter(sale);
+          }
+        }
+      },
+      error: (message) => setSyncError(message),
+      active: () => identityGenerationRef.current === generation && identityRef.current === workspaceId && controllerRef.current?.controller === controller,
+    });
+    controllerRef.current = { workspaceId, generation, controller };
+    salesRef.current = controller.records;
+    return controller;
+  }, [identityKey, isRemoteAuth, workspaceId]);
 
   const refreshSales = useCallback(async (): Promise<SaleRecord[]> => {
-    if (!isRemoteAuth || !workspaceId) {
-      salesRef.current = [];
-      setSales([]);
-      return [];
+    if (!workspaceId) {
+      const local = workspaceId ? storageService.getSales(workspaceId) : [];
+      salesRef.current = local;
+      setSales(local);
+      setPromiseDefaultsState({ workspaceId: '', records: [] });
+      return local;
     }
 
-    const rows = await remoteWorkspaceService.loadSales(workspaceId);
-    salesRef.current = rows;
-    setSales(rows);
-    return rows;
-  }, [isRemoteAuth, workspaceId]);
+    const mutationVersion = promiseDefaultChangeRef.current;
+    const [records, decisions] = await Promise.all([
+      getController()?.refresh() || Promise.resolve([]),
+      isRemoteAuth ? remoteWorkspaceService.loadPromiseDefaults(workspaceId)
+        : Promise.resolve(storageService.getPromiseDefaults(workspaceId)),
+    ]);
+    if (identityRef.current === workspaceId && promiseDefaultChangeRef.current === mutationVersion) {
+      setPromiseDefaultsState({ workspaceId, records: decisions });
+      storageService.savePromiseDefaults(decisions, workspaceId);
+    }
+    return records;
+  }, [getController, isRemoteAuth, workspaceId]);
+
+  const setPromiseDefault = async (buyerKey: string, buyerNickname: string, sessionId: string,
+    status: PromiseDefaultRecord['status']): Promise<void> => {
+    if (!workspaceId || !buyerKey || !buyerNickname.trim() || !sessionId) throw new Error('구매자와 방송 회차가 필요합니다.');
+    const decision: PromiseDefaultRecord = {
+      buyerKey, buyerNickname: buyerNickname.trim(), sessionId, status, updatedAt: new Date().toISOString(),
+    };
+    if (isRemoteAuth) await remoteWorkspaceService.savePromiseDefault(workspaceId, decision);
+    if (identityRef.current !== workspaceId) return;
+    promiseDefaultChangeRef.current += 1;
+    storageService.savePromiseDefault(decision, workspaceId);
+    setPromiseDefaultsState((current) => ({
+      workspaceId,
+      records: [decision, ...current.records.filter((record) =>
+        record.buyerKey !== buyerKey || record.sessionId !== sessionId)],
+    }));
+  };
+
+  const applyCommittedSales = useCallback((owner: string, records: SaleRecord[]) => {
+    if (owner !== identityRef.current) return;
+    getController()?.applyConfirmed(records);
+  }, [getController]);
+
+  const retrySync = useCallback(() => { void getController()?.flush({ retryBlocked: true }); }, [getController]);
+  const retryAutomaticSync = useCallback(() => { void getController()?.flush(); }, [getController]);
 
   useEffect(() => {
-    if (!isRemoteAuth || !workspaceId) {
+    if (!workspaceId) {
       salesRef.current = [];
       setSales([]);
+      setPromiseDefaultsState({ workspaceId: '', records: [] });
+      controllerRef.current = null;
+      setSyncError(null);
       return;
     }
     let active = true;
@@ -71,29 +160,51 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (active) console.error('[Sales] remote load failed', error);
       });
     };
-    load();
-    const unsubscribe = remoteWorkspaceService.subscribe(workspaceId, () => {
+    void storageService.restoreWorkspace(workspaceId).then(() => {
+      if (!active || identityRef.current !== workspaceId) return;
+      // Initialize after recovering the durable outbox; never replace a live controller.
+      const controller = getController();
+      if (controller) { salesRef.current = controller.records; setSales(controller.records); }
+      retryAutomaticSync();
+      load();
+    });
+    const unsubscribe = isRemoteAuth ? remoteWorkspaceService.subscribe(workspaceId, () => {
       window.clearTimeout(timer);
       timer = window.setTimeout(load, 350);
-    });
-    return () => { active = false; window.clearTimeout(timer); unsubscribe(); };
-  }, [isRemoteAuth, workspaceId, refreshSales]);
-
-  const persist = (sale: SaleRecord) => {
-    if (isRemoteAuth && workspaceId) {
-      void remoteWorkspaceService.saveSale(workspaceId, sale).catch((error) => console.error('[Sales] remote save failed', error));
-    }
-  };
+    }) : () => {};
+    const retryTimer = window.setInterval(retryAutomaticSync, 10_000);
+    window.addEventListener('online', retryAutomaticSync);
+    const reloadLocal = () => {
+      void storageService.restoreWorkspace(workspaceId).then(async () => {
+        if (!active) return;
+        await getController()?.reloadState();
+        retryAutomaticSync();
+      });
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === `voicecap_sales_state:${encodeURIComponent(workspaceId)}`) reloadLocal();
+    };
+    const handleLocal = (event: Event) => {
+      if ((event as CustomEvent).detail?.workspaceId === workspaceId) reloadLocal();
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('voicecap_sales_updated', handleLocal);
+    return () => {
+      active = false; window.clearTimeout(timer); window.clearInterval(retryTimer);
+      window.removeEventListener('online', retryAutomaticSync); unsubscribe();
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('voicecap_sales_updated', handleLocal);
+    };
+  }, [getController, isRemoteAuth, workspaceId, refreshSales, retryAutomaticSync]);
 
   const replaceSale = (sale: SaleRecord) => {
-    const nextSales = salesRef.current.map((item) => item.id === sale.id ? sale : item);
-    salesRef.current = nextSales;
-    setSales(nextSales);
-    persist(sale);
+    const controller = getController();
+    if (!controller) return;
+    return controller.upsert(sale);
   };
 
   const isPrintableSale = (sale: SaleRecord) => (
-    sale.status !== '보류'
+    sale.status !== '보류' && sale.status !== '취소' && sale.recordState !== 'CANCELLED'
     && sale.amount > 0
     && Boolean(sale.buyerNickname.trim())
     && sale.buyerNickname !== '미확인(보류)'
@@ -111,6 +222,8 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   const sendToPrinter = (sale: SaleRecord) => {
+    const owner = workspaceId;
+    const generation = identityGenerationRef.current;
     void commentStreamService.printSale({
       saleId: sale.id,
       printRevision: sale.printRevision || 1,
@@ -120,6 +233,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       sessionId: sale.sessionId,
     }).then((result) => {
       // 그 사이에 같은 판매가 다시 수정되었다면 오래된 인쇄 응답으로 상태를 덮어쓰지 않는다.
+      if (identityRef.current !== owner || identityGenerationRef.current !== generation) return;
       const latest = salesRef.current.find((item) => item.id === sale.id);
       if (!latest || latest.printRevision !== sale.printRevision) return;
       replaceSale({
@@ -129,6 +243,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         printError: result.ok ? undefined : (result.error || '인쇄에 실패했습니다.'),
       });
     }).catch((error) => {
+      if (identityRef.current !== owner || identityGenerationRef.current !== generation) return;
       const latest = salesRef.current.find((item) => item.id === sale.id);
       if (!latest || latest.printRevision !== sale.printRevision) return;
       replaceSale({
@@ -147,9 +262,8 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       printedAt: undefined,
       printError: undefined,
     };
-    replaceSale(queued);
-    sendToPrinter(queued);
-    return queued;
+    const persisted = replaceSale(queued) || queued;
+    return persisted;
   };
 
   const addSale = (saleData: Omit<SaleRecord, 'id'>): SaleRecord => {
@@ -169,22 +283,45 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       id: `s-${crypto.randomUUID()}`,
       printStatus: saleData.printStatus || 'NOT_REQUESTED',
       printRevision: saleData.printRevision || 0,
+      syncStatus: 'PENDING',
+      revision: saleData.revision || 1,
     };
     const newSale = isPrintableSale(baseSale)
       ? { ...baseSale, printStatus: 'QUEUED' as const, printRevision: Math.max(1, baseSale.printRevision || 0) }
       : baseSale;
-    const nextSales = [newSale, ...salesRef.current];
-    salesRef.current = nextSales;
-    setSales(nextSales);
-    if (isRemoteAuth && workspaceId) {
-      void remoteWorkspaceService.saveSale(workspaceId, newSale).catch((error) => console.error('[Sales] remote add failed', error));
-    }
-    if (newSale.printStatus === 'QUEUED') sendToPrinter(newSale);
-    return newSale;
+    const controller = getController();
+    if (!controller) throw new Error('로그인한 작업공간이 준비되지 않았습니다.');
+    const persisted = controller.upsert(newSale);
+    return persisted;
   };
 
   const updateSale = (updated: SaleRecord) => {
     const previous = salesRef.current.find((sale) => sale.id === updated.id);
+    if (previous?.source === 'WEB_VOICE' && previous.syncStatus === 'PENDING') {
+      const sameEvidence = previous.sessionId === updated.sessionId
+        && previous.amount === updated.amount && previous.rawTranscript === updated.rawTranscript
+        && previous.recognizedAt === updated.recognizedAt
+        && previous.productId === updated.productId && previous.productCode === updated.productCode
+        && previous.productName === updated.productName;
+      const metadataOnly = sameEvidence && previous.buyerNickname === updated.buyerNickname
+        && previous.purchaseRequestId === updated.purchaseRequestId && previous.status === updated.status;
+      const lateCommentLinked = sameEvidence && previous.status === '보류'
+        && updated.status === '자동저장' && Boolean(updated.purchaseRequestId);
+      const workflowContinuation = previous.status === '보류' && Boolean(previous.workflowEvidence)
+        && previous.sessionId === updated.sessionId && previous.recognizedAt === updated.recognizedAt
+        && previous.workflowEvidence?.decisionId === updated.workflowEvidence?.decisionId
+        && previous.workflowEvidence?.profileId === updated.workflowEvidence?.profileId
+        && previous.workflowEvidence?.profileVersion === updated.workflowEvidence?.profileVersion
+        && (updated.status === '보류' || (updated.status === '자동저장' && Boolean(updated.purchaseRequestId)));
+      if (!metadataOnly && !lateCommentLinked && !workflowContinuation) {
+        setSyncError('음성 판매의 서버 저장 확인 전에는 구매자·가격을 수정할 수 없습니다.');
+        return;
+      }
+      if (metadataOnly) {
+        replaceSale(updated);
+        return;
+      }
+    }
     const shouldPrint = previous
       ? isPrintableSale(updated) && (!isPrintableSale(previous) || hasSellerEditChanged(previous, updated))
       : false;
@@ -197,17 +334,12 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const retrySalePrint = (id: string) => {
     const sale = salesRef.current.find((item) => item.id === id);
-    if (!sale || !isPrintableSale(sale)) return;
+    if (!sale || sale.syncStatus === 'PENDING' || !isPrintableSale(sale)) return;
     queueSalePrint(sale, Math.max(1, sale.printRevision || 0) + 1);
   };
 
   const deleteSale = (id: string) => {
-    const nextSales = salesRef.current.filter((sale) => sale.id !== id);
-    salesRef.current = nextSales;
-    setSales(nextSales);
-    if (isRemoteAuth && workspaceId) {
-      void remoteWorkspaceService.deleteSale(workspaceId, id).catch((error) => console.error('[Sales] remote delete failed', error));
-    }
+    getController()?.delete(id);
   };
 
   const confirmBatchSales = (saleIds: string[]): BatchConfirmResult => {
@@ -229,6 +361,8 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (!hasValidNickname) validationErrors.push('구매자 닉네임 미확인');
       if (!hasValidAmount) validationErrors.push('판매 금액 0원 또는 미입력');
       if (!hasProduct) validationErrors.push('연결 상품 정보 누락');
+      if (sale.syncStatus === 'PENDING') validationErrors.push('서버 저장 확인 대기');
+      if (sale.source === 'WEB_VOICE' && !sale.purchaseRequestId) validationErrors.push('실제 구매 댓글·계정 연결 필요');
       if (unresolved.length > 0) {
         validationErrors.push(...unresolved.map((r) => r.message));
       }
@@ -305,7 +439,8 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (period === 'CUSTOM' && customRange) return recordedAt >= new Date(customRange.start).getTime() && recordedAt <= new Date(customRange.end).setHours(23, 59, 59, 999);
       return true;
     });
-    const validSales = filtered.filter((sale) => sale.status !== '보류');
+    const validSales = filtered.filter((sale) => sale.status !== '보류' && sale.status !== '취소'
+      && sale.recordState !== 'CANCELLED' && sale.syncStatus !== 'PENDING');
     const pendingSales = filtered.filter((sale) => sale.status === '보류');
     const groups: Record<string, SaleRecord[]> = {};
     validSales.forEach((sale) => {
@@ -331,7 +466,11 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   };
 
-  return <SalesContext.Provider value={{ sales, addSale, updateSale, retrySalePrint, deleteSale, confirmBatchSales, exportCsv, refreshSales, getSalesBySession, getSettlementSummary }}>
+  const visibleSales = controllerRef.current?.workspaceId === workspaceId && controllerRef.current.generation === identityGenerationRef.current ? sales : [];
+  const visiblePromiseDefaults = promiseDefaultsState.workspaceId === workspaceId ? promiseDefaultsState.records : [];
+  return <SalesContext.Provider value={{ sales: visibleSales, promiseDefaults: visiblePromiseDefaults, setPromiseDefault,
+    addSale, updateSale, retrySalePrint, deleteSale, confirmBatchSales, exportCsv, refreshSales, applyCommittedSales,
+    syncError, retrySync, getSalesBySession, getSettlementSummary }}>
     {children}
   </SalesContext.Provider>;
 };

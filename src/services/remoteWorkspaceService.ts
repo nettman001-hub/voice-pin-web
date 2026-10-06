@@ -1,12 +1,28 @@
 import { RecognitionWordRule, CaptureAreaConfig } from '../types/rules';
-import { TrainingSentence } from '../types/training';
 import { CommentCaptureConfig } from '../types/comment';
 import { SttMode, LocalSttModel } from '../types/stt';
 import { CommerceState, CustomerPurchaseClaim, PaymentReceipt, SettlementInvoice, Shipment, SmsMessage } from '../types/commerce';
-import { SaleRecord } from '../types/live';
+import { SaleRecord, SttTranscriptLog, SellerTranscriptRecord } from '../types/live';
 import { User } from '../types/auth';
 import { AdminSaleItem, SellerSttUsageSummary, SttUsageLogItem, SttUsageRecordPayload } from '../types/admin';
 import { isSupabaseConfigured, requireSupabase } from './supabaseClient';
+import { hasCommerceChanges, type CommerceChanges } from './commerceChanges';
+import { normalizeSttVocabulary } from './sttVocabularyService';
+import type { PromiseDefaultRecord } from './promiseDefaultService';
+import { invalidVoiceSaleFields, voiceSaleValidationMessage } from './voiceSaleValidation';
+
+export interface CloudSessionTranscriptsPayload {
+  sessionId: string;
+  workspaceId: string;
+  transcriptCount: number;
+  savedAt: string;
+  logs: SttTranscriptLog[];
+}
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isValidUuid = (value: string | undefined | null): boolean => {
+  return typeof value === 'string' && UUID_REGEX.test(value.trim());
+};
 
 type Row = Record<string, any>;
 const signedImageCache = new Map<string, { url: string; expiresAt: number }>();
@@ -38,6 +54,8 @@ const mapSale = async (row: Row): Promise<SaleRecord> => {
     id: row.id,
     sessionId: row.session_id,
     buyerNickname: row.buyer_nickname,
+    buyerId: row.buyer_id || undefined,
+    recordState: (row.record_state as 'ACTIVE' | 'CANCELLED') || 'ACTIVE',
     amount: row.amount,
     recognizedAt: row.recognized_at,
     rawTranscript: row.raw_transcript,
@@ -49,6 +67,13 @@ const mapSale = async (row: Row): Promise<SaleRecord> => {
     productImagePath: productImagePath || undefined,
     quantity: Number(row.quantity || 1),
     unitPrice: Number(row.unit_price ?? row.amount ?? 0),
+    purchaseRequestId: row.purchase_request_id || undefined,
+    workflowEvidence: row.workflow_evidence || undefined,
+    sourceCommentIds: Array.isArray(row.source_comment_ids) ? row.source_comment_ids : [],
+    pendingReasons: Array.isArray(row.pending_reasons) ? row.pending_reasons : [],
+    evidenceSnapshot: row.evidence_snapshot || undefined,
+    aiVerification: row.ai_verification || undefined,
+    history: Array.isArray(row.history) ? row.history : [],
     source: row.source || 'LEGACY',
     captureImageUrls: await imageUrls(storagePaths),
     note: row.note || undefined,
@@ -56,6 +81,7 @@ const mapSale = async (row: Row): Promise<SaleRecord> => {
     printRevision: Number(row.print_revision || 0),
     printedAt: row.printed_at || undefined,
     printError: row.print_error || undefined,
+    revision: Number(row.revision || 1),
     __voicecapStoragePaths: storagePaths,
   } as SaleRecord;
 };
@@ -80,6 +106,14 @@ const toSaleRow = async (workspaceId: string, sale: SaleRecord) => ({
   workspace_id: workspaceId,
   session_id: sale.sessionId,
   buyer_nickname: sale.buyerNickname,
+  buyer_id: sale.buyerId || null,
+  purchase_request_id: sale.purchaseRequestId || null,
+  workflow_evidence: sale.workflowEvidence || null,
+  source_comment_ids: sale.sourceCommentIds || [],
+  pending_reasons: sale.pendingReasons || [],
+  evidence_snapshot: sale.evidenceSnapshot || null,
+  ai_verification: sale.aiVerification || null,
+  history: sale.history || [],
   amount: sale.amount,
   recognized_at: sale.recognizedAt,
   raw_transcript: sale.rawTranscript,
@@ -91,7 +125,8 @@ const toSaleRow = async (workspaceId: string, sale: SaleRecord) => ({
   product_code_snapshot: sale.productCode || null,
   product_name_snapshot: sale.productName || null,
   product_image_path_snapshot: sale.productImagePath || null,
-  record_state: 'ACTIVE',
+  record_state: sale.recordState || (sale.status === '취소' ? 'CANCELLED' : 'ACTIVE'),
+  revision: sale.revision || 1,
   source: sale.source || 'LEGACY',
   capture_image_paths: await persistImages(
     workspaceId,
@@ -466,13 +501,115 @@ export const remoteWorkspaceService = {
   },
 
   async loadSales(workspaceId: string) {
-    const { data, error } = await ensureEnabled().from('sales').select('*').eq('workspace_id', workspaceId).order('recognized_at', { ascending: false });
+    // A complete snapshot is required before calculating totals locally. The
+    // PostgREST row cap must not silently drop older sales or pending evidence.
+    const rows: any[] = [];
+    const pageSize = 1000;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await ensureEnabled().from('sales').select('*').eq('workspace_id', workspaceId)
+        .order('recognized_at', { ascending: false }).order('id').range(offset, offset + pageSize - 1);
+      if (error) throw error;
+      rows.push(...(data || []));
+      if (!data || data.length < pageSize) break;
+    }
+    return Promise.all(rows.map(mapSale));
+  },
+
+  async loadPromiseDefaults(workspaceId: string): Promise<PromiseDefaultRecord[]> {
+    const rows: PromiseDefaultRecord[] = [];
+    const pageSize = 1000;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await ensureEnabled().from('buyer_promise_defaults').select('*')
+        .eq('workspace_id', workspaceId).order('updated_at', { ascending: false })
+        .range(offset, offset + pageSize - 1);
+      if (error) throw error;
+      rows.push(...(data || []).map((row: any) => ({
+        buyerKey: row.buyer_key, buyerNickname: row.buyer_nickname,
+        sessionId: row.session_id, status: row.status, updatedAt: row.updated_at,
+      })));
+      if (!data || data.length < pageSize) break;
+    }
+    return rows;
+  },
+
+  async savePromiseDefault(workspaceId: string, decision: PromiseDefaultRecord): Promise<void> {
+    const { error } = await ensureEnabled().from('buyer_promise_defaults').upsert({
+      workspace_id: workspaceId,
+      buyer_key: decision.buyerKey,
+      buyer_nickname: decision.buyerNickname,
+      session_id: decision.sessionId,
+      status: decision.status,
+      updated_at: decision.updatedAt,
+    }, { onConflict: 'workspace_id,buyer_key,session_id' });
     if (error) throw error;
-    return Promise.all((data || []).map(mapSale));
   },
 
   async saveSale(workspaceId: string, sale: SaleRecord) {
-    const row = await toSaleRow(workspaceId, sale);
+    if (sale.source === 'WEB_VOICE' && sale.status === '자동저장'
+        && sale.purchaseRequestId && sale.printStatus === 'QUEUED' && (sale.printRevision || 0) === 1) {
+      const operationId = sale.id.slice(2);
+      const invalidFields = invalidVoiceSaleFields(operationId, sale);
+      if (invalidFields.length) {
+        console.error('[VoiceSale] 판매 저장 근거 검증 실패:', { saleId: sale.id, invalidFields });
+        throw Object.assign(new Error(voiceSaleValidationMessage(invalidFields)), {
+          code: 'VALIDATION_ERROR', retryable: false, details: { invalidFields },
+        });
+      }
+      const { data, error } = await ensureEnabled().functions.invoke('sales-api', { body: {
+        action: 'commit-voice-sale', operationId,
+        sale: {
+          id: sale.id, sessionId: sale.sessionId, purchaseRequestId: sale.purchaseRequestId,
+          productId: sale.productId, productCode: sale.productCode, productName: sale.productName,
+          amount: sale.amount, unitPrice: sale.unitPrice || 0, quantity: sale.quantity || 1,
+          workflowEvidence: sale.workflowEvidence,
+          rawTranscript: sale.rawTranscript, recognizedAt: sale.recognizedAt,
+        },
+      } });
+      if (error || !data?.ok) {
+        let serverError = data?.error;
+        const response = (error as { context?: Response } | null)?.context;
+        if (!serverError && response && typeof response.clone === 'function') {
+          try {
+            const body = await response.clone().json();
+            serverError = body?.error;
+          } catch { /* The HTTP status is still useful when the body is unreadable. */ }
+        }
+        console.error('[VoiceSale] 클라우드 판매 확정 실패:', {
+          status: response?.status ?? null,
+          code: serverError?.code || 'UNKNOWN',
+          message: serverError?.message || error?.message || '응답을 확인할 수 없습니다.',
+          saleId: sale.id,
+          invalidFields: serverError?.details?.invalidFields || [],
+        });
+        // A comment not yet uploaded can become valid on the next retry. Input
+        // validation failures cannot, and must not block unrelated sales.
+        const retryable = !['VALIDATION_ERROR', 'PRICE_OR_INTENT_UNVERIFIED', 'INVALID_EVIDENCE'].includes(serverError?.code);
+        throw Object.assign(new Error(serverError?.message || error?.message || '음성 판매 서버 확정 실패'), {
+          code: serverError?.code, retryable, details: serverError?.details,
+        });
+      }
+      return;
+    }
+    // The first voice allocation is committed by the RPC, which resolves the
+    // canonical buyer/comment/product IDs. Later print/correction updates must
+    // not overwrite those IDs with the optimistic client's empty placeholders.
+    let canonicalSale = sale;
+    if (sale.source === 'WEB_VOICE' && sale.purchaseRequestId && (sale.revision || 1) > 1) {
+      const { data: confirmed, error: readError } = await ensureEnabled().from('sales').select(
+        'buyer_id, product_id, source_comment_ids, buyer_nickname, product_code_snapshot, product_name_snapshot')
+        .eq('workspace_id', workspaceId).eq('id', sale.id).maybeSingle();
+      if (readError) throw readError;
+      if (confirmed) canonicalSale = {
+        ...sale,
+        buyerId: confirmed.buyer_id || sale.buyerId,
+        buyerNickname: confirmed.buyer_nickname || sale.buyerNickname,
+        productId: confirmed.product_id || sale.productId,
+        sourceCommentIds: confirmed.source_comment_ids || sale.sourceCommentIds,
+        productCode: confirmed.product_code_snapshot || sale.productCode,
+        productName: confirmed.product_name_snapshot || sale.productName,
+      };
+    }
+    const row = await toSaleRow(workspaceId, canonicalSale);
     const { error } = await ensureEnabled().from('sales').upsert(row);
     if (!error) return;
     // 운영 DB에 SQL 마이그레이션을 적용하기 전에도 기존 판매 저장 자체는 멈추지 않게 한다.
@@ -512,9 +649,10 @@ export const remoteWorkspaceService = {
     };
   },
 
-  async saveCommerce(workspaceId: string, state: CommerceState) {
+  async saveCommerceChanges(workspaceId: string, changes: CommerceChanges) {
+    if (!hasCommerceChanges(changes)) return;
     const client = ensureEnabled();
-    const messages = state.messages.map((message) => ({
+    const messages = changes.messages.map((message) => ({
       id: message.id, workspace_id: workspaceId, external_id: message.externalId || null,
       phone_number: message.phoneNumber, body: message.body, direction: message.direction, category: message.category,
       status: message.status, sale_ids: message.saleIds, attachments: message.attachments.map((attachment) => ({
@@ -522,7 +660,7 @@ export const remoteWorkspaceService = {
       })), received_at: message.receivedAt || null, sent_at: message.sentAt || null,
       error: message.error || null, created_at: message.createdAt,
     }));
-    const claims = await Promise.all(state.claims.map(async (claim) => ({
+    const claims = await Promise.all(changes.claims.map(async (claim) => ({
       id: claim.id, workspace_id: workspaceId, message_id: claim.messageId, phone_number: claim.phoneNumber,
       nickname: claim.nickname, address: claim.address, product_name: claim.productName, amount: claim.amount,
       capture_image_paths: await persistImages(
@@ -535,18 +673,18 @@ export const remoteWorkspaceService = {
       match_status: claim.matchStatus, field_matches: claim.fieldMatches, seller_note: claim.sellerNote,
       created_at: claim.createdAt, updated_at: claim.updatedAt,
     })));
-    const invoices = state.invoices.map((invoice) => ({
+    const invoices = changes.invoices.map((invoice) => ({
       id: invoice.id, workspace_id: workspaceId, sale_ids: invoice.saleIds, customer_nickname: invoice.customerNickname,
       phone_number: invoice.phoneNumber, address: invoice.address, amount: invoice.amount, bank_account: invoice.bankAccount,
       due_date: invoice.dueDate, status: invoice.status, sent_at: invoice.sentAt || null, sms_message_id: invoice.smsMessageId || null,
       created_at: invoice.createdAt,
     }));
-    const payments = state.payments.map((payment) => ({
+    const payments = changes.payments.map((payment) => ({
       id: payment.id, workspace_id: workspaceId, external_id: payment.externalId || null, payer_name: payment.payerName,
       amount: payment.amount, paid_at: payment.paidAt, memo: payment.memo || null, sale_ids: payment.saleIds,
       invoice_id: payment.invoiceId || null, match_status: payment.matchStatus, created_at: payment.createdAt,
     }));
-    const shipments = state.shipments.map((shipment) => ({
+    const shipments = changes.shipments.map((shipment) => ({
       id: shipment.id, workspace_id: workspaceId, sale_ids: shipment.saleIds, recipient_name: shipment.recipientName,
       phone_number: shipment.phoneNumber, address: shipment.address, carrier: shipment.carrier,
       tracking_number: shipment.trackingNumber, status: shipment.status, memo: shipment.memo,
@@ -559,15 +697,11 @@ export const remoteWorkspaceService = {
     if (invoices.length) writes.push(client.from('invoices').upsert(invoices));
     if (payments.length) writes.push(client.from('payment_receipts').upsert(payments));
     if (shipments.length) writes.push(client.from('shipments').upsert(shipments));
-    if (state.verifiedSaleIds.length) writes.push(client.from('verified_sales').upsert(state.verifiedSaleIds.map((saleId) => ({ workspace_id: workspaceId, sale_id: saleId }))));
-    const { data: existingVerified, error: existingVerifiedError } = await client
-      .from('verified_sales')
-      .select('sale_id')
-      .eq('workspace_id', workspaceId);
-    if (existingVerifiedError) throw existingVerifiedError;
-    const desiredVerified = new Set(state.verifiedSaleIds);
-    const staleVerified = (existingVerified || []).map((row) => row.sale_id).filter((saleId) => !desiredVerified.has(saleId));
-    if (staleVerified.length) writes.push(client.from('verified_sales').delete().eq('workspace_id', workspaceId).in('sale_id', staleVerified));
+    if (changes.verifiedSaleIdsToAdd.length) writes.push(client.from('verified_sales').upsert(
+      changes.verifiedSaleIdsToAdd.map((saleId) => ({ workspace_id: workspaceId, sale_id: saleId }))
+    ));
+    if (changes.verifiedSaleIdsToRemove.length) writes.push(client.from('verified_sales')
+      .delete().eq('workspace_id', workspaceId).in('sale_id', changes.verifiedSaleIdsToRemove));
     const results: any[] = await Promise.all(writes);
     const error = results.find((result) => result?.error)?.error;
     if (error) throw error;
@@ -576,6 +710,7 @@ export const remoteWorkspaceService = {
   subscribe(workspaceId: string, callback: () => void) {
     const channel = ensureEnabled().channel(`workspace:${workspaceId}:commerce:${crypto.randomUUID()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sales', filter: `workspace_id=eq.${workspaceId}` }, callback)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'buyer_promise_defaults', filter: `workspace_id=eq.${workspaceId}` }, callback)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'customer_messages', filter: `workspace_id=eq.${workspaceId}` }, callback)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_claims', filter: `workspace_id=eq.${workspaceId}` }, callback)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices', filter: `workspace_id=eq.${workspaceId}` }, callback)
@@ -623,9 +758,9 @@ export const remoteWorkspaceService = {
   },
 
   /**
-   * 워크스페이스별 설정 저장 (단어 규칙, 훈련 문장, 개인 설정 등)
+   * 워크스페이스별 설정 저장 (단어 규칙, 발음 힌트, 개인 설정 등)
    */
-  async saveWorkspaceSettings<T>(workspaceId: string, namespace: string, value: T): Promise<void> {
+  async saveWorkspaceSettings<T>(workspaceId: string, namespace: string, value: T, options?: { throwOnError?: boolean }): Promise<void> {
     if (!isSupabaseConfigured || !workspaceId) return;
     const client = requireSupabase();
 
@@ -653,7 +788,19 @@ export const remoteWorkspaceService = {
       }
     } catch (efErr) {
       console.error(`[RemoteWorkspace] saveWorkspaceSettings failed completely for ${namespace}:`, efErr);
+      if (options?.throwOnError) throw efErr;
     }
+  },
+
+  async loadSttVocabulary(workspaceId: string): Promise<string[] | null> {
+    const value = await this.fetchWorkspaceSettings<{ words?: unknown }>(workspaceId, 'stt_vocabulary');
+    return value && Array.isArray(value.words) ? normalizeSttVocabulary(value.words) : null;
+  },
+
+  async saveSttVocabulary(workspaceId: string, words: string[]): Promise<void> {
+    await this.saveWorkspaceSettings(workspaceId, 'stt_vocabulary', {
+      words: normalizeSttVocabulary(words),
+    }, { throwOnError: true });
   },
 
   // 1순위 보물 ①: 단어 치환 규칙
@@ -663,15 +810,6 @@ export const remoteWorkspaceService = {
   },
   async saveRecognitionRules(workspaceId: string, rules: RecognitionWordRule[]): Promise<void> {
     await this.saveWorkspaceSettings(workspaceId, 'recognition_rules', { rules });
-  },
-
-  // 1순위 보물 ②: 음성 학습 문장 목록
-  async loadVoiceTraining(workspaceId: string): Promise<TrainingSentence[] | null> {
-    const res = await this.fetchWorkspaceSettings<{ sentences: TrainingSentence[] }>(workspaceId, 'voice_training');
-    return res?.sentences || null;
-  },
-  async saveVoiceTraining(workspaceId: string, sentences: TrainingSentence[]): Promise<void> {
-    await this.saveWorkspaceSettings(workspaceId, 'voice_training', { sentences });
   },
 
   // 추천 개인 설정: STT 모드 및 로컬 모델, 틱톡 사용자명
@@ -731,5 +869,77 @@ export const remoteWorkspaceService = {
   },
   async saveCaptureAreaConfig(workspaceId: string, config: CaptureAreaConfig): Promise<void> {
     await this.saveWorkspaceSettings(workspaceId, 'capture_area_config', config);
+  },
+
+  /**
+   * 방송 세션별 전체 발화 로그(전체 멘트 이력)를 Supabase 클라우드(workspace_settings)에 영구 저장합니다.
+   * 방송 종료 시 브라우저 로컬 저장소에서 1회 일괄 업로드됩니다.
+   */
+  async saveCloudSessionTranscripts(workspaceId: string, sessionId: string, logs: SttTranscriptLog[]): Promise<boolean> {
+    if (!isSupabaseConfigured || !isValidUuid(workspaceId) || !sessionId || !Array.isArray(logs) || logs.length === 0) {
+      return false;
+    }
+    const payload: CloudSessionTranscriptsPayload = {
+      sessionId,
+      workspaceId,
+      transcriptCount: logs.length,
+      savedAt: new Date().toISOString(),
+      logs,
+    };
+    try {
+      await this.saveWorkspaceSettings(workspaceId, `session_transcripts_${sessionId}`, payload);
+      return true;
+    } catch (err) {
+      console.warn(`[RemoteWorkspace] 세션 발화 로그 클라우드 저장 실패 (${sessionId}):`, err);
+      return false;
+    }
+  },
+
+  /**
+   * Supabase 클라우드에 백업된 방송 세션별 전체 발화 로그를 불러옵니다.
+   * 브라우저 캐시가 비어있거나 기기 변경 시 복원 용도로 활용됩니다.
+   */
+  async fetchCloudSessionTranscripts(workspaceId: string, sessionId: string): Promise<SttTranscriptLog[] | null> {
+    if (!isSupabaseConfigured || !isValidUuid(workspaceId) || !sessionId) {
+      return null;
+    }
+    try {
+      const payload = await this.fetchWorkspaceSettings<CloudSessionTranscriptsPayload>(
+        workspaceId,
+        `session_transcripts_${sessionId}`
+      );
+      if (payload && Array.isArray(payload.logs)) {
+        return payload.logs;
+      }
+      return null;
+    } catch (err) {
+      console.warn(`[RemoteWorkspace] 세션 발화 로그 클라우드 조회 실패 (${sessionId}):`, err);
+      return null;
+    }
+  },
+
+  async fetchSessionTranscriptHistory(workspaceId: string, sessionId?: string): Promise<SellerTranscriptRecord[]> {
+    if (!isSupabaseConfigured || !isValidUuid(workspaceId)) return [];
+    const client = requireSupabase();
+    const prefix = 'session_transcripts_';
+    const records: SellerTranscriptRecord[] = [];
+    const pageSize = 100;
+    for (let offset = 0; ; offset += pageSize) {
+      let query = client.from('workspace_settings').select('namespace,value').eq('workspace_id', workspaceId);
+      query = sessionId
+        ? query.eq('namespace', `${prefix}${sessionId}`)
+        : query.like('namespace', 'session\\_transcripts\\_%');
+      const { data, error } = await query.order('namespace').range(offset, offset + pageSize - 1);
+      if (error) throw new Error('클라우드 판매멘트 기록을 불러오지 못했습니다. 이 PC에 저장된 기록만 표시합니다.');
+      for (const row of data || []) {
+        const payload = row.value as CloudSessionTranscriptsPayload | null;
+        const recordSessionId = String(row.namespace).slice(prefix.length);
+        if (!String(row.namespace).startsWith(prefix) || !recordSessionId || payload?.workspaceId !== workspaceId
+          || payload.sessionId !== recordSessionId || !Array.isArray(payload.logs)) continue;
+        records.push(...payload.logs.map((log) => ({ ...log, sessionId: recordSessionId })));
+      }
+      if (!data || data.length < pageSize || sessionId) break;
+    }
+    return records;
   },
 };

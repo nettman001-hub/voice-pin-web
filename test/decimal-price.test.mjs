@@ -44,14 +44,14 @@ test('extractSaleFromTranscript - 소숫점 가격이 포함된 판매 멘트 �
   assert.ok(sale2);
   assert.equal(sale2.buyerNickname, '또로롱');
   assert.equal(sale2.amount, 25000);
-  assert.equal(sale2.status, '자동저장');
+  assert.equal(sale2.status, '보류'); // 이름·가격만 있고 배정 의도가 없음
 
   // 3. "뒷번호 0517님 1.7"
   const sale3 = extractSaleFromTranscript('뒷번호 0517님 1.7');
   assert.ok(sale3);
   assert.equal(sale3.buyerNickname, '뒷번호 0517');
   assert.equal(sale3.amount, 17000);
-  assert.equal(sale3.status, '자동저장');
+  assert.equal(sale3.status, '보류');
 
   // 4. "마인드셋님 일점칠 구매확정"
   const sale4 = extractSaleFromTranscript('마인드셋님 일점칠 구매확정');

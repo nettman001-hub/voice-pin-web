@@ -7,6 +7,7 @@ import { useSales } from '../../context/SalesContext';
 import { AudioVisualizer } from '../../components/common/AudioVisualizer';
 import { screenCaptureService } from '../../services/screenCaptureService';
 import { storageService, formatSequentialProductName } from '../../services/storageService';
+import { getPurchaseRequests } from '../../services/purchaseFirstSales';
 import {
   Radio,
   Square,
@@ -27,14 +28,19 @@ import {
   ShoppingBag,
   RefreshCw,
   Bot,
-  Settings
+  Settings,
+  Cloud,
+  ZoomIn
 } from 'lucide-react';
 import { COMMENT_HELPER_DOWNLOAD_URL } from '../../types/comment';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
 import { useProductSales } from '../../context/ProductSalesContext';
 import { formatMultiSaleAmount } from '../../services/salesExtractor';
-import { areNicknamesSimilar } from '../../services/nicknameMatcher';
 import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
+import { ListeningStopControl, ListeningStopStatus } from '../../components/live/ListeningStopControl';
+import { AiSaleBadge } from '../../components/sales/AiSaleBadge';
+import { formatSessionDisplay } from '../../utils/sessionFormatter';
+import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 import { CommentHelperModal } from '../../components/helper/CommentHelperModal';
 import { SellerSettingsModal } from '../../components/seller/SellerSettingsModal';
 import { salesDemoService } from '../../services/salesDemoService';
@@ -66,13 +72,21 @@ export const LiveHomePage: React.FC = () => {
     setSonioxApiKey,
     sttProvider,
     sttMode,
+    localSttModel,
+    localSttStatus,
+    sttEngineStatus,
+    sttEngineMessage,
+    pipelineDiagnostics,
+    salesWorkflow,
+    workflowProcessingError,
     setSttMode,
     startListening,
     stopListening,
-    injectTestMent
+    injectTestMent,
+    cloudSyncStatus
   } = useLive();
 
-  const { user } = useAuth();
+  const { user, workspaceId } = useAuth();
   const isAdmin = user?.role === '관리자';
   const {
     isActive: isCommentCaptureActive,
@@ -99,6 +113,17 @@ export const LiveHomePage: React.FC = () => {
   const [showSessionChoice, setShowSessionChoice] = useState(false);
   const [isSessionStarting, setIsSessionStarting] = useState(false);
   const [isSalesRefreshing, setIsSalesRefreshing] = useState(false);
+  const [viewerModal, setViewerModal] = useState<{
+    isOpen: boolean;
+    images: string[];
+    initialIndex: number;
+    title: string;
+  }>({
+    isOpen: false,
+    images: [],
+    initialIndex: 0,
+    title: ''
+  });
 
   // 실제 판매 시연 데모 상태
   const [isDemoActive, setIsDemoActive] = useState<boolean>(false);
@@ -231,19 +256,48 @@ export const LiveHomePage: React.FC = () => {
   // 댓글 피드: 아래쪽이 최신글이 되도록 새 댓글이 오면 자동 스크롤한다.
   // 회차를 고른 뒤에는 서버 판매 회차 UUID를 사용하고, 오프라인 호환 시에만 로컬 ID를 보조로 사용한다.
   const currentSessionSales = React.useMemo(() => sales.filter((sale) => (
-    sale.sessionId === currentSessionId ||
-    (activeSession?.id && sale.sessionId === activeSession.id)
+    sale.aiVerification?.reviewDecision !== 'NOT_SALE' && (sale.sessionId === currentSessionId ||
+    (activeSession?.id && sale.sessionId === activeSession.id))
   )), [activeSession?.id, currentSessionId, sales]);
-  const [displayedSessionSales, setDisplayedSessionSales] = useState(currentSessionSales);
+  const sessionSalesScope = JSON.stringify([user?.id, workspaceId, currentSessionId, activeSession?.id]);
+  const [stoppedSessionSales, setStoppedSessionSales] = useState<{
+    scope: string;
+    records: SaleRecord[];
+  } | null>(null);
+  const wasListeningRef = React.useRef(isListening);
 
-  // 청취를 멈춘 뒤에는 마지막으로 본 판매 목록을 고정하고, 수동 새로고침에서만 갱신한다.
+  // 최초 진입에서는 회차·판매의 비동기 복원을 그대로 반영한다.
+  // 실제 청취를 중지한 뒤에만 해당 계정·회차의 목록을 고정한다.
   React.useEffect(() => {
-    if (isListening) setDisplayedSessionSales(currentSessionSales);
-  }, [currentSessionSales, isListening]);
+    const justStopped = !isListening && wasListeningRef.current;
+    setStoppedSessionSales((snapshot) => {
+      if (justStopped) return { scope: sessionSalesScope, records: currentSessionSales };
+      if (isListening || snapshot?.scope !== sessionSalesScope) return null;
+      const records = snapshot.records.map((record) => {
+        const latest = currentSessionSales.find((sale) => sale.id === record.id);
+        return latest?.aiVerification && latest.aiVerification !== record.aiVerification ? latest : record;
+      }).filter((sale) => sale.aiVerification?.reviewDecision !== 'NOT_SALE');
+      return records.some((record, index) => record !== snapshot.records[index]) || records.length !== snapshot.records.length
+        ? { ...snapshot, records } : snapshot;
+    });
+    wasListeningRef.current = isListening;
+  }, [currentSessionSales, isListening, sessionSalesScope]);
+  const displayedSessionSales = !isListening && stoppedSessionSales?.scope === sessionSalesScope
+    ? stoppedSessionSales.records
+    : currentSessionSales;
 
   const todayTotalAmount = currentSessionSales
-    .filter((s) => s.status !== '보류')
+    .filter((s) => s.status !== '보류' && s.status !== '취소' && s.syncStatus !== 'PENDING')
     .reduce((sum, item) => sum + item.amount, 0);
+
+  const purchaseRequests = React.useMemo(() => {
+    const sessionId = activeSession?.id || currentSessionId;
+    const persisted = storageService.getPurchaseRequests(workspaceId)
+      .filter((item) => item.sessionId === sessionId);
+    const derived = getPurchaseRequests(liveComments, sessionId);
+    return [...new Map([...derived, ...persisted].map((item) => [item.id, item])).values()]
+      .sort((a, b) => Date.parse(b.capturedAt) - Date.parse(a.capturedAt)).slice(0, 10);
+  }, [activeSession?.id, currentSessionId, liveComments, workspaceId]);
 
   const effectiveAudioLevel = isDemoActive ? demoAudioLevel : audioLevel;
   const effectiveWaveform = isDemoActive ? demoWaveform : waveform;
@@ -252,7 +306,8 @@ export const LiveHomePage: React.FC = () => {
   const effectiveInterimTranscript = isDemoActive ? demoInterimTranscript : currentInterimTranscript;
   const effectiveMatchedRuleItem = isDemoActive ? demoMatchedRuleItem : lastMatchedRuleItem;
   const effectiveSessionSales = isDemoActive ? demoSales : displayedSessionSales;
-  const effectiveSalesCount = isDemoActive ? demoSalesCount : currentSessionSales.length;
+  const effectiveSalesCount = isDemoActive ? demoSalesCount : currentSessionSales.filter((sale) =>
+    sale.status !== '보류' && sale.status !== '취소' && sale.syncStatus !== 'PENDING').length;
   const effectiveTotalAmount = isDemoActive ? demoTotalAmount : todayTotalAmount;
   // 회차 내 판매 내역 순번 맵 (등록 시각 기준 오름차순으로 1, 2, 3...)
   const saleSequenceMap = React.useMemo(() => {
@@ -353,10 +408,13 @@ export const LiveHomePage: React.FC = () => {
     setIsSalesRefreshing(true);
     try {
       const latestSales = await refreshSales();
-      setDisplayedSessionSales(latestSales.filter((sale) => (
-        sale.sessionId === currentSessionId
-        || (activeSession?.id && sale.sessionId === activeSession.id)
-      )));
+      setStoppedSessionSales((snapshot) => snapshot?.scope === sessionSalesScope ? {
+        scope: sessionSalesScope,
+        records: latestSales.filter((sale) => (
+          sale.aiVerification?.reviewDecision !== 'NOT_SALE' && (sale.sessionId === currentSessionId
+          || (activeSession?.id && sale.sessionId === activeSession.id))
+        )),
+      } : snapshot);
     } catch (error) {
       alert(error instanceof Error ? error.message : '판매 내역을 새로고침하지 못했습니다.');
     } finally {
@@ -366,8 +424,9 @@ export const LiveHomePage: React.FC = () => {
 
   return (
     <div className="p-3.5 sm:p-6 max-w-7xl mx-auto space-y-3 sm:space-y-5">
+      {workflowProcessingError&&<p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">판매방식 처리를 재시도하고 있습니다. 원본 전사는 유지됩니다. {workflowProcessingError}</p>}
       {/* 최소 높이 상단 헤더 & 핵심 제어 */}
-      <div className="flex items-center justify-between gap-2 bg-white border border-slate-200 px-2.5 py-2 sm:px-3 rounded-2xl shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 px-2.5 py-2 sm:px-3 rounded-2xl shadow-sm">
         <div className="flex items-center gap-2 min-w-0">
           <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all flex-shrink-0 ${
             isListening
@@ -384,14 +443,15 @@ export const LiveHomePage: React.FC = () => {
               }`}>
                 {isListening ? 'ON AIR' : '대기 중'}
               </span>
+              {salesWorkflow && <span className="text-[10px] text-brand-700">판매방식 v{salesWorkflow.version} · {salesWorkflow.mode==='SHADOW'?'관찰':'적용'}</span>}
             </div>
             <p className="hidden sm:block text-[10px] leading-none text-slate-400 mt-0.5 truncate">
-              회차 <strong className="text-slate-600 font-mono">{activeSession?.displayCode || currentSessionId}</strong>
+              회차 <strong className="text-slate-700 font-bold">{formatSessionDisplay(activeSession?.displayCode || currentSessionId)}</strong>
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-1.5 ml-auto">
           {/* 실제 판매 데모보기 버튼 (상단 헤더 직접 노출) */}
           <button
             type="button"
@@ -441,6 +501,8 @@ export const LiveHomePage: React.FC = () => {
               )}
             </label>
 
+          <ListeningStopControl />
+
           <button
             onClick={handleToggleListening}
             className={`h-8 min-w-16 px-2.5 rounded-lg font-black text-xs shadow-sm flex items-center justify-center gap-1.5 transition active:scale-95 ${
@@ -463,6 +525,8 @@ export const LiveHomePage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      <ListeningStopStatus />
 
       {/* 영업 시연용 실시간 데모 배너 */}
       {isDemoActive && (
@@ -664,6 +728,7 @@ export const LiveHomePage: React.FC = () => {
                     )}
                     <CustomerStatsBadge
                       nickname={c.nickname}
+                      buyerId={c.buyerId || undefined}
                       variant="compact"
                       currentSessionId={currentSessionId || activeSession?.id}
                     />
@@ -673,14 +738,14 @@ export const LiveHomePage: React.FC = () => {
             </div>
           </div>
 
-          {/* 규칙 감지 핵심 발화 & 액션 (실시간 오디오 스트림처럼 한 줄 슬림 카드) */}
+          {/* 최근 감지된 단어 규칙 및 음성 처리 결과 */}
           <div className="order-3 bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between gap-2 sm:gap-3 min-h-[48px] sm:min-h-[50px]">
             <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
               <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
                 <Sparkles className="w-4 h-4 text-amber-500" />
               </div>
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 whitespace-nowrap">
-                규칙 감지 핵심 발화
+                최근 감지·처리 결과
               </h3>
             </div>
 
@@ -707,13 +772,24 @@ export const LiveHomePage: React.FC = () => {
               </div>
             ) : (
               <div className="flex-1 min-w-0 flex items-center justify-center py-1 px-2.5 rounded-xl border border-dashed border-slate-200 text-[11px] sm:text-xs text-slate-400 truncate italic">
-                "구매확정, 금액, 닉네임, 캡처, 수정" 등 규칙 지정 단어 감지 시 하이라이트
+                등록된 단어 규칙과 판매·음성 정정·캡처 처리 결과를 표시합니다.
               </div>
             )}
           </div>
 
           {/* 최근 전사 로그 */}
           <div className="order-4 bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
+            {!isListening && (sttEngineStatus === 'ERROR' || sttEngineStatus === 'DISCONNECTED') && sttEngineMessage && <p role="alert" className="mb-2 text-xs leading-relaxed text-amber-800">{sttEngineMessage}</p>}
+            {isListening && pipelineDiagnostics && <div className="mb-2 space-y-1 text-[11px] text-slate-600" aria-label="실시간 전사 연결 진단">
+              <p>실제 오디오 입력 {pipelineDiagnostics.audio.audioSeconds.toFixed(1)}초
+                {sttMode === 'CLOUD' && <> · 현재 STT 연결 전송 {pipelineDiagnostics.stt.audioSeconds.toFixed(1)}초 · 서버 응답 {pipelineDiagnostics.stt.receivedResponses}회 · 전사 수신 {pipelineDiagnostics.stt.receivedTextCharacters}자</>}
+              </p>
+              <p title={sttEngineMessage}>{sttMode === 'LOCAL' ? '내 PC STT' : selectedSttName} · {sttEngineStatus === 'CONNECTED' ? '소켓 연결됨' : sttEngineStatus === 'CONNECTING' ? '연결 중' : sttEngineStatus === 'ERROR' ? '연결 오류' : '연결 끊김'} · {pipelineDiagnostics.audio.processor === 'AUDIO_WORKLET' ? '오디오 전용 처리' : pipelineDiagnostics.audio.processor === 'SCRIPT_PROCESSOR' ? '호환 오디오 처리' : '오디오 처리 대기'}</p>
+              {pipelineDiagnostics.elapsedSeconds >= 10 && pipelineDiagnostics.audio.chunks === 0 && <p role="alert" className="text-amber-800">오디오 데이터가 생성되지 않습니다. 청취를 중지한 뒤 다시 시작해 주세요.</p>}
+              {pipelineDiagnostics.elapsedSeconds >= 10 && pipelineDiagnostics.audio.chunks > 0 && !pipelineDiagnostics.audio.lastSignalAt && <p role="alert" className="text-amber-800">공유한 탭에서 소리가 들어오지 않습니다. 실제 방송 탭과 탭 오디오 공유를 확인해 주세요.</p>}
+              {sttMode === 'CLOUD' && pipelineDiagnostics.stt.audioSeconds >= 10 && pipelineDiagnostics.stt.receivedResponses === 0 && <p role="alert" className="text-amber-800">오디오는 전송됐지만 STT 서버 응답이 없습니다. 연결 상태를 확인해 주세요.</p>}
+              {sttEngineStatus === 'ERROR' && <p role="alert" className="text-rose-700">{sttEngineMessage}</p>}
+            </div>}
             <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
               <div className="flex items-center space-x-2 flex-wrap">
                 <Clock className="w-4 h-4 text-brand-600 shrink-0" />
@@ -723,6 +799,18 @@ export const LiveHomePage: React.FC = () => {
                 <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
                   화면 {effectiveTranscriptLogs.length}건 / 오늘 누적 {totalSessionTranscriptCount || transcriptLogs.length}건
                 </span>
+                {cloudSyncStatus === 'saving' && (
+                  <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-full animate-pulse">
+                    <Cloud className="w-3 h-3 animate-spin" />
+                    <span>Supabase 저장 중...</span>
+                  </span>
+                )}
+                {cloudSyncStatus === 'saved' && (
+                  <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full" title="방송 발화 전체 로그가 Supabase 클라우드에 안전하게 영구 보관되었습니다.">
+                    <Cloud className="w-3 h-3 text-emerald-600" />
+                    <span>Supabase 보관됨</span>
+                  </span>
+                )}
               </div>
               <div className="flex items-center space-x-1.5">
                 <button
@@ -897,12 +985,36 @@ export const LiveHomePage: React.FC = () => {
             </div>
           </div>
 
+          {/* 구매 댓글은 판매가 아니다. 음성 배정 및 서버 확인을 따로 표시한다. */}
+          <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
+            <h3 className="text-xs sm:text-sm font-bold text-slate-900 mb-2">구매요청 · 판매자 배정 대기</h3>
+            {purchaseRequests.length === 0 ? (
+              <p className="text-xs text-slate-400">저요·ㅈㅇ 등 구매 의사 댓글이 들어오면 여기에 표시됩니다.</p>
+            ) : (
+              <div className="space-y-1.5 max-h-[140px] overflow-y-auto">
+                {purchaseRequests.map((request) => {
+                  const linked = currentSessionSales.find((sale) => sale.purchaseRequestId === request.id && sale.status !== '취소');
+                  const state = request.withdrawn ? '구매 의사 철회'
+                    : request.conditional ? '조건 확인'
+                    : request.requiresReview ? '수량·옵션 확인'
+                    : linked?.status === '보류' ? '확인 필요'
+                    : linked?.syncStatus === 'PENDING' ? '서버 저장 대기'
+                      : linked ? '판매 확정' : '배정 대기';
+                  return <div key={request.id} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs">
+                    <span className="truncate"><strong>{request.nickname}</strong> · {request.content}</span>
+                    <span className={`shrink-0 font-bold ${linked?.syncStatus === 'SYNCED' && linked.status !== '보류' ? 'text-emerald-700' : 'text-amber-700'}`}>{state}</span>
+                  </div>;
+                })}
+              </div>
+            )}
+          </div>
+
           {/* 판매 내역 카드 리스트 */}
           <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                <span>자동 적재된 판매 내역</span>
+                <span>판매 내역 · 확인 대기</span>
               </h3>
               <div className="flex items-center gap-2">
                 <button
@@ -925,10 +1037,12 @@ export const LiveHomePage: React.FC = () => {
             <div className="space-y-2 max-h-[200px] sm:max-h-[220px] overflow-y-auto pr-1">
               {effectiveSessionSales.length === 0 ? (
                 <div className="py-2.5 sm:py-3 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl min-h-[38px] flex items-center justify-center">
-                  이번 방송 회차에서 저장된 판매 내역이 없습니다. ("구매확정" 시 자동 등록)
+                  판매자 배정 발화와 구매 댓글이 연결되면 판매가 등록됩니다.
                 </div>
               ) : (
                 effectiveSessionSales.map((sale) => {
+                  const nicknameNeedsConfirmation = sale.source === 'WEB_VOICE' && sale.status === '보류'
+                    && (sale.aiVerification?.nicknameVerified === false || !sale.sourceCommentIds?.length);
                   const productImage = sale.productImageUrl
                     || sale.captureImageUrls?.[0]
                     || (sale.productCode && sale.productCode === activeProduct?.productCode ? activeProduct?.imageUrl : undefined);
@@ -941,8 +1055,8 @@ export const LiveHomePage: React.FC = () => {
                         : '기존';
 
                   // 다건 구매자 판정 및 금액 포맷팅 (시간순 정렬)
-                  const buyerSessionSales = effectiveSessionSales
-                    .filter((s) => areNicknamesSimilar(s.buyerNickname, sale.buyerNickname))
+                  const buyerSessionSales = (nicknameNeedsConfirmation ? [sale] : effectiveSessionSales
+                    .filter((s) => sale.buyerId && s.buyerId ? s.buyerId === sale.buyerId : s.buyerNickname === sale.buyerNickname))
                     .sort((a, b) => new Date(a.recognizedAt).getTime() - new Date(b.recognizedAt).getTime());
                   const multiAmount = formatMultiSaleAmount(buyerSessionSales.map((s) => s.amount));
                   const saleSeq = saleSequenceMap.get(sale.id) || 1;
@@ -967,13 +1081,36 @@ export const LiveHomePage: React.FC = () => {
                   >
                     <div className="flex items-start gap-2.5 sm:gap-3">
                       {/* 상품 이미지 썸네일 */}
-                      <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-lg overflow-hidden border border-slate-200/80 bg-slate-100 flex-shrink-0 shadow-sm flex items-center justify-center">
+                      <div
+                        className={`w-12 h-12 sm:w-14 sm:h-14 rounded-lg overflow-hidden border border-slate-200/80 bg-slate-100 flex-shrink-0 shadow-sm flex items-center justify-center relative group/thumb ${
+                          productImage ? 'cursor-pointer hover:ring-2 hover:ring-brand-500' : ''
+                        }`}
+                        onClick={() => {
+                          if (productImage) {
+                            const images = sale.captureImageUrls && sale.captureImageUrls.length > 0
+                              ? sale.captureImageUrls
+                              : [productImage];
+                            setViewerModal({
+                              isOpen: true,
+                              images,
+                              initialIndex: 0,
+                              title: `${sale.buyerNickname} 상품/캡처`
+                            });
+                          }
+                        }}
+                        title={productImage ? '클릭하여 원본 크기로 보기' : undefined}
+                      >
                         {productImage ? (
-                          <img
-                            src={productImage}
-                            alt={`${sale.productCode || sale.buyerNickname} 상품`}
-                            className="w-full h-full object-cover hover:scale-105 transition-transform duration-200"
-                          />
+                          <>
+                            <img
+                              src={productImage}
+                              alt={`${sale.productCode || sale.buyerNickname} 상품`}
+                              className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform duration-200"
+                            />
+                            <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center text-white">
+                              <ZoomIn className="w-3.5 h-3.5" />
+                            </div>
+                          </>
                         ) : (
                           <div className="flex flex-col items-center justify-center text-slate-400 p-1">
                             <ShoppingBag className="w-5 h-5 text-brand-600/70" />
@@ -986,17 +1123,24 @@ export const LiveHomePage: React.FC = () => {
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center space-x-2 flex-wrap gap-1">
-                          <span className="font-bold text-sm text-slate-900 truncate">{sale.buyerNickname}</span>
+                          <span className="font-bold text-sm text-slate-900 truncate">{sale.buyerNickname === '미확인(보류)' ? '구매자 미확인' : sale.buyerNickname}</span>
+                          {nicknameNeedsConfirmation && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                              추정 닉네임 · 확인 필요
+                            </span>
+                          )}
                           {multiAmount.isMulti && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200">
                               ★ 다건 {buyerSessionSales.length}건
                             </span>
                           )}
-                          <CustomerStatsBadge
+                          {!nicknameNeedsConfirmation && <CustomerStatsBadge
                             nickname={sale.buyerNickname}
+                            buyerId={sale.buyerId}
                             variant="pill"
                             currentSessionId={sale.sessionId || currentSessionId || activeSession?.id}
-                          />
+                          />}
+                          <AiSaleBadge sale={sale} />
                           <span className={`text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold border ${
                             sale.source === 'ANDROID_COMMENTS'
                               ? 'bg-blue-50 text-blue-700 border-blue-200'
@@ -1013,7 +1157,7 @@ export const LiveHomePage: React.FC = () => {
                               ? 'bg-purple-100 text-purple-700'
                               : 'bg-emerald-50 text-emerald-700'
                           }`}>
-                            {sale.status}
+                            {sale.syncStatus === 'PENDING' ? '서버 저장 대기' : sale.status}
                           </span>
                           {sale.note?.startsWith('댓글 닉네임 검증 완료') && (
                             <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold bg-cyan-50 text-cyan-700 border border-cyan-200">
@@ -1025,7 +1169,7 @@ export const LiveHomePage: React.FC = () => {
                               댓글 닉네임 확인 필요
                             </span>
                           )}
-                          {sale.printStatus === 'QUEUED' && (
+                          {sale.printStatus === 'QUEUED' && sale.syncStatus !== 'PENDING' && (
                             <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold bg-sky-50 text-sky-700 border border-sky-200">
                               전표 출력 중
                             </span>
@@ -1407,7 +1551,22 @@ export const LiveHomePage: React.FC = () => {
         onChangeAudioSourceMode={handleAudioSourceModeChange}
         sttProvider={sttProvider}
         sttMode={sttMode}
+        onChangeSttMode={setSttMode}
+        isListening={isListening || isSessionStarting}
+        canUseCloudStt={canUseAdminKey && hasAdminSttKey}
+        localSttModel={localSttModel}
+        localSttMessage={localSttStatus.message}
       />
+
+      {viewerModal.isOpen && (
+        <ImageViewerModal
+          isOpen={viewerModal.isOpen}
+          onClose={() => setViewerModal((prev) => ({ ...prev, isOpen: false }))}
+          images={viewerModal.images}
+          initialIndex={viewerModal.initialIndex}
+          titlePrefix={viewerModal.title}
+        />
+      )}
     </div>
   );
 };

@@ -15,15 +15,15 @@ function formatAiSettingResponse(row: any, secretMap?: Map<number, { masked: str
   const secret2 = secretMap?.get(2)
 
   const resolveAuthType = (slot: any, sec?: { masked: string; type?: string }, defaultType: string = 'NONE') => {
-    // 1. 만약 슬롯 설정 자체에 authType이 지정되어 있다면 우선 적용
-    if (slot?.authType && slot.authType !== 'NONE') {
+    // 1. 만약 슬롯 설정 자체에 authType이 지정되어 있다면 (NONE 포함) 사용자 설정을 최우선 적용
+    if (typeof slot?.authType === 'string' && slot.authType.trim() !== '') {
       return slot.authType
     }
-    // 2. 만약 ai_secrets에 등록된 비밀정보 타입이 있다면 해당 타입 동기화
+    // 2. 만약 슬롯에 authType이 누락된 레거시 데이터인 경우에만 ai_secrets에 등록된 비밀정보 타입 동기화
     if (sec?.type === 'API_KEY') return 'API_KEY'
     if (sec?.type === 'BEARER_TOKEN') return 'BEARER'
     if (sec?.type === 'CUSTOM_HEADER') return 'CUSTOM_HEADER'
-    return slot?.authType || defaultType
+    return defaultType
   }
 
   const slot1 = {
@@ -203,6 +203,34 @@ export async function handleSaveAiSettings(workspaceId: string, actorId: string,
     }
   }
 
+  // 첫 초안을 저장하기 전에 현재 운영 버전의 설정을 보존한다.
+  // 초안은 같은 ai_settings 행을 갱신하므로 이 기록이 런타임의 기준이 된다.
+  if (!applyImmediately && current.version === current.applied_version) {
+    const { data: previousHistory, error: historyReadErr } = await admin
+      .from('ai_settings_history')
+      .select('id')
+      .eq('setting_id', current.id)
+      .eq('version', current.applied_version)
+      .limit(1)
+
+    if (historyReadErr) {
+      return errorResponse('DATABASE_ERROR', historyReadErr.message, 500)
+    }
+    if (!previousHistory?.length) {
+      const { error: historyWriteErr } = await admin.from('ai_settings_history').insert({
+        setting_id: current.id,
+        version: current.version,
+        applied_version: current.applied_version,
+        snapshot: current,
+        change_summary: `운영 버전 ${current.applied_version} 자동 보존`,
+        created_by: actorId,
+      })
+      if (historyWriteErr) {
+        return errorResponse('DATABASE_ERROR', historyWriteErr.message, 500)
+      }
+    }
+  }
+
   // 비밀정보(신규 키/토큰) 처리 (slot1)
   if (settings.slot1?.clearSecret) {
     await admin.from('ai_secrets').delete().eq('setting_id', current.id).eq('slot_number', 1)
@@ -221,8 +249,8 @@ export async function handleSaveAiSettings(workspaceId: string, actorId: string,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'setting_id,slot_number' })
     }
-  } else if (nextSlot1.authType) {
-    // 키는 새로 등록하지 않았으나 authType만 변경된 경우 secret_type 동기화
+  } else if (nextSlot1.authType && nextSlot1.authType !== 'NONE') {
+    // 키는 새로 등록하지 않았으나 authType만 변경된 경우 secret_type 동기화 (NONE 제외)
     const secType = nextSlot1.authType === 'BEARER' ? 'BEARER_TOKEN' : (nextSlot1.authType === 'CUSTOM_HEADER' ? 'CUSTOM_HEADER' : 'API_KEY')
     await admin.from('ai_secrets')
       .update({ secret_type: secType, updated_at: new Date().toISOString() })
@@ -248,8 +276,8 @@ export async function handleSaveAiSettings(workspaceId: string, actorId: string,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'setting_id,slot_number' })
     }
-  } else if (nextSlot2.authType) {
-    // 키는 새로 등록하지 않았으나 authType만 변경된 경우 secret_type 동기화
+  } else if (nextSlot2.authType && nextSlot2.authType !== 'NONE') {
+    // 키는 새로 등록하지 않았으나 authType만 변경된 경우 secret_type 동기화 (NONE 제외)
     const secType = nextSlot2.authType === 'BEARER' ? 'BEARER_TOKEN' : (nextSlot2.authType === 'CUSTOM_HEADER' ? 'CUSTOM_HEADER' : 'API_KEY')
     await admin.from('ai_secrets')
       .update({ secret_type: secType, updated_at: new Date().toISOString() })

@@ -23,7 +23,8 @@ import {
   ReceiptText,
   Truck,
   PanelLeftClose,
-  Bot
+  Bot,
+  BookOpenText
 } from 'lucide-react';
 
 interface NavItem {
@@ -62,7 +63,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: [
         { name: '라이브 청취 홈', path: '/live', icon: Radio, badge: isListening ? 'ON AIR' : undefined },
         { name: '상품 판매 관리', path: '/seller/product-sales', icon: ShoppingBag },
-        { name: '음성인식 훈련 (학습)', path: '/voice-training', icon: Sparkles },
+        { name: '음성인식 발음 힌트', path: '/stt-vocabulary', icon: BookOpenText },
         { name: '캡처 영역 & 단어 규칙', path: '/recognition-rules', icon: Sliders },
         { name: '댓글 도우미 & 장치 설정', path: '/seller/helper', icon: Bot, badge: '내장' },
       ]
@@ -71,7 +72,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       groupName: '판매 & 정산 관리',
       items: [
         { name: '판매 내역 목록', path: '/sales', icon: ShoppingBag },
-        { name: '댓글 캡처 기록', path: '/comments', icon: MessageSquareText },
+        { name: '댓글/판매멘트 기록', path: '/comments', icon: MessageSquareText },
         { name: '방송 후 일괄 확인', path: '/sales/review', icon: CheckSquare },
         { name: '정산서 관리 & 발송', path: '/invoices', icon: ReceiptText },
         { name: '택배발송 관리', path: '/shipments', icon: Truck },
@@ -105,6 +106,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { name: '전체 판매 & 회차 관제', path: '/admin/sales', icon: ShoppingBag },
         { name: '회원 관리 & STT', path: '/admin/members', icon: Users },
         { name: '판매 AI 설정 (보류·정정)', path: '/admin/ai', icon: Sparkles },
+        { name: '판매자 판매방식 분석', path: '/admin/seller-analysis', icon: BookOpenText },
+        { name: '판매자 로직분석01', path: '/admin/seller-logic-analysis-01', icon: Sparkles },
+        { name: '판매자 로직분석03deep', path: '/admin/seller-logic-analysis-03-deep', icon: Sparkles },
+        { name: '판매자 로직분석01opus', path: '/admin/seller-logic-opus', icon: Sparkles },
         { name: '신고 처리 센터', path: '/admin/reports', icon: AlertTriangle },
         { name: '이용 통계 & 시스템 로그', path: '/admin/stats', icon: BarChart3 },
       ]
