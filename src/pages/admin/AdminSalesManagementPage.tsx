@@ -17,6 +17,7 @@ import {
 import { remoteWorkspaceService } from '../../services/remoteWorkspaceService';
 import { AdminSaleItem, SellerSalesGroup, SellerSttUsageSummary, SttUsageLogItem } from '../../types/admin';
 import { formatSessionDisplay } from '../../utils/sessionFormatter';
+import { formatTimeKST, formatDateTimeKST } from '../../utils/dateUtils';
 
 export const AdminSalesManagementPage: React.FC = () => {
   const [sales, setSales] = useState<AdminSaleItem[]>([]);
@@ -407,6 +408,7 @@ export const AdminSalesManagementPage: React.FC = () => {
                                 </span>
                                 <span className="text-[11px] text-slate-400">
                                   {new Date(sess.sessionTime).toLocaleString('ko-KR', {
+                                    timeZone: 'Asia/Seoul',
                                     year: 'numeric',
                                     month: '2-digit',
                                     day: '2-digit',
@@ -443,7 +445,7 @@ export const AdminSalesManagementPage: React.FC = () => {
                                     {sess.sales.map((item) => (
                                       <tr key={item.id} className="hover:bg-slate-50/80 transition">
                                         <td className="py-2.5 px-3 font-mono text-slate-400 whitespace-nowrap">
-                                          {item.recognizedAt ? item.recognizedAt.slice(11, 19) : '-'}
+                                          {formatTimeKST(item.recognizedAt)}
                                         </td>
                                         <td className="py-2.5 px-3 font-bold text-slate-900 whitespace-nowrap">
                                           {item.buyerNickname}
@@ -567,7 +569,7 @@ export const AdminSalesManagementPage: React.FC = () => {
                         </span>
                       </td>
                       <td className="py-3 px-4 font-mono text-slate-400">
-                        {item.recognizedAt ? item.recognizedAt.replace('T', ' ').slice(0, 19) : '-'}
+                        {formatDateTimeKST(item.recognizedAt)}
                       </td>
                     </tr>
                   ))
@@ -689,7 +691,7 @@ export const AdminSalesManagementPage: React.FC = () => {
                     {sttLogs.map((log) => (
                       <tr key={log.id} className="hover:bg-slate-50/80 transition">
                         <td className="py-2 px-3 font-mono text-slate-500 text-[11px]">
-                          {log.startedAt ? log.startedAt.replace('T', ' ').slice(0, 19) : log.createdAt.slice(0, 19)}
+                          {formatDateTimeKST(log.startedAt || log.createdAt)}
                         </td>
                         <td className="py-2 px-3">
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
