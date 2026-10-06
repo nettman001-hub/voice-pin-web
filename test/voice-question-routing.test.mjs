@@ -39,7 +39,7 @@ const pending = (candidateSaleIds = ['sale-1']) => ({
   parsedCorrection: corrections.parseVoiceCorrection('햇살님 금액 1.2로 정정합니다'),
 });
 
-function fixture({ sales = [], rules = [], pendingCorrection = null, failProductProcessing = false, workflow=null, comments=[] } = {}) {
+function fixture({ sales = [], renderSales = sales, rules = [], pendingCorrection = null, failProductProcessing = false, workflow=null, comments=[] } = {}) {
   const state = { sales, rules, logs: [], events: [], beeps: [], saves: [], captures: [], cloud: [], captions: [], productCalls: [] };
   const timers = new Map();
   let nextTimerId = 1;
@@ -55,7 +55,7 @@ function fixture({ sales = [], rules = [], pendingCorrection = null, failProduct
     isAuthenticatedRef: { current: true }, currentUserIdRef: { current: 'seller' },
     listeningGenerationRef: { current: 1 }, authBoundaryGenerationRef:{current:1},setWorkflowProcessingError:message=>{state.workflowError=message;},isListeningRef: { current: true }, activeListeningUserIdRef: { current: 'seller' },
     currentSessionIdRef: { current: 'broadcast' }, productSalesRef: { current: { activeSession: { id: 'broadcast' }, feed: { comments: [] } } },
-    sales, isRemoteAuth: true, workspaceId: 'workspace',
+    sales: renderSales, isRemoteAuth: true, workspaceId: 'workspace',
     storageService: { getRules: () => rules,getCommentRecords:()=>comments },
     interimStreamChunkerRef: { current: { reset() {}, finalize: (text) => [{ text }],
       processInterim: (text) => ({ newFlowItems: [], displayInterimText: text }) } },
@@ -297,6 +297,14 @@ test('a single remaining sale still requires correction target evidence and a va
   for (const text of ['햇살님 가격 변경합니다', '햇살님 금액 1.2로 변경할까요?', '앞으로 판매할 가격은 1.2입니다']) {
     assert.throws(() => corrections.applyCorrectionToSale(sale(), corrections.parseVoiceCorrection(text)), /INVALID_CORRECTION/, text);
   }
+});
+
+test('a correction during a broadcast finds sales made after listening started', () => {
+  // The STT callback keeps the render from when listening started, whose list was still empty.
+  const ctx = fixture({ sales: [sale()], renderSales: [] });
+  ctx.send('햇살님 금액 1.2로 정정합니다');
+  assert.equal(ctx.state.sales[0].amount, 12000);
+  assert.equal(ctx.state.sales[0].revision, 2);
 });
 
 test('corrections are restricted to the active session', () => {
