@@ -12,6 +12,8 @@ import {
 
 export const LIVE_HINT_NICKNAME_LIMIT = 50;
 export const LIVE_HINT_MIN_INTERVAL_MS = 5_000;
+/** 평상시(구매의사 없이) 새 닉네임을 확인하는 주기 */
+export const LIVE_HINT_ROUTINE_CHECK_MS = 10_000;
 const MAX_PRONUNCIATIONS_PER_NICKNAME = 2;
 const MAX_TERM_LENGTH = 40;
 
@@ -69,7 +71,7 @@ export function selectHintNicknames(
   return result;
 }
 
-/** 아직 STT에 보내지 않은 닉네임. 구매의사자면 즉시(두 번째부터는 5초 간격), 평상시에는 5초마다 확인해 보낸다. */
+/** 아직 STT에 보내지 않은 닉네임. 구매의사자면 즉시(두 번째부터는 5초 간격), 평상시에는 10초마다 확인해 보낸다. */
 export function findUnsentNicknames(nicknames: string[], sentNicknames: string[]): string[] {
   const sent = new Set(sentNicknames.map(hintNicknameKey));
   return nicknames.slice(0, LIVE_HINT_NICKNAME_LIMIT).filter((nickname) => !sent.has(hintNicknameKey(nickname)));

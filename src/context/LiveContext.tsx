@@ -44,6 +44,7 @@ import {
   findUnsentNicknames,
   getPurchaserNicknames,
   LIVE_HINT_MIN_INTERVAL_MS,
+  LIVE_HINT_ROUTINE_CHECK_MS,
   selectHintNicknames,
 } from '../services/liveSttHints';
 import { HintRotationScheduler } from '../services/logicOpus/opusHintPlanner';
@@ -2140,7 +2141,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [isListening]);
 
   // STT 닉네임 힌트 갱신: 새 구매의사자가 생기면 바로 보내고, 직전 갱신 5초 안에 더 생긴 구매의사자는
-  // 5초가 되는 순간 한 번에 모아 보낸다. 평상시에는 5초마다 새 닉네임(구매의사자 아닌 댓글 작성자 포함)이 있는지 확인해 보낸다.
+  // 5초가 되는 순간 한 번에 모아 보낸다. 평상시에는 10초마다 새 닉네임(구매의사자 아닌 댓글 작성자 포함)이 있는지 확인해 보낸다.
   useEffect(() => {
     if (!isListening || sttMode !== 'CLOUD') return;
 
@@ -2212,7 +2213,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { purchasers } = collectHintNicknames(currentSessionIdRef.current);
       if (findUnsentNicknames(purchasers, activeCloudNicknameTermsRef.current).length > 0) scheduler.request();
     };
-    // 평상시: 5초마다 아직 STT에 안 보낸 닉네임이 있는지 확인해 있으면 보낸다
+    // 평상시: 10초마다 아직 STT에 안 보낸 닉네임이 있는지 확인해 있으면 보낸다
     const checkAll = () => {
       if (disposed || !isListeningRef.current) return;
       const connectedAt = lastSuccessfulSttConnectionAtRef.current;
@@ -2225,7 +2226,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     checkAll();
-    const timer = window.setInterval(checkAll, LIVE_HINT_MIN_INTERVAL_MS);
+    const timer = window.setInterval(checkAll, LIVE_HINT_ROUTINE_CHECK_MS);
     window.addEventListener('voicecap_purchase_requests_updated', checkPurchasers);
     return () => {
       disposed = true;
