@@ -1008,7 +1008,6 @@ export const LiveHomePage: React.FC = () => {
                   const linked = currentSessionSales.find((sale) => sale.purchaseRequestId === request.id && sale.status !== '취소');
                   const state = request.withdrawn ? '구매 의사 철회'
                     : request.conditional ? '조건 확인'
-                    : request.requiresReview ? '수량·옵션 확인'
                     : linked?.status === '보류' ? '확인 필요'
                     : linked?.syncStatus === 'PENDING' ? '서버 저장 대기'
                       : linked ? '판매 확정' : '배정 대기';

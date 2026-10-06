@@ -166,7 +166,7 @@ export function validateVoiceReviewResult(sale: SaleRecord, comments: CommentRec
   }
   if (result.action !== 'UPDATE_SALE' || !result.resolvable || result.conflictReason || result.missingInfo.length) return pricedMeta;
   const matched = matching.find((r) => result.evidenceIds.includes(r.commentId))!;
-  if (matched.conditional || matched.requiresReview || (result.changes?.buyerNickname?.buyerId
+  if (matched.conditional || (result.changes?.buyerNickname?.buyerId
     && result.changes.buyerNickname.buyerId !== matched.buyerId)) return pricedMeta;
   return { ...pricedMeta, aiStatus: 'NEEDS_SELLER_CONFIRM', reviewDecision: 'NEEDS_CONFIRMATION', nicknameVerified: true,
     resolutionSummary: '댓글 닉네임과 발화 가격을 확인했습니다. 판매자의 최종 확인이 필요합니다.',

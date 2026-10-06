@@ -48,7 +48,7 @@ export function filterTranscriptHistory(records: SellerTranscriptRecord[], filte
 export function transcriptActionLabel(action: SttTranscriptLog['actionTriggered']): string {
   const labels: Partial<Record<NonNullable<SttTranscriptLog['actionTriggered']>, string>> = {
     SALE_SAVED: '판매 저장', SCREEN_CAPTURED: '화면 캡처',
-    VOICE_EDIT_START: '수정 시작', VOICE_EDIT_DONE: '수정 완료',
+    VOICE_EDIT_START: '수정 시작', VOICE_EDIT_DONE: '수정 완료', SALE_DELETED: '판매 삭제',
     CORRECTION_APPLIED: '정정 적용', CORRECTION_IGNORED: '정정 무시',
     CORRECTION_CANCELLED: '판매 취소', CORRECTION_RESTORED: '판매 복원',
     CORRECTION_CONFLICT: '정정 충돌', CORRECTION_INCOMPLETE: '정정 미완료',

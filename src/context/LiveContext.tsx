@@ -78,6 +78,10 @@ const SONIOX_SALE_START_PATTERNS = [
 const SONIOX_COMMAND_PATTERNS = [
   '방금 건 삭제',
   '방금거 삭제',
+  '방금 거 삭제',
+  '방금 판매 삭제',
+  '마지막 건 삭제',
+  '마지막 판매 삭제',
   '방금 건 수정',
   '방금거 수정',
   '수정 시작',
@@ -167,7 +171,7 @@ interface LiveContextType {
 const LiveContext = createContext<LiveContextType | undefined>(undefined);
 
 export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { addSale, updateSale, sales, refreshSales } = useSales();
+  const { addSale, updateSale, deleteSale, sales, refreshSales } = useSales();
   const { isAuthenticated, user, workspaceId, isRemoteAuth } = useAuth();
   const { getWordsForConnection } = useSttVocabulary();
   const productSales = useProductSales();
@@ -1390,10 +1394,24 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
             ruleActionName = '✏️ 항목 수정';
             setEditingFieldInfo(`수정됨 -> 닉네임: ${updated.buyerNickname}, 금액: ${updated.amount.toLocaleString()}원 ("수정 완료"를 말씀하세요)`);
           }
-        } else if (command.type === 'DELETE_LAST' && lastSavedSaleRef.current) {
-          playBeep(440, 300);
-          lastSavedSaleRef.current = null;
-          ruleActionName = '🗑️ 최근 항목 삭제';
+        } else if (command.type === 'DELETE_LAST') {
+          // 이 방송 회차에서 음성으로 마지막에 저장된 판매를 실제로 지운다.
+          // STT 콜백은 청취 시작 시점의 렌더에 묶이므로 최신 판매 목록은 ref에서 읽는다.
+          const target = lastSavedSaleRef.current;
+          const latest = target ? currentWorkflowSalesRef.current.find((sale) => sale.id === target.id
+            && sale.sessionId === targetSessionId) : undefined;
+          if (latest) {
+            deleteSale(latest.id);
+            if (latest.purchaseRequestId) reservedPurchaseRequestsRef.current.delete(latest.purchaseRequestId);
+            lastSavedSaleRef.current = null;
+            actionTriggered = 'SALE_DELETED';
+            ruleActionName = `🗑️ 방금 판매 삭제 (${latest.buyerNickname} ${latest.amount.toLocaleString()}원)`;
+            playBeep(440, 300);
+          } else {
+            lastSavedSaleRef.current = null;
+            ruleActionName = '⚠️ 삭제할 방금 판매가 없습니다';
+            playBeep(440, 150);
+          }
         } else {
           // 1-A. 음성 정정 의도 우선 판별 (PLAN.md 1-B: 일반 판매 추출보다 음성 정정 의도를 먼저 판단)
           let followUpCorrectionApplied = false;
@@ -1658,6 +1676,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
             : actionTriggered === 'SALE_PENDING' ? ['판매 후보']
             : actionTriggered === 'SALE_SAVED' ? ['판매 처리']
             : actionTriggered === 'SCREEN_CAPTURED' ? ['화면 캡처']
+            : actionTriggered === 'SALE_DELETED' ? ['판매 삭제']
             : ruleActionName.includes('상품') ? ['상품등록'] : ['음성 명령'];
           setLastMatchedRuleItem({
             text: fullText,
