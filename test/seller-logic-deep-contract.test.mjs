@@ -128,3 +128,18 @@ test('the engine still may not import a context item without source evidence', (
   const base = payload();
   assert.throws(() => normalizeSellerLogicDeepInput({ ...base, context: [{ text: '근거 없는 문맥', commentIds: [], transcriptIds: [] }] }), /원문 근거/);
 });
+
+test('previous decision reasons are abbreviated on the wire while the browser keeps them', () => {
+  const base = payload();
+  const input = normalizeSellerLogicDeepInput({ ...base, previousDecisions: [{
+    id: 'sld:["deep-contract","c1","s2",""]', status: 'CONFIRMED', nickname: 'xou.3z', unitPrice: 18000, quantity: 1,
+    reason: '가'.repeat(1200), commentIds: ['c1'], transcriptIds: ['s2'], decidedAt: at(5),
+  }] });
+  const prompt = sellerLogicDeepPrompt(input);
+  const wire = JSON.parse(prompt.userPrompt);
+  assert.equal(wire.previousDecisions.length, 1);
+  assert.equal(wire.previousDecisions[0].reason.length, 401);
+  assert.ok(wire.previousDecisions[0].reason.endsWith('…'));
+  assert.equal(input.previousDecisions[0].reason.length, 1200, 'the browser keeps the full reason');
+  assert.ok(prompt.systemPrompt.includes('축약'));
+});

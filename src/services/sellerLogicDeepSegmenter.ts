@@ -9,12 +9,15 @@ interface DeepEvent {
   start: number;
   end: number;
   signature: string;
+  size: number;
 }
 
 export interface SellerLogicDeepSegmentOptions {
   idleMs?: number;
   maxEvents?: number;
   maxDurationMs?: number;
+  /** Raw source budget per bucket so one AI prompt stays inside the server limit. */
+  maxCharacters?: number;
   /** When given, the last bucket is marked closed if no event arrived within idleMs. */
   now?: number;
 }
@@ -31,12 +34,12 @@ function buildEvents(comments: CommentRecord[], transcripts: WorkflowTranscript[
   const events: DeepEvent[] = [
     ...comments.map((row) => {
       const at = Date.parse(row.capturedAt);
-      return { key: `C:${row.id}`, kind: "C" as const, id: row.id, start: at, end: at, signature: sellerLogicDeepCommentSignature(row) };
+      return { key: `C:${row.id}`, kind: "C" as const, id: row.id, start: at, end: at, signature: sellerLogicDeepCommentSignature(row), size: JSON.stringify(row).length };
     }),
     ...transcripts.map((row) => {
       const start = Date.parse(row.startedAt || row.recognizedAt);
       const end = Date.parse(row.endedAt || row.recognizedAt);
-      return { key: `S:${row.id}`, kind: "S" as const, id: row.id, start, end, signature: sellerLogicDeepTranscriptSignature(row) };
+      return { key: `S:${row.id}`, kind: "S" as const, id: row.id, start, end, signature: sellerLogicDeepTranscriptSignature(row), size: JSON.stringify(row).length };
     }),
   ];
   events.sort((a, b) => a.start - b.start || a.key.localeCompare(b.key));
@@ -55,11 +58,13 @@ export function segmentSellerLogicDeepEvents(
   const idleMs = options.idleMs ?? SELLER_LOGIC_DEEP_LIMITS.segmentIdleMs;
   const maxEvents = options.maxEvents ?? SELLER_LOGIC_DEEP_LIMITS.segmentEvents;
   const maxDurationMs = options.maxDurationMs ?? SELLER_LOGIC_DEEP_LIMITS.segmentMaxMs;
+  const maxCharacters = options.maxCharacters ?? SELLER_LOGIC_DEEP_LIMITS.segmentCharacters;
   const events = buildEvents(comments, transcripts);
   const segments: SellerLogicDeepSegment[] = [];
   let bucket: DeepEvent[] = [];
   let bucketStart = 0;
   let bucketEnd = 0;
+  let bucketSize = 0;
   const flush = (closed: boolean) => {
     if (!bucket.length) return;
     segments.push({
@@ -72,9 +77,11 @@ export function segmentSellerLogicDeepEvents(
       transcriptIds: bucket.filter((row) => row.kind === "S").map((row) => row.id),
     });
     bucket = [];
+    bucketSize = 0;
   };
   for (const event of events) {
-    if (bucket.length && (event.start - bucketEnd > idleMs || bucket.length >= maxEvents || event.end - bucketStart >= maxDurationMs)) {
+    if (bucket.length && (event.start - bucketEnd > idleMs || bucket.length >= maxEvents ||
+        event.end - bucketStart >= maxDurationMs || bucketSize + event.size > maxCharacters)) {
       flush(true);
     }
     if (!bucket.length) {
@@ -82,6 +89,7 @@ export function segmentSellerLogicDeepEvents(
       bucketEnd = event.end;
     }
     bucket.push(event);
+    bucketSize += event.size;
     bucketEnd = Math.max(bucketEnd, event.end);
   }
   const idleClosed = options.now !== undefined && events.length > 0 && options.now - bucketEnd >= idleMs;

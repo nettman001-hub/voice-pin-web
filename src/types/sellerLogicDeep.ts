@@ -102,6 +102,7 @@ export interface SellerLogicDeepEngineState {
 
 export const SELLER_LOGIC_DEEP_LIMITS = {
   segmentEvents: 120,
+  segmentCharacters: 16_000,
   segmentIdleMs: 30_000,
   segmentMaxMs: 15 * 60_000,
   decisions: 200,
@@ -109,4 +110,6 @@ export const SELLER_LOGIC_DEEP_LIMITS = {
   signals: 50,
   timeoutSeconds: 120,
   promptCharacters: 30_000,
+  /** Previous decision reasons are abbreviated on the wire; the browser keeps the full text. */
+  wireReasonCharacters: 400,
 } as const;

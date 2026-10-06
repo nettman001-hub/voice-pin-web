@@ -1,6 +1,7 @@
 import type { CommentRecord } from "../types/comment.ts";
 import type { WorkflowTranscript } from "../types/salesWorkflow.ts";
 import {
+  SELLER_LOGIC_DEEP_LIMITS,
   type SellerLogicDeepContextItem,
   type SellerLogicDeepDecision,
   type SellerLogicDeepEngineState,
@@ -10,6 +11,7 @@ import {
   type SellerLogicDeepSignal,
 } from "../types/sellerLogicDeep.ts";
 import { segmentSellerLogicDeepEvents, sellerLogicDeepSegmentSignature } from "./sellerLogicDeepSegmenter.ts";
+import { sellerLogicDeepPrompt } from "./sellerLogicDeepContract.ts";
 
 export interface SellerLogicDeepCallResult {
   decisions: SellerLogicDeepDecision[];
@@ -44,8 +46,14 @@ export interface SellerLogicDeepRunOptions {
   now?: number;
 }
 
-const packetLimit = 28_000;
-const packetDecisionLimit = 50;
+const promptBudget = SELLER_LOGIC_DEEP_LIMITS.promptCharacters - 200;
+const packetDecisionLimit = 30;
+
+/** The server limit counts the built system+user prompt, not the raw packet JSON. */
+function promptCost(packet: SellerLogicDeepInput): number {
+  const prompt = sellerLogicDeepPrompt(packet);
+  return prompt.systemPrompt.length + prompt.userPrompt.length;
+}
 
 function assemblePacket(
   sessionId: string,
@@ -129,13 +137,16 @@ export async function runSellerLogicDeep(
       refs.forEach((key) => keys.add(key));
       const candidatePacket = assemblePacket(input.sessionId, input.slotNumber, segment, keys, sendableContext,
         [...previousDecisions, decision], input.comments, input.transcripts);
-      if (JSON.stringify(candidatePacket).length > packetLimit) {
+      if (promptCost(candidatePacket) > promptBudget) {
         refs.forEach((key) => keys.delete(key));
         continue;
       }
       previousDecisions.push(decision);
     }
     const packet = assemblePacket(input.sessionId, input.slotNumber, segment, keys, sendableContext, previousDecisions, input.comments, input.transcripts);
+    if (promptCost(packet) > promptBudget) {
+      throw new Error(`한 시간대의 원문과 이전 거래가 AI 입력 한도를 초과했습니다 (${promptCost(packet).toLocaleString('en-US')}자 / ${promptBudget.toLocaleString('en-US')}자). 시간대를 더 짧게 나누어 주세요.`);
+    }
     const started = Date.now();
     state.stats.segmentCalls++;
     const result = await call(packet);

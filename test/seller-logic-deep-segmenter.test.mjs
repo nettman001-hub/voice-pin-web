@@ -27,6 +27,13 @@ test('the event ceiling splits one bucket deterministically', () => {
   assert.deepEqual(segments.map((segment) => segment.index), [0, 1, 2]);
 });
 
+test('long source text splits a bucket by the character budget before it reaches the AI', () => {
+  const transcripts = Array.from({ length: 4 }, (_, index) => speech(`s${index}`, index, '가'.repeat(300)));
+  const segments = segmentSellerLogicDeepEvents([], transcripts, { maxCharacters: 900, now: epoch + 600_000 });
+  assert.equal(segments.length, 2);
+  assert.deepEqual(segments.map((segment) => segment.transcriptIds.length), [2, 2]);
+});
+
 test('a revised transcript changes its bucket signature without moving the bucket', () => {
   const first = segmentSellerLogicDeepEvents([], [speech('s1', 0, '초안')], { now: epoch + 60_000 })[0];
   const before = sellerLogicDeepSegmentSignature(first, [], [speech('s1', 0, '초안')]);
