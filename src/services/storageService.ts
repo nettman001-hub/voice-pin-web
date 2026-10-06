@@ -82,6 +82,8 @@ export function getNextProductCodeForSession(
 }
 
 
+
+
 // 초기 기본 인식 단어 규칙
 export const DEFAULT_RULES: RecognitionWordRule[] = [
   { id: 'r1', word: '구매확정', action: 'DB_SAVE', isEnabled: true, isEssential: true, priority: 1, description: '판매 확정 감지 및 DB 자동 저장' },

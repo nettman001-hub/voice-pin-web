@@ -51,6 +51,41 @@ import { MatchedRuleItem } from '../../context/LiveContext';
 const SILENCE_WARNING_DELAY_MS = 5 * 60 * 1000;
 const SILENCE_STOP_COUNTDOWN_SECONDS = 20;
 
+function getBuyerPurchaseIntentWord(
+  sale: SaleRecord,
+  comments: CommentRecord[] = []
+): string | null {
+  if (sale.note) {
+    const match = String(sale.note).match(/구매 댓글 ["']([^"']+)["']/);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  }
+
+  if (sale.sourceCommentIds && sale.sourceCommentIds.length > 0) {
+    const matchedComment = comments.find((c) => sale.sourceCommentIds?.includes(c.id));
+    if (matchedComment && matchedComment.content) {
+      return matchedComment.content.trim();
+    }
+  }
+
+  const normTarget = sale.buyerNickname ? sale.buyerNickname.trim().toLowerCase().replace(/[\s_.-]+/g, '') : '';
+  const buyerComments = comments.filter((c) => {
+    if (sale.buyerId && c.buyerId) return c.buyerId === sale.buyerId;
+    const cNorm = c.nickname.trim().toLowerCase().replace(/[\s_.-]+/g, '');
+    return cNorm === normTarget;
+  });
+  if (buyerComments.length > 0) {
+    const purchasePattern = /(?:구매|주문|살게요|살께요|결제|입금|저요|손|찜|예약|드려요|원)/u;
+    const purchaseComment = buyerComments.find((c) => purchasePattern.test(c.content)) || buyerComments[0];
+    if (purchaseComment && purchaseComment.content) {
+      return purchaseComment.content.trim();
+    }
+  }
+
+  return null;
+}
+
 export const LiveHomePage: React.FC = () => {
   const {
     isListening,
@@ -309,6 +344,7 @@ export const LiveHomePage: React.FC = () => {
   const effectiveSalesCount = isDemoActive ? demoSalesCount : currentSessionSales.filter((sale) =>
     sale.status !== '보류' && sale.status !== '취소' && sale.syncStatus !== 'PENDING').length;
   const effectiveTotalAmount = isDemoActive ? demoTotalAmount : todayTotalAmount;
+
 
   // 댓글 피드: 아래쪽이 최신글이 되도록 새 댓글이 오면 자동 스크롤한다.
   React.useEffect(() => {
@@ -1034,6 +1070,8 @@ export const LiveHomePage: React.FC = () => {
                     .filter((s) => sale.buyerId && s.buyerId ? s.buyerId === sale.buyerId : s.buyerNickname === sale.buyerNickname))
                     .sort((a, b) => new Date(a.recognizedAt).getTime() - new Date(b.recognizedAt).getTime());
                   const multiAmount = formatMultiSaleAmount(buyerSessionSales.map((s) => s.amount));
+                  const displayProductName = sale.productName;
+                  const purchaseIntentWord = getBuyerPurchaseIntentWord(sale, effectiveComments);
 
                   return (
                   <Link
@@ -1092,7 +1130,20 @@ export const LiveHomePage: React.FC = () => {
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center space-x-2 flex-wrap gap-1">
-                          <span className="font-bold text-sm text-slate-900 truncate">{sale.buyerNickname === '미확인(보류)' ? '구매자 미확인' : sale.buyerNickname}</span>
+                          <div className="relative group/buyer inline-flex items-center">
+                            <span
+                              className="font-bold text-sm text-slate-900 truncate hover:text-brand-600 transition-colors cursor-help"
+                              title={purchaseIntentWord ? `구매의사: "${purchaseIntentWord}"` : undefined}
+                            >
+                              {sale.buyerNickname === '미확인(보류)' ? '구매자 미확인' : sale.buyerNickname}
+                            </span>
+                            {purchaseIntentWord && (
+                              <div className="pointer-events-none absolute bottom-full left-0 mb-1 z-30 hidden group-hover/buyer:flex items-center gap-1 px-2.5 py-1 bg-slate-900/95 text-white text-[11px] rounded-md shadow-xl whitespace-nowrap border border-slate-700/50">
+                                <span className="text-amber-300 font-bold">구매의사:</span>
+                                <span className="font-semibold text-white">"{purchaseIntentWord}"</span>
+                              </div>
+                            )}
+                          </div>
                           {nicknameNeedsConfirmation && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
                               추정 닉네임 · 확인 필요
@@ -1168,9 +1219,9 @@ export const LiveHomePage: React.FC = () => {
                             {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}
                           </div>
                         )}
-                        {(sale.productCode || sale.productName) && (
+                        {(sale.productCode || displayProductName) && (
                           <div className="text-[11px] font-semibold text-slate-600 mt-0.5">
-                            상품 {sale.productCode || '번호 없음'}{sale.productName ? ` · ${sale.productName}` : ''}
+                            상품 {sale.productCode || '번호 없음'}{displayProductName ? ` · ${displayProductName}` : ''}
                           </div>
                         )}
 

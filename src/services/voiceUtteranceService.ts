@@ -6,7 +6,7 @@ export function splitTranscriptClauses(text: string): string[] {
     const char = text[index];
     const previous = text[index - 1] || '';
     const next = text[index + 1] || '';
-    const isDecimalPoint = char === '.' && /\d/u.test(previous) && /\d/u.test(next);
+    const isDecimalPoint = char === '.' && /\d/u.test(previous) && /^\s*\d/u.test(text.slice(index + 1));
     const isEllipsis = char === '.' && (previous === '.' || next === '.');
     if (!/[!?？。\n]/u.test(char) && (char !== '.' || isDecimalPoint || isEllipsis)) continue;
     const clause = text.slice(start, index + 1).trim();

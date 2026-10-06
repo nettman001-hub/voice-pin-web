@@ -183,7 +183,7 @@ export interface ExtractedSaleResult {
   allocationTranscript?: string;
 }
 
-const ALLOCATION_ACTION = /(?:드리겠습니다|드릴게요|드릴께요|챙겨\s*드릴게요|챙겨\s*드리겠습니다|챙겨\s*줄(?:게|께)(?:요)?(?=\s|[,.!?]|$)|(?:넣어|담아|배정해)\s*드(?:릴(?:게|께)요|렸(?:어요|습니다))|구매\s*확정(?:입니다|할게요)?|낙찰(?:입니다)?|판매\s*완료|주문\s*확정|결제\s*완료)/u;
+const ALLOCATION_ACTION = /(?:드리겠습니다|드릴게요|드릴께요|챙겨\s*드릴게요|챙겨\s*드리겠습니다|챙겨\s*줄(?:게|께)(?:요)?(?=\s|[,.!?]|$)|(?:넣어|담아|배정해)\s*드(?:릴(?:게|께)요|렸(?:어요|습니다))|구매\s*확정(?:입니다|할게요)?|낙찰(?:입니다)?|판매\s*완료|주문\s*확정|결제\s*완료|캡처(?:해주세요|해\s*주시고|하세요|부탁)?|먼저\s*(?:하셨네요|하셨어요|하셨|잡으셨|가져가셨)|가져가(?:세요|실게요|셨어요)|가실게요)/u;
 const NON_ALLOCATION = /(?:드릴까요|드릴\s*수\s*있|드리는\s*거\s*아니|안\s*드리|못\s*드리|(?:안|못)\s*챙겨|챙겨\s*(?:안|못)\s*줄|챙겨\s*줄(?:게|께)(?:요)?[\s,，]*(?:라고|라는|아니|취소|(?:하고|고)\s*(?:말|했)|했(?:잖|어|다)|하기로)|(?:입금|결제|구매|원)(?:하시면|하면)|사시면|있으면|남으면|가능하면|아까\s*.*(?:드렸|드린)|(?:보여|입어|설명|안내|알려|비춰|찍어|읽어|확인해|보내|재|제|재어|측정해)\s*(?:드(?:릴(?:게|께)요|리겠습니다|립니다|려요)|줄(?:게|께)(?:요)?))/u;
 
 /** A price declaration may continue an allocation, but measurements and a
@@ -203,9 +203,7 @@ export function findExplicitPriceTranscript(text: string): string | null {
     .split(/(?:가단|가슴\s*단면|총장|기장|길이|높이|폭|사이즈)(?:은|는|이|가)?\s*[:：]?\s*(?=[\d영공일이삼사오육칠팔구])/u)[0]
     .replace(/[.!。\s]+$/u, '').trim();
   const price = extractSpeechPrice(body);
-  if (!price || !body.startsWith(price.quote)) return null;
-  const ending = body.slice(price.quote.length);
-  if (!/^(?:\s*(?:만\s*원|원)?\s*(?:입니다|이에요|예요|에요|이요|요|이고요|이고)?[\s,，.!。]*)$/u.test(ending)) return null;
+  if (!price) return null;
   return `${prefix[0]}${price.quote}`;
 }
 
@@ -230,9 +228,13 @@ export function findAllocationTranscript(text: string): string | null {
     if (previous && /^(?:네[,，]?\s*)?[가-힣a-zA-Z0-9_]{2,20}\s*(?:언니|님|씨)(?:께|에게|한테)?$/u.test(previous)
       && parseBuyerNickname(previous)) return withFollowingPrice(`${previous}. ${clause}`);
     if (/구매\s*확정|낙찰|판매\s*완료|주문\s*확정|결제\s*완료|(?:넣어|담아|배정해)\s*드/u.test(clause)) return withFollowingPrice(clause);
+    if (/캡처/u.test(clause)) {
+      const preceding = clauses.slice(Math.max(0, i - 2), i).join('. ');
+      if (getBuyerNicknameCandidates(preceding).length > 0) return withFollowingPrice(`${preceding}. ${clause}`);
+    }
     // Keep a priced allocation as pending when STT loses the buyer's name.
-    // Measurement/demonstration clauses were rejected above.
-    if (extractSpeechPrice(clause)) return clause;
+    // Must be an active allocation action like 챙겨/넣어/담아/배정, not a general host price offer (드릴게요/해드릴게요).
+    if (/(?:챙겨|넣어|담아|배정해)\s*드|챙겨\s*줄/u.test(clause) && extractSpeechPrice(clause)) return clause;
   }
   return null;
 }
@@ -253,6 +255,7 @@ export function extractSaleFromTranscript(transcript: string, activeKeywords: st
 
   // Keep intervening questions as boundaries when linking a following price.
   const allocationTranscript = findAllocationTranscript(transcript);
+  const explicitConfirmation = /(?:구매\s*확정|낙찰|판매\s*완료|주문\s*확정|결제\s*완료)/u.test(text);
   const hasTrigger = Boolean(allocationTranscript) ||
     (text.includes('닉네임') && (hasDecimal || text.includes('원') || text.includes('금액') || text.includes('가격'))) ||
     (hasDecimal && Boolean(parseBuyerNickname(text)));
@@ -261,6 +264,22 @@ export function extractSaleFromTranscript(transcript: string, activeKeywords: st
     && !/(?:가격|금액)/u.test(text);
 
   if (!hasTrigger || (!allocationTranscript && (NON_ALLOCATION.test(text) || isMeasurementDescription))) {
+    return null;
+  }
+
+  const evidenceText = allocationTranscript || text;
+  const nickname = parseBuyerNickname(evidenceText) || parseBuyerNickname(text);
+
+  // 1. 배정 문맥도 없고 확정도 없는데 닉네임까지 없으면 판매 아님
+  if (!allocationTranscript && !nickname && !explicitConfirmation) {
+    return null;
+  }
+
+  // 2. 닉네임과 명시적 확정이 없는 단순 호스트 가격 제안/안내 멘트는 적재 방지
+  const isPureHostOffer = !nickname && !explicitConfirmation &&
+    !/(?:챙겨|넣어|담아|배정해|가져가|먼저\s*하셨|캡처)/u.test(evidenceText) &&
+    /(?:드릴게요|드릴께요|해드릴게요|해드릴께요|구매\s*가격이|구매가가)/u.test(evidenceText);
+  if (isPureHostOffer) {
     return null;
   }
 
@@ -274,8 +293,7 @@ export function extractSaleFromTranscript(transcript: string, activeKeywords: st
     matchedKeywords.push('소수점가격');
   }
 
-  const evidenceText = allocationTranscript || text;
-  const nickname = parseBuyerNickname(evidenceText);
+  // 타 구문/타인 가격 오염 방지: 반드시 evidenceText에서만 가격 추출
   const amount = extractSpeechPrice(evidenceText)?.amount || null;
 
   // 닉네임이나 금액 중 하나라도 없으면 '보류' 상태로 지정
