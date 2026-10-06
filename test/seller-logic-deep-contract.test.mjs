@@ -124,6 +124,32 @@ test('an evidence-less context item is preserved for manual review instead of re
   assert.equal(parsed.context[1].sourcesMissing, undefined);
 });
 
+test('swapped or unknown context aliases are recovered or shown for review instead of halting the analysis', async () => {
+  const input = normalizeSellerLogicDeepInput(payload());
+  const swapped = answer();
+  swapped.context = [
+    { text: '전사 근거가 댓글 배열로 온 항목', commentIds: ['S0'], transcriptIds: [] },
+    { text: '없는 별칭만 온 항목', commentIds: ['C99'], transcriptIds: [] },
+  ];
+  const parsed = await parse(swapped, input);
+  assert.deepEqual(parsed.context[0].commentIds, []);
+  assert.deepEqual(parsed.context[0].transcriptIds, ['s1']);
+  assert.equal(parsed.context[1].sourcesMissing, true);
+});
+
+test('an auxiliary signal with unusable aliases never rejects the deep result', async () => {
+  const input = normalizeSellerLogicDeepInput(payload());
+  const messy = answer();
+  messy.signals = [
+    { kind: 'BUYER_INTENT', summary: '별칭이 뒤바뀐 신호', commentIds: ['S1'], transcriptIds: ['C0'] },
+    { kind: 'NOISE', summary: '알 수 없는 별칭 신호', commentIds: ['C99'], transcriptIds: ['S99'] },
+  ];
+  const parsed = await parse(messy, input);
+  assert.equal(parsed.signals.length, 1);
+  assert.deepEqual(parsed.signals[0].commentIds, ['c1']);
+  assert.deepEqual(parsed.signals[0].transcriptIds, ['s2']);
+});
+
 test('the engine still may not import a context item without source evidence', () => {
   const base = payload();
   assert.throws(() => normalizeSellerLogicDeepInput({ ...base, context: [{ text: '근거 없는 문맥', commentIds: [], transcriptIds: [] }] }), /원문 근거/);

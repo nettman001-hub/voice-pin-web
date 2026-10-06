@@ -294,26 +294,40 @@ export async function parseSellerLogicDeepResult(
     ids.add(id);
     return { ...validated, id };
   });
-  const signalIds = new Set<string>();
-  const signals = (raw.signals as unknown[]).map((signal: unknown): SellerLogicDeepSignal => {
-    if (!object(signal) || !kinds.includes(signal.kind as SellerLogicDeepSignalKind) || !text(signal.summary, 1500)) {
-      return invalid("탐지 신호에는 kind와 요약이 필요합니다.");
-    }
-    const commentIds = decodeIds(signal.commentIds, commentByAlias, "signal.commentIds");
-    const transcriptIds = decodeIds(signal.transcriptIds, transcriptByAlias, "signal.transcriptIds");
-    if (!commentIds.length && !transcriptIds.length) return invalid("탐지 신호에는 원문 근거가 필요합니다.");
-    const id = `sldsig:${JSON.stringify([input.segment.id, commentIds.slice().sort(), transcriptIds.slice().sort()])}`;
-    if (signalIds.has(id)) return invalid("같은 근거의 탐지 신호가 중복되었습니다.");
-    signalIds.add(id);
-    return { id, kind: signal.kind as SellerLogicDeepSignalKind, summary: signal.summary, commentIds, transcriptIds };
-  });
-  const context = validateContextItems((raw.context as unknown[]).map((item: unknown) => {
-    if (!object(item)) return invalid("문맥 항목은 JSON 객체여야 합니다.");
-    return {
-      text: item.text,
-      commentIds: decodeIds(item.commentIds, commentByAlias, "context.commentIds"),
-      transcriptIds: decodeIds(item.transcriptIds, transcriptByAlias, "context.transcriptIds"),
+  // Auxiliary payload (signals, carry) must never halt a paid analysis. Recover
+  // swapped alias arrays and ignore unresolvable aliases; decisions stay strict.
+  const decodeRefsLenient = (commentValues: unknown, transcriptValues: unknown) => {
+    const commentIds: string[] = [];
+    const transcriptIds: string[] = [];
+    const accept = (value: unknown, direct: Map<string, string>, target: string[], swapped: Map<string, string>, other: string[]) => {
+      if (typeof value !== "string") return;
+      const hit = direct.get(value);
+      if (hit) { if (!target.includes(hit)) target.push(hit); return; }
+      const cross = swapped.get(value);
+      if (cross && !other.includes(cross)) other.push(cross);
     };
-  }), input, false).map((item) => item.commentIds.length || item.transcriptIds.length ? item : { ...item, sourcesMissing: true });
+    if (Array.isArray(commentValues)) commentValues.forEach((value) => accept(value, commentByAlias, commentIds, transcriptByAlias, transcriptIds));
+    if (Array.isArray(transcriptValues)) transcriptValues.forEach((value) => accept(value, transcriptByAlias, transcriptIds, commentByAlias, commentIds));
+    return { commentIds, transcriptIds };
+  };
+  const signalIds = new Set<string>();
+  const signals: SellerLogicDeepSignal[] = [];
+  for (const signal of raw.signals as unknown[]) {
+    if (!object(signal) || !kinds.includes(signal.kind as SellerLogicDeepSignalKind) || !text(signal.summary, 1500)) continue;
+    const { commentIds, transcriptIds } = decodeRefsLenient(signal.commentIds, signal.transcriptIds);
+    if (!commentIds.length && !transcriptIds.length) continue;
+    const id = `sldsig:${JSON.stringify([input.segment.id, commentIds.slice().sort(), transcriptIds.slice().sort()])}`;
+    if (signalIds.has(id)) continue;
+    signalIds.add(id);
+    signals.push({ id, kind: signal.kind as SellerLogicDeepSignalKind, summary: signal.summary, commentIds, transcriptIds });
+  }
+  const context: SellerLogicDeepContextItem[] = [];
+  for (const item of raw.context as unknown[]) {
+    if (!object(item) || !text(item.text, 2000)) continue;
+    const { commentIds, transcriptIds } = decodeRefsLenient(item.commentIds, item.transcriptIds);
+    context.push(commentIds.length || transcriptIds.length
+      ? { text: item.text, commentIds, transcriptIds }
+      : { text: item.text, commentIds, transcriptIds, sourcesMissing: true });
+  }
   return { decisions, signals, context, summary: raw.summary };
 }
