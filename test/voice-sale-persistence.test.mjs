@@ -29,8 +29,8 @@ const compiled = ts.transpileModule(`const persistVoiceSale = ${callback}; modul
 
 const speech = '언니, DM 왜 빵바지 보여줄게. 아니, 가까운 건 좋은데, 가윤 언니 챙겨줄게.';
 const decoratedBuyerSpeech = '금액은 8,000원, 0.8. 이거 언니, 이뿌쥬 언니 챙겨드릴게요, 0.8.';
-function comment(nickname = '가윤♡예준맘', id = 'purchase-comment', buyerId = 'buyer-account') {
-  return { id, platformMessageId: id, buyerId, nickname, content: '저요', sessionId: 'broadcast',
+function comment(nickname = '가윤♡예준맘', id = 'purchase-comment', buyerId = 'buyer-account', content = '저요') {
+  return { id, platformMessageId: id, buyerId, nickname, content, sessionId: 'broadcast',
     capturedAt: new Date(Date.now() - 1000).toISOString() };
 }
 
@@ -132,4 +132,15 @@ test('allocation binds the spoken buyer to the exact decorated comment identity 
   assert.equal(saved.rawTranscript, decoratedBuyerSpeech);
   assert.equal(ctx.reserved.has(saved.purchaseRequestId), true);
   assert.equal(ctx.reserved.has(`broadcast:${fillerBuyer.platformMessageId}`), false);
+});
+
+test('a quantity and option purchase comment is confirmed at the spoken amount', async () => {
+  const live = fixture([comment('이뿌쥬', 'option-comment', 'option-buyer', '빨강 2개 저요')]);
+  await live.save('이뿌쥬 언니 빨강 두 개 2만원 챙겨드릴게요.');
+  assert.equal(live.stored.length, 1);
+  const [sale] = live.stored;
+  assert.equal(sale.status, '자동저장');
+  assert.equal(sale.buyerNickname, '이뿌쥬');
+  assert.equal(sale.amount, 20000);
+  assert.match(sale.note, /빨강 2개 저요/u);
 });

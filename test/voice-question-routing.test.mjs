@@ -40,7 +40,7 @@ const pending = (candidateSaleIds = ['sale-1']) => ({
 });
 
 function fixture({ sales = [], rules = [], pendingCorrection = null, failProductProcessing = false, workflow=null, comments=[] } = {}) {
-  const state = { sales, rules, logs: [], events: [], beeps: [], saves: [], captures: [], cloud: [], captions: [], productCalls: [] };
+  const state = { sales, rules, deleted: [], logs: [], events: [], beeps: [], saves: [], captures: [], cloud: [], captions: [], productCalls: [] };
   const timers = new Map();
   let nextTimerId = 1;
   const globals = {
@@ -68,6 +68,8 @@ function fixture({ sales = [], rules = [], pendingCorrection = null, failProduct
     activePendingCorrectionRef: { current: pendingCorrection }, lastSavedSaleRef: { current: sales[0] || null },
     recentFinalFragmentRef: { current: null }, pendingVoiceFollowupRef: { current: new Map() }, setPendingAiTick() {},
     playBeep: (...args) => state.beeps.push(args),
+    deleteSale: (id) => { state.deleted.push(id); sales.splice(sales.findIndex((entry) => entry.id === id), 1); },
+    reservedPurchaseRequestsRef: { current: new Set(['request-1']) },
     updateSale: (updated) => { const index = sales.findIndex((entry) => entry.id === updated.id); sales[index] = updated; },
     persistVoiceSale: (...args) => state.saves.push(args), screenCaptureService: { getActiveStream: () => null },
     captureCurrentScreen: (...args) => state.captures.push(args),
@@ -356,6 +358,27 @@ test('questions and prohibitions never execute explicit edit/delete commands', (
   for (const text of ['수정 시작할까요?', '수정 완료인가요?', '방금 건 삭제할까요?', '삭제하지 마세요', '바꾸지 마세요']) {
     assert.equal(parseVoiceCommand(text, true).type, 'NONE', text);
   }
+});
+
+test('"방금 건 삭제" removes the last voice sale of this broadcast', () => {
+  for (const provider of [undefined, 'SONIOX']) {
+    const ctx = fixture({ sales: [sale('sale-1', { purchaseRequestId: 'request-1' })] });
+    ctx.send('방금 건 삭제', provider ? { provider, confirmedTextDelta: '방금 건 삭제.' } : {});
+    assert.deepEqual(ctx.state.deleted, ['sale-1'], provider || 'default');
+    assert.equal(ctx.state.sales.length, 0);
+    assert.equal(ctx.globals.lastSavedSaleRef.current, null);
+    assert.equal(ctx.globals.reservedPurchaseRequestsRef.current.has('request-1'), false);
+  }
+});
+
+test('unrelated "삭제" speech and other broadcasts never delete a sale', () => {
+  const ctx = fixture({ sales: [sale()] });
+  ctx.send('댓글 삭제됐네요');
+  assert.deepEqual(ctx.state.deleted, []);
+  const other = fixture({ sales: [sale('sale-1', { sessionId: 'yesterday' })] });
+  other.send('방금 건 삭제');
+  assert.deepEqual(other.state.deleted, []);
+  assert.equal(other.state.sales.length, 1);
 });
 
 test('manual voice editing cannot revive the first name from an ambiguous parser result', () => {
