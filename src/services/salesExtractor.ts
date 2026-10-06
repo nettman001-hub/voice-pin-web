@@ -189,7 +189,10 @@ const NON_ALLOCATION = /(?:드릴까요|드릴\s*수\s*있|드리는\s*거\s*아
 /** A price declaration may continue an allocation, but measurements and a
  * second buyer/product/price must never become its transaction evidence. */
 export function findExplicitPriceTranscript(text: string): string | null {
-  const clause = text.trim();
+  // A stammered label is still one declaration: "가격은, 가격은 0.5" → "가격은 0.5".
+  const clause = text.trim()
+    .replace(/^((?:가격|금액|단가|판매가)(?:은|는|이|가)?)(?:[\s,，]+\1)+(?=[\s,，:：]|$)/u, '$1')
+    .replace(/^((?:가격|금액|단가|판매가)(?:은|는|이|가)?)[,，]\s*/u, '$1 ');
   if (splitTranscriptClauses(clause).length !== 1 || isQuestionUtterance(clause)
     || getBuyerNicknameCandidates(clause).length > 0
     || /(?:아니|말고|정정|수정|변경|취소|이면|라면|다면|하시면|다음|다른|이전|새\s*상품)/u.test(clause)) return null;
@@ -217,8 +220,21 @@ export function findAllocationTranscript(text: string): string | null {
     if (isQuestionUtterance(clause) || !ALLOCATION_ACTION.test(clause) || NON_ALLOCATION.test(clause)) continue;
     const withFollowingPrice = (allocation: string): string => {
       if (extractSpeechPrice(allocation)) return allocation;
-      const priceClause = findExplicitPriceTranscript(clauses[i + 1] || '');
-      return priceClause ? `${allocation}. ${priceClause}` : allocation;
+      // Sellers often repeat the allocation or add a filler before the price:
+      // "햇반님 드릴게요. 햇반님 드릴게요. 가격은 1.2". Skip only those, never
+      // another buyer, product or unrelated sentence.
+      const names = new Set(getBuyerNicknameCandidates(allocation).map((name) => name.replace(/\s+/gu, '')));
+      for (let j = i + 1; j < Math.min(clauses.length, i + 4); j++) {
+        const next = clauses[j];
+        const priceClause = findExplicitPriceTranscript(next);
+        if (priceClause) return `${allocation}. ${priceClause}`;
+        const nextNames = getBuyerNicknameCandidates(next).map((name) => name.replace(/\s+/gu, ''));
+        const repeatsAllocation = ALLOCATION_ACTION.test(next) && !NON_ALLOCATION.test(next) && !isQuestionUtterance(next)
+          && !extractSpeechPrice(next) && nextNames.every((name) => names.has(name));
+        const isFiller = /^(?:네|넵|예|자|아|어|음|이거|요거)(?:[,，\s]*(?:네|넵|예|자|아|어|음|이거|요거))*$/u.test(next);
+        if (!repeatsAllocation && !isFiller) break;
+      }
+      return allocation;
     };
     // A clear allocation with several possible names must stay visible for
     // review, even without a price; never promote one of those names by order.

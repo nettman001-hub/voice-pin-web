@@ -67,3 +67,25 @@ test('소수점 뒤 마침표 및 띄어쓰기 금액 인식 검증', () => {
   // 전화번호는 가격으로 오인되지 않아야 함
   assert.equal(extractSpeechPrice('전화번호 010-5855-5668'), null);
 });
+
+test('배정 멘트를 반복하거나 "가격은"을 더듬어도 뒤따르는 가격을 판매 금액으로 읽어야 함', () => {
+  const cases = [
+    ['는. 이렇게 A라인으로. 포미님 아까 거. 이거. 포미님 드릴게요. 가격은 0.8.', '포미', 8000],
+    ['있는 이런 니트 가디건 1.2. 네. 네, 이거 햇반님 드릴게요. 햇반님 드릴게요. 가격은 1.2.', '햇반', 12000],
+    ['어, 아지트님. 비싼 거 사셨어. 0.5. 이거 아지트님 드릴게요. 가격은, 가격은 0.5. 네.', '아지트', 5000],
+    ['햇반님 드릴게요. 네. 가격은 1.5.', '햇반', 15000],
+  ];
+  for (const [utterance, buyer, amount] of cases) {
+    const result = extractSaleFromTranscript(utterance);
+    assert.equal(result?.intent, 'ALLOCATION', utterance);
+    assert.equal(result?.buyerNickname, buyer, utterance);
+    assert.equal(result?.amount, amount, utterance);
+    // 서버 검증도 배정 근거 문장에서 같은 금액을 다시 읽는다.
+    assert.equal(extractSpeechPrice(result.allocationTranscript)?.amount, amount, utterance);
+  }
+});
+
+test('다른 구매자 배정이 끼어들면 뒤 가격을 앞 구매자에게 붙이지 않아야 함', () => {
+  const result = extractSaleFromTranscript('햇반님 드릴게요. 포미님 드릴게요. 가격은 1.2.');
+  assert.notEqual(result?.allocationTranscript?.includes('1.2') && result?.buyerNickname === '햇반', true);
+});
