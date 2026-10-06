@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { extractSaleFromTranscript } from '../src/services/salesExtractor.ts';
+import { extractSpeechPrice } from '../src/services/priceEvidence.ts';
 import { getPurchaseRequests, matchPurchaseRequest } from '../src/services/purchaseFirstSales.ts';
 import { buildPendingReasons, buildEvidenceSnapshot } from '../src/services/pendingSalesService.ts';
 import { getVoiceReviewRequests, shouldReviewVoiceSale, buildVoiceReviewRequest,
@@ -34,15 +35,15 @@ function comment(nickname = '가윤♡예준맘', id = 'purchase-comment', buyer
     capturedAt: new Date(Date.now() - 1000).toISOString() };
 }
 
-function fixture(comments) {
+function fixture(comments, activeProduct = undefined) {
   const stored = [];
   const reserved = new Set();
   const globals = {
-    extractSaleFromTranscript, getPurchaseRequests, matchPurchaseRequest,
+    extractSaleFromTranscript, extractSpeechPrice, getPurchaseRequests, matchPurchaseRequest,
     buildPendingReasons, buildEvidenceSnapshot, getVoiceReviewRequests, generateSequentialProductName,
     workspaceId: 'workspace', sales: [], currentWorkflowSalesRef: { current: stored },
     productSalesRef: { current: { activeSession: { id: 'broadcast', displayCode: '20261001-1' },
-      activeProduct: undefined, feed: { comments: [] } } },
+      activeProduct, feed: { comments: [] } } },
     currentSessionIdRef: { current: 'broadcast' }, recentVoiceDecisionsRef: { current: new Map() },
     reservedPurchaseRequestsRef: { current: reserved }, lastSavedSaleRef: { current: null },
     storageService: { getCommentRecords: () => comments, getPurchaseRequests: () => [], getCaptures: () => [] },
@@ -152,4 +153,18 @@ test('a quantity and option purchase comment is confirmed at the spoken amount',
   assert.equal(sale.buyerNickname, '이뿌쥬');
   assert.equal(sale.amount, 20000);
   assert.match(sale.note, /빨강 2개 저요/u);
+});
+
+test('a spoken price wins over the registered product price, even after a repeated allocation', async () => {
+  const product = { id: 'product', productCode: '001', name: '상품', unitPrice: 3000 };
+  const linked = fixture([comment('햇반', 'c-1', 'buyer-1')], product);
+  await linked.save('있는 이런 니트 가디건 1.2. 네. 네, 이거 햇반님 드릴게요. 햇반님 드릴게요. 가격은 1.2.');
+  assert.equal(linked.stored[0].amount, 12000);
+  assert.equal(linked.stored[0].status, '자동저장');
+
+  // A price the extractor could not tie to this allocation must not silently
+  // become the registered product price.
+  const unlinked = fixture([comment('햇반', 'c-2', 'buyer-2')], product);
+  await unlinked.save('햇반님 드릴게요. 니트는 원래 1.5인데요.');
+  assert.notEqual(unlinked.stored[0]?.amount, 3000);
 });

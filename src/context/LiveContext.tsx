@@ -4,6 +4,7 @@ import { deepgramService } from '../services/deepgramService';
 import { audioCaptureService } from '../services/audioCaptureService';
 import { screenCaptureService } from '../services/screenCaptureService';
 import { extractSaleFromTranscript, parseKoreanAmount } from '../services/salesExtractor';
+import { extractSpeechPrice } from '../services/priceEvidence';
 import { parseVoiceCommand } from '../services/voiceCommandParser';
 import { splitTranscriptClauses } from '../services/voiceUtteranceService';
 import { getPurchaseRequests, matchPurchaseRequest } from '../services/purchaseFirstSales';
@@ -823,7 +824,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, cloudComments).length) return;
     const buyerNickname = request?.nickname || saleResult.buyerNickname;
     const hasValidNickname = Boolean(buyerNickname) && buyerNickname !== '미확인(보류)' && buyerNickname !== '미확인';
-    const effectiveAmount = saleResult.amount > 0 ? saleResult.amount : (activeProductSnapshot?.unitPrice ?? 0);
+    // The registered product price is only a fallback when the seller said no
+    // price at all; a spoken price we could not link must stay for review.
+    const effectiveAmount = saleResult.amount > 0 ? saleResult.amount
+      : extractSpeechPrice(fullText) ? 0 : (activeProductSnapshot?.unitPrice ?? 0);
     const status = (request || hasValidNickname) && effectiveAmount > 0 && saleResult.intent === 'ALLOCATION' ? '자동저장' : '보류';
     // Repeated allocation/price phrases for one purchase comment refine the
     // same pending sale rather than creating another transaction.
