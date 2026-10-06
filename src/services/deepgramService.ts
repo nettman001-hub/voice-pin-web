@@ -16,6 +16,16 @@ export type OnTranscriptCallback = (data: {
   abnormalReason?: string;
 }) => void;
 
+// Deepgram은 keyterm이 URL에 들어가므로 Soniox보다 적게 보낸다.
+const MAX_DEEPGRAM_KEYTERMS = 100;
+// 겹침 교체: 최소 겹침, 끊을 무음 길이, 최대 겹침
+const OVERLAP_MIN_MS = 600;
+const OVERLAP_SILENCE_MS = 250;
+const OVERLAP_MAX_MS = 3_000;
+const ROTATION_CONNECT_TIMEOUT_MS = 5_000;
+const ROTATION_DRAIN_TIMEOUT_MS = 4_000;
+const TOKEN_BOUNDARY_TOLERANCE_MS = 40;
+
 export type OnErrorCallback = (error: string) => void;
 export type OnStatusCallback = (status: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'ERROR', message?: string) => void;
 
@@ -55,6 +65,21 @@ export class DeepgramSttService {
   private receivedResponses = 0;
   private receivedTextCharacters = 0;
   private lastResponseAt = 0;
+  // 겹침 교체(Soniox): 새 세션이 같은 오디오를 함께 듣는 동안의 상태
+  private overlapCandidate: DeepgramSttService | null = null;
+  private overlapObserver: ((chunk: ArrayBuffer) => void) | null = null;
+  private drainingDelegate: DeepgramSttService | null = null;
+  private drainingOwnSocket: WebSocket | null = null;
+  // 세션 하나 기준(이 인스턴스의 소켓이 받은 오디오 기준 ms)
+  private sentAudioMs = 0;
+  private lastFinalTokenEndMs = -Infinity;
+  private keepTokensEndingBeforeMs: number | null = null;
+  private keepTokensStartingFromMs: number | null = null;
+  private heldMessages: string[] | null = null;
+  private processHeldMessage: ((raw: string) => void) | null = null;
+  private emitPendingFinal: (() => void) | null = null;
+  private retiring: { onLost: () => void } | null = null;
+  private drainWaiter: (() => void) | null = null;
 
   private isCurrentGeneration(generation: number): boolean {
     return this.sessionGeneration === generation;
@@ -119,6 +144,21 @@ export class DeepgramSttService {
       this.activeDelegate = null;
       active.resetSessionSilently();
     }
+    if (this.drainingDelegate) {
+      const draining = this.drainingDelegate;
+      this.drainingDelegate = null;
+      draining.resetSessionSilently();
+    }
+    if (this.drainingOwnSocket) {
+      const socket = this.drainingOwnSocket;
+      this.drainingOwnSocket = null;
+      if (this.ws !== socket) this.discardSocket(socket);
+    }
+    this.overlapCandidate = null;
+    this.overlapObserver = null;
+    const drainWaiter = this.drainWaiter;
+    this.drainWaiter = null;
+    drainWaiter?.();
     this.sessionGeneration += 1;
     this.isRecognitionActive = false;
     this.currentEngine = 'NONE';
@@ -141,6 +181,14 @@ export class DeepgramSttService {
     this.receivedResponses = 0;
     this.receivedTextCharacters = 0;
     this.lastResponseAt = 0;
+    this.sentAudioMs = 0;
+    this.lastFinalTokenEndMs = -Infinity;
+    this.keepTokensEndingBeforeMs = null;
+    this.keepTokensStartingFromMs = null;
+    this.heldMessages = null;
+    this.processHeldMessage = null;
+    this.emitPendingFinal = null;
+    this.retiring = null;
 
     return this.sessionGeneration;
   }
@@ -174,6 +222,7 @@ export class DeepgramSttService {
 
     const handleCloudFailure = (socket: WebSocket, message: string) => {
       if (!this.isActiveSession(generation) || this.ws !== socket) return;
+      if (this.handleLossDuringRotation()) return;
 
       const troubleshootingHint = provider === 'DEEPGRAM'
         ? 'API 키 또는 요청 설정을 확인해 주세요'
@@ -230,11 +279,11 @@ export class DeepgramSttService {
             sessionOnStatus?.('CONNECTED', 'Soniox v5 연결 성공! 한국어 전용으로 실시간 전사합니다.');
           };
 
-          socket.onmessage = (event) => {
+          const processSonioxMessage = (raw: string) => {
             if (!this.isActiveSession(generation) || this.ws !== socket) return;
 
             try {
-              const data: SonioxResponse = JSON.parse(event.data);
+              const data: SonioxResponse = JSON.parse(raw);
               this.receivedResponses++;
               this.lastResponseAt = Date.now();
               if (this.receivedResponses === 1) console.log('[Soniox] 첫 서버 응답 수신:', {
@@ -248,7 +297,7 @@ export class DeepgramSttService {
                 return;
               }
 
-              const tokens = data.tokens || [];
+              const tokens = this.filterRotationTokens(data.tokens || []);
               this.receivedTextCharacters += tokens.filter((token) => token.text !== '<end>' && token.text !== '<fin>')
                 .reduce((count, token) => count + token.text.length, 0);
               const finalizationReached = tokens.some((token) => (
@@ -261,6 +310,11 @@ export class DeepgramSttService {
                 !token.is_final && token.text !== '<fin>' && token.text !== '<end>'
               ));
               const confirmedTextDelta = finalTokens.map((token) => token.text).join('');
+              for (const token of finalTokens) {
+                if (typeof token.end_ms === 'number') {
+                  this.lastFinalTokenEndMs = Math.max(this.lastFinalTokenEndMs, token.end_ms);
+                }
+              }
 
               if (confirmedTextDelta) {
                 this.sonioxFinalText += confirmedTextDelta;
@@ -308,9 +362,27 @@ export class DeepgramSttService {
                   rawResponse: data
                 });
               }
+              if (data.finished) this.drainWaiter?.();
             } catch (e) {
               console.error('[Soniox] 응답 파싱 실패:', e);
             }
+          };
+
+          socket.onmessage = (event) => {
+            if (!this.isActiveSession(generation) || this.ws !== socket) return;
+            // 교체 중인 새 세션은 옛 세션이 끝날 때까지 결과를 모아 두었다가 겹친 부분을 빼고 처리한다
+            if (this.heldMessages) {
+              this.heldMessages.push(event.data);
+              return;
+            }
+            processSonioxMessage(event.data);
+          };
+          this.processHeldMessage = processSonioxMessage;
+          this.emitPendingFinal = () => {
+            if (!this.isActiveSession(generation) || this.ws !== socket) return;
+            const finalText = this.sonioxFinalText.trim();
+            this.sonioxFinalText = '';
+            if (finalText) onTranscript({ text: finalText, isFinal: true, confidence: 0.9, provider: 'SONIOX' });
           };
 
           socket.onerror = () => {
@@ -320,6 +392,7 @@ export class DeepgramSttService {
 
           socket.onclose = (event) => {
             if (!this.isActiveSession(generation) || this.ws !== socket) return;
+            if (this.handleLossDuringRotation()) return;
 
             console.log('[Soniox] WebSocket 연결 종료 코드:', event.code, event.reason);
             this.ws = null;
@@ -342,13 +415,13 @@ export class DeepgramSttService {
           `channels=1`,
           `endpointing=300`,
           config.keyterms && config.keyterms.length > 0
-            ? config.keyterms.map((term) => `keyterm=${encodeURIComponent(term)}`).join('&')
+            ? config.keyterms.slice(0, MAX_DEEPGRAM_KEYTERMS).map((term) => `keyterm=${encodeURIComponent(term)}`).join('&')
             : ''
         ].filter(Boolean).join('&');
 
         const url = `wss://api.deepgram.com/v1/listen?${queryParams}`;
         // The URL contains seller-entered vocabulary; never log the full query string.
-        console.log('[Deepgram] WebSocket 연결 시도 (발음 힌트 개수):', config.keyterms?.length || 0);
+        console.log('[Deepgram] WebSocket 연결 시도 (발음 힌트 개수):', Math.min(config.keyterms?.length || 0, MAX_DEEPGRAM_KEYTERMS));
         const socket = new WebSocket(url, ['token', cleanApiKey]);
         this.ws = socket;
         this.socketProvider = 'DEEPGRAM';
@@ -647,13 +720,23 @@ export class DeepgramSttService {
    * 탭 방송 소리 또는 마이크 오디오 바이너리 청크를 선택된 STT WebSocket으로 실시간 전송
    */
   public sendAudioChunk(chunk: ArrayBuffer | Blob) {
+    const candidate = this.overlapCandidate;
+    const observer = this.overlapObserver;
+    // 겹침 교체 중에는 같은 오디오를 새 세션에도 보낸다
+    candidate?.sendAudioChunk(chunk);
     if (this.activeDelegate) {
       this.activeDelegate.sendAudioChunk(chunk);
-      return;
+    } else {
+      this.sendToOwnSocket(chunk);
     }
+    if (observer && chunk instanceof ArrayBuffer) observer(chunk);
+  }
+
+  private sendToOwnSocket(chunk: ArrayBuffer | Blob) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(chunk);
       const bytes = chunk instanceof ArrayBuffer ? chunk.byteLength : chunk.size;
+      if (chunk instanceof ArrayBuffer) this.sentAudioMs += bytes / 32;
       if (this.sentAudioBytes === 0 && bytes > 0) console.log('[STT] 첫 오디오 전송:', {
         engine: this.currentEngine, bytes,
       });
@@ -700,6 +783,23 @@ export class DeepgramSttService {
    * 새 소켓이 열린 뒤에도 발화 경계가 유지된 경우에만 전송 대상을 원자적으로 바꾼다.
    */
   public async rotateLiveStream(config: SttConfig): Promise<boolean> {
+    if (config.provider === 'SONIOX' && this.getCurrentEngine() === 'SONIOX') {
+      return this.rotateWithOverlap(config);
+    }
+    return this.rotateAtSilence(config);
+  }
+
+  /** 지금 힌트 단어 교체를 시작할 수 있는지. Soniox는 말하는 중에도 겹쳐 교체한다. */
+  public canRotateLiveStream(): boolean {
+    if (this.pendingRotation || this.drainingDelegate || this.drainingOwnSocket || !this.isRecognitionActive) return false;
+    if (this.getCurrentEngine() === 'SONIOX') {
+      const session = this.activeDelegate ?? this;
+      return !!session.ws && session.ws.readyState === WebSocket.OPEN && session.drainWaiter === null;
+    }
+    return this.isSafeToRotateLiveStream();
+  }
+
+  private async rotateAtSilence(config: SttConfig): Promise<boolean> {
     if (!this.isSafeToRotateLiveStream() || this.pendingRotation) return false;
 
     const transcriptCallback = this.onTranscript;
@@ -775,6 +875,227 @@ export class DeepgramSttService {
         },
       );
     });
+  }
+
+  /**
+   * 판매 멘트가 이어지는 중에도 멘트를 잃지 않고 Soniox 세션을 바꾼다.
+   * 1) 기존 세션으로 계속 들으면서 새 힌트 단어로 새 세션을 연다(실패하면 기존 세션 유지).
+   * 2) 새 세션이 열리면 같은 오디오를 두 세션에 함께 보낸다(겹쳐 듣기).
+   * 3) 짧은 무음(또는 최대 3초 겹침)에서 기존 세션에 오디오를 끊고, 남은 말을 확정받아 내보낸다.
+   *    끊은 지점에 걸린 단어는 기존 세션에서 버리고 새 세션의 온전한 단어를 쓴다.
+   * 4) 새 세션이 모아 둔 결과 중 기존 세션이 이미 확정한 부분은 빼고 이어 붙인다.
+   */
+  private async rotateWithOverlap(config: SttConfig): Promise<boolean> {
+    if (!this.canRotateLiveStream()) return false;
+
+    const transcriptCallback = this.onTranscript;
+    const errorCallback = this.onError;
+    const statusCallback = this.onStatus;
+    if (!transcriptCallback || !errorCallback) return false;
+
+    const attemptId = ++this.rotationAttemptId;
+    const old: DeepgramSttService = this.activeDelegate ?? this;
+    const candidate = new DeepgramSttService();
+    this.pendingRotation = candidate;
+    let promoted = false;
+    let overlapping = false;
+
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      let overlapTimer: number | null = null;
+      const connectTimer = window.setTimeout(() => abort(), ROTATION_CONNECT_TIMEOUT_MS);
+
+      const settle = (success: boolean) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(connectTimer);
+        if (overlapTimer !== null) window.clearTimeout(overlapTimer);
+        if (this.pendingRotation === candidate) this.pendingRotation = null;
+        resolve(success);
+      };
+
+      // 끊기 전 실패: 새 세션만 버리고 기존 세션은 그대로 듣는다
+      const abort = () => {
+        if (settled || promoted) return;
+        if (this.overlapCandidate === candidate) {
+          this.overlapCandidate = null;
+          this.overlapObserver = null;
+        }
+        old.retiring = null;
+        candidate.resetSessionSilently();
+        settle(false);
+      };
+
+      const cut = async () => {
+        if (settled || promoted || !overlapping) return;
+        if (attemptId !== this.rotationAttemptId || !this.isRecognitionActive) {
+          abort();
+          return;
+        }
+        promoted = true;
+        const oldCutMs = old.sentAudioMs;
+        const candidateCutMs = candidate.sentAudioMs;
+        this.overlapCandidate = null;
+        this.overlapObserver = null;
+        old.retiring = null;
+
+        // 이 순간부터 오디오는 새 세션에만 간다
+        const oldOwnSocket = old === this ? this.ws : null;
+        if (old === this) this.drainingOwnSocket = oldOwnSocket;
+        else this.drainingDelegate = old;
+        this.activeDelegate = candidate;
+        this.currentEngine = config.provider;
+
+        const lastFinalEndMs = await old.drainSoniox(oldCutMs);
+        if (attemptId !== this.rotationAttemptId) {
+          settle(false);
+          return;
+        }
+        old.emitPendingFinal?.();
+        if (old === this) {
+          if (this.drainingOwnSocket === oldOwnSocket) this.drainingOwnSocket = null;
+          if (oldOwnSocket && this.ws === oldOwnSocket) {
+            this.ws = null;
+            this.socketProvider = null;
+          }
+          if (oldOwnSocket) this.discardSocket(oldOwnSocket);
+          this.keepTokensEndingBeforeMs = null;
+        } else {
+          if (this.drainingDelegate === old) this.drainingDelegate = null;
+          old.resetSessionSilently();
+        }
+
+        // 기존 세션이 확정한 마지막 단어 끝을 새 세션 시각으로 바꿔, 그 뒤 단어부터 쓴다
+        const keepFrom = Number.isFinite(lastFinalEndMs)
+          ? lastFinalEndMs - (oldCutMs - candidateCutMs)
+          : null;
+        candidate.releaseHeldTranscripts(keepFrom);
+        statusCallback?.('CONNECTED', 'Soniox 닉네임 힌트를 갱신했습니다. (겹쳐 듣기로 멘트 유실 없이 교체)');
+        settle(true);
+      };
+
+      const beginOverlap = () => {
+        if (settled || attemptId !== this.rotationAttemptId || !this.isRecognitionActive || (this.activeDelegate ?? this) !== old) {
+          abort();
+          return;
+        }
+        window.clearTimeout(connectTimer);
+        overlapping = true;
+        old.retiring = { onLost: () => void cut() };
+        let overlapMs = 0;
+        let quietMs = 0;
+        this.overlapCandidate = candidate;
+        this.overlapObserver = (chunk) => {
+          const { rms, durationMs } = this.measurePcmChunk(chunk);
+          overlapMs += durationMs;
+          quietMs = rms < 0.012 ? quietMs + durationMs : 0;
+          if (overlapMs >= OVERLAP_MIN_MS && (quietMs >= OVERLAP_SILENCE_MS || overlapMs >= OVERLAP_MAX_MS)) void cut();
+        };
+        // 오디오가 멈춰도 교체가 끝나도록 한다
+        overlapTimer = window.setTimeout(() => void cut(), OVERLAP_MAX_MS + 2_000);
+      };
+
+      candidate.startLiveStream(
+        { ...config, allowBrowserSpeechFallback: false },
+        (data) => {
+          if (promoted) transcriptCallback(data);
+        },
+        (message) => {
+          if (promoted) errorCallback(message);
+          else abort();
+        },
+        (status, message) => {
+          if (!promoted && status === 'CONNECTED') {
+            beginOverlap();
+            return;
+          }
+          if (!promoted && (status === 'ERROR' || status === 'DISCONNECTED')) {
+            abort();
+            return;
+          }
+          if (promoted && status !== 'CONNECTED') statusCallback?.(status, message);
+        },
+      );
+      candidate.heldMessages = [];
+    });
+  }
+
+  /** 교체로 물러나는 세션이 끊기면 정상 종료로 처리한다. 처리했으면 true. */
+  private handleLossDuringRotation(): boolean {
+    if (this.drainWaiter) {
+      this.drainWaiter();
+      return true;
+    }
+    if (this.retiring) {
+      const retiring = this.retiring;
+      this.retiring = null;
+      retiring.onLost();
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 오디오를 끊은 세션의 남은 말을 확정받는다.
+   * 끊은 지점에 걸친 단어는 잘렸을 수 있어 버린다(새 세션이 온전히 들었다).
+   * 이 세션이 확정한 마지막 단어의 끝(이 세션 기준 ms)을 돌려준다.
+   */
+  private drainSoniox(cutMs: number): Promise<number> {
+    this.keepTokensEndingBeforeMs = cutMs - TOKEN_BOUNDARY_TOLERANCE_MS;
+    const socket = this.ws;
+    return new Promise<number>((resolve) => {
+      let finished = false;
+      const done = () => {
+        if (finished) return;
+        finished = true;
+        window.clearTimeout(timer);
+        if (this.drainWaiter === done) this.drainWaiter = null;
+        resolve(this.lastFinalTokenEndMs);
+      };
+      const timer = window.setTimeout(done, ROTATION_DRAIN_TIMEOUT_MS);
+      this.drainWaiter = done;
+      try {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'finalize' }));
+          socket.send(new ArrayBuffer(0));
+        } else {
+          done();
+        }
+      } catch {
+        done();
+      }
+    });
+  }
+
+  private releaseHeldTranscripts(keepFromMs: number | null): void {
+    this.keepTokensStartingFromMs = keepFromMs;
+    const held = this.heldMessages || [];
+    this.heldMessages = null;
+    for (const raw of held) this.processHeldMessage?.(raw);
+  }
+
+  private filterRotationTokens(tokens: SonioxResponse['tokens']): SonioxResponse['tokens'] {
+    const keepFrom = this.keepTokensStartingFromMs;
+    const keepBefore = this.keepTokensEndingBeforeMs;
+    if (keepFrom === null && keepBefore === null) return tokens;
+    return tokens.filter((token) => {
+      if (token.text === '<end>' || token.text === '<fin>') return true;
+      if (keepFrom !== null && typeof token.start_ms === 'number' && token.start_ms < keepFrom - TOKEN_BOUNDARY_TOLERANCE_MS) return false;
+      if (keepBefore !== null && typeof token.end_ms === 'number' && token.end_ms > keepBefore) return false;
+      return true;
+    });
+  }
+
+  private discardSocket(socket: WebSocket): void {
+    socket.onopen = null;
+    socket.onmessage = null;
+    socket.onerror = null;
+    socket.onclose = null;
+    try {
+      if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) socket.close();
+    } catch (e) {
+      console.error('[STT] WebSocket 종료 에러:', e);
+    }
   }
 
   /**

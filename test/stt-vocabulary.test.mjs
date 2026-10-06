@@ -40,18 +40,19 @@ test('STT vocabulary accepts 50 distinct short terms and discards invalid extras
   assert.deepEqual(Array.from(normalizeSttVocabulary(['x'.repeat(41), '정상'])), ['정상']);
 
   const presets = Array.from({ length: 50 }, (_, index) => `브랜드${index}`);
-  const nicknames = Array.from({ length: 25 }, (_, index) => `고객${index}`);
+  const nicknames = Array.from({ length: 120 }, (_, index) => `고객${index}`);
   const rules = ['브랜드0', ...Array.from({ length: 70 }, (_, index) => `규칙${index}`)];
   const combined = buildCloudSttTerms(presets, nicknames, rules);
-  assert.equal(combined.length, 100);
+  assert.equal(combined.length, 200);
   assert.deepEqual(Array.from(combined.slice(0, 50)), presets);
-  assert.deepEqual(Array.from(combined.slice(50, 75)), nicknames);
+  assert.deepEqual(Array.from(combined.slice(50, 170)), nicknames);
+  assert.equal(combined[170], '규칙0');
   assert.equal(combined.filter((word) => word === '브랜드0').length, 1);
 });
 
-test('cloud STT nickname hints use the latest 25 distinct commenters', () => {
+test('cloud STT nickname hints use the latest 50 distinct commenters', () => {
   const { getRecentCommentNicknames } = loadTypescript('src/services/sttVocabularyService.ts');
-  const comments = Array.from({ length: 30 }, (_, index) => ({
+  const comments = Array.from({ length: 55 }, (_, index) => ({
     nicknameSnapshot: `고객${index}`,
     capturedAt: new Date(Date.UTC(2026, 9, 1, 0, 0, index)).toISOString(),
     ingestSequence: index,
@@ -63,10 +64,10 @@ test('cloud STT nickname hints use the latest 25 distinct commenters', () => {
   });
 
   const nicknames = getRecentCommentNicknames(comments);
-  assert.equal(nicknames.length, 25);
+  assert.equal(nicknames.length, 50);
   assert.equal(nicknames[0], '고객10');
   assert.equal(nicknames.filter((nickname) => nickname === '고객10').length, 1);
-  assert.ok(nicknames.includes('고객29'));
+  assert.ok(nicknames.includes('고객54'));
   assert.ok(!nicknames.includes('고객4'));
 });
 
@@ -329,7 +330,8 @@ test('navigation replaces the mock training page and live requests use saved voc
   assert.ok(!sidebar.includes('음성인식 훈련 (학습)'));
   assert.ok(sidebar.includes('음성인식 발음 힌트'));
   assert.ok(!fs.existsSync(path.join(root, 'src/pages/seller/VoiceTrainingPage.tsx')));
-  assert.ok(live.includes('storageService.getSessionCommentRecords(newSessionId, transcriptWorkspaceIdRef.current)'));
-  assert.ok(live.includes('buildCloudSttTerms(await getWordsForConnection(), recentNicknameTerms, ruleTerms)'));
+  assert.ok(live.includes('storageService.getSessionCommentRecords(sessionId, workspace)'));
+  assert.ok(live.includes('collectHintNicknames(newSessionId)'));
+  assert.ok(live.includes('buildCloudSttTerms(await getWordsForConnection(), buildNicknameHintTerms(recentNicknameTerms), ruleTerms)'));
   assert.ok(live.includes('keyterms: cloudKeyterms'));
 });

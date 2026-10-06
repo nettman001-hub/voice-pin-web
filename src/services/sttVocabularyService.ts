@@ -1,7 +1,7 @@
 export const MAX_STT_VOCABULARY_WORDS = 50;
 export const MAX_STT_VOCABULARY_WORD_LENGTH = 40;
-export const MAX_CLOUD_STT_TERMS = 100;
-export const MAX_RECENT_COMMENT_NICKNAMES = 25;
+export const MAX_CLOUD_STT_TERMS = 200;
+export const MAX_RECENT_COMMENT_NICKNAMES = 50;
 
 interface CommentNicknameSource {
   nickname?: unknown;
