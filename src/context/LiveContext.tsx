@@ -9,8 +9,8 @@ import { splitTranscriptClauses } from '../services/voiceUtteranceService';
 import { getPurchaseRequests, matchPurchaseRequest } from '../services/purchaseFirstSales';
 import type { CommentRecord } from '../types/comment';
 import { nicknameVerificationNote, verifyNicknameFromComments } from '../services/commentNicknameVerifier';
-import { storageService, generateSessionId, getNextProductCodeForSession, formatSequentialProductName } from '../services/storageService';
-import { generateSequentialProductName } from '../utils/productNaming';
+import { storageService, generateSessionId, getNextProductCodeForSession } from '../services/storageService';
+import { generateSequentialProductName, formatSequentialProductName } from '../utils/productNaming';
 import { useSales } from './SalesContext';
 import { useAuth } from './AuthContext';
 import { CaptureAreaConfig } from '../types/rules';
@@ -800,7 +800,9 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sessionId: sessionSnapshot, recognizedAt, rawTranscript: fullText,
     }, cloudComments).length) return;
     const buyerNickname = request?.nickname || saleResult.buyerNickname;
-    const status = request && saleResult.amount > 0 && saleResult.intent === 'ALLOCATION' ? '자동저장' : '보류';
+    const hasValidNickname = Boolean(buyerNickname) && buyerNickname !== '미확인(보류)' && buyerNickname !== '미확인';
+    const effectiveAmount = saleResult.amount > 0 ? saleResult.amount : (activeProductSnapshot?.unitPrice ?? 0);
+    const status = (request || hasValidNickname) && effectiveAmount > 0 && saleResult.intent === 'ALLOCATION' ? '자동저장' : '보류';
     // Repeated allocation/price phrases for one purchase comment refine the
     // same pending sale rather than creating another transaction.
     const existingPending = request ? sales.find((sale) => sale.sessionId === sessionSnapshot
@@ -809,8 +811,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (existingPending) {
       if (status === '자동저장' && existingPending.syncStatus !== 'PENDING') {
         updateSale({ ...existingPending, buyerNickname: request!.nickname, buyerId: request!.buyerId || undefined,
-          purchaseRequestId: request!.id, sourceCommentIds: [request!.commentId], amount: saleResult.amount,
-          unitPrice: saleResult.amount, rawTranscript: fullText, recognizedAt, status, pendingReasons: [],
+          purchaseRequestId: request!.id, sourceCommentIds: [request!.commentId], amount: effectiveAmount,
+          unitPrice: effectiveAmount, rawTranscript: fullText, recognizedAt, status, pendingReasons: [],
           aiVerification: undefined, note: '같은 구매 댓글의 후속 판매 배정·가격 확인' });
         reservedPurchaseRequestsRef.current.add(request!.id);
       }
@@ -847,7 +849,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const pendingReasons = status === '보류'
       ? buildPendingReasons(
-          { rawTranscript: fullText, buyerNickname, amount: saleResult.amount },
+          { rawTranscript: fullText, buyerNickname, amount: effectiveAmount },
           {
             comments: cloudComments,
             activeProduct: product ? { unitPrice: product.unitPrice ?? undefined, productCode: resolvedProductCode } : undefined,
@@ -860,10 +862,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         rawTranscript: fullText,
         recognizedAt,
         buyerNickname,
-        amount: saleResult.amount,
+        amount: effectiveAmount,
         productCode: resolvedProductCode,
         productName: resolvedProductName,
-        unitPrice: saleResult.amount,
+        unitPrice: effectiveAmount,
         quantity: 1,
         captureImageUrls: fallbackImage ? [fallbackImage] : undefined,
       },
@@ -879,7 +881,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       buyerId: request?.buyerId || undefined,
       purchaseRequestId: status === '자동저장' ? request?.id : undefined,
       sourceCommentIds: request ? [request.commentId] : [],
-      amount: saleResult.amount,
+      amount: effectiveAmount,
       recognizedAt,
       rawTranscript: fullText,
       status,
@@ -894,7 +896,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       productImageUrl: product?.imageUrl || fallbackImage,
       productImagePath: product?.imagePath,
       quantity: 1,
-      unitPrice: saleResult.amount,
+      unitPrice: effectiveAmount,
       source: 'WEB_VOICE',
       captureImageUrls: fallbackImage ? [fallbackImage] : undefined,
       revision: 1,

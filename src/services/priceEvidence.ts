@@ -18,12 +18,13 @@ export function extractSpeechPrice(text: string): SpeechPriceEvidence | null {
     }
   };
 
-  for (const match of text.matchAll(/(?<![\d.])(\d{1,3})\s*(?:\.|점)\s*(\d{1,2})(?![\d.])/gu)) {
+  for (const match of text.matchAll(/(?<![\d.])(\d{1,3})\s*(?:\.|점)\s*(\d{1,2})(?!\d)(?!\.\d)/gu)) {
     const offset = match.index;
     const after = text.slice(offset + match[0].length);
     const before = text.slice(Math.max(0, offset - 10), offset);
     if (/^\s*(?:월|일|시|분|초|미터|센티|cm|개|번|사이즈|버전)/iu.test(after)
       || /(?:번호|뒷자리|사이즈|길이|높이|폭|가단|가슴\s*단면|총장|기장)(?:은|는|이|가)?\s*[:：]?\s*$/u.test(before)) continue;
+    if (/01[016789][-\s]?$/u.test(before) || /^[-.\s]?\d{3,4}[-.\s]?\d{4}/u.test(after)) continue;
     const [whole, fraction] = [match[1], match[2]];
     const amount = Number(whole) * 10_000 + Number(fraction) * (fraction.length === 1 ? 1000 : 100);
     add(match[0], amount, 'DECIMAL_MAN', offset);
