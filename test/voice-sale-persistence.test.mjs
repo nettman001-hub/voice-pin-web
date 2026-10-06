@@ -40,7 +40,7 @@ function fixture(comments) {
   const globals = {
     extractSaleFromTranscript, getPurchaseRequests, matchPurchaseRequest,
     buildPendingReasons, buildEvidenceSnapshot, getVoiceReviewRequests, generateSequentialProductName,
-    workspaceId: 'workspace', sales: stored,
+    workspaceId: 'workspace', sales: [], currentWorkflowSalesRef: { current: stored },
     productSalesRef: { current: { activeSession: { id: 'broadcast', displayCode: '20261001-1' },
       activeProduct: undefined, feed: { comments: [] } } },
     currentSessionIdRef: { current: 'broadcast' }, recentVoiceDecisionsRef: { current: new Map() },
@@ -132,6 +132,15 @@ test('allocation binds the spoken buyer to the exact decorated comment identity 
   assert.equal(saved.rawTranscript, decoratedBuyerSpeech);
   assert.equal(ctx.reserved.has(saved.purchaseRequestId), true);
   assert.equal(ctx.reserved.has(`broadcast:${fillerBuyer.platformMessageId}`), false);
+});
+
+test('sales made during a broadcast see the latest list, not the list from listening start', async () => {
+  const live = fixture([comment('햇살', 'first-comment', 'first-buyer'), comment('구름', 'second-comment', 'second-buyer')]);
+  await live.save('햇살 언니 1.2 챙겨드릴게요.');
+  await live.save('구름 언니 1.5 챙겨드릴게요.');
+  assert.equal(live.stored.length, 2);
+  assert.deepEqual(live.stored.map((sale) => sale.productCode), ['001', '002']);
+  assert.deepEqual(live.stored.map((sale) => sale.status), ['자동저장', '자동저장']);
 });
 
 test('a quantity and option purchase comment is confirmed at the spoken amount', async () => {

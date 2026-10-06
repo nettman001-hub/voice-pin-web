@@ -192,6 +192,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const workflowDecisionsRef = useRef(new Set<string>());
   const workflowFingerprintsRef = useRef(new Map<string,string>());
   const workflowReplayRef = useRef<(()=>void)|null>(null);
+  // STT 콜백은 청취를 시작한 렌더의 함수에 묶여 방송 내내 그 시점의 `sales`만 본다.
+  // 방송 중 음성 판매·정정·삭제는 이 ref로 최신 판매 목록을 읽는다.
   const currentWorkflowSalesRef = useRef(sales);
   currentWorkflowSalesRef.current = sales;
   const workflowQueueRef = useRef(Promise.resolve());
@@ -761,6 +763,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     requiredListeningGeneration?: number
   ) => {
     const recognizedAt = new Date().toISOString();
+    const sales = currentWorkflowSalesRef.current;
     const sessionSnapshot = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
     const decisionKey = `${sessionSnapshot}:${fullText.replace(/\s+/gu, '')}`;
     const previousDecisionAt = recentVoiceDecisionsRef.current.get(decisionKey) || 0;
@@ -1351,7 +1354,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const matchedKeywords = activeKeywords.filter((kw) => fullText.includes(kw));
         const correctionIntent = parseVoiceCorrection(fullText);
         const targetSessionId = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
-        const sessionSales = sales.filter((sale) => sale.sessionId === targetSessionId);
+        const sessionSales = currentWorkflowSalesRef.current.filter((sale) => sale.sessionId === targetSessionId);
         let actionTriggered: SttTranscriptLog['actionTriggered'] = 'NONE';
         let ruleActionName = !processingOptions.skipProductCommands && !correctionIntent.isQuestion && !correctionIntent.isNegativeCommand
           ? handleVoiceProductTranscript(fullText, requiredListeningGeneration) || '' : '';
