@@ -277,7 +277,7 @@ export function extractTrailing4Digits(text?: string): string | null {
 /**
  * 라이브 커머스 빈출 영문 닉네임 단어 사전 (한글 발음 매핑)
  */
-const ENGLISH_TO_KOREAN_DICT: Record<string, string> = {
+export const ENGLISH_TO_KOREAN_DICT: Record<string, string> = {
   mindset: '마인드셋',
   mind: '마인드',
   set: '셋',
