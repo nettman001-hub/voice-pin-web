@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { SaleRecord, SaleStatus } from '../types/live';
-import { getNextProductCodeForSession } from '../services/storageService';
+import { getNextProductCodeForSession, formatSequentialProductName } from '../services/storageService';
 import { exportSalesToCsv } from '../services/csvExporter';
 import { useAuth } from './AuthContext';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
@@ -155,9 +155,17 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const addSale = (saleData: Omit<SaleRecord, 'id'>): SaleRecord => {
     const productCode = saleData.productCode
       || getNextProductCodeForSession(saleData.sessionId, sales);
+    const sessionSales = salesRef.current.filter((s) => s.sessionId === saleData.sessionId);
+    const nextSeq = sessionSales.length + 1;
+    const sequentialProductName = formatSequentialProductName(
+      saleData.productName,
+      nextSeq,
+      productCode
+    );
     const baseSale: SaleRecord = {
       ...saleData,
       productCode,
+      productName: sequentialProductName || saleData.productName,
       id: `s-${crypto.randomUUID()}`,
       printStatus: saleData.printStatus || 'NOT_REQUESTED',
       printRevision: saleData.printRevision || 0,

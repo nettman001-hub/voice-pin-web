@@ -6,7 +6,7 @@ import { screenCaptureService } from '../services/screenCaptureService';
 import { extractSaleFromTranscript, parseKoreanAmount } from '../services/salesExtractor';
 import { parseVoiceCommand } from '../services/voiceCommandParser';
 import { nicknameVerificationNote, verifyNicknameFromComments } from '../services/commentNicknameVerifier';
-import { storageService, generateSessionId, getNextProductCodeForSession } from '../services/storageService';
+import { storageService, generateSessionId, getNextProductCodeForSession, formatSequentialProductName } from '../services/storageService';
 import { useSales } from './SalesContext';
 import { useAuth } from './AuthContext';
 import { CaptureAreaConfig } from '../types/rules';
@@ -718,6 +718,13 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       productSalesRef.current.activeProduct?.productCode
     );
     const resolvedProductCode = product?.productCode || productLink.fallbackCode || fallbackAutoCode;
+    const sessionSales = sales.filter((s) => s.sessionId === sessionId);
+    const nextSeq = sessionSales.length + 1;
+    const resolvedProductName = formatSequentialProductName(
+      product?.name,
+      nextSeq,
+      resolvedProductCode
+    ) || product?.name || undefined;
 
     // 최근 60초 내 캡처된 화면이 있으면 연결
     const recentCapture = storageService.getCaptures().find((capture) => {
@@ -745,7 +752,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         buyerNickname,
         amount: saleResult.amount,
         productCode: resolvedProductCode,
-        productName: product?.name || undefined,
+        productName: resolvedProductName,
         unitPrice: product?.unitPrice ?? 0,
         quantity: 1,
         captureImageUrls: fallbackImage ? [fallbackImage] : undefined,
@@ -766,7 +773,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       note: nicknameVerificationNote(nicknameVerification),
       productId: product?.id,
       productCode: resolvedProductCode,
-      productName: product?.name || undefined,
+      productName: resolvedProductName,
       productImageUrl: product?.imageUrl || fallbackImage,
       productImagePath: product?.imagePath,
       quantity: 1,

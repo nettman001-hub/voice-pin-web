@@ -6,7 +6,7 @@ import { useCommentCapture, getCommentStatusBadge } from '../../context/CommentC
 import { useSales } from '../../context/SalesContext';
 import { AudioVisualizer } from '../../components/common/AudioVisualizer';
 import { screenCaptureService } from '../../services/screenCaptureService';
-import { storageService } from '../../services/storageService';
+import { storageService, formatSequentialProductName } from '../../services/storageService';
 import {
   Radio,
   Square,
@@ -254,6 +254,30 @@ export const LiveHomePage: React.FC = () => {
   const effectiveSessionSales = isDemoActive ? demoSales : displayedSessionSales;
   const effectiveSalesCount = isDemoActive ? demoSalesCount : currentSessionSales.length;
   const effectiveTotalAmount = isDemoActive ? demoTotalAmount : todayTotalAmount;
+  // 회차 내 판매 내역 순번 맵 (등록 시각 기준 오름차순으로 1, 2, 3...)
+  const saleSequenceMap = React.useMemo(() => {
+    const map = new Map<string, number>();
+    const originalIndexMap = new Map<string, number>();
+    effectiveSessionSales.forEach((s, idx) => {
+      originalIndexMap.set(s.id, idx);
+    });
+
+    const sorted = [...effectiveSessionSales].sort((a, b) => {
+      const timeA = new Date(a.recognizedAt || 0).getTime();
+      const timeB = new Date(b.recognizedAt || 0).getTime();
+      if (timeA !== timeB && !Number.isNaN(timeA) && !Number.isNaN(timeB)) {
+        return timeA - timeB;
+      }
+      const idxA = originalIndexMap.get(a.id) ?? 0;
+      const idxB = originalIndexMap.get(b.id) ?? 0;
+      return idxB - idxA;
+    });
+
+    sorted.forEach((sale, index) => {
+      map.set(sale.id, index + 1);
+    });
+    return map;
+  }, [effectiveSessionSales]);
 
   // 댓글 피드: 아래쪽이 최신글이 되도록 새 댓글이 오면 자동 스크롤한다.
   React.useEffect(() => {
@@ -921,6 +945,12 @@ export const LiveHomePage: React.FC = () => {
                     .filter((s) => areNicknamesSimilar(s.buyerNickname, sale.buyerNickname))
                     .sort((a, b) => new Date(a.recognizedAt).getTime() - new Date(b.recognizedAt).getTime());
                   const multiAmount = formatMultiSaleAmount(buyerSessionSales.map((s) => s.amount));
+                  const saleSeq = saleSequenceMap.get(sale.id) || 1;
+                  const displayProductName = formatSequentialProductName(
+                    sale.productName,
+                    saleSeq,
+                    sale.productCode
+                  );
 
                   return (
                   <Link
@@ -1025,9 +1055,9 @@ export const LiveHomePage: React.FC = () => {
                             {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}
                           </div>
                         )}
-                        {(sale.productCode || sale.productName) && (
+                        {(sale.productCode || displayProductName) && (
                           <div className="text-[11px] font-semibold text-slate-600 mt-0.5">
-                            상품 {sale.productCode || '번호 없음'}{sale.productName ? ` · ${sale.productName}` : ''}
+                            상품 {sale.productCode || '번호 없음'}{displayProductName ? ` · ${displayProductName}` : ''}
                           </div>
                         )}
 
