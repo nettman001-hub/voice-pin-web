@@ -215,6 +215,44 @@ test('prompt instructs decimal price x10,000 calculation and casual confirmation
   assert.ok(prompt.systemPrompt.includes('3.9 -> 39,000원'));
   assert.ok(prompt.systemPrompt.includes('샤넬 언니 그레이'));
   assert.ok(prompt.systemPrompt.includes('그레이 주세요'));
+  assert.ok(prompt.systemPrompt.includes('단순 문의/스펙 질문은 구매 의사가 아님'));
+  assert.ok(prompt.systemPrompt.includes('판매자의 질문 답변은 배정 확정이 아님'));
 });
+
+test('pure inquiry comments (e.g. 55반인데, 허리가 밴딩) demote from CONFIRMED to REVIEW', async () => {
+  const base = payload();
+  base.comments = [
+    { id: 'c_dorothy_1', sessionId: 'deep-contract', nickname: '도로시💕', content: '55반인데', capturedAt: at(0) },
+    { id: 'c_dorothy_2', sessionId: 'deep-contract', nickname: '도로시💕', content: '허리가 밴딩', capturedAt: at(20) },
+  ];
+  base.transcripts = [
+    { id: 's_dorothy_1', text: ', 3.9 드립니다. 밴딩 쪼여서 5반이야? 5반 될 것 같은데, 언니.', recognizedAt: at(2), isFinal: true },
+    { id: 's_dorothy_2', text: '자, 허리 밴딩이에요.', recognizedAt: at(25), isFinal: true },
+  ];
+  base.segment = {
+    id: 'dseg:0:dorothy', index: 0,
+    startedAt: at(0), endedAt: at(30), closed: true,
+    commentIds: ['c_dorothy_1', 'c_dorothy_2'],
+    transcriptIds: ['s_dorothy_1', 's_dorothy_2'],
+  };
+  const input = normalizeSellerLogicDeepInput(base);
+  const erroneousAiAnswer = answer();
+  // AI erroneously set CONFIRMED citing pure inquiry comments
+  erroneousAiAnswer.decisions[0] = {
+    id: null,
+    status: 'CONFIRMED',
+    nickname: '도로시💕',
+    unitPrice: 39000,
+    quantity: 1,
+    reason: '고객 도로시가 허리 밴딩 여부를 확인했고 판매자가 확정함',
+    commentIds: ['C0', 'C1'],
+    transcriptIds: ['S0', 'S1'],
+  };
+
+  const parsed = await parse(erroneousAiAnswer, input);
+  assert.equal(parsed.decisions[0].status, 'REVIEW', 'demoted to REVIEW because comment was only a question');
+  assert.ok(parsed.decisions[0].reason.includes('단순 문의/질문'));
+});
+
 
 
