@@ -825,12 +825,13 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, cloudComments).length) return;
     const buyerNickname = request?.nickname
       || resolveSpokenNicknameWithoutRequest(spokenBuyer, cloudComments.map((comment) => comment.nickname));
-    const hasValidNickname = Boolean(buyerNickname) && buyerNickname !== '미확인(보류)' && buyerNickname !== '미확인';
     // The registered product price is only a fallback when the seller said no
     // price at all; a spoken price we could not link must stay for review.
     const effectiveAmount = saleResult.amount > 0 ? saleResult.amount
       : extractSpeechPrice(fullText) ? 0 : (activeProductSnapshot?.unitPrice ?? 0);
-    const status = (request || hasValidNickname) && effectiveAmount > 0 && saleResult.intent === 'ALLOCATION' ? '자동저장' : '보류';
+    // A spoken name alone never confirms a sale: unless it matches a buyer's
+    // purchase comment nickname, the sale is held until that comment links.
+    const status = request && effectiveAmount > 0 && saleResult.intent === 'ALLOCATION' ? '자동저장' : '보류';
     // Repeated allocation/price phrases for one purchase comment refine the
     // same pending sale rather than creating another transaction.
     const existingPending = request ? sales.find((sale) => sale.sessionId === sessionSnapshot
@@ -884,6 +885,12 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         )
       : [];
+    if (status === '보류' && !request && !pendingReasons.some((reason) => reason.code === 'MISSING_NICKNAME'
+      || reason.code === 'DELAYED_COMMENT' || reason.code === 'MULTIPLE_CANDIDATES_CONFLICT')) {
+      pendingReasons.push(match.kind === 'AMBIGUOUS'
+        ? { code: 'MULTIPLE_CANDIDATES_CONFLICT', message: '구매 댓글 후보가 여러 명이라 확인이 필요합니다.', resolved: false }
+        : { code: 'DELAYED_COMMENT', message: `판매자 발화 닉네임 '${buyerNickname}'과 일치하는 구매 댓글이 없어 보류합니다.`, resolved: false });
+    }
 
     const evidenceSnapshot = buildEvidenceSnapshot(
       {
