@@ -136,6 +136,30 @@ function honorificBuyerNames(text: string): string[] {
     .map((match) => match[1]));
 }
 
+// Words that open an allocation sentence but are never part of a nickname.
+const LEADING_NON_NAME_WORDS = new Set([
+  ...NON_BUYER_NAMES, '자', '아', '어', '음', '예', '넵', '그', '저', '우리', '그럼', '그러면', '그리고',
+  '이제', '이거는', '요거는', '닉네임', '닉네임은', '구매확정', '구매', '확정',
+]);
+
+/** A display name may contain a space ("성훈 맘"), but the spoken-name parser
+ * keeps only the word next to the honorific ("맘"). Return that name with up
+ * to two words spoken right before it, so the purchase matcher can check the
+ * longer reading against real comment nicknames. Never an identity by itself. */
+export function getBuyerNicknamePhrase(text: string, nickname: string | null): string | null {
+  if (!text || !nickname || /\s/u.test(nickname)) return nickname;
+  const escaped = nickname.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const match = text.match(new RegExp(`(?:^|[\\s,，.!?])((?:[가-힣a-zA-Z0-9_]{1,20}\\s+){1,2})${escaped}\\s*(?:언니|님|씨)`, 'u'));
+  if (!match) return nickname;
+  let words = match[1].trim().split(/\s+/u);
+  // "루비 언니 블루 언니": a word after another honorific is a new name.
+  for (let i = words.length - 1; i >= 0; i--) {
+    if (/(?:언니|님)(?:께|에게|한테|는|은|도|을|를)?$/u.test(words[i])) { words = words.slice(i + 1); break; }
+  }
+  while (words.length && (LEADING_NON_NAME_WORDS.has(words[0]) || /\d/u.test(words[0]))) words.shift();
+  return words.length ? `${words.join(' ')} ${nickname}` : nickname;
+}
+
 /** Spoken name candidates only; canonical identity comes from the comment. */
 export function getBuyerNicknameCandidates(text: string): string[] {
   if (!text) return [];
@@ -181,6 +205,8 @@ export interface ExtractedSaleResult {
   matchedKeywords: string[];
   intent: 'ALLOCATION' | 'UNCERTAIN';
   allocationTranscript?: string;
+  /** buyerNickname with the words spoken right before it ("성훈 맘"). */
+  buyerNicknamePhrase?: string;
 }
 
 const ALLOCATION_ACTION = /(?:드리겠습니다|드릴게요|드릴께요|챙겨\s*드릴게요|챙겨\s*드리겠습니다|챙겨\s*줄(?:게|께)(?:요)?(?=\s|[,.!?]|$)|(?:넣어|담아|배정해)\s*드(?:릴(?:게|께)요|렸(?:어요|습니다))|구매\s*확정(?:입니다|할게요)?|낙찰(?:입니다)?|판매\s*완료|주문\s*확정|결제\s*완료|캡처(?:해주세요|해\s*주시고|하세요|부탁)?|먼저\s*(?:하셨네요|하셨어요|하셨|잡으셨|가져가셨)|가져가(?:세요|실게요|셨어요)|가실게요)/u;
@@ -326,6 +352,8 @@ export function extractSaleFromTranscript(transcript: string, activeKeywords: st
     matchedKeywords,
     intent: allocationTranscript ? 'ALLOCATION' : 'UNCERTAIN',
     allocationTranscript: allocationTranscript || undefined,
+    buyerNicknamePhrase: nickname
+      ? getBuyerNicknamePhrase(evidenceText, nickname) || undefined : undefined,
   };
 }
 

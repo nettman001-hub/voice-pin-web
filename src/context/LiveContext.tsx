@@ -7,7 +7,7 @@ import { extractSaleFromTranscript, parseKoreanAmount } from '../services/salesE
 import { extractSpeechPrice } from '../services/priceEvidence';
 import { parseVoiceCommand } from '../services/voiceCommandParser';
 import { splitTranscriptClauses } from '../services/voiceUtteranceService';
-import { getPurchaseRequests, matchPurchaseRequest } from '../services/purchaseFirstSales';
+import { getPurchaseRequests, matchPurchaseRequest, resolveSpokenNicknameWithoutRequest } from '../services/purchaseFirstSales';
 import type { CommentRecord } from '../types/comment';
 import { nicknameVerificationNote, verifyNicknameFromComments } from '../services/commentNicknameVerifier';
 import { storageService, generateSessionId, getNextProductCodeForSession } from '../services/storageService';
@@ -813,22 +813,25 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
     for (const id of reservedPurchaseRequestsRef.current) consumed.add(id);
-    const match = matchPurchaseRequest(saleResult.buyerNickname, requests, recognizedAt, consumed);
+    const spokenBuyer = saleResult.buyerNicknamePhrase || saleResult.buyerNickname;
+    const match = matchPurchaseRequest(spokenBuyer, requests, recognizedAt, consumed);
     if (match.kind === 'NO_REQUEST') {
-      const priorMatch = matchPurchaseRequest(saleResult.buyerNickname, requests, recognizedAt);
+      const priorMatch = matchPurchaseRequest(spokenBuyer, requests, recognizedAt);
       if (priorMatch.kind === 'MATCH' && consumed.has(priorMatch.request.id)) return;
     }
     const request = match.kind === 'MATCH' ? match.request : null;
     if (saleResult.intent === 'UNCERTAIN' && !getVoiceReviewRequests({
       sessionId: sessionSnapshot, recognizedAt, rawTranscript: fullText,
     }, cloudComments).length) return;
-    const buyerNickname = request?.nickname || saleResult.buyerNickname;
-    const hasValidNickname = Boolean(buyerNickname) && buyerNickname !== '미확인(보류)' && buyerNickname !== '미확인';
+    const buyerNickname = request?.nickname
+      || resolveSpokenNicknameWithoutRequest(spokenBuyer, cloudComments.map((comment) => comment.nickname));
     // The registered product price is only a fallback when the seller said no
     // price at all; a spoken price we could not link must stay for review.
     const effectiveAmount = saleResult.amount > 0 ? saleResult.amount
       : extractSpeechPrice(fullText) ? 0 : (activeProductSnapshot?.unitPrice ?? 0);
-    const status = (request || hasValidNickname) && effectiveAmount > 0 && saleResult.intent === 'ALLOCATION' ? '자동저장' : '보류';
+    // A spoken name alone never confirms a sale: unless it matches a buyer's
+    // purchase comment nickname, the sale is held until that comment links.
+    const status = request && effectiveAmount > 0 && saleResult.intent === 'ALLOCATION' ? '자동저장' : '보류';
     // Repeated allocation/price phrases for one purchase comment refine the
     // same pending sale rather than creating another transaction.
     const existingPending = request ? sales.find((sale) => sale.sessionId === sessionSnapshot
@@ -882,6 +885,12 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         )
       : [];
+    if (status === '보류' && !request && !pendingReasons.some((reason) => reason.code === 'MISSING_NICKNAME'
+      || reason.code === 'DELAYED_COMMENT' || reason.code === 'MULTIPLE_CANDIDATES_CONFLICT')) {
+      pendingReasons.push(match.kind === 'AMBIGUOUS'
+        ? { code: 'MULTIPLE_CANDIDATES_CONFLICT', message: '구매 댓글 후보가 여러 명이라 확인이 필요합니다.', resolved: false }
+        : { code: 'DELAYED_COMMENT', message: `판매자 발화 닉네임 '${buyerNickname}'과 일치하는 구매 댓글이 없어 보류합니다.`, resolved: false });
+    }
 
     const evidenceSnapshot = buildEvidenceSnapshot(
       {
@@ -964,7 +973,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           || sale.purchaseRequestId || !sale.sessionId) continue;
         const extracted = extractSaleFromTranscript(sale.rawTranscript);
         if (!extracted || extracted.intent !== 'ALLOCATION' || !extracted.buyerNickname || extracted.amount !== sale.amount) continue;
-        const match = matchPurchaseRequest(extracted.buyerNickname,
+        const match = matchPurchaseRequest(extracted.buyerNicknamePhrase || extracted.buyerNickname,
           requests.filter((request) => request.sessionId === sale.sessionId), sale.recognizedAt, claimed);
         if (match.kind !== 'MATCH') continue;
         claimed.add(match.request.id);

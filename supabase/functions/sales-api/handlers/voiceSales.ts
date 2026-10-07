@@ -75,7 +75,7 @@ export async function handleCommitVoiceSale(workspaceId: string, actorId: string
     buyerId: comment.buyer_id, nickname: comment.nickname_snapshot, content: comment.content,
     capturedAt: comment.captured_at,
   })), sale.sessionId)
-  const match = matchPurchaseRequest(extracted.buyerNickname, requestCandidates, sale.recognizedAt)
+  const match = matchPurchaseRequest(extracted.buyerNicknamePhrase || extracted.buyerNickname, requestCandidates, sale.recognizedAt)
   if (match.kind !== 'MATCH' || match.request.id !== sale.purchaseRequestId) {
     return errorResponse('BUYER_AMBIGUOUS', '판매자 호칭과 실제 구매 댓글의 계정 연결을 확인할 수 없습니다.', 409)
   }

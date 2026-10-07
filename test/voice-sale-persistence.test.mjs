@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { extractSaleFromTranscript } from '../src/services/salesExtractor.ts';
 import { extractSpeechPrice } from '../src/services/priceEvidence.ts';
-import { getPurchaseRequests, matchPurchaseRequest } from '../src/services/purchaseFirstSales.ts';
+import { getPurchaseRequests, matchPurchaseRequest, resolveSpokenNicknameWithoutRequest } from '../src/services/purchaseFirstSales.ts';
 import { buildPendingReasons, buildEvidenceSnapshot } from '../src/services/pendingSalesService.ts';
 import { getVoiceReviewRequests, shouldReviewVoiceSale, buildVoiceReviewRequest,
   isVoiceReviewReady } from '../src/services/voicePendingReviewService.ts';
@@ -39,7 +39,7 @@ function fixture(comments, activeProduct = undefined) {
   const stored = [];
   const reserved = new Set();
   const globals = {
-    extractSaleFromTranscript, extractSpeechPrice, getPurchaseRequests, matchPurchaseRequest,
+    extractSaleFromTranscript, extractSpeechPrice, getPurchaseRequests, matchPurchaseRequest, resolveSpokenNicknameWithoutRequest,
     buildPendingReasons, buildEvidenceSnapshot, getVoiceReviewRequests, generateSequentialProductName,
     workspaceId: 'workspace', sales: [], currentWorkflowSalesRef: { current: stored },
     productSalesRef: { current: { activeSession: { id: 'broadcast', displayCode: '20261001-1' },
@@ -167,4 +167,22 @@ test('a spoken price wins over the registered product price, even after a repeat
   const unlinked = fixture([comment('햇반', 'c-2', 'buyer-2')], product);
   await unlinked.save('햇반님 드릴게요. 니트는 원래 1.5인데요.');
   assert.notEqual(unlinked.stored[0]?.amount, 3000);
+});
+
+test('a spaced commenter nickname is confirmed whole, and an unmatched spoken name stays pending', async () => {
+  const speech = '안녕하세요. 0.8, 이거 성훈 맘님 드릴게요. 가격은 0.8';
+  const buyer = comment('성훈 맘', 'sunghoon-comment', 'sunghoon-account', 'ㅈㅇ');
+  const matched = fixture([buyer]);
+  await matched.save(speech);
+  assert.equal(matched.stored[0].status, '자동저장');
+  assert.equal(matched.stored[0].buyerNickname, '성훈 맘');
+  assert.equal(matched.stored[0].amount, 8000);
+
+  // No purchase comment matches the spoken name: never auto-save it.
+  const unmatched = fixture([comment('다른고객', 'other-comment', 'other-account', 'ㅈㅇ')]);
+  await unmatched.save(speech);
+  assert.equal(unmatched.stored[0].status, '보류');
+  assert.equal(unmatched.stored[0].buyerNickname, '맘');
+  assert.equal(unmatched.stored[0].purchaseRequestId, undefined);
+  assert.ok(unmatched.stored[0].pendingReasons.some((reason) => reason.code === 'DELAYED_COMMENT'));
 });
