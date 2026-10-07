@@ -223,7 +223,10 @@ public final class MainActivity extends Activity {
             SyncScheduler.scheduleNow(getApplicationContext());
             return;
         }
-        requestPermissions(new String[]{Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS, Manifest.permission.SEND_SMS, Manifest.permission.RECEIVE_MMS, Manifest.permission.RECEIVE_WAP_PUSH}, PERMISSION_REQUEST);
+        List<String> wanted = new ArrayList<>(java.util.Arrays.asList(Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS, Manifest.permission.SEND_SMS, Manifest.permission.RECEIVE_MMS, Manifest.permission.RECEIVE_WAP_PUSH));
+        // 기본 문자앱은 새 문자 알림을 직접 띄워야 한다 (Android 13+ 알림 권한).
+        if (Build.VERSION.SDK_INT >= 33) wanted.add(Manifest.permission.POST_NOTIFICATIONS);
+        requestPermissions(wanted.toArray(new String[0]), PERMISSION_REQUEST);
     }
 
     public void requestProductCameraPermission(Runnable onGranted, Runnable onDenied) {

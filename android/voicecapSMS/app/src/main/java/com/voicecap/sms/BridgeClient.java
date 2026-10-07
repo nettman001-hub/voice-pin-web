@@ -114,12 +114,21 @@ public final class BridgeClient {
         } catch (Exception ignored) { }
     }
 
-    public static void updateOutboxStatus(Context context, String id, String status, String error) {
+    public enum ReportResult { REPORTED, REJECTED, RETRY }
+
+    /** 4xx(점유권 없음 등)는 다시 보내도 같으므로 REJECTED, 네트워크 오류·5xx는 RETRY. */
+    public static ReportResult updateOutboxStatus(Context context, String id, String status, String error) {
+        if (!BridgePreferences.configured(context)) return ReportResult.RETRY;
         try {
             JSONObject payload = new JSONObject().put("action", "outbox-status").put("id", id).put("status", status);
-            if (error != null && !error.isEmpty()) payload.put("error", error);
-            requestText(context, true, "sms-bridge", payload);
-        } catch (Exception ignored) { }
+            if (error != null && !error.isEmpty()) payload.put("error", error.length() > 500 ? error.substring(0, 500) : error);
+            int[] code = new int[1];
+            JSONObject response = requestText(context, true, "sms-bridge", payload, code);
+            if (response.optBoolean("ok")) return ReportResult.REPORTED;
+            return code[0] >= 400 && code[0] < 500 ? ReportResult.REJECTED : ReportResult.RETRY;
+        } catch (Exception ignored) {
+            return ReportResult.RETRY;
+        }
     }
 
     public static boolean getStatus(Context context) {
@@ -138,6 +147,10 @@ public final class BridgeClient {
     }
 
     private static JSONObject requestText(Context context, boolean deviceAuth, String functionName, JSONObject payload) throws Exception {
+        return requestText(context, deviceAuth, functionName, payload, new int[1]);
+    }
+
+    private static JSONObject requestText(Context context, boolean deviceAuth, String functionName, JSONObject payload, int[] statusCode) throws Exception {
         String endpoint = BridgePreferences.apiBaseUrl() + "/" + functionName;
         HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection();
         connection.setRequestMethod("POST");
@@ -149,7 +162,8 @@ public final class BridgeClient {
         try (OutputStream output = connection.getOutputStream()) {
             output.write(payload.toString().getBytes(StandardCharsets.UTF_8));
         }
-        InputStream stream = connection.getResponseCode() < 400 ? connection.getInputStream() : connection.getErrorStream();
+        statusCode[0] = connection.getResponseCode();
+        InputStream stream = statusCode[0] < 400 ? connection.getInputStream() : connection.getErrorStream();
         StringBuilder text = new StringBuilder();
         if (stream != null) try (BufferedReader reader = new BufferedReader(new java.io.InputStreamReader(stream, StandardCharsets.UTF_8))) {
             String line; while ((line = reader.readLine()) != null) text.append(line);
