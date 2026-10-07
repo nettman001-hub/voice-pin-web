@@ -5,6 +5,15 @@ import type { WorkflowTranscript } from '../types/salesWorkflow';
 import { screenCaptureService } from './screenCaptureService';
 import type { SonioxResponse, SonioxToken, SttConfig } from '../types/deepgram';
 import { recentSellerLogicNicknames, sellerLogicNicknameTerms, type SellerLogicNicknameSource } from './sellerLogicVocabulary';
+import {
+  buildNicknameHintTerms,
+  findUnsentNicknames,
+  LIVE_HINT_MIN_INTERVAL_MS,
+  LIVE_HINT_ROUTINE_CHECK_MS,
+  selectHintNicknames,
+} from './liveSttHints';
+import { buildCloudSttTerms } from './sttVocabularyService';
+import { HintRotationScheduler } from './logicOpus/opusHintPlanner';
 
 export interface SellerLogicTranscript extends WorkflowTranscript {
   id: string;
@@ -33,12 +42,18 @@ export interface SellerLogicCaptureOptions {
   interim?: (text: string) => void;
   level?: (level: number) => void;
   initialComments?: SellerLogicNicknameSource[];
+  /** 1순위: 판매자 등록 고정 발음 힌트 (nettman006@gmail.com 계정 값) */
+  presetWords?: string[];
+  /** 3순위: 단어 치환 규칙 단어 (nettman006@gmail.com 계정 값) */
+  ruleWords?: string[];
+  onKeytermsChanged?: (keyterms: string[]) => void;
 }
 
 interface AudioChunk { data: ArrayBuffer; capturedAt: number }
 interface Connection {
   socket: WebSocket;
   nicknames: string[];
+  keyterms: string[];
   origin: number | null;
   sentMs: number;
   finalTokens: SonioxToken[];
@@ -49,6 +64,7 @@ interface Connection {
   utteranceId?: string;
   lastTranscript?: SellerLogicTranscript;
   drainReason?: 'stream_end' | 'rotation';
+  onPromoted?: (success: boolean) => void;
 }
 
 const CONNECT_TIMEOUT_MS = 12_000;
@@ -73,6 +89,9 @@ export class SellerLogicCapture {
   private seenComments = new Set<string>();
   private disposers: Array<() => void> = [];
   private timer: number | null = null;
+  private routineTimer: number | null = null;
+  private scheduler: HintRotationScheduler | null = null;
+  private activeKeyterms: string[] = [];
   private generation = 0;
   private sequence = 0;
   private utteranceSequence = 0;
@@ -151,32 +170,89 @@ export class SellerLogicCapture {
         track.addEventListener('ended', ended);
         this.disposers.push(() => track.removeEventListener('ended', ended));
       });
+
+      // 힌트 교체 스케줄러: 청취 홈과 동일하게 5초 버퍼링/즉시 교체
+      this.scheduler = new HintRotationScheduler({
+        now: () => Date.now(),
+        setTimer: (fn, ms) => window.setTimeout(fn, ms),
+        clearTimer: (handle) => window.clearTimeout(handle as number),
+        rotate: () => new Promise<boolean | 'skipped'>((resolve) => {
+          if (this.stopping || !this.options) { resolve('skipped'); return; }
+          if (this.pending) { resolve(false); return; }
+          const desired = this.desiredNames();
+          const nextTerms = this.buildKeyterms(desired);
+          const now = Date.now();
+          const providerLimitReached = now - this.lastRotationAt >= 4 * 60 * 60 * 1000;
+          if (!providerLimitReached && this.active && nextTerms.join('\n') === this.activeKeyterms.join('\n')) {
+            resolve('skipped');
+            return;
+          }
+          this.openConnection((promoted) => resolve(promoted));
+        }),
+        minIntervalMs: LIVE_HINT_MIN_INTERVAL_MS,
+      });
+
+      // 평상시: 10초마다 아직 STT에 안 보낸 닉네임이 있는지 확인해 보냄
+      this.routineTimer = window.setInterval(() => {
+        if (this.stopping || !this.options || !this.active) return;
+        const desired = this.desiredNames();
+        const providerLimitReached = Date.now() - this.lastRotationAt >= 4 * 60 * 60 * 1000;
+        if (providerLimitReached || findUnsentNicknames(desired, this.active.nicknames).length > 0) {
+          this.scheduler?.request();
+        }
+      }, LIVE_HINT_ROUTINE_CHECK_MS);
+      if (typeof this.routineTimer === 'object' && this.routineTimer && 'unref' in (this.routineTimer as any)) {
+        (this.routineTimer as any).unref();
+      }
+
       this.openConnection();
       this.timer = window.setInterval(() => this.tick(), 2_000);
+      if (typeof this.timer === 'object' && this.timer && 'unref' in (this.timer as any)) {
+        (this.timer as any).unref();
+      }
     } catch (error) {
       if (generation === this.generation) this.fail(error instanceof Error ? error.message : '방송 오디오 연결 실패');
       throw error;
     }
   }
 
-  /** Names must come from AI purchase-intent classifications, never local keyword matching. */
+  /** 구매의사 댓글자 발생 시 즉시/5초 버퍼링 스케줄러 요청 */
   prioritizeNicknames(names: string[]): void {
     const missing = names.filter((name) => this.seenNicknames.has(name) && !this.active?.nicknames.includes(name));
     if (!missing.length) return;
     this.priority = [...new Set([...missing, ...this.priority])].slice(0, 50);
-    this.tick();
+    const now = Date.now();
+    const wait = this.lastRotationAt + LIVE_HINT_MIN_INTERVAL_MS - now;
+    if (!this.pending && wait <= 0 && this.active) {
+      this.openConnection();
+    } else {
+      this.scheduler?.request();
+    }
   }
 
-  private desiredNames(): string[] { return recentSellerLogicNicknames(this.recent, this.priority); }
+  /** 청취 홈과 동일: 구매의사자 최신순 우선 + 최근 댓글 작성자 (최대 50명, 원문 닉네임 유지) */
+  private desiredNames(): string[] {
+    return recentSellerLogicNicknames(this.recent, this.priority);
+  }
+
+  /**
+   * 힌트 단어 전송 조합 (최대 200개):
+   * 1순위: 판매자 등록 고정 발음 힌트 (nettman006@gmail.com 계정 값)
+   * 2순위: 닉네임 원문 + 영문 한국어 발음 표기 (sellerLogicNicknameTerms)
+   * 3순위: 단어 치환 규칙 단어 (nettman006@gmail.com 계정 값)
+   */
+  private buildKeyterms(nicknames: string[]): string[] {
+    const nicknameTerms = sellerLogicNicknameTerms(nicknames);
+    return buildCloudSttTerms(
+      this.options?.presetWords || [],
+      nicknameTerms,
+      this.options?.ruleWords || [],
+    );
+  }
 
   private tick(): void {
     if (!this.options || this.stopping) return;
     const now = Date.now();
-    const urgent = this.priority.some((name) => !this.active?.nicknames.includes(name));
-    if (!this.pending && now >= this.retryAfter && this.active && (
-      urgent || now - this.lastRotationAt >= 4 * 60 * 60 * 1000 ||
-      (now - this.lastRotationAt >= 30_000 && !SAME_NAMES(this.active.nicknames, this.desiredNames()))
-    )) this.openConnection();
     for (const connection of this.connections) {
       if (connection.firstFinalAt && now - connection.firstFinalAt >= 3_000) this.emitTranscript(connection);
       if (!connection.draining && connection.socket.readyState === WebSocket.OPEN) {
@@ -207,7 +283,7 @@ export class SellerLogicCapture {
     } catch { this.connectionFailed(connection, 'STT 오디오 전송 실패'); }
   }
 
-  private openConnection(): void {
+  private openConnection(onPromoted?: (promoted: boolean) => void): void {
     if (!this.options || this.pending || this.stopping) return;
     let socket: WebSocket;
     try { socket = new WebSocket('wss://stt-rt.soniox.com/transcribe-websocket'); }
@@ -216,11 +292,14 @@ export class SellerLogicCapture {
         this.retryAfter = Date.now() + 3_000;
         this.report('WARNING', 'Soniox 갱신 연결 실패. 기존 연결로 계속 청취합니다.');
       } else this.fail('Soniox 연결을 시작하지 못했습니다.');
+      onPromoted?.(false);
       return;
     }
+    const nicknames = this.desiredNames();
+    const keyterms = this.buildKeyterms(nicknames);
     const connection: Connection = {
-      socket, nicknames: this.desiredNames(), origin: null, sentMs: 0,
-      finalTokens: [], draining: false, timeout: null,
+      socket, nicknames, keyterms, origin: null, sentMs: 0,
+      finalTokens: [], draining: false, timeout: null, onPromoted,
     };
     this.pending = connection;
     this.connections.add(connection);
@@ -232,7 +311,7 @@ export class SellerLogicCapture {
           api_key: this.options.stt.apiKey!.trim(), model: 'stt-rt-v5',
           audio_format: 'pcm_s16le', sample_rate: 16000, num_channels: 1,
           language_hints: ['ko'], enable_endpoint_detection: true, max_endpoint_delay_ms: 2000,
-          context: { terms: sellerLogicNicknameTerms(connection.nicknames) },
+          context: { terms: connection.keyterms },
         }));
         for (const chunk of this.buffered) {
           if (this.pending !== connection) break;
@@ -280,10 +359,18 @@ export class SellerLogicCapture {
     this.buffered = [];
     this.bufferedBytes = 0;
     this.lastRotationAt = Date.now();
+    this.activeKeyterms = connection.keyterms;
+    this.options?.onKeytermsChanged?.(connection.keyterms);
+    connection.onPromoted?.(true);
+    connection.onPromoted = undefined;
     if (connection.timeout !== null) window.clearTimeout(connection.timeout);
     connection.timeout = null;
     this.priority = this.priority.filter((name) => !connection.nicknames.includes(name));
-    if (!this.stopping) this.report('CONNECTED', `Soniox 연결됨 · 최근 닉네임 ${connection.nicknames.length}명`);
+    const pCount = this.options?.presetWords?.length || 0;
+    const rCount = this.options?.ruleWords?.length || 0;
+    if (!this.stopping) {
+      this.report('CONNECTED', `Soniox 연결됨 · 힌트 단어 ${connection.keyterms.length}개 (1순위 고정 ${pCount}개, 2순위 닉네임 ${connection.nicknames.length}명, 3순위 규칙 ${rCount}개)`);
+    }
     if (previous) this.drain(previous, 'rotation');
   }
 
@@ -389,6 +476,9 @@ export class SellerLogicCapture {
     ++this.generation;
     if (this.timer !== null) window.clearInterval(this.timer);
     this.timer = null;
+    if (this.routineTimer !== null) window.clearInterval(this.routineTimer);
+    this.routineTimer = null;
+    this.scheduler = null;
     this.audio.stopCapture();
     this.disposers.splice(0).forEach((dispose) => dispose());
     this.comments.disconnect();
@@ -422,6 +512,7 @@ export class SellerLogicCapture {
       this.seenNicknames.clear();
       this.priority = [];
       this.seenComments.clear();
+      this.activeKeyterms = [];
       this.lastAudioEndMs = 0;
       this.sequence = 0;
       this.utteranceSequence = 0;

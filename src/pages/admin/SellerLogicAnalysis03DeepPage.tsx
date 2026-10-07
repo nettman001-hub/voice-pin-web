@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Bot, Radio, Square, Upload, Download, Play, MessageSquareText, CheckCircle2, Clock, RotateCcw } from 'lucide-react';
 import { useLive } from '../../context/LiveContext';
 import { useCommentCapture } from '../../context/CommentCaptureContext';
-import { analyzeSellerLogicDeep, getSellerLogicSlots } from '../../services/sellerLogicDeepApi';
+import { analyzeSellerLogicDeep, getSellerLogicSlots, getSellerLogicDeepHints } from '../../services/sellerLogicDeepApi';
 import { runSellerLogicDeep, type SellerLogicDeepRunResult } from '../../services/sellerLogicDeepEngine';
 import { SellerLogicCapture } from '../../services/sellerLogicCapture';
 import { koreanCalendarDate, parseSellerLogicText, SELLER_LOGIC_EXAMPLE, type SellerLogicEvidence } from '../../services/sellerLogicInput';
@@ -33,6 +33,11 @@ export default function SellerLogicAnalysis03DeepPage() {
   const [slotSettings, setSlotSettings] = useState<SellerLogicSlots | null>(null);
   const [slotSettingsError, setSlotSettingsError] = useState('');
   const [loadingSlots, setLoadingSlots] = useState(true);
+  const [presetWords, setPresetWords] = useState<string[]>([]);
+  const [ruleWords, setRuleWords] = useState<string[]>([]);
+  const [activeKeyterms, setActiveKeyterms] = useState<string[]>([]);
+  const presetWordsRef = useRef<string[]>([]);
+  const ruleWordsRef = useRef<string[]>([]);
   const [username, setUsername] = useState(commentCapture.config.tiktokUsername || '');
   const [date, setDate] = useState(koreanCalendarDate);
   const [paste, setPaste] = useState('');
@@ -80,6 +85,21 @@ export default function SellerLogicAnalysis03DeepPage() {
       const settings = await getSellerLogicSlots();
       if (!mounted.current || loadId !== slotLoadGeneration.current) return;
       setSlotSettings(settings);
+      let pWords = settings.presetWords || [];
+      let rWords = settings.ruleWords || [];
+      if (!pWords.length && !rWords.length) {
+        try {
+          const hints = await getSellerLogicDeepHints('nettman006@gmail.com');
+          pWords = hints.presetWords || [];
+          rWords = hints.ruleWords || [];
+        } catch (hintErr) {
+          console.warn('[SellerLogicDeep] nettman006@gmail.com 힌트 조회 폴백 실패:', hintErr);
+        }
+      }
+      setPresetWords(pWords);
+      setRuleWords(rWords);
+      presetWordsRef.current = pWords;
+      ruleWordsRef.current = rWords;
       if (!selectedSlotExplicitly.current) {
         slotRef.current = settings.primarySlot;
         setSlot(settings.primarySlot);
@@ -246,6 +266,7 @@ export default function SellerLogicAnalysis03DeepPage() {
     setStarting(false);
     setRunning(false);
     setAutomatic(false);
+    setActiveKeyterms([]);
     setFilter('ALL');
     setDebugLog([]);
   };
@@ -281,6 +302,11 @@ export default function SellerLogicAnalysis03DeepPage() {
         sessionId: sessionRef.current,
         stt: { provider: 'SONIOX', apiKey: live.sonioxApiKey, model: 'nova-3', language: 'ko', keyterms: [],
           punctuate: true, interimResults: true, endpointing: 800, allowBrowserSpeechFallback: false },
+        presetWords: presetWordsRef.current,
+        ruleWords: ruleWordsRef.current,
+        onKeytermsChanged: (terms) => {
+          if (mounted.current) setActiveKeyterms(terms);
+        },
         comment: (c) => {
           if (!current()) return;
           const rows = rowsRef.current;
@@ -361,7 +387,22 @@ export default function SellerLogicAnalysis03DeepPage() {
           : <button className={`${button} bg-brand-600 text-white`} disabled={starting || running || Boolean(count) || loadingSlots || !slotSettings || Boolean(slotSettingsError)} onClick={() => void start()}><Radio size={16} /> 실시간 청취 시작</button>}
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
-        <span>Soniox 음성 + 플랫폼 댓글 · {analysisInterval}초마다 새 시간대 심층 분석 · 최근 닉네임 50개 STT 힌트</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold text-slate-700">STT 힌트 전송 (청취 홈 동일 방식):</span>
+          <span className="rounded-md bg-purple-50 px-2 py-0.5 font-medium text-purple-700">
+            1순위 고정({presetWords.length}개)
+          </span>
+          <span className="rounded-md bg-blue-50 px-2 py-0.5 font-medium text-blue-700">
+            2순위 구매자·닉네임(5초 버퍼/무중단 교체)
+          </span>
+          <span className="rounded-md bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">
+            3순위 규칙({ruleWords.length}개)
+          </span>
+          {activeKeyterms.length > 0 && (
+            <span className="font-semibold text-slate-700">· 현재 적용 {activeKeyterms.length}개</span>
+          )}
+          <span className="text-slate-400">· 계정: nettman006@gmail.com</span>
+        </div>
         <Link className="font-semibold text-brand-600 hover:underline" to="/admin/ai">판매 AI 설정(보류·정정) →</Link>
       </div>
       <p className="mt-2 text-xs text-slate-500">기존 판매 AI 설정의 슬롯과 API 키를 그대로 사용합니다.{slotSettings && ` 운영 적용 버전 v${slotSettings.appliedVersion}`}</p>

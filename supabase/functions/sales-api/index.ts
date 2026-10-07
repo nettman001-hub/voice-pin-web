@@ -46,7 +46,7 @@ import {
 } from './handlers/sales.ts'
 import { handleCommitVoiceSale } from './handlers/voiceSales.ts'
 import { handleSellerAnalysis } from './handlers/sellerAnalysis.ts'
-import { handleSellerLogicAnalysis, handleSellerLogicSlots } from './handlers/sellerLogicAnalysis.ts'
+import { handleSellerLogicAnalysis, handleSellerLogicSlots, handleSellerLogicDeepHints } from './handlers/sellerLogicAnalysis.ts'
 import { handleSellerLogicDetection } from './handlers/sellerLogicDetection.ts'
 import { handleSellerLogicDeep } from './handlers/sellerLogicDeep.ts'
 import { handleSellerWorkflow } from './handlers/sellerWorkflow.ts'
@@ -134,6 +134,8 @@ serve(async (req: Request) => {
     switch (action) {
       case 'seller-logic-slots':
         return await handleSellerLogicSlots(auth)
+      case 'seller-logic-deep-hints':
+        return await handleSellerLogicDeepHints(auth, body)
       case 'seller-logic-analysis':
         return await handleSellerLogicAnalysis(auth, body)
       case 'seller-logic-detect':

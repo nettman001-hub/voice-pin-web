@@ -31,4 +31,15 @@ export function analyzeSellerLogicDeep(input: SellerLogicDeepInput, options: { s
   return invoke<SellerLogicDeepCallResult>("seller-logic-deep", { input }, options.signal);
 }
 
+export interface SellerLogicDeepHintsResult {
+  email: string;
+  presetWords: string[];
+  ruleWords: string[];
+}
+
+/** 1순위 판매자 등록 고정 발음 힌트 및 3순위 규칙 단어를 특정 계정(기본: nettman006@gmail.com)에서 조회 */
+export function getSellerLogicDeepHints(email = 'nettman006@gmail.com', options: { signal?: AbortSignal } = {}): Promise<SellerLogicDeepHintsResult> {
+  return invoke<SellerLogicDeepHintsResult>('seller-logic-deep-hints', { email }, options.signal);
+}
+
 export { getSellerLogicSlots } from "./sellerLogicApi.ts";

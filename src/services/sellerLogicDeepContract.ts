@@ -57,22 +57,53 @@ function validateDeepDecision(raw: unknown, source: Pick<SellerLogicDeepInput, "
   let citedComments = source.comments.filter((row) => commentIds.includes(row.id));
   const citedTranscripts = source.transcripts.filter((row) => transcriptIds.includes(row.id));
 
+  const isPseudoNull = (val: unknown): boolean => {
+    if (val === null || val === undefined) return true;
+    if (typeof val === "string") {
+      const lower = val.trim().toLowerCase();
+      return lower === "null" || lower === "undefined" || lower === "none" || lower === "";
+    }
+    return false;
+  };
+
   let nickname = raw.nickname as string | null;
+  const exactMatchInComments = typeof nickname === "string" && source.comments.some((row) => row.nickname === nickname);
+  if (!exactMatchInComments && isPseudoNull(nickname)) {
+    nickname = null;
+  }
+
+  const citedNicknames = [...new Set(citedComments.map((row) => row.nickname))];
+  if (nickname === null && citedNicknames.length === 1) {
+    // AI가 인용한 댓글이 단 한 고객의 댓글인 경우(예: '키티'), nickname을 인용 댓글의 정확한 닉네임으로 자동 복구
+    nickname = citedNicknames[0];
+  }
+
   let status = raw.status as SellerLogicDeepStatus;
   let reason = (text(raw.reason, 4000) ? raw.reason : "") as string;
   let spokenNickname = (raw.spokenNickname && text(raw.spokenNickname, 500) ? raw.spokenNickname : undefined) as string | undefined;
+  if (spokenNickname && !exactMatchInComments && isPseudoNull(spokenNickname)) {
+    spokenNickname = undefined;
+  }
 
   if (nickname !== null) {
     if (!text(nickname, 300)) {
       nickname = null;
     } else {
-      const matchingBuyer = citedComments.some((row) => row.nickname === nickname);
-      if (!matchingBuyer) {
+      const trimmedNick = nickname.trim();
+      const matchingBuyer = citedComments.some((row) => row.nickname === nickname || row.nickname.trim() === trimmedNick);
+      if (matchingBuyer) {
+        const found = citedComments.find((row) => row.nickname === nickname || row.nickname.trim() === trimmedNick);
+        if (found) nickname = found.nickname;
+      } else {
         // AI가 타인의 댓글을 잘못 인용했더라도, source.comments에 해당 고객의 실제 댓글이 있는지 검색하여 자동 복구
-        const exactComments = source.comments.filter((row) => row.nickname === nickname);
+        const exactComments = source.comments.filter((row) => row.nickname === nickname || row.nickname.trim() === trimmedNick);
         if (exactComments.length > 0) {
+          nickname = exactComments[0].nickname;
           // 일치하는 원문 댓글이 있으므로 타인의 댓글을 배제하고 해당 닉네임의 본인 댓글 ID로 교체/보정
-          const sameNickIds = commentIds.filter((id) => source.comments.find((c) => c.id === id)?.nickname === nickname);
+          const sameNickIds = commentIds.filter((id) => {
+            const c = source.comments.find((row) => row.id === id);
+            return c && (c.nickname === nickname || c.nickname.trim() === trimmedNick);
+          });
           commentIds = sameNickIds.length > 0 ? sameNickIds : [exactComments[exactComments.length - 1].id];
           citedComments = source.comments.filter((row) => commentIds.includes(row.id));
         } else {
@@ -82,21 +113,35 @@ function validateDeepDecision(raw: unknown, source: Pick<SellerLogicDeepInput, "
     }
   }
 
-  if (raw.unitPrice !== null && (!Number.isSafeInteger(raw.unitPrice) || Number(raw.unitPrice) < 1 || Number(raw.unitPrice) > 99_999_999)) {
+  let unitPrice = raw.unitPrice as number | null;
+  if (typeof unitPrice === "string") {
+    const trimmed = (unitPrice as string).trim().toLowerCase();
+    if (trimmed === "null" || trimmed === "undefined" || trimmed === "none" || trimmed === "") {
+      unitPrice = null;
+    } else if (/^\d+$/.test(trimmed)) {
+      unitPrice = Number.parseInt(trimmed, 10);
+    }
+  }
+  if (unitPrice !== null && (!Number.isSafeInteger(unitPrice) || Number(unitPrice) < 1 || Number(unitPrice) > 99_999_999)) {
     return invalid("unitPrice는 원 단위 양의 정수 또는 null이어야 합니다.");
   }
-  if (!Number.isInteger(raw.quantity) || Number(raw.quantity) < 1 || Number(raw.quantity) > 99) {
+
+  let quantity = raw.quantity;
+  if (typeof quantity === "string" && /^\d+$/.test((quantity as string).trim())) {
+    quantity = Number.parseInt((quantity as string).trim(), 10);
+  }
+  if (!Number.isInteger(quantity) || Number(quantity) < 1 || Number(quantity) > 99) {
     return invalid("quantity는 1~99 범위의 정수여야 합니다.");
   }
   if (!text(reason, 4000)) return invalid("선정 또는 보류 이유를 reason에 기록해 주세요.");
 
-  if (status === "CONFIRMED" && (nickname === null || raw.unitPrice === null || !commentIds.length ||
+  if (status === "CONFIRMED" && (nickname === null || unitPrice === null || !commentIds.length ||
       !citedTranscripts.some((row) => row.isFinal !== false))) {
     // 필수 근거(가격, 닉네임, 댓글, 확정발화)가 미비한 경우 실시간 분석을 중단하지 않고 REVIEW로 안전하게 전환합니다.
     status = "REVIEW";
     const missing: string[] = [];
     if (nickname === null) missing.push("구매자 닉네임");
-    if (raw.unitPrice === null) missing.push("확정 가격");
+    if (unitPrice === null) missing.push("확정 가격");
     if (!commentIds.length) missing.push("구매 댓글");
     if (!citedTranscripts.some((row) => row.isFinal !== false)) missing.push("판매자 확정 발화");
     reason = `[확인 필요: ${missing.join(", ")} 근거 보완 필요] ${reason}`.slice(0, 4000);
@@ -130,13 +175,14 @@ function validateDeepDecision(raw: unknown, source: Pick<SellerLogicDeepInput, "
       }
     }
   }
-  if (raw.unitPrice !== null && Number(raw.unitPrice) * Number(raw.quantity) > 99_999_999) {
+  if (unitPrice !== null && Number(unitPrice) * Number(quantity) > 99_999_999) {
     return invalid("거래 총액이 지원 범위를 초과했습니다.");
   }
   const optional: Pick<SellerLogicDeepDecision, "productName" | "orderCode" | "spokenNickname" | "lineKey"> = {};
   if (spokenNickname) optional.spokenNickname = spokenNickname;
   for (const key of ["productName", "orderCode", "lineKey"] as const) {
     if (raw[key] !== undefined && raw[key] !== null && raw[key] !== "") {
+      if (isPseudoNull(raw[key])) continue;
       if (!text(raw[key], 500)) return invalid(`${key} 형식이 올바르지 않습니다.`);
       optional[key] = raw[key] as string;
     }
@@ -148,7 +194,7 @@ function validateDeepDecision(raw: unknown, source: Pick<SellerLogicDeepInput, "
   const decidedAt = new Date(allTimes.length ? Math.max(...allTimes) : Date.now()).toISOString();
   return {
     status, nickname,
-    unitPrice: raw.unitPrice as number | null, quantity: Number(raw.quantity), reason,
+    unitPrice: unitPrice as number | null, quantity: Number(quantity), reason,
     commentIds, transcriptIds, decidedAt, ...optional,
   };
 }
@@ -326,12 +372,17 @@ export async function parseSellerLogicDeepResult(
   const previous = new Map(input.previousDecisions.map((row) => [row.id, row]));
   const ids = new Set<string>();
   const isSameTransactionCandidate = (prior: SellerLogicDeepDecision, decisionRaw: Record<string, unknown>) => {
-    const priorNick = prior.nickname ? prior.nickname.trim().toLowerCase() : null;
-    const nextNick = typeof decisionRaw.nickname === "string" && decisionRaw.nickname.trim() ? decisionRaw.nickname.trim().toLowerCase() : null;
+    const normalizeNick = (v: unknown): string | null => {
+      if (typeof v !== "string") return null;
+      const t = v.trim().toLowerCase();
+      return t === "" || t === "null" || t === "undefined" || t === "none" ? null : t;
+    };
+    const priorNick = normalizeNick(prior.nickname);
+    const nextNick = normalizeNick(decisionRaw.nickname);
     if (priorNick && nextNick) return priorNick === nextNick;
     if (!priorNick || !nextNick) return true;
-    const priorSpoken = prior.spokenNickname ? prior.spokenNickname.trim().toLowerCase() : null;
-    const nextSpoken = typeof decisionRaw.spokenNickname === "string" && decisionRaw.spokenNickname.trim() ? decisionRaw.spokenNickname.trim().toLowerCase() : null;
+    const priorSpoken = normalizeNick(prior.spokenNickname);
+    const nextSpoken = normalizeNick(decisionRaw.spokenNickname);
     if (priorSpoken && nextSpoken) return priorSpoken === nextSpoken;
     return false;
   };

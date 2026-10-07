@@ -16,7 +16,14 @@ function load(name, dependencies = {}, globals = {}) {
   return exports;
 }
 
-const vocabulary = load('sellerLogicVocabulary', { './nicknameMatcher': load('nicknameMatcher') });
+const nicknameMatcher = load('nicknameMatcher');
+const vocabulary = load('sellerLogicVocabulary', { './nicknameMatcher': nicknameMatcher });
+const liveSttHints = load('liveSttHints', { './nicknameMatcher.ts': nicknameMatcher, './nicknameMatcher': nicknameMatcher });
+const sttVocab = load('sttVocabularyService');
+const opusHintPlanner = load('logicOpus/opusHintPlanner', {
+  '../../types/logicOpus.ts': { LOGIC_OPUS_LIMITS: { maxHintTerms: 200 } },
+  './opusNicknameCandidates.ts': { plainForm: (s) => s },
+});
 
 test('admin Soniox vocabulary keeps 50 distinct platform names and their Latin Korean readings', () => {
   const comments = Array.from({ length: 70 }, (_, i) => ({
@@ -80,6 +87,9 @@ async function fixture({ selection, created } = {}) {
       stopStream() {}, cancelPendingRequest() {},
     } },
     './sellerLogicVocabulary': vocabulary,
+    './liveSttHints': liveSttHints,
+    './sttVocabularyService': sttVocab,
+    './logicOpus/opusHintPlanner': opusHintPlanner,
   }, { WebSocket: Socket, ArrayBuffer, Date: Clock, crypto: webcrypto, window: { setTimeout, clearTimeout, setInterval, clearInterval } });
   const capture = new SellerLogicCapture();
   created?.(capture);

@@ -5,6 +5,76 @@ import { getOperationalAiSetting, getPrimaryAiSlot } from "./aiOperationalSettin
 import { executeAiPrompt } from "./aiAdapters/index.ts";
 import { requireAnalysisAdmin } from "./workflowAuthorization.ts";
 
+export async function getAccountHintsByEmail(targetEmail = 'nettman006@gmail.com') {
+  try {
+    let targetUserId: string | null = null;
+    const { data: profile } = await admin
+      .from('profiles')
+      .select('id, email')
+      .ilike('email', targetEmail)
+      .maybeSingle();
+
+    if (profile?.id) {
+      targetUserId = profile.id;
+    } else {
+      const { data: usersData } = await admin.auth.admin.listUsers({ perPage: 1000 });
+      const authUser = usersData?.users?.find((u: { email?: string }) => u.email?.toLowerCase() === targetEmail.toLowerCase());
+      if (authUser?.id) targetUserId = authUser.id;
+    }
+
+    if (!targetUserId) {
+      console.warn(`[sellerLogicHints] User not found for email: ${targetEmail}`);
+      return { presetWords: [], ruleWords: [] };
+    }
+
+    const { data: member } = await admin
+      .from('workspace_members')
+      .select('workspace_id')
+      .eq('user_id', targetUserId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    const workspaceId = member?.workspace_id;
+    if (!workspaceId) {
+      console.warn(`[sellerLogicHints] Workspace not found for user: ${targetUserId}`);
+      return { presetWords: [], ruleWords: [] };
+    }
+
+    const { data: vocabSetting } = await admin
+      .from('workspace_settings')
+      .select('value')
+      .eq('workspace_id', workspaceId)
+      .eq('namespace', 'stt_vocabulary')
+      .maybeSingle();
+
+    const rawWords = vocabSetting?.value?.words;
+    const presetWords = Array.isArray(rawWords)
+      ? rawWords.filter((w): w is string => typeof w === 'string' && Boolean(w.trim())).map((w) => w.trim())
+      : [];
+
+    const { data: rulesSetting } = await admin
+      .from('workspace_settings')
+      .select('value')
+      .eq('workspace_id', workspaceId)
+      .eq('namespace', 'recognition_rules')
+      .maybeSingle();
+
+    const rawRules = rulesSetting?.value?.rules;
+    const ruleWords = Array.isArray(rawRules)
+      ? rawRules
+          .filter((r): r is { word: string; isEnabled?: boolean } => Boolean(r && typeof r.word === 'string' && r.isEnabled !== false))
+          .map((r) => r.word.trim())
+          .filter(Boolean)
+      : [];
+
+    return { presetWords, ruleWords };
+  } catch (err) {
+    console.error(`[sellerLogicHints] Failed to get hints for ${targetEmail}:`, err);
+    return { presetWords: [], ruleWords: [] };
+  }
+}
+
 /** Display the same existing applied slots used by pending/correction execution. */
 export async function handleSellerLogicSlots(auth: AuthContext) {
   requireAnalysisAdmin(auth);
@@ -20,6 +90,17 @@ export async function handleSellerLogicSlots(auth: AuthContext) {
       provider: String(setting[`slot${slotNumber}`]?.provider || ""),
       model: String(setting[`slot${slotNumber}`]?.model || ""),
     })),
+  });
+}
+
+export async function handleSellerLogicDeepHints(auth: AuthContext, body: any) {
+  requireAnalysisAdmin(auth);
+  const email = typeof body.email === 'string' && body.email.trim() ? body.email.trim() : 'nettman006@gmail.com';
+  const hints = await getAccountHintsByEmail(email);
+  return successResponse({
+    email,
+    presetWords: hints.presetWords,
+    ruleWords: hints.ruleWords,
   });
 }
 

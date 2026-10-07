@@ -9,6 +9,9 @@ export interface SellerLogicSlots {
   appliedVersion: number;
   primarySlot: 1 | 2;
   slots: Array<{ slotNumber: 1 | 2; provider: string; model: string }>;
+  hintsAccount?: string;
+  presetWords?: string[];
+  ruleWords?: string[];
 }
 
 export interface SellerLogicDecision {

@@ -254,5 +254,38 @@ test('pure inquiry comments (e.g. 55반인데, 허리가 밴딩) demote from CON
   assert.ok(parsed.decisions[0].reason.includes('단순 문의/질문'));
 });
 
+test('auto-recovers nickname when AI returns string "null" but cited comments belong to a single buyer (e.g. 키티)', async () => {
+  const base = payload();
+  base.comments[0] = { id: 'c1', sessionId: 'deep-contract', nickname: '키티', content: '저요 1번', capturedAt: at(3) };
+  const input = normalizeSellerLogicDeepInput(base);
+  const aiAnswer = answer();
+  // AI sets nickname to string "null" while citing C0 (키티)
+  aiAnswer.decisions[0].nickname = 'null';
+  aiAnswer.decisions[0].commentIds = ['C0'];
+  aiAnswer.decisions[0].unitPrice = '18000'; // string price test
+  const parsed = await parse(aiAnswer, input);
+  assert.equal(parsed.decisions[0].nickname, '키티', 'string "null" is auto-recovered to the cited comment nickname "키티"');
+  assert.equal(parsed.decisions[0].unitPrice, 18000, 'string price is parsed to integer');
+  assert.equal(parsed.decisions[0].status, 'CONFIRMED');
+});
+
+test('demotes to REVIEW when AI returns string "null" and nickname cannot be identified without throwing INVALID error', async () => {
+  const base = payload();
+  base.comments = [
+    { id: 'c1', sessionId: 'deep-contract', nickname: '키티', content: '저요 1번', capturedAt: at(3) },
+    { id: 'c2', sessionId: 'deep-contract', nickname: '루비', content: '저요 1번', capturedAt: at(4) },
+  ];
+  base.segment.commentIds = ['c1', 'c2'];
+  const input = normalizeSellerLogicDeepInput(base);
+  const aiAnswer = answer();
+  // AI cites multiple buyers comments with string "null"
+  aiAnswer.decisions[0].nickname = 'null';
+  aiAnswer.decisions[0].commentIds = ['C0', 'C1'];
+  const parsed = await parse(aiAnswer, input);
+  assert.equal(parsed.decisions[0].nickname, null);
+  assert.equal(parsed.decisions[0].status, 'REVIEW', 'safely demotes to REVIEW instead of halting analysis with 502');
+  assert.ok(parsed.decisions[0].reason.includes('구매자 닉네임'));
+});
+
 
 
