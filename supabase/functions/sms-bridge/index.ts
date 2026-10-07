@@ -11,6 +11,7 @@ import { parseOutgoing, parsePayment } from './core.ts'
 import { createClaimForMessage, matchStoredPayment } from './commerce.ts'
 
 const list = (value: unknown) => Array.isArray(value) ? value.map(String) : []
+const OUTBOX_SENDING_LEASE_MS = 30 * 60 * 1000
 
 async function uploadAttachments(workspaceId: string, messageId: string, attachments: unknown[]) {
   if (attachments.length > 8) throw new Error('이미지는 최대 8개까지 첨부할 수 있습니다.')
@@ -156,7 +157,10 @@ Deno.serve(async (request) => {
       if (!id || !validMessageStatus.has(status) || !['SENT', 'FAILED', 'SENDING'].includes(status)) {
         return json({ ok: false, error: '올바른 발송 상태가 필요합니다.' }, 400)
       }
-      const update: Record<string, unknown> = { status, lease_expires_at: null, lease_device_id: null }
+      // SENDING은 "통신사에 넘김, 결과 대기" 보고다. 점유를 30분 늘려 다른 휴대폰이 같은 문자를 다시 보내지 않게 한다.
+      const update: Record<string, unknown> = status === 'SENDING'
+        ? { status, lease_expires_at: new Date(Date.now() + OUTBOX_SENDING_LEASE_MS).toISOString() }
+        : { status, lease_expires_at: null, lease_device_id: null }
       if (status === 'SENT') update.sent_at = String(payload.sentAt ?? new Date().toISOString())
       if (status === 'FAILED') update.error = String(payload.error ?? 'SMS 발송 실패').slice(0, 500)
       const { data, error } = await admin

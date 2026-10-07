@@ -87,3 +87,9 @@ test('sms-bridge가 새 액션과 서버 대조를 연결한다', () => {
   assert.match(source, /matchStoredPayment\(workspaceId, id, input\)/);
   assert.match(source, /receiver_name: input\.receiverName/);
 });
+
+test('outbox-status SENDING은 점유를 풀지 않고 30분 늘린다', () => {
+  const source = fs.readFileSync(new URL('../supabase/functions/sms-bridge/index.ts', import.meta.url), 'utf8');
+  assert.match(source, /OUTBOX_SENDING_LEASE_MS = 30 \* 60 \* 1000/);
+  assert.match(source, /status === 'SENDING'\s*\? \{ status, lease_expires_at: new Date\(Date\.now\(\) \+ OUTBOX_SENDING_LEASE_MS\)/);
+});
