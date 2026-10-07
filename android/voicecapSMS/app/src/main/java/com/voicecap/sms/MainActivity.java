@@ -29,6 +29,7 @@ public final class MainActivity extends Activity {
     private static final int PERMISSION_REQUEST = 901;
     private static final int ROLE_REQUEST = 902;
     private static final int CAMERA_PERMISSION_REQUEST = 903;
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 904;
     private static final String STATE_SELECTED_TAB = "state_selected_tab";
 
     private FrameLayout contentContainer;
@@ -62,6 +63,7 @@ public final class MainActivity extends Activity {
         setContentView(buildRootLayout());
         selectTab(currentTab);
         SyncScheduler.schedule(getApplicationContext());
+        if (state == null && SmsRoleUtils.isDefaultSmsApp(this)) requestNotificationPermission();
     }
 
     @Override
@@ -73,6 +75,8 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        // 앱을 열면 백오프 중인 업로드·MMS 다운로드도 바로 다시 시도한다.
+        SyncScheduler.scheduleNow(getApplicationContext(), true);
         if (currentTab == 0 && productSalesView != null) {
             productSalesView.start();
         } else if (currentTab == 1 && smsBridgeView != null) {
@@ -221,12 +225,25 @@ public final class MainActivity extends Activity {
         if (SmsRoleUtils.hasSmsPermissions(this)) {
             smsBridgeView.setStatus(R.string.status_setup_complete, SmsBridgeView.TONE_SUCCESS);
             SyncScheduler.scheduleNow(getApplicationContext());
+            // 문자 권한이 이미 있어도 알림 권한은 따로 확인한다.
+            requestNotificationPermission();
             return;
         }
         List<String> wanted = new ArrayList<>(java.util.Arrays.asList(Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS, Manifest.permission.SEND_SMS, Manifest.permission.RECEIVE_MMS, Manifest.permission.RECEIVE_WAP_PUSH));
         // 기본 문자앱은 새 문자 알림을 직접 띄워야 한다 (Android 13+ 알림 권한).
-        if (Build.VERSION.SDK_INT >= 33) wanted.add(Manifest.permission.POST_NOTIFICATIONS);
+        if (needsNotificationPermission()) wanted.add(Manifest.permission.POST_NOTIFICATIONS);
         requestPermissions(wanted.toArray(new String[0]), PERMISSION_REQUEST);
+    }
+
+    private boolean needsNotificationPermission() {
+        return Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED;
+    }
+
+    /** Android 13+: 새 문자 알림 권한을 SMS 권한과 별개로 확인·요청한다. */
+    private void requestNotificationPermission() {
+        if (needsNotificationPermission()) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
+        }
     }
 
     public void requestProductCameraPermission(Runnable onGranted, Runnable onDenied) {
@@ -267,6 +284,10 @@ public final class MainActivity extends Activity {
             pendingCameraGranted = null;
             pendingCameraDenied = null;
             if (callback != null) callback.run();
+            return;
+        }
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
+            if (needsNotificationPermission()) smsBridgeView.setStatus("알림 권한이 없으면 새 문자 알림이 표시되지 않습니다.", SmsBridgeView.TONE_WARNING);
             return;
         }
         if (requestCode != PERMISSION_REQUEST) return;

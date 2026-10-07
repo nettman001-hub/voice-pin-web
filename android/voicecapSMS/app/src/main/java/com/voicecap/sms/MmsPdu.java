@@ -21,9 +21,14 @@ public final class MmsPdu {
     static final int H_BCC = 0x81, H_CC = 0x82, H_CONTENT_LOCATION = 0x83, H_CONTENT_TYPE = 0x84,
             H_DATE = 0x85, H_EXPIRY = 0x88, H_FROM = 0x89, H_MESSAGE_ID = 0x8B, H_MESSAGE_TYPE = 0x8C,
             H_MMS_VERSION = 0x8D, H_MESSAGE_SIZE = 0x8E, H_STATUS = 0x95, H_SUBJECT = 0x96, H_TO = 0x97,
-            H_TRANSACTION_ID = 0x98;
+            H_TRANSACTION_ID = 0x98, H_RETRIEVE_STATUS = 0x99;
 
     static final int STATUS_RETRIEVED = 0x81;
+    /** X-Mms-Retrieve-Status: Ok. 헤더가 없으면 성공으로 본다. */
+    public static final int RETRIEVE_STATUS_OK = 0x80;
+
+    /** 받은 retrieve.conf의 결과: 저장 / 나중에 다시 받기 / 포기. */
+    public enum RetrieveOutcome { OK, RETRY, DROP }
     static final int MMS_VERSION_1_2 = 0x92;
 
     private static final Map<Integer, String> WELL_KNOWN_TYPES = new HashMap<>();
@@ -54,6 +59,7 @@ public final class MmsPdu {
         CHARSETS.put(3, "US-ASCII");
         CHARSETS.put(4, "ISO-8859-1");
         CHARSETS.put(17, "Shift_JIS");
+        CHARSETS.put(36, "KS_C_5601-1987");
         CHARSETS.put(38, "EUC-KR");
         CHARSETS.put(106, "UTF-8");
         CHARSETS.put(1000, "UTF-16");
@@ -67,8 +73,18 @@ public final class MmsPdu {
         public String from = "";
         public String subject = "";
         public long messageSize;
+        /** X-Mms-Expiry 값(초). {@link #expiryRelative}면 받은 시각부터의 초, 아니면 절대 시각. 0이면 없음. */
         public long expiry;
+        public boolean expiryRelative;
+
+        /** 다운로드를 포기할 시각(밀리초). 헤더가 없으면 받은 뒤 7일. */
+        public long expiresAtMillis(long receivedAtMillis) {
+            if (expiry <= 0) return receivedAtMillis + DEFAULT_EXPIRY_MILLIS;
+            return expiryRelative ? receivedAtMillis + expiry * 1000L : expiry * 1000L;
+        }
     }
+
+    static final long DEFAULT_EXPIRY_MILLIS = 7L * 24 * 60 * 60 * 1000;
 
     public static final class Part {
         public String contentType = "application/octet-stream";
@@ -79,7 +95,9 @@ public final class MmsPdu {
         public byte[] data = new byte[0];
 
         public boolean isText() { return contentType.startsWith("text/") || "application/smil".equals(contentType); }
-        public String text() { return new String(data, charsetFor(charset)); }
+        /** 문자함 part 행의 text 칸에 바로 넣는 파트. 나머지(vCard·HTML 등)는 파일로 쓴다. */
+        public boolean isInlineText() { return "text/plain".equals(contentType) || "application/smil".equals(contentType); }
+        public String text() { return decode(data, charset); }
     }
 
     public static final class RetrieveConf {
@@ -90,6 +108,7 @@ public final class MmsPdu {
         public String subject = "";
         public long dateSeconds;
         public int mmsVersion = 0x12;
+        public int retrieveStatus = RETRIEVE_STATUS_OK;
         public String contentType = "";
         public final List<Part> parts = new ArrayList<>();
 
@@ -107,13 +126,47 @@ public final class MmsPdu {
 
     private MmsPdu() { }
 
+    /** 한국어(KS_C_5601·EUC-KR)는 확장 완성형까지 읽는 CP949로 먼저 읽고, 없으면 EUC-KR로 읽는다. */
+    private static final String[] KOREAN_CHARSETS = {"x-windows-949", "windows-949", "MS949", "EUC-KR"};
+
     public static Charset charsetFor(int mib) {
+        if (mib == 36 || mib == 38) {
+            for (String name : KOREAN_CHARSETS) {
+                try {
+                    return Charset.forName(name);
+                } catch (Exception ignored) { }
+            }
+            return StandardCharsets.UTF_8;
+        }
         String name = CHARSETS.get(mib);
         try {
             return name == null ? StandardCharsets.UTF_8 : Charset.forName(name);
         } catch (Exception ignored) {
             return StandardCharsets.UTF_8;
         }
+    }
+
+    static String decode(byte[] data, int mib) {
+        return new String(data, charsetFor(mib));
+    }
+
+    /**
+     * X-Mms-Retrieve-Status 판정. 0x80만 성공이다. 0xC0~0xDF는 일시 오류라 만료 전까지 다시 받고,
+     * 그 밖의 값(0xE0 이상 영구 오류 포함)은 포기한다. 어느 실패든 "받았음"(NotifyResp Retrieved)은 보내지 않는다.
+     */
+    public static RetrieveOutcome retrieveOutcome(int status) {
+        if (status == RETRIEVE_STATUS_OK) return RetrieveOutcome.OK;
+        if (status >= 0xC0 && status <= 0xDF) return RetrieveOutcome.RETRY;
+        return RetrieveOutcome.DROP;
+    }
+
+    /**
+     * 수신 확인·중복 판정에 쓰는 transaction id. AOSP NotificationTransaction처럼 항상 m-notification-ind의 값을 쓰고,
+     * retrieve.conf의 값은 알림 쪽 값이 없을 때만 쓴다 (통신사에 따라 둘이 다르다).
+     */
+    public static String resolveTransactionId(String notificationTransactionId, String retrieveTransactionId) {
+        if (notificationTransactionId != null && !notificationTransactionId.isEmpty()) return notificationTransactionId;
+        return retrieveTransactionId == null ? "" : retrieveTransactionId;
     }
 
     /** m-notification-ind를 해석한다. 형식이 다르거나 필수 값이 없으면 null. */
@@ -132,7 +185,12 @@ public final class MmsPdu {
                     case H_FROM: ind.from = in.fromValue(); break;
                     case H_SUBJECT: ind.subject = in.encodedString(); break;
                     case H_MESSAGE_SIZE: ind.messageSize = in.longInteger(); break;
-                    case H_EXPIRY: ind.expiry = in.expiryValue(); break;
+                    case H_EXPIRY: {
+                        long[] expiry = in.expiryValue();
+                        ind.expiryRelative = expiry[0] == 0x81;
+                        ind.expiry = expiry[1];
+                        break;
+                    }
                     default: in.skipValue(field); break;
                 }
             }
@@ -175,6 +233,7 @@ public final class MmsPdu {
                     case H_SUBJECT: conf.subject = in.encodedString(); break;
                     case H_DATE: conf.dateSeconds = in.longInteger(); break;
                     case H_MMS_VERSION: conf.mmsVersion = in.u8() & 0x7F; break;
+                    case H_RETRIEVE_STATUS: conf.retrieveStatus = in.u8(); break;
                     default: in.skipValue(field); break;
                 }
             }
@@ -268,6 +327,12 @@ public final class MmsPdu {
             return text;
         }
 
+        /** Quoted-string: 앞의 큰따옴표(0x22) 한 개를 뗀 Text-string. */
+        String quotedString() {
+            if (pos < limit && (data[pos] & 0xFF) == 0x22) pos++;
+            return textString();
+        }
+
         long longInteger() {
             int b = peek();
             if (b >= 0x80) return u8() & 0x7F;
@@ -310,13 +375,14 @@ public final class MmsPdu {
             return stripAddressType(address);
         }
 
-        long expiryValue() {
+        /** {토큰(0x80 절대 / 0x81 상대), 초}. */
+        long[] expiryValue() {
             int length = valueLength();
             int end = pos + length;
-            u8(); // absolute(0x80) / relative(0x81)
+            int token = u8();
             long value = longInteger();
             pos = end;
-            return value;
+            return new long[]{token, value};
         }
 
         /** 모르는 헤더 값을 형식 규칙만으로 건너뛴다. */
@@ -404,7 +470,7 @@ public final class MmsPdu {
                 part.name = contentType.name;
                 while (pos < headersEnd) {
                     int header = u8();
-                    if (header == 0xC0) part.contentId = stripBrackets(textString());
+                    if (header == 0xC0) part.contentId = stripBrackets(quotedString());
                     else if (header == 0x8E) part.contentLocation = textString();
                     else skipValue(header);
                 }
@@ -422,13 +488,18 @@ public final class MmsPdu {
         return type == null ? "application/octet-stream" : type;
     }
 
+    /** 문자셋 이름 또는 글자로 적힌 MIBenum 번호("106", "36")를 MIBenum으로 바꾼다. 모르면 UTF-8(106). */
     static int mibForName(String name) {
         if (name == null) return 106;
         String normalized = name.trim().toUpperCase(java.util.Locale.ROOT);
+        if (normalized.isEmpty()) return 106;
+        if (normalized.matches("[0-9]{1,5}")) return Integer.parseInt(normalized);
         for (Map.Entry<Integer, String> entry : CHARSETS.entrySet()) {
             if (entry.getValue().equalsIgnoreCase(normalized)) return entry.getKey();
         }
-        if ("KS_C_5601-1987".equals(normalized) || "CP949".equals(normalized)) return 38;
+        if ("KS_C_5601".equals(normalized) || "KSC5601".equals(normalized)) return 36;
+        if ("CP949".equals(normalized) || "MS949".equals(normalized) || "X-WINDOWS-949".equals(normalized)
+                || "WINDOWS-949".equals(normalized) || "UHC".equals(normalized)) return 38;
         return 106;
     }
 

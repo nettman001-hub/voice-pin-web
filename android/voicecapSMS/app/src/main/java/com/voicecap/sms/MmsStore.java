@@ -71,12 +71,14 @@ public final class MmsStore {
             if (!part.name.isEmpty()) partValues.put(Telephony.Mms.Part.NAME, part.name);
             if (!part.contentId.isEmpty()) partValues.put(Telephony.Mms.Part.CONTENT_ID, "<" + part.contentId + ">");
             if (!part.contentLocation.isEmpty()) partValues.put(Telephony.Mms.Part.CONTENT_LOCATION, part.contentLocation);
-            if (part.isText()) {
-                // 문자셋을 해석해 UTF-8 텍스트로 저장한다 (EUC-KR 등 국내 통신사 대응).
+            if (part.isInlineText()) {
+                // text/plain·SMIL만 text 칸에 넣는다. 문자셋을 해석해 UTF-8로 저장한다 (EUC-KR 등 국내 통신사 대응).
                 partValues.put(Telephony.Mms.Part.CHARSET, CHARSET_UTF8);
                 partValues.put(Telephony.Mms.Part.TEXT, part.text());
                 context.getContentResolver().insert(partsUri, partValues);
             } else {
+                // 이미지·vCard·HTML 등은 원본 바이트를 파일로 쓴다 (텍스트 파트는 원래 문자셋을 기록).
+                if (part.isText()) partValues.put(Telephony.Mms.Part.CHARSET, part.charset);
                 Uri partUri = context.getContentResolver().insert(partsUri, partValues);
                 if (partUri == null) continue;
                 try (OutputStream output = context.getContentResolver().openOutputStream(partUri)) {

@@ -1,9 +1,11 @@
 package com.voicecap.sms;
 
 import android.content.BroadcastReceiver;
+import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.provider.BlockedNumberContract;
 import android.provider.Telephony;
 import android.telephony.SmsMessage;
@@ -36,7 +38,10 @@ public final class SmsReceiver extends BroadcastReceiver {
         EXECUTOR.execute(() -> {
             try {
                 for (SmsAssembler.Message message : SmsAssembler.assemble(segments)) {
-                    store(app, message, subId, finalServiceCenter);
+                    long receivedAt = System.currentTimeMillis();
+                    Uri uri = store(app, message, subId, finalServiceCenter, receivedAt);
+                    // 모든 받은 문자에 sync_items 행: 업무 대상이면 PENDING, 개인·차단 문자는 SKIPPED.
+                    if (uri != null) UploadQueue.enqueueIncoming(app, LocalDb.KIND_SMS_IN, ContentUris.parseId(uri), message.address, message.body, receivedAt);
                     if (!isBlocked(app, message.address)) MessageNotifier.notifyIncoming(app, message.address, message.body);
                 }
                 SyncScheduler.scheduleNow(app);
@@ -51,20 +56,21 @@ public final class SmsReceiver extends BroadcastReceiver {
         return subId >= 0 ? subId : intent.getIntExtra("subscription", -1);
     }
 
-    private static void store(Context context, SmsAssembler.Message message, int subId, String serviceCenter) {
+    private static Uri store(Context context, SmsAssembler.Message message, int subId, String serviceCenter, long receivedAt) {
         ContentValues values = new ContentValues();
         values.put(Telephony.Sms.ADDRESS, message.address);
         values.put(Telephony.Sms.BODY, message.body);
-        values.put(Telephony.Sms.DATE, System.currentTimeMillis());
+        values.put(Telephony.Sms.DATE, receivedAt);
         if (message.sentAtMillis > 0) values.put(Telephony.Sms.DATE_SENT, message.sentAtMillis);
         values.put(Telephony.Sms.READ, 0);
         values.put(Telephony.Sms.SEEN, 0);
         if (serviceCenter != null) values.put(Telephony.Sms.SERVICE_CENTER, serviceCenter);
         if (subId >= 0) values.put(Telephony.Sms.SUBSCRIPTION_ID, subId);
         try {
-            context.getContentResolver().insert(Telephony.Sms.Inbox.CONTENT_URI, values);
+            return context.getContentResolver().insert(Telephony.Sms.Inbox.CONTENT_URI, values);
         } catch (RuntimeException error) {
             android.util.Log.e("VoiceCAP", "SMS inbox insert failed", error);
+            return null;
         }
     }
 

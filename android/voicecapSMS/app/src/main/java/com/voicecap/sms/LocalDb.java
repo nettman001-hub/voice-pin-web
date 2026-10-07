@@ -18,6 +18,8 @@ public final class LocalDb extends SQLiteOpenHelper {
     public static final String KIND_SMS_IN = "SMS_IN";
     public static final String KIND_MMS_IN = "MMS_IN";
     public static final String KIND_SMS_OUT = "SMS_OUT";
+    /** 아직 받지 못한 MMS 알림(m-notification-ind). 다운로드·저장에 성공하면 지운다. */
+    public static final String KIND_MMS_NOTICE = "MMS_NOTICE";
 
     public static final String ORIGIN_DEVICE = "DEVICE";
     public static final String ORIGIN_WEB = "WEB";
@@ -48,6 +50,8 @@ public final class LocalDb extends SQLiteOpenHelper {
         public long nextAt;
         public String lastError;
         public long createdAt;
+        /** {@link #page}로 읽었을 때만 채워진다. */
+        public long rowId;
     }
 
     public static synchronized LocalDb get(Context context) {
@@ -115,6 +119,65 @@ public final class LocalDb extends SQLiteOpenHelper {
         update(existing);
     }
 
+    /** 같은 external_id나 provider_uri 행이 이미 있으면 아무것도 하지 않는다. 새로 넣었으면 true. */
+    public synchronized boolean insertIfAbsent(Item item) {
+        ContentValues values = new ContentValues();
+        values.put("external_id", item.externalId);
+        values.put("kind", item.kind);
+        values.put("origin", item.origin);
+        values.put("server_id", item.serverId);
+        values.put("provider_uri", item.providerUri);
+        values.put("payload", item.payload == null ? "{}" : item.payload.toString());
+        values.put("state", item.state);
+        values.put("attempts", item.attempts);
+        values.put("next_at", item.nextAt);
+        values.put("last_error", item.lastError);
+        values.put("created_at", item.createdAt == 0 ? System.currentTimeMillis() : item.createdAt);
+        return getWritableDatabase().insertWithOnConflict("sync_items", null, values, SQLiteDatabase.CONFLICT_IGNORE) != -1;
+    }
+
+    public synchronized void delete(String externalId) {
+        getWritableDatabase().delete("sync_items", "external_id=?", new String[]{externalId});
+    }
+
+    /**
+     * kind·state가 맞는 행을 rowid 순서로 limit개씩 읽는다. 처리에 실패해 그대로 남은 행 때문에
+     * 같은 페이지를 반복하지 않도록, 다음 호출에는 마지막 행의 {@link Item#rowId}를 afterRowId로 넘긴다.
+     */
+    public synchronized List<Item> page(String kind, String state, long afterRowId, int limit) {
+        List<Item> items = new ArrayList<>();
+        try (Cursor cursor = getReadableDatabase().rawQuery(
+                "select rowid as row_id, * from sync_items where kind=? and state=? and rowid>? order by rowid limit " + limit,
+                new String[]{kind, state, String.valueOf(afterRowId)})) {
+            while (cursor.moveToNext()) items.add(read(cursor));
+        }
+        return items;
+    }
+
+    /** now 이후로 잡힌 재시도 시각 중 가장 이른 값. 없으면 0. */
+    public synchronized long nextRetryAt(long now) {
+        try (Cursor cursor = getReadableDatabase().rawQuery(
+                "select min(next_at) from sync_items where state=? and next_at>?", new String[]{STATE_PENDING, String.valueOf(now)})) {
+            return cursor.moveToFirst() && !cursor.isNull(0) ? cursor.getLong(0) : 0;
+        }
+    }
+
+    /** 서버에 아직 저장되지 않은 업무 문자 수 (업로드 대기 + 실패). */
+    public synchronized int unsyncedCount() {
+        try (Cursor cursor = getReadableDatabase().rawQuery(
+                "select count(*) from sync_items where kind in (?,?) and state in (?,?)",
+                new String[]{KIND_SMS_IN, KIND_MMS_IN, STATE_PENDING, STATE_FAILED})) {
+            return cursor.moveToFirst() ? cursor.getInt(0) : 0;
+        }
+    }
+
+    /** 다른 칸은 건드리지 않고 last_error만 바꾼다 (발송 결과 콜백과 겹쳐도 상태를 덮어쓰지 않게). */
+    public synchronized void setLastError(String externalId, String error) {
+        ContentValues values = new ContentValues();
+        values.put("last_error", error);
+        getWritableDatabase().update("sync_items", values, "external_id=?", new String[]{externalId});
+    }
+
     public synchronized void update(Item item) {
         ContentValues values = new ContentValues();
         values.put("payload", item.payload == null ? "{}" : item.payload.toString());
@@ -159,6 +222,8 @@ public final class LocalDb extends SQLiteOpenHelper {
         item.nextAt = cursor.getLong(cursor.getColumnIndexOrThrow("next_at"));
         item.lastError = cursor.getString(cursor.getColumnIndexOrThrow("last_error"));
         item.createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at"));
+        int rowId = cursor.getColumnIndex("row_id");
+        if (rowId >= 0) item.rowId = cursor.getLong(rowId);
         return item;
     }
 

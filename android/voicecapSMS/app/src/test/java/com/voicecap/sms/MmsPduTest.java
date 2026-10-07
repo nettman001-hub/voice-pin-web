@@ -42,6 +42,7 @@ public class MmsPduTest {
         assertEquals("+821012345678", ind.from);
         assertEquals(4096, ind.messageSize);
         assertEquals(86400, ind.expiry);
+        assertTrue(ind.expiryRelative);
     }
 
     @Test
@@ -132,5 +133,127 @@ public class MmsPduTest {
     public void stripsAddressType() {
         assertEquals("01012345678", MmsPdu.stripAddressType("01012345678/TYPE=PLMN"));
         assertEquals("", MmsPdu.stripAddressType(null));
+    }
+
+    private static byte[] retrieveConf(Integer retrieveStatus, String transactionId) {
+        Bytes pdu = new Bytes().b(0x8C, 0x84).b(0x98).text(transactionId).b(0x8D, 0x92);
+        if (retrieveStatus != null) pdu.b(0x99, retrieveStatus);
+        byte[] text = "hi".getBytes(StandardCharsets.UTF_8);
+        return pdu.b(0x84, 0x83).raw(text).get(); // 단일 text/plain 본문
+    }
+
+    @Test
+    public void parsesRetrieveStatusAndClassifiesIt() {
+        assertEquals(MmsPdu.RETRIEVE_STATUS_OK, MmsPdu.parseRetrieveConf(retrieveConf(null, "T1")).retrieveStatus);
+        assertEquals(0x80, MmsPdu.parseRetrieveConf(retrieveConf(0x80, "T1")).retrieveStatus);
+        assertEquals(0xC1, MmsPdu.parseRetrieveConf(retrieveConf(0xC1, "T1")).retrieveStatus);
+        assertEquals(0xE2, MmsPdu.parseRetrieveConf(retrieveConf(0xE2, "T1")).retrieveStatus);
+
+        assertEquals(MmsPdu.RetrieveOutcome.OK, MmsPdu.retrieveOutcome(0x80));
+        assertEquals(MmsPdu.RetrieveOutcome.RETRY, MmsPdu.retrieveOutcome(0xC0));
+        assertEquals(MmsPdu.RetrieveOutcome.RETRY, MmsPdu.retrieveOutcome(0xC3));
+        assertEquals(MmsPdu.RetrieveOutcome.RETRY, MmsPdu.retrieveOutcome(0xDF));
+        assertEquals(MmsPdu.RetrieveOutcome.DROP, MmsPdu.retrieveOutcome(0xE0));
+        assertEquals(MmsPdu.RetrieveOutcome.DROP, MmsPdu.retrieveOutcome(0xE3));
+        assertEquals(MmsPdu.RetrieveOutcome.DROP, MmsPdu.retrieveOutcome(0xFF));
+        assertEquals(MmsPdu.RetrieveOutcome.DROP, MmsPdu.retrieveOutcome(0x81));
+    }
+
+    @Test
+    public void alwaysUsesNotificationTransactionId() {
+        MmsPdu.RetrieveConf conf = MmsPdu.parseRetrieveConf(retrieveConf(null, "retrieve-T9"));
+        assertEquals("retrieve-T9", conf.transactionId);
+        assertEquals("notice-T1", MmsPdu.resolveTransactionId("notice-T1", conf.transactionId));
+        assertEquals("retrieve-T9", MmsPdu.resolveTransactionId(null, conf.transactionId));
+        assertEquals("retrieve-T9", MmsPdu.resolveTransactionId("", conf.transactionId));
+        assertEquals("", MmsPdu.resolveTransactionId(null, null));
+        // 수신 확인 PDU에는 알림 쪽 transaction id가 들어간다.
+        byte[] expected = new Bytes().b(0x8C, 0x83).b(0x98).text("notice-T1").b(0x8D, 0x92).b(0x95, 0x81).get();
+        assertArrayEquals(expected, MmsPdu.buildNotifyRespInd(MmsPdu.resolveTransactionId("notice-T1", conf.transactionId)));
+    }
+
+    @Test
+    public void stripsQuoteAndBracketsFromContentId() {
+        Bytes headers = new Bytes().b(0x83).b(0xC0).b(0x22).text("<part1>");
+        byte[] data = "x".getBytes(StandardCharsets.UTF_8);
+        byte[] pdu = new Bytes()
+                .b(0x8C, 0x84)
+                .b(0x84, 0xA3)
+                .b(0x01)
+                .b(headers.size(), data.length).raw(headers.get()).raw(data)
+                .get();
+        MmsPdu.RetrieveConf conf = MmsPdu.parseRetrieveConf(pdu);
+        assertNotNull(conf);
+        assertEquals("part1", conf.parts.get(0).contentId);
+    }
+
+    @Test
+    public void decodesKoreanCharsets() {
+        // "똠"은 EUC-KR(KS X 1001)에 없고 CP949 확장 완성형에만 있다.
+        String text = "똠양꿍 주문";
+        byte[] cp949 = text.getBytes(Charset.forName("x-windows-949"));
+        assertEquals(text, MmsPdu.decode(cp949, 36));
+        assertEquals(text, MmsPdu.decode(cp949, 38));
+        byte[] euckr = "안녕하세요".getBytes(Charset.forName("EUC-KR"));
+        assertEquals("안녕하세요", MmsPdu.decode(euckr, 36));
+    }
+
+    @Test
+    public void mapsCharsetNamesAndNumericText() {
+        assertEquals(36, MmsPdu.mibForName("KS_C_5601-1987"));
+        assertEquals(38, MmsPdu.mibForName("euc-kr"));
+        assertEquals(38, MmsPdu.mibForName("CP949"));
+        assertEquals(106, MmsPdu.mibForName("utf-8"));
+        assertEquals(106, MmsPdu.mibForName("106"));
+        assertEquals(36, MmsPdu.mibForName(" 36 "));
+        assertEquals(106, MmsPdu.mibForName("unknown-charset"));
+    }
+
+    @Test
+    public void readsTextualNumericCharsetParameter() {
+        // Content-Type: text/plain; charset="36"(글자로 적힌 MIBenum) → KS_C_5601로 해석
+        byte[] korean = "주문할게요".getBytes(Charset.forName("x-windows-949"));
+        byte[] ctBody = new Bytes().b(0x83).text("charset").text("36").get();
+        Bytes headers = new Bytes().b(ctBody.length).raw(ctBody);
+        byte[] pdu = new Bytes()
+                .b(0x8C, 0x84)
+                .b(0x84, 0xA3)
+                .b(0x01)
+                .b(headers.size(), korean.length).raw(headers.get()).raw(korean)
+                .get();
+        MmsPdu.RetrieveConf conf = MmsPdu.parseRetrieveConf(pdu);
+        assertNotNull(conf);
+        assertEquals(36, conf.parts.get(0).charset);
+        assertEquals("주문할게요", conf.bodyText());
+    }
+
+    @Test
+    public void computesNotificationExpiry() {
+        MmsPdu.NotificationInd relative = new MmsPdu.NotificationInd();
+        relative.expiry = 86400;
+        relative.expiryRelative = true;
+        assertEquals(1_000L + 86_400_000L, relative.expiresAtMillis(1_000L));
+
+        MmsPdu.NotificationInd absolute = new MmsPdu.NotificationInd();
+        absolute.expiry = 1_700_000_000L;
+        assertEquals(1_700_000_000_000L, absolute.expiresAtMillis(5L));
+
+        MmsPdu.NotificationInd none = new MmsPdu.NotificationInd();
+        assertEquals(5L + MmsPdu.DEFAULT_EXPIRY_MILLIS, none.expiresAtMillis(5L));
+    }
+
+    @Test
+    public void keepsOnlyPlainTextAndSmilInline() {
+        MmsPdu.Part part = new MmsPdu.Part();
+        part.contentType = "text/plain";
+        assertTrue(part.isInlineText());
+        part.contentType = "application/smil";
+        assertTrue(part.isInlineText());
+        part.contentType = "text/x-vCard";
+        assertFalse(part.isInlineText());
+        part.contentType = "text/html";
+        assertFalse(part.isInlineText());
+        part.contentType = "image/jpeg";
+        assertFalse(part.isInlineText());
     }
 }

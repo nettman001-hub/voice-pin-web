@@ -58,8 +58,10 @@ public final class BridgeClient {
         }
     }
 
-    public static boolean postIncoming(Context context, String externalId, String phoneNumber, String body, String category, List<ImageAttachment> images) {
-        if (!BridgePreferences.configured(context)) return false;
+    /** 받은 문자 업로드. 서버가 이미 가진 externalId도 성공(REPORTED)으로 돌려준다. */
+    public static ReportResult postIncoming(Context context, String externalId, String phoneNumber, String body, String category,
+                                            long receivedAtMillis, List<ImageAttachment> images) {
+        if (!BridgePreferences.configured(context)) return ReportResult.RETRY;
         try {
             JSONObject payload = new JSONObject();
             payload.put("action", "incoming");
@@ -67,7 +69,7 @@ public final class BridgeClient {
             payload.put("phoneNumber", phoneNumber);
             payload.put("body", body.isEmpty() ? "(이미지 첨부 문자)" : body);
             payload.put("category", category);
-            payload.put("receivedAt", java.time.Instant.now().toString());
+            payload.put("receivedAt", java.time.Instant.ofEpochMilli(receivedAtMillis > 0 ? receivedAtMillis : System.currentTimeMillis()).toString());
             JSONArray attachments = new JSONArray();
             for (ImageAttachment image : images) {
                 if (image.bytes.length > MAX_IMAGE_BYTES) continue;
@@ -78,9 +80,11 @@ public final class BridgeClient {
                 attachments.put(attachment);
             }
             payload.put("attachments", attachments);
-            return requestText(context, true, "sms-bridge", payload).optBoolean("ok");
+            int[] code = new int[1];
+            JSONObject response = requestText(context, true, "sms-bridge", payload, code);
+            return classify(response, code[0]);
         } catch (Exception ignored) {
-            return false;
+            return ReportResult.RETRY;
         }
     }
 
@@ -114,9 +118,19 @@ public final class BridgeClient {
         } catch (Exception ignored) { }
     }
 
-    public enum ReportResult { REPORTED, REJECTED, RETRY }
+    /**
+     * REPORTED 성공, CONFLICT 409(발송 점유권 없음: 다른 휴대폰이 맡았거나 취소됨), REJECTED 그 밖의 4xx
+     * (다시 보내도 같음), RETRY 네트워크 오류·5xx.
+     */
+    public enum ReportResult { REPORTED, CONFLICT, REJECTED, RETRY }
 
-    /** 4xx(점유권 없음 등)는 다시 보내도 같으므로 REJECTED, 네트워크 오류·5xx는 RETRY. */
+    private static ReportResult classify(JSONObject response, int code) {
+        if (response.optBoolean("ok")) return ReportResult.REPORTED;
+        if (code == 409) return ReportResult.CONFLICT;
+        return code >= 400 && code < 500 ? ReportResult.REJECTED : ReportResult.RETRY;
+    }
+
+    /** status는 SENDING(통신사에 넘김) / SENT / FAILED. */
     public static ReportResult updateOutboxStatus(Context context, String id, String status, String error) {
         if (!BridgePreferences.configured(context)) return ReportResult.RETRY;
         try {
@@ -124,8 +138,7 @@ public final class BridgeClient {
             if (error != null && !error.isEmpty()) payload.put("error", error.length() > 500 ? error.substring(0, 500) : error);
             int[] code = new int[1];
             JSONObject response = requestText(context, true, "sms-bridge", payload, code);
-            if (response.optBoolean("ok")) return ReportResult.REPORTED;
-            return code[0] >= 400 && code[0] < 500 ? ReportResult.REJECTED : ReportResult.RETRY;
+            return classify(response, code[0]);
         } catch (Exception ignored) {
             return ReportResult.RETRY;
         }
