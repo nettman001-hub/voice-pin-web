@@ -19,11 +19,14 @@ import {
 } from '../types/commerce';
 
 type BridgeStatus = 'CHECKING' | 'ONLINE' | 'OFFLINE';
+/** 마지막 웹 발송 때 휴대폰을 즉시 깨웠는지. DELAYED면 휴대폰 주기 확인(최대 15분)을 기다린다. */
+type PhonePushStatus = 'UNKNOWN' | 'INSTANT' | 'DELAYED';
 
 interface CommerceContextType extends CommerceState {
   bridgeConfig: SmsBridgeConfig;
   bridgeStatus: BridgeStatus;
   bridgeMessage: string;
+  phonePush: PhonePushStatus;
   saveBridgeConfig: (config: SmsBridgeConfig) => void;
   syncBridge: () => Promise<boolean>;
   getClaimForSales: (saleIds: string[]) => CustomerPurchaseClaim | undefined;
@@ -85,6 +88,7 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>('CHECKING');
   const [bridgeMessage, setBridgeMessage] = useState('연동 서버 확인 중');
   const [remoteReady, setRemoteReady] = useState(false);
+  const [phonePush, setPhonePush] = useState<PhonePushStatus>('UNKNOWN');
   const stateRef = useRef(state);
   const remoteSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const currentWorkspaceRef = useRef<string | null>(null);
@@ -113,6 +117,13 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         .then(async () => {
           if (currentWorkspaceRef.current !== workspaceId) return;
           await remoteWorkspaceService.saveCommerceChanges(workspaceId, changes);
+          if (changes.messages.some((message) => message.direction === 'OUTGOING' && message.status === 'QUEUED')) {
+            void remoteWorkspaceService.notifyOutbox(workspaceId)
+              .then((result) => {
+                if (currentWorkspaceRef.current === workspaceId) setPhonePush(result.pushed > 0 ? 'INSTANT' : 'DELAYED');
+              })
+              .catch((error) => console.warn('[Commerce] phone push failed', error));
+          }
         })
         .catch((error) => {
           console.error('[Commerce] remote save failed', error);
@@ -499,6 +510,7 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     bridgeConfig,
     bridgeStatus,
     bridgeMessage,
+    phonePush,
     saveBridgeConfig,
     syncBridge,
     getClaimForSales,
@@ -516,7 +528,7 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     createShipmentsForSales,
     updateShipment,
     sendShippingNotice
-  }), [state, bridgeConfig, bridgeStatus, bridgeMessage, syncBridge, getClaimForSales, getMessagesForSales, isVerified, isPaid]);
+  }), [state, bridgeConfig, bridgeStatus, bridgeMessage, phonePush, syncBridge, getClaimForSales, getMessagesForSales, isVerified, isPaid]);
 
   return <CommerceContext.Provider value={value}>{children}</CommerceContext.Provider>;
 };

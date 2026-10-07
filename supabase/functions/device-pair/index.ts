@@ -8,8 +8,11 @@ import {
   sha256,
   workspaceMembership,
 } from '../_shared/voicecap.ts'
+import { createFcmSender, parseServiceAccount, type PushResult } from '../_shared/fcm.ts'
 
 const pairingPepper = Deno.env.get('VOICECAP_PAIRING_PEPPER') ?? ''
+const fcmAccount = parseServiceAccount(Deno.env.get('FCM_SERVICE_ACCOUNT_JSON'))
+const sendOutboxPush = fcmAccount ? createFcmSender(fcmAccount) : null
 
 const pairingHash = (code: string) => sha256(`${pairingPepper}:${code.trim().toUpperCase()}`)
 
@@ -100,7 +103,89 @@ Deno.serve(async (request) => {
       const device = await activeDevice(request)
       if (!device) return json({ ok: false, error: '등록된 기기가 아닙니다.' }, 401)
       await admin.from('devices').update({ revoked_at: new Date().toISOString() }).eq('id', device.id)
+      await admin.from('device_push_tokens').delete().eq('device_id', device.id)
       return json({ ok: true })
+    }
+
+    // 휴대폰 앱이 FCM 토큰을 등록한다. 빈 토큰이면 등록을 지운다.
+    if (action === 'register-push') {
+      const device = await activeDevice(request)
+      if (!device) return json({ ok: false, error: '등록된 기기가 아닙니다.' }, 401)
+      const token = String(payload.token ?? '').trim()
+      if (token.length > 4096) return json({ ok: false, error: '알림 토큰이 너무 깁니다.' }, 400)
+      if (!token) {
+        const { error } = await admin.from('device_push_tokens').delete().eq('device_id', device.id)
+        if (error) throw error
+        return json({ ok: true, registered: false, pushConfigured: Boolean(sendOutboxPush) })
+      }
+      // 앱을 다시 연결하면 같은 토큰이 예전 기기 행에 남아 있을 수 있어 먼저 옮긴다.
+      const { error: moveError } = await admin.from('device_push_tokens').delete().eq('token', token).neq('device_id', device.id)
+      if (moveError) throw moveError
+      const { error } = await admin.from('device_push_tokens').upsert({
+        device_id: device.id,
+        workspace_id: device.workspace_id,
+        token,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'device_id' })
+      if (error) throw error
+      return json({ ok: true, registered: true, pushConfigured: Boolean(sendOutboxPush) })
+    }
+
+    // 웹이 문자를 대기열에 넣은 뒤 부른다. 연결된 휴대폰을 깨워 바로 outbox-claim 하게 한다.
+    if (action === 'notify-outbox') {
+      const user = await authenticatedUser(request)
+      if (!user) return json({ ok: false, error: '로그인이 필요합니다.' }, 401)
+      const membership = await workspaceMembership(user.id, payload.workspaceId)
+      if (!membership) return json({ ok: false, error: '워크스페이스 권한이 없습니다.' }, 403)
+      const workspaceId = membership.workspace_id
+
+      const { data: queued, error: queuedError } = await admin
+        .from('customer_messages')
+        .select('id')
+        .eq('workspace_id', workspaceId)
+        .eq('direction', 'OUTGOING')
+        .eq('status', 'QUEUED')
+        .limit(1)
+      if (queuedError) throw queuedError
+      if (!queued?.length) return json({ ok: true, queued: false, configured: Boolean(sendOutboxPush), devices: 0, pushed: 0 })
+
+      const { data: devices, error: devicesError } = await admin
+        .from('devices')
+        .select('id, capabilities')
+        .eq('workspace_id', workspaceId)
+        .is('revoked_at', null)
+      if (devicesError) throw devicesError
+      const smsDeviceIds = (devices ?? [])
+        .filter((device) => !Array.isArray(device.capabilities) || device.capabilities.includes('SMS'))
+        .map((device) => device.id as string)
+      if (!sendOutboxPush || smsDeviceIds.length === 0) {
+        return json({ ok: true, queued: true, configured: Boolean(sendOutboxPush), devices: smsDeviceIds.length, pushed: 0 })
+      }
+
+      const { data: tokens, error: tokensError } = await admin
+        .from('device_push_tokens')
+        .select('device_id, token')
+        .in('device_id', smsDeviceIds)
+      if (tokensError) throw tokensError
+      const results = await Promise.all((tokens ?? []).map(async (row) => {
+        let result: PushResult = 'FAILED'
+        try {
+          result = await sendOutboxPush(String(row.token))
+        } catch (error) {
+          console.error('[device-pair] FCM 발송 실패', error)
+        }
+        if (result === 'STALE_TOKEN') {
+          await admin.from('device_push_tokens').delete().eq('device_id', row.device_id).eq('token', row.token)
+        }
+        return result
+      }))
+      return json({
+        ok: true,
+        queued: true,
+        configured: true,
+        devices: smsDeviceIds.length,
+        pushed: results.filter((result) => result === 'SENT').length,
+      })
     }
 
     return json({ ok: false, error: '지원하지 않는 요청입니다.' }, 400)

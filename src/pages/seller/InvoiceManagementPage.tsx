@@ -26,6 +26,7 @@ export const InvoiceManagementPage: React.FC = () => {
     payments,
     bridgeStatus,
     bridgeMessage,
+    phonePush,
     syncBridge,
     getClaimForSales,
     isPaid,
@@ -294,6 +295,11 @@ export const InvoiceManagementPage: React.FC = () => {
             {isRemoteAuth ? bridgeMessage : '수파베이스 설정 후 사용 가능'}
           </span>
         </div>
+        {isRemoteAuth && phonePush === 'DELAYED' && (
+          <p className="mt-1.5 rounded-lg bg-amber-50 px-2 py-1 text-[10px] text-amber-800">
+            휴대폰에 즉시 발송 알림을 보내지 못했습니다. 휴대폰 앱이 문자를 가져갈 때까지 최대 15분 늦어질 수 있습니다.
+          </p>
+        )}
       </section>
 
       <PaymentReconciliationPanel payments={payments} invoices={invoices} onConfirm={confirmPayment} onDismiss={dismissPayment} />

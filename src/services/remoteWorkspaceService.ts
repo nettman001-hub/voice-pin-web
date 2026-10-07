@@ -715,6 +715,19 @@ export const remoteWorkspaceService = {
   },
 
   /**
+   * 대기열에 넣은 문자를 바로 보내도록 연결된 휴대폰을 FCM으로 깨운다.
+   * pushed가 0이면 휴대폰은 주기 확인(최대 15분)으로만 문자를 가져간다.
+   */
+  async notifyOutbox(workspaceId: string): Promise<{ pushed: number; devices: number; configured: boolean }> {
+    const { data, error } = await ensureEnabled().functions.invoke('device-pair', {
+      body: { action: 'notify-outbox', workspaceId },
+    });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || '휴대폰 알림을 보내지 못했습니다.');
+    return { pushed: Number(data.pushed) || 0, devices: Number(data.devices) || 0, configured: Boolean(data.configured) };
+  },
+
+  /**
    * 판매자가 확인 필요 입금을 정산서에 연결하면 입금자명 → 닉네임을 기억한다.
    * 같은 입금자명이 다른 닉네임에 묶여 있으면(동명이인) 닉네임을 비워 자동 확정에 쓰지 않는다.
    */

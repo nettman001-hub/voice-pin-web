@@ -86,3 +86,46 @@ test('입금확인 마이그레이션: 두 번 실행해도 안전하고 제약�
     await db.close();
   }
 });
+
+const pushMigration = fs.readFileSync(
+  new URL('../supabase/migrations/202610070002_device_push.sql', import.meta.url),
+  'utf8',
+);
+
+test('알림 토큰 마이그레이션: 서버만 쓰는 표, 토큰은 한 기기에만', async (t) => {
+  if (!PGlite) {
+    t.skip('PGlite is not installed in this environment');
+    return;
+  }
+  const db = new PGlite();
+  try {
+    await db.exec(`
+      create role anon;
+      create role authenticated;
+      create table public.workspaces(id uuid primary key);
+      create table public.devices(id uuid primary key, workspace_id uuid);
+    `);
+    await db.exec(pushMigration);
+    await db.exec(pushMigration);
+
+    const ws = crypto.randomUUID();
+    const first = crypto.randomUUID();
+    const second = crypto.randomUUID();
+    await db.query('insert into public.workspaces values ($1)', [ws]);
+    await db.query('insert into public.devices values ($1, $3), ($2, $3)', [first, second, ws]);
+    await db.query("insert into public.device_push_tokens (device_id, workspace_id, token) values ($1, $2, 'tok')", [first, ws]);
+    await assert.rejects(db.query("insert into public.device_push_tokens (device_id, workspace_id, token) values ($1, $2, 'tok')", [second, ws]));
+
+    await db.query('delete from public.devices where id = $1', [first]);
+    assert.equal((await db.query('select count(*)::int as count from public.device_push_tokens')).rows[0].count, 0);
+
+    const rls = (await db.query("select relrowsecurity from pg_class where relname = 'device_push_tokens'")).rows[0];
+    assert.equal(rls.relrowsecurity, true);
+    const grants = (await db.query(
+      "select grantee from information_schema.role_table_grants where table_name = 'device_push_tokens' and grantee in ('anon', 'authenticated')",
+    )).rows;
+    assert.deepEqual(grants, []);
+  } finally {
+    await db.close();
+  }
+});
