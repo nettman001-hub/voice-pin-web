@@ -75,6 +75,21 @@ test('nickname must be the literal text of a cited comment', async () => {
   await assert.rejects(() => parse(aliased, input), /정확한 원문 닉네임/);
 });
 
+test('when AI cites another buyer comment, auto-recovers matching comment from evidence (e.g. 오1유3 with 키티 comment)', async () => {
+  const base = payload();
+  base.comments.push({ id: 'c3', sessionId: 'deep-contract', nickname: '키티', content: '블랙엑라', capturedAt: at(15) });
+  base.comments[1] = { ...base.comments[1], nickname: '오1유3', content: '저 된거죠?' };
+  const input = normalizeSellerLogicDeepInput(base);
+  const aiAnswer = answer();
+  // AI sets nickname to '오1유3' but cited C2 (which is c3, 키티)
+  aiAnswer.decisions[0].nickname = '오1유3';
+  aiAnswer.decisions[0].commentIds = ['C2']; // C2 is '키티'
+  const parsed = await parse(aiAnswer, input);
+  assert.equal(parsed.decisions[0].nickname, '오1유3');
+  assert.deepEqual(parsed.decisions[0].commentIds, ['c2'], 'automatically recovered to c2 (오1유3)');
+  assert.equal(parsed.decisions[0].status, 'CONFIRMED');
+});
+
 test('CONFIRMED requires price and a final seller utterance or demotes to REVIEW', async () => {
   const input = normalizeSellerLogicDeepInput(payload());
   const noPrice = answer();
