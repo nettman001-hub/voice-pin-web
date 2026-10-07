@@ -67,7 +67,11 @@ export interface SettlementInvoice {
   createdAt: string;
   sentAt?: string;
   smsMessageId?: string;
+  /** 고객이 입금자명에 적으면 자동 확정되는 짧은 코드 (미결 정산서끼리 유일) */
+  depositCode?: string;
 }
+
+export type PaymentSource = 'NOTIFICATION' | 'SMS' | 'MANUAL';
 
 export interface PaymentReceipt {
   id: string;
@@ -80,6 +84,11 @@ export interface PaymentReceipt {
   saleIds: string[];
   invoiceId?: string;
   matchStatus: PaymentMatchStatus;
+  /** 확인 필요일 때 판매자가 고를 정산서 후보 (첫 번째가 추천) */
+  candidateIds?: string[];
+  receiverName?: string;
+  bank?: string;
+  source?: PaymentSource;
   createdAt: string;
 }
 

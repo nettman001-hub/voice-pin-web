@@ -7,6 +7,8 @@ import {
   validMessageCategory,
   validMessageStatus,
 } from '../_shared/voicecap.ts'
+import { parseOutgoing, parsePayment } from './core.ts'
+import { createClaimForMessage, matchStoredPayment } from './commerce.ts'
 
 const list = (value: unknown) => Array.isArray(value) ? value.map(String) : []
 
@@ -80,6 +82,49 @@ Deno.serve(async (request) => {
       const { data, error } = await admin.from('customer_messages').insert(row).select().single()
       if (error) throw error
       await admin.from('audit_logs').insert({ workspace_id: workspaceId, actor_device_id: device.id, action: 'SMS_RECEIVED', entity_type: 'customer_message', entity_id: messageId })
+      if (category === 'PURCHASE_INFO') {
+        // 구매 신청을 만들지 못해도 문자 업로드는 성공으로 둔다(앱이 같은 문자를 다시 올리지 않게).
+        try {
+          await createClaimForMessage(workspaceId, data)
+        } catch (claimError) {
+          console.error('purchase claim creation failed', claimError)
+        }
+      }
+      return json({ ok: true, duplicate: false, message: data }, 201)
+    }
+
+    if (action === 'outgoing') {
+      const parsed = parseOutgoing(payload, validMessageCategory)
+      if (!parsed.ok) return json({ ok: false, error: parsed.error }, 400)
+      const input = parsed.value
+      const { data: existing } = await admin
+        .from('customer_messages')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .eq('external_id', input.externalId)
+        .maybeSingle()
+      if (existing) return json({ ok: true, duplicate: true, message: existing })
+
+      const messageId = `sms-${crypto.randomUUID()}`
+      const attachments = await uploadAttachments(workspaceId, messageId, Array.isArray(payload.attachments) ? payload.attachments : [])
+      const { data, error } = await admin.from('customer_messages').insert({
+        id: messageId,
+        workspace_id: workspaceId,
+        device_id: device.id,
+        external_id: input.externalId,
+        phone_number: input.phoneNumber,
+        body: input.body,
+        direction: 'OUTGOING',
+        category: input.category,
+        status: input.status,
+        sale_ids: input.saleIds,
+        attachments,
+        sent_at: input.status === 'SENT' ? input.sentAt : null,
+        error: input.error,
+        created_at: input.sentAt,
+      }).select().single()
+      if (error) throw error
+      await admin.from('audit_logs').insert({ workspace_id: workspaceId, actor_device_id: device.id, action: 'SMS_OUTGOING', entity_type: 'customer_message', entity_id: messageId })
       return json({ ok: true, duplicate: false, message: data }, 201)
     }
 
@@ -129,24 +174,41 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'payment-incoming') {
-      const externalId = String(payload.externalId ?? '').trim()
-      const payerName = String(payload.payerName ?? '').trim()
-      const amount = Number(payload.amount)
-      if (!externalId || !payerName || !Number.isFinite(amount) || amount <= 0) {
-        return json({ ok: false, error: 'externalId, payerName, amount가 필요합니다.' }, 400)
-      }
+      const parsed = parsePayment(payload)
+      if (!parsed.ok) return json({ ok: false, error: parsed.error }, 400)
+      const input = parsed.value
       const { data: existing } = await admin.from('payment_receipts')
-        .select('*').eq('workspace_id', workspaceId).eq('external_id', externalId).maybeSingle()
+        .select('*').eq('workspace_id', workspaceId).eq('external_id', input.externalId).maybeSingle()
       if (existing) return json({ ok: true, duplicate: true, payment: existing })
       const id = `bank-${crypto.randomUUID()}`
-      const paidAt = String(payload.paidAt ?? new Date().toISOString())
-      const { data, error } = await admin.from('payment_receipts').insert({
-        id, workspace_id: workspaceId, external_id: externalId, payer_name: payerName,
-        amount, paid_at: paidAt, memo: String(payload.memo ?? '').slice(0, 1000),
-        sale_ids: [], match_status: 'UNMATCHED',
-      }).select().single()
-      if (error) throw error
-      return json({ ok: true, duplicate: false, payment: data }, 201)
+      const { error } = await admin.from('payment_receipts').insert({
+        id, workspace_id: workspaceId, external_id: input.externalId, payer_name: input.payerName,
+        amount: input.amount, paid_at: input.paidAt, memo: input.memo,
+        receiver_name: input.receiverName, bank: input.bank, source: input.source, device_id: device.id,
+        sale_ids: [], candidate_ids: [], match_status: 'UNMATCHED',
+      })
+      if (error) {
+        // 동시에 같은 입금이 두 번 올라온 경우
+        if (error.code === '23505') {
+          const { data: duplicate } = await admin.from('payment_receipts')
+            .select('*').eq('workspace_id', workspaceId).eq('external_id', input.externalId).maybeSingle()
+          return json({ ok: true, duplicate: true, payment: duplicate })
+        }
+        throw error
+      }
+      let match = null
+      try {
+        match = await matchStoredPayment(workspaceId, id, input)
+      } catch (matchError) {
+        // 대조에 실패해도 입금은 저장된 상태로 두고(미확인), 판매자가 웹에서 연결한다.
+        console.error('payment matching failed', matchError)
+      }
+      await admin.from('audit_logs').insert({
+        workspace_id: workspaceId, actor_device_id: device.id, action: 'PAYMENT_RECEIVED', entity_type: 'payment_receipt', entity_id: id,
+        metadata: { amount: input.amount, bank: input.bank, source: input.source, matchStatus: match?.status ?? 'UNMATCHED' },
+      })
+      const { data: payment } = await admin.from('payment_receipts').select('*').eq('id', id).maybeSingle()
+      return json({ ok: true, duplicate: false, payment, match }, 201)
     }
 
     return json({ ok: false, error: '지원하지 않는 요청입니다.' }, 400)

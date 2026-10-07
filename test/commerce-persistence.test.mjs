@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 import * as voiceSaleValidation from '../src/services/voiceSaleValidation.ts';
+import * as paymentMatching from '../src/services/paymentMatching.ts';
 
 // Execute the application modules with a local Supabase stub; never connect to
 // the real database or browser storage during these persistence checks.
@@ -95,7 +96,7 @@ function remoteService(client) {
     './supabaseClient': { isSupabaseConfigured: true, requireSupabase: () => client },
     './commerceChanges': changesModule,
     './sttVocabularyService': { normalizeSttVocabulary: (words) => words },
-    './voiceSaleValidation': voiceSaleValidation,
+    './voiceSaleValidation': voiceSaleValidation, './paymentMatching': paymentMatching,
   }).remoteWorkspaceService;
 }
 
@@ -239,7 +240,7 @@ function readyProvider(initial, save = async () => {}) {
       getCommerceState: () => initial, saveCommerceState: (state) => localSaves.push(state),
     } },
     '../services/remoteWorkspaceService': { remoteWorkspaceService: { saveCommerceChanges: save } },
-    '../services/commerceChanges': changesModule,
+    '../services/commerceChanges': changesModule, '../services/paymentMatching': paymentMatching,
   });
   const value = CommerceProvider({ children: null }).props.value;
   return { value, localSaves, stateUpdates };

@@ -10,6 +10,7 @@ import { hasCommerceChanges, type CommerceChanges } from './commerceChanges';
 import { normalizeSttVocabulary } from './sttVocabularyService';
 import type { PromiseDefaultRecord } from './promiseDefaultService';
 import { invalidVoiceSaleFields, voiceSaleValidationMessage } from './voiceSaleValidation';
+import { decideAliasUpdate, isUnknownPayer, normalizePayerName } from './paymentMatching';
 
 export interface CloudSessionTranscriptsPayload {
   sessionId: string;
@@ -209,6 +210,7 @@ const mapInvoice = (row: Row): SettlementInvoice => ({
   createdAt: row.created_at,
   sentAt: row.sent_at || undefined,
   smsMessageId: row.sms_message_id || undefined,
+  depositCode: row.deposit_code || undefined,
 });
 
 const mapPayment = (row: Row, workspaceId: string): PaymentReceipt => ({
@@ -222,6 +224,10 @@ const mapPayment = (row: Row, workspaceId: string): PaymentReceipt => ({
   saleIds: Array.isArray(row.sale_ids) ? row.sale_ids.map(String) : [],
   invoiceId: row.invoice_id || undefined,
   matchStatus: row.match_status,
+  candidateIds: Array.isArray(row.candidate_ids) ? row.candidate_ids.map(String) : [],
+  receiverName: row.receiver_name || undefined,
+  bank: row.bank || undefined,
+  source: row.source || undefined,
   createdAt: row.created_at,
 });
 
@@ -677,12 +683,13 @@ export const remoteWorkspaceService = {
       id: invoice.id, workspace_id: workspaceId, sale_ids: invoice.saleIds, customer_nickname: invoice.customerNickname,
       phone_number: invoice.phoneNumber, address: invoice.address, amount: invoice.amount, bank_account: invoice.bankAccount,
       due_date: invoice.dueDate, status: invoice.status, sent_at: invoice.sentAt || null, sms_message_id: invoice.smsMessageId || null,
-      created_at: invoice.createdAt,
+      deposit_code: invoice.depositCode || null, created_at: invoice.createdAt,
     }));
     const payments = changes.payments.map((payment) => ({
       id: payment.id, workspace_id: workspaceId, external_id: payment.externalId || null, payer_name: payment.payerName,
       amount: payment.amount, paid_at: payment.paidAt, memo: payment.memo || null, sale_ids: payment.saleIds,
-      invoice_id: payment.invoiceId || null, match_status: payment.matchStatus, created_at: payment.createdAt,
+      invoice_id: payment.invoiceId || null, match_status: payment.matchStatus, candidate_ids: payment.candidateIds || [],
+      created_at: payment.createdAt,
     }));
     const shipments = changes.shipments.map((shipment) => ({
       id: shipment.id, workspace_id: workspaceId, sale_ids: shipment.saleIds, recipient_name: shipment.recipientName,
@@ -705,6 +712,28 @@ export const remoteWorkspaceService = {
     const results: any[] = await Promise.all(writes);
     const error = results.find((result) => result?.error)?.error;
     if (error) throw error;
+  },
+
+  /**
+   * 판매자가 확인 필요 입금을 정산서에 연결하면 입금자명 → 닉네임을 기억한다.
+   * 같은 입금자명이 다른 닉네임에 묶여 있으면(동명이인) 닉네임을 비워 자동 확정에 쓰지 않는다.
+   */
+  async saveDepositorAlias(workspaceId: string, payerName: string, buyerNickname: string) {
+    if (isUnknownPayer(payerName) || !buyerNickname.trim()) return;
+    const client = ensureEnabled();
+    const payerNormalized = normalizePayerName(payerName);
+    const { data: existing, error: readError } = await client.from('depositor_aliases')
+      .select('buyer_nickname').eq('workspace_id', workspaceId).eq('payer_name_normalized', payerNormalized).maybeSingle();
+    if (readError) throw readError;
+    const decision = decideAliasUpdate(existing ? String(existing.buyer_nickname ?? '') : null, buyerNickname);
+    if (decision === 'keep') return;
+    const { error } = decision === 'ambiguous'
+      ? await client.from('depositor_aliases').update({ buyer_nickname: '' })
+        .eq('workspace_id', workspaceId).eq('payer_name_normalized', payerNormalized)
+      : await client.from('depositor_aliases').insert({
+        workspace_id: workspaceId, payer_name_normalized: payerNormalized, buyer_nickname: buyerNickname.trim(),
+      });
+    if (error && error.code !== '23505') throw error;
   },
 
   subscribe(workspaceId: string, callback: () => void) {
