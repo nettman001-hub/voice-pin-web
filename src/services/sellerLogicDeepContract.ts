@@ -267,6 +267,16 @@ export async function parseSellerLogicDeepResult(
   };
   const previous = new Map(input.previousDecisions.map((row) => [row.id, row]));
   const ids = new Set<string>();
+  const isSameTransactionCandidate = (prior: SellerLogicDeepDecision, decisionRaw: Record<string, unknown>) => {
+    const priorNick = prior.nickname ? prior.nickname.trim().toLowerCase() : null;
+    const nextNick = typeof decisionRaw.nickname === "string" && decisionRaw.nickname.trim() ? decisionRaw.nickname.trim().toLowerCase() : null;
+    if (priorNick && nextNick) return priorNick === nextNick;
+    if (!priorNick || !nextNick) return true;
+    const priorSpoken = prior.spokenNickname ? prior.spokenNickname.trim().toLowerCase() : null;
+    const nextSpoken = typeof decisionRaw.spokenNickname === "string" && decisionRaw.spokenNickname.trim() ? decisionRaw.spokenNickname.trim().toLowerCase() : null;
+    if (priorSpoken && nextSpoken) return priorSpoken === nextSpoken;
+    return false;
+  };
   const decisions = (raw.decisions as unknown[]).map((decision: unknown) => {
     if (!object(decision)) return invalid("거래 판단은 JSON 객체여야 합니다.");
     const decoded = {
@@ -274,16 +284,27 @@ export async function parseSellerLogicDeepResult(
       commentIds: decodeIds(decision.commentIds, commentByAlias, "commentIds"),
       transcriptIds: decodeIds(decision.transcriptIds, transcriptByAlias, "transcriptIds"),
     };
-    const validated = validateDeepDecision(decoded, input);
-    let id: string;
+    let prior: SellerLogicDeepDecision | undefined;
     if (typeof decision.id === "string" && decision.id) {
       const priorId = decisionByAlias.get(decision.id);
-      const prior = priorId ? previous.get(priorId) : undefined;
+      prior = priorId ? previous.get(priorId) : undefined;
       if (!prior) return invalid("이전에 없던 거래에는 id를 null로 반환해 주세요.");
-      if (!validated.commentIds.some((value) => prior.commentIds.includes(value)) &&
-          !validated.transcriptIds.some((value) => prior.transcriptIds.includes(value))) {
-        return invalid("이전 거래를 갱신할 때는 같은 거래의 기존 근거를 하나 이상 함께 인용해 주세요.");
+      const hasPriorEvidence = decoded.commentIds.some((value) => prior!.commentIds.includes(value)) ||
+        decoded.transcriptIds.some((value) => prior!.transcriptIds.includes(value));
+      if (!hasPriorEvidence) {
+        if (isSameTransactionCandidate(prior, decision as Record<string, unknown>)) {
+          // AI가 동일 구매자의 거래를 갱신하면서 이전 근거를 생략하고 새 근거만 적은 경우,
+          // 분석을 중단하지 않고 이전 거래의 근거를 보존하여 자동 병합합니다.
+          decoded.commentIds = [...new Set([...prior.commentIds, ...decoded.commentIds])];
+          decoded.transcriptIds = [...new Set([...prior.transcriptIds, ...decoded.transcriptIds])];
+        } else {
+          return invalid("이전 거래를 갱신할 때는 같은 거래의 기존 근거를 하나 이상 함께 인용해 주세요.");
+        }
       }
+    }
+    const validated = validateDeepDecision(decoded, input);
+    let id: string;
+    if (prior) {
       id = prior.id;
     } else if (decision.id === null) {
       id = deepDecisionIdentity(input, validated);

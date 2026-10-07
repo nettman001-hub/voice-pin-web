@@ -169,3 +169,24 @@ test('previous decision reasons are abbreviated on the wire while the browser ke
   assert.equal(input.previousDecisions[0].reason.length, 1200, 'the browser keeps the full reason');
   assert.ok(prompt.systemPrompt.includes('축약'));
 });
+
+test('updating a previous decision merges prior evidence when AI cites only newly recognized evidence', async () => {
+  const base = payload();
+  const prior = {
+    id: 'sld:["deep-contract","c1","s2",""]', status: 'PENDING', nickname: 'xou.3z', unitPrice: 18000, quantity: 1,
+    reason: '판매자 확정 대기', commentIds: ['c1'], transcriptIds: ['s2'], decidedAt: at(5),
+  };
+  const evidence = normalizeSellerLogicDeepInput({ ...base, previousDecisions: [prior] });
+  const updatedOnlyNewSpeech = answer();
+  // AI cites D0 with the same buyer, but cites only new transcript S0 instead of repeating prior C0/S1
+  updatedOnlyNewSpeech.decisions[0] = {
+    id: 'D0', status: 'CONFIRMED', nickname: 'xou.3z', unitPrice: 18000, quantity: 1,
+    reason: '판매자가 18,000원에 확정 발화함', commentIds: [], transcriptIds: ['S0'],
+  };
+  const parsed = await parse(updatedOnlyNewSpeech, evidence);
+  assert.equal(parsed.decisions[0].id, prior.id);
+  // prior comment c1 and prior speech s2 are merged with new speech s1 (S0)
+  assert.deepEqual(parsed.decisions[0].commentIds, ['c1']);
+  assert.deepEqual(parsed.decisions[0].transcriptIds.sort(), ['s1', 's2']);
+});
+

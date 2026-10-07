@@ -1,4 +1,4 @@
-﻿import { admin } from '../../_shared/productSales.ts'
+import { admin } from '../../_shared/productSales.ts'
 
 export async function getWorkspaceSettings(workspaceId: string) {
   const { data } = await admin

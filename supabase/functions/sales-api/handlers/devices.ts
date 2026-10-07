@@ -1,4 +1,4 @@
-﻿import { admin, successResponse, errorResponse } from '../../_shared/productSales.ts'
+import { admin, successResponse, errorResponse } from '../../_shared/productSales.ts'
 
 export async function handleListDevices(workspaceId: string) {
   const { data: devices } = await admin

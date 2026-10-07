@@ -1,4 +1,4 @@
-﻿import { admin, successResponse, errorResponse, sha256 } from '../../_shared/productSales.ts'
+import { admin, successResponse, errorResponse, sha256 } from '../../_shared/productSales.ts'
 import { calculateSummary, calculateBuyerStats } from './common.ts'
 
 export async function handleCommitSales(workspaceId: string, actorId: string, body: any) {
