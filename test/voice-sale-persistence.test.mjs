@@ -10,6 +10,7 @@ import { buildPendingReasons, buildEvidenceSnapshot } from '../src/services/pend
 import { getVoiceReviewRequests, shouldReviewVoiceSale, buildVoiceReviewRequest,
   isVoiceReviewReady } from '../src/services/voicePendingReviewService.ts';
 import { generateSequentialProductName } from '../src/utils/productNaming.ts';
+import { findCaptureForSale } from '../src/services/saleCapturePairing.ts';
 
 // Exercise the actual persistence callback. Only storage, UI, and capture
 // boundaries are mocked; sale extraction and comment matching remain real.
@@ -35,18 +36,20 @@ function comment(nickname = '가윤♡예준맘', id = 'purchase-comment', buyer
     capturedAt: new Date(Date.now() - 1000).toISOString() };
 }
 
-function fixture(comments, activeProduct = undefined) {
+function fixture(comments, activeProduct = undefined, captures = []) {
   const stored = [];
   const reserved = new Set();
   const globals = {
     extractSaleFromTranscript, extractSpeechPrice, getPurchaseRequests, matchPurchaseRequest, resolveSpokenNicknameWithoutRequest,
-    buildPendingReasons, buildEvidenceSnapshot, getVoiceReviewRequests, generateSequentialProductName,
+    buildPendingReasons, buildEvidenceSnapshot, getVoiceReviewRequests, generateSequentialProductName, findCaptureForSale,
     workspaceId: 'workspace', sales: [], currentWorkflowSalesRef: { current: stored },
     productSalesRef: { current: { activeSession: { id: 'broadcast', displayCode: '20261001-1' },
       activeProduct, feed: { comments: [] } } },
     currentSessionIdRef: { current: 'broadcast' }, recentVoiceDecisionsRef: { current: new Map() },
     reservedPurchaseRequestsRef: { current: reserved }, lastSavedSaleRef: { current: null },
-    storageService: { getCommentRecords: () => comments, getPurchaseRequests: () => [], getCaptures: () => [] },
+    storageService: { getCommentRecords: () => comments, getPurchaseRequests: () => [], getCaptures: () => captures,
+      linkCaptureToSale: (captureId, saleId) => { captures.find((entry) => entry.id === captureId).saleId = saleId; } },
+    setRecentCaptures() {},
     getNextProductCodeForSession: () => '001',
     addSale: (value) => { const saved = { id: `sale-${stored.length + 1}`, ...value }; stored.push(saved); return saved; },
     updateSale: (value) => { stored[stored.findIndex((entry) => entry.id === value.id)] = value; },
@@ -185,4 +188,22 @@ test('a spaced commenter nickname is confirmed whole, and an unmatched spoken na
   assert.equal(unmatched.stored[0].buyerNickname, '맘');
   assert.equal(unmatched.stored[0].purchaseRequestId, undefined);
   assert.ok(unmatched.stored[0].pendingReasons.some((reason) => reason.code === 'DELAYED_COMMENT'));
+});
+
+test('a "capture" shot taken within 10 seconds before the sale becomes its image 1; older shots are ignored', async () => {
+  const now = Date.now();
+  const captures = [
+    { id: 'recent', sessionId: 'broadcast', imageUrl: 'data:recent', capturedAt: new Date(now - 3000).toISOString(), purpose: 'SALE' },
+    { id: 'previous-buyer', sessionId: 'broadcast', imageUrl: 'data:old', capturedAt: new Date(now - 30000).toISOString(), purpose: 'SALE' },
+  ];
+  const live = fixture([comment('햇반', 'c-1', 'buyer-1')], undefined, captures);
+  await live.save('햇반님 드릴게요. 가격은 1.2.');
+  assert.equal(live.stored[0].productImageUrl, 'data:recent');
+  assert.deepEqual(Array.from(live.stored[0].captureImageUrls), ['data:recent']);
+  assert.equal(captures[0].saleId, live.stored[0].id);
+
+  const none = fixture([comment('햇반', 'c-2', 'buyer-2')], undefined, [captures[1]]);
+  await none.save('햇반님 드릴게요. 가격은 1.2.');
+  assert.equal(none.stored[0].productImageUrl, undefined);
+  assert.equal(none.stored[0].captureImageUrls, undefined);
 });

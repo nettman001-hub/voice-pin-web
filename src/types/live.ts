@@ -53,6 +53,7 @@ export interface CaptureItem {
   capturedAt: string;          // 캡처 일시
   areaName: string;            // '댓글 목록' | '주문 내역' | '화면 전체' | '사용자 지정'
   triggerWord: string;         // '캡처' 등 트리거 단어
+  purpose?: 'SALE' | 'PRODUCT_REGISTER'; // SALE만 판매 사진(이미지1) 짝짓기 대상
   note?: string;
 }
 
