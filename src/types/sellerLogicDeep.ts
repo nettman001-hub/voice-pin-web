@@ -101,10 +101,10 @@ export interface SellerLogicDeepEngineState {
 }
 
 export const SELLER_LOGIC_DEEP_LIMITS = {
-  segmentEvents: 120,
-  segmentCharacters: 16_000,
-  segmentIdleMs: 30_000,
-  segmentMaxMs: 15 * 60_000,
+  segmentEvents: 40,
+  segmentCharacters: 7_000,
+  segmentIdleMs: 25_000,
+  segmentMaxMs: 5 * 60_000,
   decisions: 200,
   contextItems: 30,
   signals: 50,

@@ -74,6 +74,129 @@ function assemblePacket(
   };
 }
 
+function assembleSafeDeepPacket(
+  sessionId: string,
+  slotNumber: 1 | 2,
+  segment: SellerLogicDeepSegment,
+  stateContext: SellerLogicDeepContextItem[],
+  candidateDecisions: SellerLogicDeepDecision[],
+  allComments: CommentRecord[],
+  allTranscripts: WorkflowTranscript[],
+  eventExists: Set<string>,
+  budget: number,
+): SellerLogicDeepInput {
+  let currentSegment = { ...segment };
+  let currentCommentIds = [...segment.commentIds];
+  let currentTranscriptIds = [...segment.transcriptIds];
+
+  const getEventTime = (key: string): number => {
+    if (key.startsWith("C:")) {
+      const c = allComments.find((row) => row.id === key.slice(2));
+      return c ? Date.parse(c.capturedAt) : 0;
+    } else {
+      const t = allTranscripts.find((row) => row.id === key.slice(2));
+      return t ? Date.parse(t.recognizedAt || t.startedAt || "") : 0;
+    }
+  };
+
+  let segKeys = new Set<string>([
+    ...currentCommentIds.map((id) => `C:${id}`),
+    ...currentTranscriptIds.map((id) => `S:${id}`),
+  ]);
+  let basePacket = assemblePacket(sessionId, slotNumber, currentSegment, segKeys, [], [], allComments, allTranscripts);
+
+  // 1. 세그먼트 단독으로도 예산을 초과하는 경우: 세그먼트 내 이벤트를 최신순으로 슬라이스
+  if (promptCost(basePacket) > budget) {
+    const allSegEvents = [
+      ...currentCommentIds.map((id) => ({ key: `C:${id}`, id, kind: "C" as const, time: getEventTime(`C:${id}`) })),
+      ...currentTranscriptIds.map((id) => ({ key: `S:${id}`, id, kind: "S" as const, time: getEventTime(`S:${id}`) })),
+    ].sort((a, b) => a.time - b.time);
+
+    let safeEvents = allSegEvents.slice(-1);
+    for (let i = allSegEvents.length - 2; i >= 0; i--) {
+      const nextCandidate = [allSegEvents[i], ...safeEvents];
+      const testKeys = new Set(nextCandidate.map((e) => e.key));
+      const testSeg: SellerLogicDeepSegment = {
+        ...currentSegment,
+        startedAt: new Date(nextCandidate[0].time).toISOString(),
+        endedAt: new Date(nextCandidate[nextCandidate.length - 1].time).toISOString(),
+        commentIds: nextCandidate.filter((e) => e.kind === "C").map((e) => e.id),
+        transcriptIds: nextCandidate.filter((e) => e.kind === "S").map((e) => e.id),
+      };
+      const testPacket = assemblePacket(sessionId, slotNumber, testSeg, testKeys, [], [], allComments, allTranscripts);
+      if (promptCost(testPacket) > budget) {
+        break;
+      }
+      safeEvents = nextCandidate;
+    }
+
+    currentCommentIds = safeEvents.filter((e) => e.kind === "C").map((e) => e.id);
+    currentTranscriptIds = safeEvents.filter((e) => e.kind === "S").map((e) => e.id);
+    currentSegment = {
+      ...currentSegment,
+      startedAt: new Date(safeEvents[0].time).toISOString(),
+      endedAt: new Date(safeEvents[safeEvents.length - 1].time).toISOString(),
+      commentIds: currentCommentIds,
+      transcriptIds: currentTranscriptIds,
+    };
+    segKeys = new Set(safeEvents.map((e) => e.key));
+
+    basePacket = assemblePacket(sessionId, slotNumber, currentSegment, segKeys, [], [], allComments, allTranscripts);
+    if (promptCost(basePacket) > budget) {
+      const trimmedComments = basePacket.comments.map((c) => ({
+        ...c,
+        content: c.content.length > 500 ? `${c.content.slice(0, 500)}...` : c.content,
+      }));
+      const trimmedTranscripts = basePacket.transcripts.map((t) => ({
+        ...t,
+        text: t.text.length > 500 ? `${t.text.slice(0, 500)}...` : t.text,
+      }));
+      return {
+        sessionId, slotNumber, segment: currentSegment,
+        comments: trimmedComments,
+        transcripts: trimmedTranscripts,
+        context: [],
+        previousDecisions: [],
+      };
+    }
+    return basePacket;
+  }
+
+  // 2. 세그먼트 자체는 예산 내입니다. sendableContext를 가능한 만큼 추가합니다.
+  const sendableContext = stateContext.filter((item) => item.commentIds.length > 0 || item.transcriptIds.length > 0);
+  const activeKeys = new Set(segKeys);
+  const activeContext: SellerLogicDeepContextItem[] = [];
+
+  for (const item of sendableContext) {
+    const itemRefs = [...item.commentIds.map((id) => `C:${id}`), ...item.transcriptIds.map((id) => `S:${id}`)]
+      .filter((k) => eventExists.has(k) && !activeKeys.has(k));
+    itemRefs.forEach((k) => activeKeys.add(k));
+    const testPacket = assemblePacket(sessionId, slotNumber, currentSegment, activeKeys, [...activeContext, item], [], allComments, allTranscripts);
+    if (promptCost(testPacket) > budget) {
+      itemRefs.forEach((k) => activeKeys.delete(k));
+      continue;
+    }
+    activeContext.push(item);
+  }
+
+  // 3. candidateDecisions를 예산이 허용하는 만큼 추가합니다.
+  const activeDecisions: SellerLogicDeepDecision[] = [];
+  for (const decision of candidateDecisions) {
+    if (activeDecisions.length >= packetDecisionLimit) break;
+    const refs = [...decision.commentIds.map((id) => `C:${id}`), ...decision.transcriptIds.map((id) => `S:${id}`)]
+      .filter((key) => eventExists.has(key) && !activeKeys.has(key));
+    refs.forEach((key) => activeKeys.add(key));
+    const testPacket = assemblePacket(sessionId, slotNumber, currentSegment, activeKeys, activeContext, [...activeDecisions, decision], allComments, allTranscripts);
+    if (promptCost(testPacket) > budget) {
+      refs.forEach((key) => activeKeys.delete(key));
+      continue;
+    }
+    activeDecisions.push(decision);
+  }
+
+  return assemblePacket(sessionId, slotNumber, currentSegment, activeKeys, activeContext, activeDecisions, allComments, allTranscripts);
+}
+
 /** One deep AI call per changed time bucket; the browser owns the archive. */
 export async function runSellerLogicDeep(
   input: SellerLogicDeepRunInput,
@@ -115,38 +238,24 @@ export async function runSellerLogicDeep(
     checkAbort();
     const signature = sellerLogicDeepSegmentSignature(segment, input.comments, input.transcripts);
     if (state.processedSegments[segment.id] === signature) continue;
-    const keys = new Set<string>();
-    segment.commentIds.forEach((id) => keys.add(`C:${id}`));
-    segment.transcriptIds.forEach((id) => keys.add(`S:${id}`));
-    // Evidence-less carry is preserved for the screen but never sent back to the AI.
-    const sendableContext = state.context.filter((item) => item.commentIds.length > 0 || item.transcriptIds.length > 0);
-    for (const item of sendableContext) {
-      for (const key of [...item.commentIds.map((id) => `C:${id}`), ...item.transcriptIds.map((id) => `S:${id}`)]) {
-        if (eventExists.has(key)) keys.add(key);
-      }
-    }
+
     const candidates = [...decisions.values()].sort((a, b) => {
       const open = Number(b.status === "PENDING" || b.status === "REVIEW") - Number(a.status === "PENDING" || a.status === "REVIEW");
       return open || Date.parse(b.decidedAt) - Date.parse(a.decidedAt);
     });
-    const previousDecisions: SellerLogicDeepDecision[] = [];
-    for (const decision of candidates) {
-      if (previousDecisions.length >= packetDecisionLimit) break;
-      const refs = [...decision.commentIds.map((id) => `C:${id}`), ...decision.transcriptIds.map((id) => `S:${id}`)]
-        .filter((key) => eventExists.has(key) && !keys.has(key));
-      refs.forEach((key) => keys.add(key));
-      const candidatePacket = assemblePacket(input.sessionId, input.slotNumber, segment, keys, sendableContext,
-        [...previousDecisions, decision], input.comments, input.transcripts);
-      if (promptCost(candidatePacket) > promptBudget) {
-        refs.forEach((key) => keys.delete(key));
-        continue;
-      }
-      previousDecisions.push(decision);
-    }
-    const packet = assemblePacket(input.sessionId, input.slotNumber, segment, keys, sendableContext, previousDecisions, input.comments, input.transcripts);
-    if (promptCost(packet) > promptBudget) {
-      throw new Error(`한 시간대의 원문과 이전 거래가 AI 입력 한도를 초과했습니다 (${promptCost(packet).toLocaleString('en-US')}자 / ${promptBudget.toLocaleString('en-US')}자). 시간대를 더 짧게 나누어 주세요.`);
-    }
+
+    const packet = assembleSafeDeepPacket(
+      input.sessionId,
+      input.slotNumber,
+      segment,
+      state.context,
+      candidates,
+      input.comments,
+      input.transcripts,
+      eventExists,
+      promptBudget,
+    );
+
     const started = Date.now();
     state.stats.segmentCalls++;
     const result = await call(packet);

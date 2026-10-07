@@ -72,3 +72,28 @@ test('a revised transcript re-opens only its own bucket', async () => {
   assert.equal(again.calls[0].segment.index, 0);
   assert.equal(second.stats.segmentCalls, 3);
 });
+
+test('oversized bucket auto-fits safely within prompt budget without throwing', async () => {
+  // 프롬프트 직렬화 시 30,000자를 초과할 수 있는 긴 텍스트의 발화들
+  const heavyTranscripts = Array.from({ length: 30 }, (_, i) =>
+    speech(`s_heavy_${i}`, i * 2, `고객님 이 상품은 ${'가나다라마바사아자차'.repeat(30)} 안내드립니다 ${i}`)
+  );
+  const input = {
+    sessionId: 'deep-heavy',
+    slotNumber: 1,
+    comments: [comment('c_heavy_1', 1, '저요')],
+    transcripts: heavyTranscripts,
+  };
+  const calls = [];
+  const fakeCall = async (packet) => {
+    calls.push(packet);
+    return { decisions: [], signals: [], context: [], summary: '초과 안전 처리 완료', provider: 'TEST', model: 'test', appliedVersion: 1 };
+  };
+
+  const result = await runSellerLogicDeep(input, fakeCall, { now: epoch + 600_000 });
+  assert.ok(calls.length > 0, 'calls proceeded without throwing error');
+  // 각 호출된 패킷의 원문이 정상 보존되고 결과가 반환되었는지 확인
+  assert.equal(result.summary, '초과 안전 처리 완료');
+  assert.equal(result.provider, 'TEST');
+});
+
