@@ -851,6 +851,10 @@ export class StorageService {
     list.unshift(item);
     this.setItem(KEYS.CAPTURES, list);
   }
+  public linkCaptureToSale(captureId: string, saleId: string) {
+    const list = this.getCaptures().map((item) => (item.id === captureId ? { ...item, saleId } : item));
+    this.setItem(KEYS.CAPTURES, list);
+  }
 
   // 결제 내역
   public getPayments(): PaymentHistoryItem[] { return this.getItem(KEYS.PAYMENTS, INITIAL_PAYMENTS); }

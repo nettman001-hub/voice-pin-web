@@ -15,6 +15,7 @@ import { generateSequentialProductName, formatSequentialProductName } from '../u
 import { useSales } from './SalesContext';
 import { useAuth } from './AuthContext';
 import { CaptureAreaConfig } from '../types/rules';
+import { findCaptureForSale, findSaleForCapture, hasCaptureInstructionText } from '../services/saleCapturePairing';
 import { SttConfig, SttProvider } from '../types/deepgram';
 import { localSttService } from '../services/localSttService';
 import { LocalSttModel, LocalSttStatusPayload, SttMode } from '../types/stt';
@@ -90,7 +91,8 @@ const SONIOX_COMMAND_PATTERNS = [
   '수정 끝',
   '화면 캡처',
   '화면캡처',
-  '캡처'
+  '캡처',
+  '캡쳐'
 ];
 const VOICE_PRODUCT_DRAFT_TIMEOUT_MS = 30_000;
 
@@ -568,16 +570,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 2. 화면 비디오 스트림 가져오기
     const stream = screenCaptureService.getActiveStream();
-    const targetSale = targetSaleId === null
-      ? undefined
-      : targetSaleId
-        ? (sales.find((s) => s.id === targetSaleId) || lastSavedSaleRef.current)
-        : lastSavedSaleRef.current;
+    // 캡처 시각은 캡처 지시를 받은 순간으로 본다(프레임 디코딩 지연과 무관하게 판매 저장 시각과 비교).
+    const capturedAt = new Date().toISOString();
 
     const imageUrl = await screenCaptureService.captureArea(stream, configuredArea, {
-      nickname: targetSale?.buyerNickname,
-      amount: targetSale?.amount,
-      timestamp: new Date().toLocaleTimeString('ko-KR')
+      timestamp: new Date(capturedAt).toLocaleTimeString('ko-KR')
     });
 
     const authChanged =
@@ -611,28 +608,52 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return '';
     }
 
+    // 최신 판매 목록: 상태 반영 전에 막 저장된 판매(lastSavedSaleRef)가 더 최신이다.
+    const latestSales = new Map(currentWorkflowSalesRef.current.map((sale) => [sale.id, sale]));
+    if (lastSavedSaleRef.current) latestSales.set(lastSavedSaleRef.current.id, lastSavedSaleRef.current);
+
+    // 상품등록 촬영(targetSaleId === null)은 판매에 연결하지 않는다.
+    // 지정 판매가 없으면 캡처 시각 앞뒤 10초 안에 저장된, 아직 사진 없는 판매와 짝짓는다.
+    // 짝이 없으면 캡처만 보관해 두고, 10초 안에 저장되는 판매가 가져간다.
+    const targetSale = targetSaleId === null
+      ? undefined
+      : targetSaleId
+        ? latestSales.get(targetSaleId)
+        : findSaleForCapture(
+            {
+              sessionIds: [currentSessionIdRef.current, productSalesRef.current.activeSession?.id]
+                .filter((id): id is string => Boolean(id)),
+              capturedAt,
+            },
+            [...latestSales.values()]
+          );
+
     const newCapture: CaptureItem = {
       id: `cap-${Date.now()}`,
       saleId: targetSale?.id,
-      sessionId: currentSessionId,
+      sessionId: currentSessionIdRef.current,
       imageUrl,
-      capturedAt: new Date().toISOString(),
+      capturedAt,
       areaName: configuredArea.name,
-      triggerWord
+      triggerWord,
+      purpose: targetSaleId === null ? 'PRODUCT_REGISTER' : 'SALE',
     };
 
     storageService.addCapture(newCapture);
     setRecentCaptures((prev) => [newCapture, ...prev.slice(0, 9)]);
 
-    // 지정 판매 내역 또는 가장 최근 판매 내역에 캡처 이미지 연결
     if (targetSale) {
+      const isFirstCapture = (targetSale.captureImageUrls?.length || 0) === 0;
       const updatedSale: SaleRecord = {
         ...targetSale,
         captureImageUrls: [...(targetSale.captureImageUrls || []), imageUrl],
-        productImageUrl: targetSale.productImageUrl || imageUrl,
+        // 판매의 첫 캡처가 상품 이미지1이 된다.
+        productImageUrl: isFirstCapture ? imageUrl : targetSale.productImageUrl || imageUrl,
       };
       updateSale(updatedSale);
-      lastSavedSaleRef.current = updatedSale;
+      if (!lastSavedSaleRef.current || lastSavedSaleRef.current.id === updatedSale.id) {
+        lastSavedSaleRef.current = updatedSale;
+      }
     }
 
     return imageUrl;
@@ -867,14 +888,13 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const resolvedProductCode = sequentialProductCode || product?.productCode || productLink.fallbackCode || fallbackAutoCode;
     const resolvedProductName = autoSequentialProductName || formatSequentialProductName(product?.name, sessionSalesCount + 1, resolvedProductCode) || product?.name || undefined;
 
-    // 최근 60초 내 캡처된 화면이 있으면 연결
-    const recentCapture = storageService.getCaptures().find((capture) => {
-      const capturedAt = new Date(capture.capturedAt).getTime();
-      return capture.sessionId === currentSessionIdRef.current
-        && Number.isFinite(capturedAt)
-        && Date.now() - capturedAt <= 60000;
-    });
-    const fallbackImage = productLink.fallbackImageDataUrl || recentCapture?.imageUrl;
+    // 판매 저장 시각 앞뒤 10초 안에 "캡처하세요"로 찍힌, 아직 쓰이지 않은 캡처가 있으면 상품 이미지1로 확정한다.
+    // 없으면 이미지 없이 저장한다(직후 10초 안의 캡처는 captureCurrentScreen이 이 판매에 붙인다).
+    const pairedCapture = findCaptureForSale(
+      { sessionId: currentSessionIdRef.current, recognizedAt },
+      storageService.getCaptures()
+    );
+    const fallbackImage = productLink.fallbackImageDataUrl || pairedCapture?.imageUrl;
 
     const pendingReasons = status === '보류'
       ? buildPendingReasons(
@@ -928,7 +948,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       productId: product?.id,
       productCode: resolvedProductCode,
       productName: resolvedProductName,
-      productImageUrl: product?.imageUrl || fallbackImage,
+      productImageUrl: fallbackImage || product?.imageUrl,
       productImagePath: product?.imagePath,
       quantity: 1,
       unitPrice: effectiveAmount,
@@ -939,13 +959,18 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       evidenceSnapshot,
     });
     lastSavedSaleRef.current = saved;
+    if (pairedCapture) {
+      storageService.linkCaptureToSale(pairedCapture.id, saved.id);
+      setRecentCaptures((prev) => prev.map((capture) => (
+        capture.id === pairedCapture.id ? { ...capture, saleId: saved.id } : capture
+      )));
+    }
 
-    // 화면 공유 스트림이 활성화되어 있거나 '캡처하세요' 발화 시 즉시 화면 캡처 실행하여 판매건에 연동
-    const hasActiveStream = Boolean(screenCaptureService.getActiveStream());
-    if (hasCaptureInstruction || hasActiveStream) {
+    // 판매 멘트와 같은 문장에 '캡처하세요'가 있을 때만 캡처한다(판매 저장 직후 자동 캡처는 하지 않음).
+    if (hasCaptureInstruction) {
       await captureCurrentScreen(
         undefined,
-        hasCaptureInstruction ? '캡처하세요 (판매 자동 연동)' : '판매 자동 화면 캡처',
+        '캡처하세요 (판매 자동 연동)',
         requiredListeningGeneration,
         saved.id
       );
@@ -1125,7 +1150,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const intent = parseVoiceCorrection(clause);
       const command = parseVoiceCommand(clause, isVoiceEditingRef.current);
       if (intent.isQuestion || intent.isNegativeCommand) continue;
-      const isCaptureCommand = clause.includes('캡처') && command.type === 'NONE';
+      const isCaptureCommand = /캡[처쳐]/u.test(clause) && command.type === 'NONE';
       if (!isCaptureCommand && command.type === 'NONE') continue;
       handleTranscript(
         { text: clause, isFinal: true, confidence },
@@ -1584,7 +1609,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // (띄어쓰기 유연성 및 단어 규칙 관리 등록 반영)
           const hasCaptureInstruction =
             !processingOptions.skipCapture &&
-            (/(캡처\s*하세요|캡쳐\s*하세요)/u.test(fullText) ||
+            (hasCaptureInstructionText(fullText) ||
               rules.some(
                 (r) =>
                   r.isEnabled &&
@@ -1594,11 +1619,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (saleResult) {
             actionTriggered = 'SALE_PENDING';
-            const hasActiveStream = Boolean(screenCaptureService.getActiveStream());
             if (hasCaptureInstruction) {
               ruleActionName = '🛍️ 판매 후보 확인 중 + 📸 캡처 연동';
-            } else if (hasActiveStream) {
-              ruleActionName = '🛍️ 판매 후보 확인 중 + 📸 화면 캡처';
             } else {
               ruleActionName = '🛍️ 구매 댓글·음성 가격 확인 중';
             }

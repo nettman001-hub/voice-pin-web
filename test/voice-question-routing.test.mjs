@@ -9,6 +9,7 @@ import { extractSaleFromTranscript, parseKoreanAmount } from '../src/services/sa
 import { parseVoiceCommand } from '../src/services/voiceCommandParser.ts';
 import { splitTranscriptClauses, isQuestionUtterance } from '../src/services/voiceUtteranceService.ts';
 import {replaySalesWorkflow,DEFAULT_WORKFLOW_PROFILE} from '../src/services/salesWorkflowEngine.ts';
+import { hasCaptureInstructionText } from '../src/services/saleCapturePairing.ts';
 
 // Execute the real live callbacks with controlled storage/audio/cloud boundaries.
 const source = fs.readFileSync(new URL('../src/context/LiveContext.tsx', import.meta.url), 'utf8');
@@ -45,7 +46,7 @@ function fixture({ sales = [], renderSales = sales, rules = [], pendingCorrectio
   let nextTimerId = 1;
   const globals = {
     ...corrections, extractSaleFromTranscript, parseKoreanAmount, parseVoiceCommand, splitTranscriptClauses,
-    crypto: { randomUUID }, console,
+    crypto: { randomUUID }, console, hasCaptureInstructionText,
     appliedWorkflowRef: {current:workflow},replaySalesWorkflow,
     workflowQueueRef:{current:Promise.resolve()},workflowReplayRef:{current:null},workflowObservationAtRef:{current:0},
     workflowFingerprintsRef:{current:new Map()},workflowDecisionsRef:{current:new Set()},
