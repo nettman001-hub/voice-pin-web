@@ -193,3 +193,13 @@ test('updating a previous decision merges prior evidence when AI cites only newl
   assert.deepEqual(parsed.decisions[0].transcriptIds.sort(), ['s1', 's2']);
 });
 
+test('prompt instructs decimal price x10,000 calculation and casual confirmation like 샤넬 언니 그레이', () => {
+  const input = normalizeSellerLogicDeepInput(payload());
+  const prompt = sellerLogicDeepPrompt(input);
+  assert.ok(prompt.systemPrompt.includes('소수점에 10,000원을 곱해'));
+  assert.ok(prompt.systemPrompt.includes('3.9 -> 39,000원'));
+  assert.ok(prompt.systemPrompt.includes('샤넬 언니 그레이'));
+  assert.ok(prompt.systemPrompt.includes('그레이 주세요'));
+});
+
+
