@@ -73,6 +73,13 @@ export interface SellerLogicDeepInput {
   previousDecisions: SellerLogicDeepDecision[];
 }
 
+export interface SellerLogicDeepWarning {
+  id: string;
+  at: string;
+  segmentId?: string;
+  message: string;
+}
+
 export interface SellerLogicDeepResult {
   /** Complete cumulative decision snapshot for the session. */
   decisions: SellerLogicDeepDecision[];
@@ -86,6 +93,7 @@ export interface SellerLogicDeepResult {
   model: string;
   appliedVersion: number;
   stats: { segmentCalls: number; segmentMs: number };
+  warnings?: SellerLogicDeepWarning[];
 }
 
 export interface SellerLogicDeepEngineState {
@@ -98,6 +106,7 @@ export interface SellerLogicDeepEngineState {
   model?: string;
   appliedVersion?: number;
   stats: { segmentCalls: number; segmentMs: number };
+  warnings?: SellerLogicDeepWarning[];
 }
 
 export const SELLER_LOGIC_DEEP_LIMITS = {

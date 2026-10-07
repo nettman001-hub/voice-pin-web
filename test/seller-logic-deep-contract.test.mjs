@@ -287,5 +287,21 @@ test('demotes to REVIEW when AI returns string "null" and nickname cannot be ide
   assert.ok(parsed.decisions[0].reason.includes('구매자 닉네임'));
 });
 
+test('handles decision with string "null" or arbitrary id as new decision without throwing "이전에 없던 거래" error', async () => {
+  const input = normalizeSellerLogicDeepInput(payload());
+  const aiAnswer = answer();
+  // AI sets decision id to string "null"
+  aiAnswer.decisions[0].id = 'null';
+  const parsed = await parse(aiAnswer, input);
+  assert.ok(parsed.decisions[0].id.startsWith('sld:'), 'derived new sld: id for new decision');
+
+  // AI sets decision id to arbitrary string like 'new'
+  const aiAnswer2 = answer();
+  aiAnswer2.decisions[0].id = 'new';
+  const parsed2 = await parse(aiAnswer2, input);
+  assert.ok(parsed2.decisions[0].id.startsWith('sld:'), 'derived new sld: id for arbitrary id');
+});
+
+
 
 

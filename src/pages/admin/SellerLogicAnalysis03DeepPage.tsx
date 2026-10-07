@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Bot, Radio, Square, Upload, Download, Play, MessageSquareText, CheckCircle2, Clock, RotateCcw } from 'lucide-react';
+import { Bot, Radio, Square, Upload, Download, Play, MessageSquareText, CheckCircle2, Clock, RotateCcw, AlertTriangle } from 'lucide-react';
 import { useLive } from '../../context/LiveContext';
 import { useCommentCapture } from '../../context/CommentCaptureContext';
 import { analyzeSellerLogicDeep, getSellerLogicSlots, getSellerLogicDeepHints } from '../../services/sellerLogicDeepApi';
@@ -8,7 +8,7 @@ import { runSellerLogicDeep, type SellerLogicDeepRunResult } from '../../service
 import { SellerLogicCapture } from '../../services/sellerLogicCapture';
 import { koreanCalendarDate, parseSellerLogicText, SELLER_LOGIC_EXAMPLE, type SellerLogicEvidence } from '../../services/sellerLogicInput';
 import { SellerLogicScheduler } from '../../services/sellerLogicScheduler';
-import type { SellerLogicDeepDecision } from '../../types/sellerLogicDeep';
+import type { SellerLogicDeepDecision, SellerLogicDeepWarning } from '../../types/sellerLogicDeep';
 import type { SellerLogicSlots } from '../../types/sellerLogicAnalysis';
 
 const field = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm disabled:bg-slate-100';
@@ -50,6 +50,8 @@ export default function SellerLogicAnalysis03DeepPage() {
   const [analysisInterval, setAnalysisInterval] = useState(5);
   const [status, setStatus] = useState('방송을 청취하거나 대화 자료를 불러오면 AI가 시간대별로 구매자와 가격을 판단합니다.');
   const [error, setError] = useState('');
+  const [warnings, setWarnings] = useState<SellerLogicDeepWarning[]>([]);
+  const [showWarnings, setShowWarnings] = useState(true);
   const [resultSlot, setResultSlot] = useState<1 | 2 | null>(null);
   const [filter, setFilter] = useState('ALL');
   const [debugLog, setDebugLog] = useState<DeepDebugEntry[]>([]);
@@ -123,6 +125,9 @@ export default function SellerLogicAnalysis03DeepPage() {
     setResult(next);
     setResultSlot(inputSlot);
     setError(captureFailure.current);
+    if (next.warnings && next.warnings.length) {
+      setWarnings(next.warnings);
+    }
     const confirmed = next.decisions.filter((decision) => decision.status === 'CONFIRMED');
     const pending = next.decisions.filter((decision) => decision.status === 'PENDING' || decision.status === 'REVIEW');
     setStatus(next.stats.segmentCalls
@@ -140,6 +145,7 @@ export default function SellerLogicAnalysis03DeepPage() {
 
   const makeQueue = () => new SellerLogicScheduler<QueuedAnalysis, SellerLogicDeepRunResult>({
     intervalMs: analysisIntervalRef.current * 1000,
+    keepAutomaticOnError: true,
     execute: (input) => {
       const controller = new AbortController();
       analysisAbort.current = controller;
@@ -179,8 +185,22 @@ export default function SellerLogicAnalysis03DeepPage() {
         setStatus('AI 분석 중지 · 완료된 결과와 원문은 유지됩니다.');
         return;
       }
-      setError(`${e instanceof Error ? e.message : String(e)} 자동 분석을 일시 중지했습니다. 자료는 유지됩니다.`);
-      setStatus('분석 실패 · 슬롯 설정을 확인한 뒤 다시 분석해 주세요.');
+      const msg = e instanceof Error ? e.message : String(e);
+      const newWarning: SellerLogicDeepWarning = {
+        id: `err-${Date.now()}`,
+        at: new Date().toISOString(),
+        message: msg,
+      };
+      setWarnings((prev) => [newWarning, ...prev].slice(0, 50));
+      // 청취 중일 때는 분석을 멈추지 않고 경고 목록에 남긴 뒤 자동 분석을 계속 유지합니다.
+      if (liveMode.current || captureRef.current) {
+        setError('');
+        setStatus(`심층 분석 진행 중 · 경고가 발생한 시간대는 건너뛰고 계속 청취합니다`);
+        queueRef.current?.setAutomatic(true);
+      } else {
+        setError(`${msg} (경고 목록에 추가되었으며 이전 자료는 유지됩니다)`);
+        setStatus('분석 완료 · 경고 항목 발생');
+      }
     },
     state: ({ running: busy, automatic: auto }) => {
       runningRef.current = busy;
@@ -258,6 +278,7 @@ export default function SellerLogicAnalysis03DeepPage() {
     resultSlotRef.current = null;
     captureFailure.current = '';
     prioritizedCommentIds.current.clear();
+    setWarnings([]);
     setEvidence(rowsRef.current);
     setResult(null);
     setResultSlot(null);
@@ -410,6 +431,46 @@ export default function SellerLogicAnalysis03DeepPage() {
     </section>
 
     {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div>}
+
+    {warnings.length > 0 && (
+      <section aria-label="심층 분석 경고 목록" className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-sm shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 font-bold text-amber-900">
+            <AlertTriangle className="shrink-0 text-amber-600" size={18} />
+            <span>심층 분석 경고 ({warnings.length}건) · 오류가 발생한 시간대는 건너뛰었으며 심층 분석은 정상 진행됩니다</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="text-xs font-semibold text-amber-800 hover:text-amber-950 hover:underline"
+              onClick={() => setShowWarnings(!showWarnings)}
+            >
+              {showWarnings ? '경고 목록 접기 ▲' : '경고 목록 보기 ▼'}
+            </button>
+            <button
+              type="button"
+              className="text-xs font-semibold text-slate-500 hover:text-slate-800 hover:underline"
+              onClick={() => setWarnings([])}
+            >
+              경고 지우기
+            </button>
+          </div>
+        </div>
+        {showWarnings && (
+          <div className="mt-3 max-h-48 space-y-2 overflow-y-auto rounded-xl border border-amber-200 bg-white p-3 text-xs text-amber-950">
+            {warnings.map((w) => (
+              <div key={w.id} className="flex items-start gap-2 border-b border-amber-100 pb-1.5 last:border-b-0 last:pb-0">
+                <span className="shrink-0 font-mono text-slate-400">
+                  {new Date(w.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+                <span className="break-all font-medium text-amber-900">{w.message}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    )}
+
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-900 px-5 py-4 text-sm text-white">
       <div role="status" aria-live="polite" className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${capturing ? 'animate-pulse bg-emerald-400' : 'bg-slate-500'}`} />{running ? `슬롯 ${slot} AI 심층 분석 중 · 시간대 ${processedSegments}개 처리` : status}</div>
       <div className="flex flex-wrap items-center gap-3"><span className="text-xs text-slate-300">시간대 {segments.length}개 · 처리 {processedSegments}개</span>

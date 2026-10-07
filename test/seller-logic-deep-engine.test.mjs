@@ -97,3 +97,22 @@ test('oversized bucket auto-fits safely within prompt budget without throwing', 
   assert.equal(result.provider, 'TEST');
 });
 
+test('skips failing segment, logs warning, and continues analyzing remaining segments', async () => {
+  const input = archive([speech('s1', 2, '루비 언니 1.5에 드릴게요'), speech('s2', 75, '루비 언니 2만 원에 드릴게요')]);
+  const failingCall = async (packet) => {
+    if (packet.segment.index === 0) {
+      throw new Error('심층 분석 결과를 적용하지 않았습니다: 이전에 없던 거래에는 id를 null로 반환해 주세요.');
+    }
+    return { decisions: [decisionB], signals: [], context: [], summary: '2구간 판단 완료', provider: 'EXISTING', model: 'deep-model', appliedVersion: 9 };
+  };
+
+  const result = await runSellerLogicDeep(input, failingCall, { now: epoch + 600_000 });
+  // Segment 0 failed, but analysis did not halt; segment 1 succeeded!
+  assert.equal(result.decisions.length, 1);
+  assert.equal(result.decisions[0].id, 'sld:b');
+  assert.ok(result.warnings && result.warnings.length === 1);
+  assert.ok(result.warnings[0].message.includes('이전에 없던 거래에는 id를 null로 반환해 주세요.'));
+  assert.equal(Object.keys(result.state.processedSegments).length, 2);
+});
+
+

@@ -9,6 +9,7 @@ import {
   type SellerLogicDeepResult,
   type SellerLogicDeepSegment,
   type SellerLogicDeepSignal,
+  type SellerLogicDeepWarning,
 } from "../types/sellerLogicDeep.ts";
 import { segmentSellerLogicDeepEvents, sellerLogicDeepSegmentSignature } from "./sellerLogicDeepSegmenter.ts";
 import { sellerLogicDeepPrompt } from "./sellerLogicDeepContract.ts";
@@ -206,9 +207,11 @@ export async function runSellerLogicDeep(
   const segments = segmentSellerLogicDeepEvents(input.comments, input.transcripts, { now: options.now ?? Date.now() });
   const state: SellerLogicDeepEngineState = input.state && input.state.slotNumber === input.slotNumber
     ? structuredClone(input.state)
-    : { slotNumber: input.slotNumber, processedSegments: {}, context: [], unreviewedContext: [], decisions: [], stats: { segmentCalls: 0, segmentMs: 0 } };
+    : { slotNumber: input.slotNumber, processedSegments: {}, context: [], unreviewedContext: [], decisions: [], stats: { segmentCalls: 0, segmentMs: 0 }, warnings: [] };
   if (!Array.isArray(state.unreviewedContext)) state.unreviewedContext = [];
+  if (!Array.isArray(state.warnings)) state.warnings = [];
   const decisions = new Map(state.decisions.map((row) => [row.id, row]));
+  const warnings = [...state.warnings];
   const eventExists = new Set([
     ...input.comments.map((row) => `C:${row.id}`),
     ...input.transcripts.map((row) => `S:${row.id}`),
@@ -225,10 +228,12 @@ export async function runSellerLogicDeep(
     state.provider = provider;
     state.model = model;
     state.appliedVersion = appliedVersion;
+    state.warnings = warnings.slice(-50);
     return {
       decisions: ordered, signals, context: state.context, unreviewedContext: state.unreviewedContext,
       segments, summary, provider, model, appliedVersion,
       stats: { ...state.stats }, state: structuredClone(state),
+      warnings: state.warnings,
     };
   };
 
@@ -258,7 +263,26 @@ export async function runSellerLogicDeep(
 
     const started = Date.now();
     state.stats.segmentCalls++;
-    const result = await call(packet);
+    let result: SellerLogicDeepCallResult;
+    try {
+      result = await call(packet);
+    } catch (error) {
+      checkAbort();
+      // AI 호출 실패 또는 계약 검증 에러 발생 시 전체 분석을 멈추지 않고 경고 목록에 남긴 뒤
+      // 해당 시간대를 건너뛰고 다음 시간대 심층 분석을 계속 진행합니다.
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const startStr = new Date(segment.startedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      const endStr = new Date(segment.endedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      warnings.push({
+        id: `warn-${Date.now()}-${segment.id}`,
+        at: new Date().toISOString(),
+        segmentId: segment.id,
+        message: `[시간대 ${segment.index + 1} (${startStr} ~ ${endStr})] ${errorMsg}`,
+      });
+      state.processedSegments[segment.id] = signature;
+      options.onProgress?.(snapshot());
+      continue;
+    }
     checkAbort();
     state.stats.segmentMs += Date.now() - started;
     for (const decision of result.decisions) decisions.set(decision.id, decision);

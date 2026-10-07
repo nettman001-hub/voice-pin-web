@@ -394,20 +394,37 @@ export async function parseSellerLogicDeepResult(
       transcriptIds: decodeIds(decision.transcriptIds, transcriptByAlias, "transcriptIds"),
     };
     let prior: SellerLogicDeepDecision | undefined;
-    if (typeof decision.id === "string" && decision.id) {
-      const priorId = decisionByAlias.get(decision.id);
+    let decisionId = decision.id as string | null | undefined;
+    const isNullId = !decisionId || (typeof decisionId === "string" && (
+      decisionId.trim().toLowerCase() === "null" ||
+      decisionId.trim().toLowerCase() === "undefined" ||
+      decisionId.trim().toLowerCase() === "none" ||
+      decisionId.trim() === ""
+    ));
+    if (isNullId) {
+      decisionId = null;
+    }
+    if (typeof decisionId === "string" && decisionId) {
+      const priorId = decisionByAlias.get(decisionId.trim());
       prior = priorId ? previous.get(priorId) : undefined;
-      if (!prior) return invalid("이전에 없던 거래에는 id를 null로 반환해 주세요.");
-      const hasPriorEvidence = decoded.commentIds.some((value) => prior!.commentIds.includes(value)) ||
-        decoded.transcriptIds.some((value) => prior!.transcriptIds.includes(value));
-      if (!hasPriorEvidence) {
-        if (isSameTransactionCandidate(prior, decision as Record<string, unknown>)) {
-          // AI가 동일 구매자의 거래를 갱신하면서 이전 근거를 생략하고 새 근거만 적은 경우,
-          // 분석을 중단하지 않고 이전 거래의 근거를 보존하여 자동 병합합니다.
-          decoded.commentIds = [...new Set([...prior.commentIds, ...decoded.commentIds])];
-          decoded.transcriptIds = [...new Set([...prior.transcriptIds, ...decoded.transcriptIds])];
+      if (!prior) {
+        if (/^D\d+$/i.test(decisionId.trim())) {
+          return invalid("이전에 없던 거래에는 id를 null로 반환해 주세요.");
         } else {
-          return invalid("이전 거래를 갱신할 때는 같은 거래의 기존 근거를 하나 이상 함께 인용해 주세요.");
+          decisionId = null;
+        }
+      } else {
+        const hasPriorEvidence = decoded.commentIds.some((value) => prior!.commentIds.includes(value)) ||
+          decoded.transcriptIds.some((value) => prior!.transcriptIds.includes(value));
+        if (!hasPriorEvidence) {
+          if (isSameTransactionCandidate(prior, decision as Record<string, unknown>)) {
+            // AI가 동일 구매자의 거래를 갱신하면서 이전 근거를 생략하고 새 근거만 적은 경우,
+            // 분석을 중단하지 않고 이전 거래의 근거를 보존하여 자동 병합합니다.
+            decoded.commentIds = [...new Set([...prior.commentIds, ...decoded.commentIds])];
+            decoded.transcriptIds = [...new Set([...prior.transcriptIds, ...decoded.transcriptIds])];
+          } else {
+            return invalid("이전 거래를 갱신할 때는 같은 거래의 기존 근거를 하나 이상 함께 인용해 주세요.");
+          }
         }
       }
     }
@@ -415,7 +432,7 @@ export async function parseSellerLogicDeepResult(
     let id: string;
     if (prior) {
       id = prior.id;
-    } else if (decision.id === null) {
+    } else if (decisionId === null) {
       id = deepDecisionIdentity(input, validated);
     } else {
       return invalid("거래 id는 null 또는 이전 거래의 별칭이어야 합니다.");

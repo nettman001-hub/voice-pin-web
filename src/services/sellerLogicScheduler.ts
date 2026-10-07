@@ -14,6 +14,7 @@ export class SellerLogicScheduler<Input, Output> {
     error: (error: unknown) => void;
     state?: (state: { running: boolean; automatic: boolean }) => void;
     intervalMs?: number;
+    keepAutomaticOnError?: boolean;
   }) {}
 
   submit(input: Input) {
@@ -72,7 +73,9 @@ export class SellerLogicScheduler<Input, Output> {
       this.completed = snapshot.revision;
     } catch (error) {
       if (!this.disposed) {
-        this.automatic = false;
+        if (!this.options.keepAutomaticOnError) {
+          this.automatic = false;
+        }
         this.options.error(error);
       }
     } finally {
