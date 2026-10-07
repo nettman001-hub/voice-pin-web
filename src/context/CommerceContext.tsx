@@ -47,7 +47,6 @@ interface CommerceContextType extends CommerceState {
 
 const CommerceContext = createContext<CommerceContextType | undefined>(undefined);
 
-const normalize = (value: string) => value.replace(/\s+/g, '').replace(/님$/u, '').toLowerCase();
 const normalizePhone = (value: string) => {
   const compact = value.replace(/[^0-9+]/g, '');
   if (compact.startsWith('+82')) return `0${compact.slice(3)}`;
