@@ -41,11 +41,11 @@ public class SmsBridgeView extends ScrollView {
     private static final int SLATE_900 = Color.rgb(15, 23, 42);
     private static final int ROSE_500 = Color.rgb(244, 63, 94);
 
-    private final MainActivity activity;
+    private final SettingsActivity activity;
     private EditText pairingCodeInput;
     private TextView status;
 
-    public SmsBridgeView(MainActivity activity) {
+    public SmsBridgeView(SettingsActivity activity) {
         super(activity);
         this.activity = activity;
         setFillViewport(true);
@@ -148,6 +148,13 @@ public class SmsBridgeView extends ScrollView {
         Button setup = button("기본 SMS 앱 · 권한 설정", BUTTON_PRIMARY);
         setup.setOnClickListener(v -> activity.beginProtectedSetup());
         setupCard.addView(setup);
+
+        TextView rcs = captionText(activity.getString(R.string.rcs_notice_short));
+        rcs.setPadding(0, dp(10), 0, 0);
+        setupCard.addView(rcs);
+        Button rcsDetail = button("채팅+(RCS) 안내 보기", BUTTON_NEUTRAL);
+        rcsDetail.setOnClickListener(v -> activity.showRcsNotice());
+        setupCard.addView(rcsDetail);
 
         Button sync = button("지금 동기화 및 발송 처리", BUTTON_SECONDARY);
         sync.setOnClickListener(v -> syncInBackground());
