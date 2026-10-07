@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { extractSaleFromTranscript } from '../src/services/salesExtractor.ts';
 import { extractSpeechPrice } from '../src/services/priceEvidence.ts';
-import { getPurchaseRequests, matchPurchaseRequest } from '../src/services/purchaseFirstSales.ts';
+import { getPurchaseRequests, matchPurchaseRequest, resolveSpokenNicknameWithoutRequest } from '../src/services/purchaseFirstSales.ts';
 import { buildPendingReasons, buildEvidenceSnapshot } from '../src/services/pendingSalesService.ts';
 import { getVoiceReviewRequests, shouldReviewVoiceSale, buildVoiceReviewRequest,
   isVoiceReviewReady } from '../src/services/voicePendingReviewService.ts';
@@ -39,7 +39,7 @@ function fixture(comments, activeProduct = undefined) {
   const stored = [];
   const reserved = new Set();
   const globals = {
-    extractSaleFromTranscript, extractSpeechPrice, getPurchaseRequests, matchPurchaseRequest,
+    extractSaleFromTranscript, extractSpeechPrice, getPurchaseRequests, matchPurchaseRequest, resolveSpokenNicknameWithoutRequest,
     buildPendingReasons, buildEvidenceSnapshot, getVoiceReviewRequests, generateSequentialProductName,
     workspaceId: 'workspace', sales: [], currentWorkflowSalesRef: { current: stored },
     productSalesRef: { current: { activeSession: { id: 'broadcast', displayCode: '20261001-1' },

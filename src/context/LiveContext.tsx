@@ -7,7 +7,7 @@ import { extractSaleFromTranscript, parseKoreanAmount } from '../services/salesE
 import { extractSpeechPrice } from '../services/priceEvidence';
 import { parseVoiceCommand } from '../services/voiceCommandParser';
 import { splitTranscriptClauses } from '../services/voiceUtteranceService';
-import { getPurchaseRequests, matchPurchaseRequest } from '../services/purchaseFirstSales';
+import { getPurchaseRequests, matchPurchaseRequest, resolveSpokenNicknameWithoutRequest } from '../services/purchaseFirstSales';
 import type { CommentRecord } from '../types/comment';
 import { nicknameVerificationNote, verifyNicknameFromComments } from '../services/commentNicknameVerifier';
 import { storageService, generateSessionId, getNextProductCodeForSession } from '../services/storageService';
@@ -813,16 +813,18 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
     for (const id of reservedPurchaseRequestsRef.current) consumed.add(id);
-    const match = matchPurchaseRequest(saleResult.buyerNickname, requests, recognizedAt, consumed);
+    const spokenBuyer = saleResult.buyerNicknamePhrase || saleResult.buyerNickname;
+    const match = matchPurchaseRequest(spokenBuyer, requests, recognizedAt, consumed);
     if (match.kind === 'NO_REQUEST') {
-      const priorMatch = matchPurchaseRequest(saleResult.buyerNickname, requests, recognizedAt);
+      const priorMatch = matchPurchaseRequest(spokenBuyer, requests, recognizedAt);
       if (priorMatch.kind === 'MATCH' && consumed.has(priorMatch.request.id)) return;
     }
     const request = match.kind === 'MATCH' ? match.request : null;
     if (saleResult.intent === 'UNCERTAIN' && !getVoiceReviewRequests({
       sessionId: sessionSnapshot, recognizedAt, rawTranscript: fullText,
     }, cloudComments).length) return;
-    const buyerNickname = request?.nickname || saleResult.buyerNickname;
+    const buyerNickname = request?.nickname
+      || resolveSpokenNicknameWithoutRequest(spokenBuyer, cloudComments.map((comment) => comment.nickname));
     const hasValidNickname = Boolean(buyerNickname) && buyerNickname !== '미확인(보류)' && buyerNickname !== '미확인';
     // The registered product price is only a fallback when the seller said no
     // price at all; a spoken price we could not link must stay for review.
@@ -964,7 +966,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           || sale.purchaseRequestId || !sale.sessionId) continue;
         const extracted = extractSaleFromTranscript(sale.rawTranscript);
         if (!extracted || extracted.intent !== 'ALLOCATION' || !extracted.buyerNickname || extracted.amount !== sale.amount) continue;
-        const match = matchPurchaseRequest(extracted.buyerNickname,
+        const match = matchPurchaseRequest(extracted.buyerNicknamePhrase || extracted.buyerNickname,
           requests.filter((request) => request.sessionId === sale.sessionId), sale.recognizedAt, claimed);
         if (match.kind !== 'MATCH') continue;
         claimed.add(match.request.id);

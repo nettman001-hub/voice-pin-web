@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getPurchaseRequests, matchPurchaseRequest } from '../src/services/purchaseFirstSales.ts';
-import { extractSaleFromTranscript, parseBuyerNickname } from '../src/services/salesExtractor.ts';
+import { getPurchaseRequests, matchPurchaseRequest, resolveSpokenNicknameWithoutRequest } from '../src/services/purchaseFirstSales.ts';
+import { extractSaleFromTranscript, getBuyerNicknamePhrase, parseBuyerNickname } from '../src/services/salesExtractor.ts';
 import { extractSpeechPrice } from '../src/services/priceEvidence.ts';
 
 const at = '2026-09-30T12:00:00.000Z';
@@ -199,4 +199,30 @@ test('allocation prices never cross a buyer, product, question, or ambiguous pri
     assert.equal(sale.isPending, true, following);
   }
   assert.equal(extractSaleFromTranscript('구름언니 1.0 챙겨드릴게요. 금액은 1.5입니다.').amount, 10000);
+});
+
+test('a nickname with a space resolves the whole commenter name, not its last word', () => {
+  const speech = '안녕하세요. 0.8, 이거 성훈 맘님 드릴게요. 가격은 0.8';
+  const sale = extractSaleFromTranscript(speech);
+  assert.equal(sale.buyerNicknamePhrase, '성훈 맘');
+  assert.equal(sale.amount, 8000);
+  assert.equal(sale.intent, 'ALLOCATION');
+  const result = match(sale.buyerNicknamePhrase, [comment('성훈 맘'), comment('맘', '저요', 'other-mom')]);
+  assert.equal(result.kind, 'MATCH');
+  assert.equal(result.request.nickname, '성훈 맘');
+  assert.equal(resolveSpokenNicknameWithoutRequest(sale.buyerNicknamePhrase, ['성훈 맘']), '성훈 맘');
+  assert.equal(getBuyerNicknamePhrase('자 이거 우리 성훈 맘님 드릴게요', '맘'), '성훈 맘');
+  // A word after another honorific belongs to a different name.
+  assert.equal(getBuyerNicknamePhrase('루비 언니 블루 언니 드릴게요', '블루'), '블루');
+});
+
+test('a product or color word before the name still resolves the actual commenter', () => {
+  const sale = extractSaleFromTranscript('맨투맨 엑소 언니 1.5 드릴게요');
+  assert.equal(sale.buyerNickname, '엑소');
+  assert.equal(sale.buyerNicknamePhrase, '맨투맨 엑소');
+  const result = match(sale.buyerNicknamePhrase, [comment('엑소'), comment('맨투맨', '저요', 'mtm')]);
+  assert.equal(result.kind, 'MATCH');
+  assert.equal(result.request.nickname, '엑소');
+  assert.equal(resolveSpokenNicknameWithoutRequest('맨투맨 엑소', ['다른사람']), '엑소');
+  assert.equal(resolveSpokenNicknameWithoutRequest('햇살', []), '햇살');
 });

@@ -86,7 +86,49 @@ function matchesDelimitedNicknamePrefix(spoken: string, nickname: string): boole
   return parts.length >= 2 && parts[0] === spoken;
 }
 
+/** Endings of a spoken multi-word name, longest first: "맨투맨 엑소" →
+ * ["맨투맨 엑소", "엑소"]. A product or color word may precede the name, and a
+ * display name may itself contain a space, so both readings stay possible. */
+export function spokenNicknameVariants(spoken: string): string[] {
+  // "가윤 언니" is one name with its honorific, not two words.
+  const words = spoken.trim().replace(/\s+(?=(?:언니|님|씨)$)/u, '').split(/\s+/u).filter(Boolean);
+  if (words.length <= 1 || /^(?:뒷|끝|앞|첫|마지막|처음)/u.test(words[0])) return words.length ? [words.join(' ')] : [];
+  return words.map((_, i) => words.slice(i).join(' '));
+}
+
+/** Without a linked purchase comment, keep a spaced spoken name only when a
+ * commenter in this broadcast really has that name ("성훈 맘"); otherwise use
+ * the last word, since the earlier words are usually a product or color. */
+export function resolveSpokenNicknameWithoutRequest(spokenNickname: string, commenterNicknames: string[]): string {
+  const variants = spokenNicknameVariants(spokenNickname);
+  if (variants.length <= 1) return spokenNickname;
+  for (const variant of variants) {
+    const key = spokenBase(variant);
+    const commenter = commenterNicknames.find((nickname) => nickname && normalizeNickname(nickname) === key);
+    if (commenter) return commenter.trim();
+  }
+  return variants[variants.length - 1];
+}
+
 export function matchPurchaseRequest(
+  spokenNickname: string,
+  requests: PurchaseRequest[],
+  recognizedAt: string,
+  consumedRequestIds: ReadonlySet<string> = new Set(),
+): RequestMatch {
+  // A spoken phrase like "이거 성훈 맘" may hold a spaced display name ("성훈 맘")
+  // or a product word before the name ("맨투맨 엑소"). A longer reading wins
+  // only when it equals a requesting commenter's nickname exactly; otherwise
+  // the last word is matched as before, including similar-sounding names.
+  const variants = spokenNicknameVariants(spokenNickname);
+  for (const variant of variants.slice(0, -1)) {
+    const result = matchSpokenVariant(variant, requests, recognizedAt, consumedRequestIds);
+    if (result.kind === 'MATCH' && result.score === 100) return result;
+  }
+  return matchSpokenVariant(variants[variants.length - 1] || '', requests, recognizedAt, consumedRequestIds);
+}
+
+function matchSpokenVariant(
   spokenNickname: string,
   requests: PurchaseRequest[],
   recognizedAt: string,
