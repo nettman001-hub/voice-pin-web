@@ -66,11 +66,20 @@ function validateDeepDecision(raw: unknown, source: Pick<SellerLogicDeepInput, "
     return invalid("quantity는 1~99 범위의 정수여야 합니다.");
   }
   if (!text(raw.reason, 4000)) return invalid("선정 또는 보류 이유를 reason에 기록해 주세요.");
-  if (raw.status === "CONFIRMED" && (raw.nickname === null || raw.unitPrice === null || !commentIds.length ||
+  let status = raw.status as SellerLogicDeepStatus;
+  let reason = raw.reason as string;
+  if (status === "CONFIRMED" && (raw.nickname === null || raw.unitPrice === null || !commentIds.length ||
       !citedTranscripts.some((row) => row.isFinal !== false))) {
-    return invalid("CONFIRMED에는 정확한 댓글 닉네임, 확정 가격, 구매 댓글과 판매자의 확정 발화 근거가 필요합니다.");
+    // 필수 근거(가격, 닉네임, 댓글, 확정발화)가 미비한 경우 실시간 분석을 중단하지 않고 REVIEW로 안전하게 전환합니다.
+    status = "REVIEW";
+    const missing: string[] = [];
+    if (raw.nickname === null) missing.push("구매자 닉네임");
+    if (raw.unitPrice === null) missing.push("확정 가격");
+    if (!commentIds.length) missing.push("구매 댓글");
+    if (!citedTranscripts.some((row) => row.isFinal !== false)) missing.push("판매자 확정 발화");
+    reason = `[확인 필요: ${missing.join(", ")} 근거 보완 필요] ${reason}`.slice(0, 4000);
   }
-  if (raw.status === "CONFIRMED") {
+  if (status === "CONFIRMED") {
     const buyerComments = citedComments.filter((row) => row.nickname === raw.nickname);
     for (const key of ["platformUserId", "uniqueId", "buyerId"] as const) {
       if (new Set(buyerComments.map((row) => row[key]).filter(Boolean)).size > 1) {
@@ -94,8 +103,8 @@ function validateDeepDecision(raw: unknown, source: Pick<SellerLogicDeepInput, "
     ...citedTranscripts.map((row) => Date.parse(row.recognizedAt)),
   )).toISOString();
   return {
-    status: raw.status as SellerLogicDeepStatus, nickname: raw.nickname as string | null,
-    unitPrice: raw.unitPrice as number | null, quantity: Number(raw.quantity), reason: raw.reason,
+    status, nickname: raw.nickname as string | null,
+    unitPrice: raw.unitPrice as number | null, quantity: Number(raw.quantity), reason,
     commentIds, transcriptIds, decidedAt, ...optional,
   };
 }

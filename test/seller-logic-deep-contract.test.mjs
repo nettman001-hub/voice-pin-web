@@ -75,13 +75,16 @@ test('nickname must be the literal text of a cited comment', async () => {
   await assert.rejects(() => parse(aliased, input), /정확한 원문 닉네임/);
 });
 
-test('CONFIRMED requires price and a final seller utterance', async () => {
+test('CONFIRMED requires price and a final seller utterance or demotes to REVIEW', async () => {
   const input = normalizeSellerLogicDeepInput(payload());
   const noPrice = answer();
   noPrice.decisions[0].unitPrice = null;
-  await assert.rejects(() => parse(noPrice, input), /CONFIRMED/);
+  const parsed = await parse(noPrice, input);
+  assert.equal(parsed.decisions[0].status, 'REVIEW');
+  assert.ok(parsed.decisions[0].reason.includes('확정 가격'));
   const noSpeech = answer();
   noSpeech.decisions[0].transcriptIds = [];
+  noSpeech.decisions[0].commentIds = [];
   await assert.rejects(() => parse(noSpeech, input), /근거/);
 });
 
