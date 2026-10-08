@@ -57,6 +57,8 @@ public final class PushRegistration {
      */
     public static synchronized void ensureRegistered(Context context, boolean force) {
         SharedPreferences prefs = prefs(context);
+        // 부팅 직후처럼 구글 서비스가 아직 준비되지 않아 토큰을 못 받았으면 동기화 때 다시 받아 본다.
+        if (prefs.getBoolean(UNAVAILABLE, false) || prefs.getString(CURRENT, "").isEmpty()) refreshToken(context);
         boolean paired = BridgePreferences.configured(context);
         String desired = PushLogic.desiredToken(paired, BridgePreferences.hasDataTransferConsent(context), prefs.getString(CURRENT, ""));
         long now = System.currentTimeMillis();
