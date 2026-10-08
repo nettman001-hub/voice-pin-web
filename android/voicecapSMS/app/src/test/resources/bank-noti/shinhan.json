@@ -1,0 +1,42 @@
+{
+  "bank": "신한은행",
+  "cases": [
+    {
+      "name": "입금 + 계좌 + 잔액 + 입금자",
+      "synthetic": true,
+      "package": "com.shinhan.sbanking",
+      "title": "신한 SOL뱅크",
+      "text": "신한10/07 14:23",
+      "bigText": "신한10/07 14:23\n110-***-123456\n입금      50,000\n잔액   1,234,567\n 김민지",
+      "postTime": 1791354180000,
+      "expect": { "bank": "신한은행", "amount": 50000, "payer": "김민지", "balance": 1234567, "receiverName": "****3456" }
+    },
+    {
+      "name": "TEXT_LINES로 온 입금 (이체입금이라는 말이 있어도 받는다)",
+      "synthetic": true,
+      "package": "com.shinhan.sbanking",
+      "title": "신한 SOL뱅크 이체입금",
+      "textLines": ["입금 15,000", "잔액 215,000", "박서준"],
+      "postTime": 1791354300000,
+      "expect": { "bank": "신한은행", "amount": 15000, "payer": "박서준", "balance": 215000, "receiverName": null }
+    },
+    {
+      "name": "출금은 올리지 않음",
+      "synthetic": true,
+      "package": "com.shinhan.sbanking",
+      "title": "신한 SOL뱅크",
+      "bigText": "신한10/07 14:40\n110-***-123456\n출금      50,000\n잔액   1,184,567\n 김민지",
+      "postTime": 1791355200000,
+      "expect": null
+    },
+    {
+      "name": "잔액만 있는 알림(입금 아님)은 올리지 않음",
+      "synthetic": true,
+      "package": "com.shinhan.sbanking",
+      "title": "신한 SOL뱅크",
+      "text": "오늘 잔액 1,184,567원",
+      "postTime": 1791355260000,
+      "expect": null
+    }
+  ]
+}

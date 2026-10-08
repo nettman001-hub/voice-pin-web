@@ -115,6 +115,54 @@ public final class BridgeClient {
         }
     }
 
+    /** payment-incoming 결과. matchStatus는 서버가 대조 결과를 돌려줄 때만 (MATCHED / NEEDS_REVIEW / UNMATCHED). */
+    public static final class PaymentReport {
+        public final ReportResult result;
+        public final String matchStatus;
+
+        PaymentReport(ReportResult result, String matchStatus) {
+            this.result = result;
+            this.matchStatus = matchStatus;
+        }
+    }
+
+    /**
+     * 은행 알림 입금 업로드 (action: payment-incoming). 금액·입금자명·시각·은행·받는 계좌 별칭만 보낸다.
+     * receiverName·bank·source와 서버 대조(match)는 PR #9 배포 뒤부터 쓰인다. 그 전 서버는 이 칸들을 무시하고 저장만 한다.
+     */
+    public static PaymentReport postPayment(Context context, String externalId, long amount, String payerName, long paidAtMillis,
+                                            String receiverName, String bank, String source) {
+        if (!BridgePreferences.configured(context)) return new PaymentReport(ReportResult.RETRY, null);
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("action", "payment-incoming");
+            payload.put("externalId", externalId);
+            payload.put("amount", amount);
+            payload.put("payerName", payerName);
+            payload.put("paidAt", java.time.Instant.ofEpochMilli(paidAtMillis > 0 ? paidAtMillis : System.currentTimeMillis()).toString());
+            payload.put("receiverName", receiverName == null ? JSONObject.NULL : receiverName);
+            payload.put("bank", bank == null ? JSONObject.NULL : bank);
+            payload.put("source", source);
+            int[] code = new int[1];
+            JSONObject response = requestText(context, true, "sms-bridge", payload, code);
+            return new PaymentReport(classify(response, code[0]), matchStatus(response));
+        } catch (Exception ignored) {
+            return new PaymentReport(ReportResult.RETRY, null);
+        }
+    }
+
+    /**
+     * 새 입금이면 응답의 match.status, 이미 올린 입금(duplicate)이면 저장된 payment.match_status.
+     * PR #9 전 서버는 대조를 하지 않고 늘 UNMATCHED를 저장하므로, 새 칸(source)이 없는 응답은 결과로 쓰지 않는다.
+     */
+    static String matchStatus(JSONObject response) {
+        JSONObject match = response.optJSONObject("match");
+        if (match != null) return match.optString("status", null);
+        JSONObject payment = response.optJSONObject("payment");
+        if (response.optBoolean("duplicate") && payment != null && payment.has("source")) return payment.optString("match_status", null);
+        return null;
+    }
+
     public static List<JSONObject> getOutbox(Context context) {
         List<JSONObject> result = new ArrayList<>();
         if (!BridgePreferences.configured(context)) return result;

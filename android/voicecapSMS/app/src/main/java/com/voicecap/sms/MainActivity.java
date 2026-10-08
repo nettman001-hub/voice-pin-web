@@ -14,8 +14,8 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.Toast;
+import com.voicecap.sms.deposit.DepositTabView;
 import com.voicecap.sms.sales.FakeSalesRepository;
 import com.voicecap.sms.sales.RealSalesRepository;
 import com.voicecap.sms.sales.SalesRepository;
@@ -44,7 +44,7 @@ public final class MainActivity extends Activity {
     /** 판매관리 탭이 꺼져 있으면 null (판매 코드를 실행하지 않음). */
     private ProductSalesView productSalesView;
     private SmsHomeView smsHomeView;
-    private View depositView;
+    private DepositTabView depositView;
     private Button tabSalesBtn;
     private Button tabSmsBtn;
     private Button tabDepositBtn;
@@ -111,6 +111,7 @@ public final class MainActivity extends Activity {
         // 앱을 열면 백오프 중인 업로드·MMS 다운로드도 바로 다시 시도한다.
         SyncScheduler.scheduleNow(getApplicationContext(), true);
         smsHomeView.refresh();
+        if (currentTab == TAB_DEPOSIT) depositView.refresh();
         if (currentTab == TAB_SALES && productSalesView != null) productSalesView.start();
     }
 
@@ -155,7 +156,7 @@ public final class MainActivity extends Activity {
             contentContainer.addView(productSalesView);
         }
         smsHomeView = new SmsHomeView(this);
-        depositView = buildDepositPlaceholder();
+        depositView = new DepositTabView(this);
         contentContainer.addView(smsHomeView);
         contentContainer.addView(depositView);
         root.addView(contentContainer);
@@ -176,20 +177,6 @@ public final class MainActivity extends Activity {
         return button;
     }
 
-    /** 입금확인 탭은 Phase 4에서 채운다. */
-    private View buildDepositPlaceholder() {
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout column = new LinearLayout(this);
-        column.setOrientation(LinearLayout.VERTICAL);
-        column.setPadding(dp(16), dp(16), dp(16), dp(24));
-        LinearLayout card = Ui.card(this);
-        card.addView(Ui.title(this, "입금확인은 준비 중입니다", 16));
-        card.addView(Ui.body(this, "선택한 은행 앱의 입금 알림에서 금액과 입금자명만 읽어 VoiceCAP 주문과 맞춰 보는 기능입니다. 알림 원문은 서버로 보내지 않습니다."));
-        column.addView(card);
-        scroll.addView(column);
-        return scroll;
-    }
-
     public void selectTab(int tabIndex) {
         if (tabIndex == TAB_SALES && !BuildConfig.SALES_TAB_ENABLED) {
             Toast.makeText(this, R.string.sales_coming_soon, Toast.LENGTH_SHORT).show();
@@ -207,6 +194,7 @@ public final class MainActivity extends Activity {
             else productSalesView.stop();
         }
         if (tabIndex == TAB_SMS) smsHomeView.refresh();
+        if (tabIndex == TAB_DEPOSIT) depositView.refresh();
     }
 
     private void styleTab(Button button, boolean selected) {

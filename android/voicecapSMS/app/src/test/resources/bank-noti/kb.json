@@ -1,0 +1,51 @@
+{
+  "bank": "KB국민은행",
+  "cases": [
+    {
+      "name": "입금 + 계좌 + 잔액 (SMS형 여러 줄)",
+      "synthetic": true,
+      "package": "com.kbstar.kbbank",
+      "title": "KB스타뱅킹",
+      "text": "[KB]10/07 14:23",
+      "bigText": "[KB]10/07 14:23\n123456**789\n홍길동\n입금\n50,000\n잔액1,234,567",
+      "postTime": 1791354180000,
+      "expect": { "bank": "KB국민은행", "amount": 50000, "payer": "홍길동", "balance": 1234567, "receiverName": "****6789" }
+    },
+    {
+      "name": "입금 (계좌 줄 없음)",
+      "synthetic": true,
+      "package": "com.kbstar.kbbank",
+      "title": "KB스타뱅킹",
+      "text": "성훈맘\n입금\n32,000\n잔액 532,000",
+      "postTime": 1791354240000,
+      "expect": { "bank": "KB국민은행", "amount": 32000, "payer": "성훈맘", "balance": 532000, "receiverName": null }
+    },
+    {
+      "name": "출금은 올리지 않음",
+      "synthetic": true,
+      "package": "com.kbstar.kbbank",
+      "title": "KB스타뱅킹",
+      "bigText": "[KB]10/07 14:30\n123456**789\n홍길동\n출금\n50,000\n잔액1,184,567",
+      "postTime": 1791354600000,
+      "expect": null
+    },
+    {
+      "name": "체크카드 승인은 올리지 않음",
+      "synthetic": true,
+      "package": "com.kbstar.kbbank",
+      "title": "KB국민카드",
+      "text": "[KB]체크카드 승인 12,000원 10/07 14:31 편의점",
+      "postTime": 1791354660000,
+      "expect": null
+    },
+    {
+      "name": "입금 예정 안내(광고성)는 올리지 않음",
+      "synthetic": true,
+      "package": "com.kbstar.kbbank",
+      "title": "KB스타뱅킹",
+      "text": "급여 입금 예정일 안내\n입금\n2,500,000\n잔액 0",
+      "postTime": 1791354720000,
+      "expect": null
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "bank": "NH농협은행",
+  "cases": [
+    {
+      "name": "한 줄 입금",
+      "synthetic": true,
+      "package": "nh.smart.banking",
+      "title": "NH스마트뱅킹",
+      "text": "농협 입금50,000원 10/07 14:23 351-****-5678-12 이영희 잔액1,234,567원",
+      "postTime": 1791354180000,
+      "expect": { "bank": "NH농협은행", "amount": 50000, "payer": "이영희", "balance": 1234567, "receiverName": "****7812" }
+    },
+    {
+      "name": "출금은 올리지 않음",
+      "synthetic": true,
+      "package": "nh.smart.banking",
+      "title": "NH스마트뱅킹",
+      "text": "농협 출금50,000원 10/07 14:50 351-****-5678-12 이영희 잔액1,184,567원",
+      "postTime": 1791355800000,
+      "expect": null
+    }
+  ]
+}

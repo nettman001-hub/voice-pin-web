@@ -1,0 +1,23 @@
+{
+  "bank": "(규칙 없음)",
+  "cases": [
+    {
+      "name": "규칙이 없는 은행앱은 입금처럼 보여도 올리지 않음 (범용 폴백 없음)",
+      "synthetic": true,
+      "package": "viva.republica.toss",
+      "title": "토스",
+      "text": "홍길동님이 50,000원을 보냈어요",
+      "postTime": 1791354180000,
+      "expect": null
+    },
+    {
+      "name": "은행이 아닌 앱",
+      "synthetic": true,
+      "package": "com.example.shopping",
+      "title": "입금 확인",
+      "text": "입금 50,000원 홍길동 잔액 1,000,000원",
+      "postTime": 1791354180000,
+      "expect": null
+    }
+  ]
+}
