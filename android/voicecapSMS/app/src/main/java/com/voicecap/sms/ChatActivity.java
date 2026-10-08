@@ -190,8 +190,8 @@ public final class ChatActivity extends MessagingActivity {
         if (resumed && hasPendingBadge) main.postDelayed(reloadTask, BADGE_REFRESH_MILLIS);
     }
 
-    /** 대화 상대 모두에게 각각 SMS로 보낸다 (그룹 MMS 아님). */
-    private void send(String body, int subId) {
+    /** 대화 상대 모두에게 각각 보낸다 (그룹 MMS 아님). 사진이 있으면 MMS, 없으면 SMS. */
+    private void send(String body, int subId, List<Uri> images) {
         if (addresses.isEmpty()) {
             Toast.makeText(this, "받는 사람 번호가 없습니다.", Toast.LENGTH_SHORT).show();
             return;
@@ -201,24 +201,43 @@ public final class ChatActivity extends MessagingActivity {
         Context app = getApplicationContext();
         EXECUTOR.execute(() -> {
             String failure = null;
-            for (int index = 0; index < targets.size(); index++) {
+            boolean unrecorded = false;
+            List<byte[]> jpegs = null;
+            if (!images.isEmpty()) {
+                try {
+                    jpegs = MmsImages.prepare(app, images, body, subId);
+                } catch (Exception error) {
+                    failure = error.getMessage() == null ? "사진을 준비하지 못했습니다." : error.getMessage();
+                }
+            }
+            boolean ready = images.isEmpty() || jpegs != null;
+            for (int index = 0; ready && index < targets.size(); index++) {
                 if (index > 0) sleep(ConversationLogic.MULTI_SEND_GAP_MILLIS);
                 try {
-                    SmsSender.send(app, targets.get(index), body, subId, LocalDb.ORIGIN_DEVICE, null);
+                    if (images.isEmpty()) {
+                        SmsSender.send(app, targets.get(index), body, subId, LocalDb.ORIGIN_DEVICE, null);
+                    } else if (!MmsSender.send(app, targets.get(index), body, jpegs, subId).recorded) {
+                        unrecorded = true;
+                    }
                 } catch (Exception error) {
                     failure = error.getMessage() == null ? "문자를 보내지 못했습니다." : error.getMessage();
                 }
             }
-            String message = failure;
+            String message = failure != null ? failure : unrecorded ? MMS_UNRECORDED : null;
+            boolean restore = failure != null;
             main.post(() -> {
-                if (message != null) {
-                    Toast.makeText(this, message, Toast.LENGTH_LONG).show();
-                    if (sendBar.text().isEmpty()) sendBar.setText(body);
+                if (message != null) Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+                if (restore && sendBar.text().isEmpty() && sendBar.images().isEmpty()) {
+                    sendBar.setText(body);
+                    sendBar.addImages(images);
                 }
                 reload();
             });
         });
     }
+
+    /** 설계 3.8: 사진 문자를 보냈지만 휴대폰 문자함에 기록하지 못한 경우의 안내. */
+    static final String MMS_UNRECORDED = "사진 문자를 보냈지만 휴대폰 문자함에 기록하지 못했습니다. 대화에 보이지 않을 수 있고 VoiceCAP에도 올라가지 않습니다.";
 
     static void sleep(long millis) {
         try {

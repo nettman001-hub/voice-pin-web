@@ -8,12 +8,13 @@ import android.provider.Settings;
 import java.util.HashSet;
 import java.util.Set;
 
-/** 입금확인 탭 설정: 고른 앱, 샘플 수집 모드, 입금 정보 전송 동의, 인식 실패 횟수. */
+/** 입금확인 탭 설정: 고른 앱, 샘플 수집 모드, 입금 정보 전송 동의, 은행 입금 문자 읽기, 인식 실패 횟수. */
 public final class DepositSettings {
     private static final String NAME = "voicecap_deposit";
     private static final String SELECTED = "selected_packages";
     private static final String SAMPLE_MODE = "sample_mode";
     private static final String CONSENT = "deposit_consent";
+    private static final String BANK_SMS = "bank_sms_enabled";
     private static final String FAIL_PREFIX = "parse_fail_";
     /** 샘플 원문 보관 기간. */
     public static final long SAMPLE_RETENTION_MILLIS = 30L * 24 * 60 * 60 * 1000;
@@ -52,8 +53,24 @@ public final class DepositSettings {
         return prefs(context).getBoolean(CONSENT, false);
     }
 
+    /** 동의를 철회하면 은행 입금 문자 읽기도 함께 끈다. */
     public static void setConsent(Context context, boolean consent) {
-        prefs(context).edit().putBoolean(CONSENT, consent).apply();
+        SharedPreferences.Editor editor = prefs(context).edit().putBoolean(CONSENT, consent);
+        if (!consent) editor.putBoolean(BANK_SMS, false);
+        editor.apply();
+    }
+
+    /** "은행 입금 문자도 읽기" (기본 꺼짐). 입금 정보 전송 동의가 없으면 저장값과 상관없이 꺼진 것으로 본다. */
+    public static boolean bankSmsEnabled(Context context) {
+        SharedPreferences preferences = prefs(context);
+        return BankSmsDepositDetector.enabled(preferences.getBoolean(BANK_SMS, false), preferences.getBoolean(CONSENT, false));
+    }
+
+    /** 동의가 없으면 켤 수 없다 (false를 돌려준다). */
+    public static boolean setBankSmsEnabled(Context context, boolean enabled) {
+        if (enabled && !hasConsent(context)) return false;
+        prefs(context).edit().putBoolean(BANK_SMS, enabled).apply();
+        return true;
     }
 
     public static void countFailure(Context context, String packageName) {

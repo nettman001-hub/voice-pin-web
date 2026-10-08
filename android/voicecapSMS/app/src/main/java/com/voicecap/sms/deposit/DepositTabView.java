@@ -12,6 +12,7 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -31,8 +32,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 입금확인 탭 (설계 4.1): 알림 접근·배터리 안내, 입금 정보 전송 동의, 은행 선택(프리셋 + 최근 알림 앱),
- * 입금 피드(업로드 배지 + 서버 대조 결과), 샘플 수집 모드.
+ * 입금확인 탭 (설계 4.1): 알림 접근·배터리 안내, 입금 정보 전송 동의, 은행 입금 문자 읽기(4.5),
+ * 은행 선택(프리셋 + 최근 알림 앱), 입금 피드(업로드 배지 + 서버 대조 결과), 샘플 수집 모드.
  */
 public final class DepositTabView extends ScrollView {
     private static final int FEED_LIMIT = 50;
@@ -67,6 +68,7 @@ public final class DepositTabView extends ScrollView {
         column.removeAllViews();
         column.addView(accessCard());
         column.addView(consentCard());
+        column.addView(bankSmsCard(rules));
         if (DepositSettings.hasConsent(activity)) {
             column.addView(banksCard(rules));
             column.addView(recentAppsCard());
@@ -122,7 +124,7 @@ public final class DepositTabView extends ScrollView {
         Button revoke = Ui.button(activity, "동의 철회 (입금 읽기 중단)", false);
         revoke.setOnClickListener(v -> new AlertDialog.Builder(activity)
                 .setTitle("입금 정보 전송 동의 철회")
-                .setMessage("고른 은행 앱을 모두 해제하고 입금 업로드를 멈춥니다. 알림 접근 권한 자체는 휴대폰 설정에서 끌 수 있습니다.")
+                .setMessage("고른 은행 앱을 모두 해제하고 은행 입금 문자 읽기도 끄며 입금 업로드를 멈춥니다. 알림 접근 권한 자체는 휴대폰 설정에서 끌 수 있습니다.")
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton("철회", (dialog, which) -> {
                     DepositSettings.setConsent(activity, false);
@@ -131,6 +133,39 @@ public final class DepositTabView extends ScrollView {
                 })
                 .show());
         card.addView(revoke);
+        return card;
+    }
+
+    /**
+     * 은행 입금 문자 읽기 (설계 4.5, 기본 꺼짐). 입금 정보 전송 동의가 있어야 켤 수 있고, 동의를 철회하면 함께 꺼진다.
+     * 켜져 있으면 은행 발신번호(smsRules의 senders)에서 온 문자만 읽는다. 문자는 평소처럼 문자함에 남는다.
+     */
+    private LinearLayout bankSmsCard(BankRules rules) {
+        LinearLayout card = Ui.card(activity);
+        boolean consent = DepositSettings.hasConsent(activity);
+        Switch toggle = new Switch(activity);
+        toggle.setText("은행 입금 문자도 읽기");
+        toggle.setTextSize(16);
+        toggle.setTextColor(Ui.SLATE_900);
+        toggle.setChecked(DepositSettings.bankSmsEnabled(activity));
+        toggle.setEnabled(consent);
+        toggle.setOnCheckedChangeListener((view, checked) -> {
+            if (!DepositSettings.setBankSmsEnabled(activity, checked)) {
+                view.setChecked(false);
+                Toast.makeText(activity, "입금 정보 전송에 먼저 동의해 주세요.", Toast.LENGTH_SHORT).show();
+            }
+        });
+        card.addView(toggle);
+        card.addView(Ui.body(activity, consent
+                ? "은행 앱 알림 대신 은행이 문자로 입금을 알려 주는 경우에 켭니다. 은행 발신번호에서 온 입금 문자만 읽고, 금액·입금자명·시각·은행만 보냅니다. 문자 원문은 보내지 않으며 문자는 문자함에 그대로 남습니다."
+                : "입금 정보 전송에 동의해야 켤 수 있습니다."));
+        StringBuilder banks = new StringBuilder();
+        for (BankRules.Rule rule : rules.smsRules) {
+            if (banks.length() > 0) banks.append(", ");
+            banks.append(rule.bank);
+        }
+        card.addView(caption(banks.length() == 0 ? "아직 은행 문자 규칙이 없습니다."
+                : "읽는 은행: " + banks + " · 발신번호·문자 모양은 실제 문자로 아직 확인하지 않았습니다. VoiceCAP이 기본 문자앱일 때만 동작합니다."));
         return card;
     }
 
@@ -232,7 +267,8 @@ public final class DepositTabView extends ScrollView {
             TextView main = Ui.title(activity, DepositLabels.won(deposit.amount) + " · " + deposit.payer, 15);
             row.addView(main);
             String match = DepositLabels.matchLabel(deposit.matchState);
-            row.addView(caption((deposit.bank == null ? "" : deposit.bank) + " · " + format.format(new Date(deposit.paidAt))
+            row.addView(caption((deposit.bank == null ? "" : deposit.bank)
+                    + (DepositRecorder.SOURCE_SMS.equals(deposit.source) ? " (문자)" : "") + " · " + format.format(new Date(deposit.paidAt))
                     + (match == null ? "" : " · " + match)));
             String sync = DepositLabels.syncLabel(deposit.syncState);
             if (!sync.isEmpty()) {

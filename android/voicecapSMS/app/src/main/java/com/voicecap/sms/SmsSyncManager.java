@@ -162,5 +162,9 @@ public final class SmsSyncManager {
                 SmsSentReceiver.finish(context, item.externalId, false, STALE_SEND_ERROR);
             }
         }
+        for (LocalDb.Item item : db.list(LocalDb.KIND_MMS_OUT, LocalDb.ORIGIN_DEVICE, LocalDb.STATE_SENDING)) {
+            if (item.createdAt > cutoff) continue;
+            SmsSentReceiver.finish(context, item.externalId, false, STALE_SEND_ERROR);
+        }
     }
 }

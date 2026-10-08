@@ -11,6 +11,7 @@ import java.security.MessageDigest;
  */
 public final class DepositIds {
     public static final String PREFIX = "banknoti:";
+    public static final String SMS_PREFIX = "banksms:";
     public static final long DUPLICATE_WINDOW_MILLIS = 90_000L;
     private static final int HASH_CHARS = 24;
 
@@ -25,6 +26,20 @@ public final class DepositIds {
 
     public static String externalId(DepositParser.Deposit deposit) {
         return externalId(deposit.packageName, deposit.amount, deposit.payerName, deposit.balance, deposit.postTime);
+    }
+
+    /**
+     * 은행 SMS 입금: banksms: + SHA-256(규칙 키|amount|payer|balance|보낸 시각 분 단위 내림) 앞 24자.
+     * 분할 문자는 합친 뒤 한 번만 판정하므로 한 입금 = 한 id. 같은 문자를 다시 읽어도 같은 id.
+     */
+    public static String smsExternalId(String ruleKey, long amount, String payer, Long balance, long sentAtMillis) {
+        long minute = Math.floorDiv(sentAtMillis, 60_000L);
+        String key = ruleKey + "|" + amount + "|" + payer + "|" + (balance == null ? "" : balance) + "|" + minute;
+        return SMS_PREFIX + sha256Hex(key).substring(0, HASH_CHARS);
+    }
+
+    public static String smsExternalId(DepositParser.Deposit deposit) {
+        return smsExternalId(deposit.packageName, deposit.amount, deposit.payerName, deposit.balance, deposit.postTime);
     }
 
     /** 90초 창은 잔액이 없을 때만. 잔액이 있으면 실제 이중 입금을 버리지 않도록 창을 쓰지 않는다. */

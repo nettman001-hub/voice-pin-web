@@ -3,6 +3,7 @@ package com.voicecap.sms;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -25,8 +26,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 새 문자: 번호 입력 + 연락처 검색. 받는 사람이 여러 명이면 그룹 MMS가 아니라 각자에게 따로 SMS를 보낸다
- * (손님끼리 번호가 보이지 않게). 수신자 사이에는 1초 간격을 둔다.
+ * 새 문자: 번호 입력 + 연락처 검색. 받는 사람이 여러 명이면 그룹 MMS가 아니라 각자에게 따로 보낸다
+ * (손님끼리 번호가 보이지 않게). 사진을 붙이면 각자에게 MMS로 보낸다. 수신자 사이에는 1초 간격을 둔다.
  */
 public final class ComposeActivity extends MessagingActivity {
     static final String EXTRA_RECIPIENTS = "recipients";
@@ -209,7 +210,7 @@ public final class ComposeActivity extends MessagingActivity {
         });
     }
 
-    private void send(String body, int subId) {
+    private void send(String body, int subId, List<Uri> images) {
         if (sending) return;
         addTypedRecipients();
         if (recipients.isEmpty()) {
@@ -220,27 +221,47 @@ public final class ComposeActivity extends MessagingActivity {
         sending = true;
         sendBar.setLocked(true);
         progress.setVisibility(View.VISIBLE);
+        progress.setTextColor(Ui.SLATE_700);
         Context app = getApplicationContext();
         EXECUTOR.execute(() -> {
             List<String> failed = new ArrayList<>();
-            for (int index = 0; index < targets.size(); index++) {
+            boolean unrecorded = false;
+            List<byte[]> jpegs = null;
+            String prepareError = null;
+            if (!images.isEmpty()) {
+                main.post(() -> progress.setText("사진을 통신사 크기에 맞게 줄이는 중…"));
+                try {
+                    jpegs = MmsImages.prepare(app, images, body, subId);
+                } catch (Exception error) {
+                    prepareError = error.getMessage() == null ? "사진을 준비하지 못했습니다." : error.getMessage();
+                    failed.addAll(targets);
+                }
+            }
+            for (int index = 0; prepareError == null && index < targets.size(); index++) {
                 int done = index;
                 main.post(() -> progress.setText(targets.size() == 1 ? "보내는 중…" : "각자에게 따로 보내는 중… " + (done + 1) + "/" + targets.size()));
                 if (index > 0) ChatActivity.sleep(ConversationLogic.MULTI_SEND_GAP_MILLIS);
                 try {
-                    SmsSender.send(app, targets.get(index), body, subId, LocalDb.ORIGIN_DEVICE, null);
+                    if (images.isEmpty()) {
+                        SmsSender.send(app, targets.get(index), body, subId, LocalDb.ORIGIN_DEVICE, null);
+                    } else if (!MmsSender.send(app, targets.get(index), body, jpegs, subId).recorded) {
+                        unrecorded = true;
+                    }
                 } catch (Exception error) {
                     failed.add(targets.get(index));
                 }
             }
-            main.post(() -> finishSend(targets, failed));
+            String error = prepareError;
+            boolean warn = unrecorded;
+            main.post(() -> finishSend(targets, failed, error, warn));
         });
     }
 
-    private void finishSend(List<String> targets, List<String> failed) {
+    private void finishSend(List<String> targets, List<String> failed, String error, boolean unrecorded) {
         sending = false;
+        if (unrecorded) Toast.makeText(this, ChatActivity.MMS_UNRECORDED, Toast.LENGTH_LONG).show();
         if (!failed.isEmpty()) {
-            progress.setText("보내지 못한 번호: " + android.text.TextUtils.join(", ", failed));
+            progress.setText((error != null ? error + "\n" : "") + "보내지 못한 번호: " + android.text.TextUtils.join(", ", failed));
             progress.setTextColor(Color.rgb(220, 38, 38));
             recipients.clear();
             recipients.addAll(failed);

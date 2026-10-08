@@ -93,7 +93,7 @@ public final class SmsSender {
     }
 
     @SuppressWarnings("deprecation")
-    private static SmsManager smsManager(Context context, int subId) {
+    static SmsManager smsManager(Context context, int subId) {
         if (subId < 0) return context.getSystemService(SmsManager.class);
         if (Build.VERSION.SDK_INT >= 31) return context.getSystemService(SmsManager.class).createForSubscriptionId(subId);
         return SmsManager.getSmsManagerForSubscriptionId(subId);

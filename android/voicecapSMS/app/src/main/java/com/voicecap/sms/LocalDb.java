@@ -19,6 +19,8 @@ public final class LocalDb extends SQLiteOpenHelper {
     public static final String KIND_SMS_IN = "SMS_IN";
     public static final String KIND_MMS_IN = "MMS_IN";
     public static final String KIND_SMS_OUT = "SMS_OUT";
+    /** 폰에서 보낸 MMS (Phase 6). external_id = device-mms-sent-&lt;문자함 id&gt;. */
+    public static final String KIND_MMS_OUT = "MMS_OUT";
     /** 아직 받지 못한 MMS 알림(m-notification-ind). 다운로드·저장에 성공하면 지운다. */
     public static final String KIND_MMS_NOTICE = "MMS_NOTICE";
     /** 은행 알림에서 읽은 입금 (payment-incoming). external_id = banknoti:<package>:<hash>. */
@@ -233,8 +235,8 @@ public final class LocalDb extends SQLiteOpenHelper {
     /** 서버에 아직 저장되지 않은 업무 문자 수 (받은 문자·폰에서 보낸 문자의 업로드 대기 + 실패). */
     public synchronized int unsyncedCount() {
         try (Cursor cursor = getReadableDatabase().rawQuery(
-                "select count(*) from sync_items where state in (?,?) and (kind in (?,?) or (kind=? and origin=?))",
-                new String[]{STATE_PENDING, STATE_FAILED, KIND_SMS_IN, KIND_MMS_IN, KIND_SMS_OUT, ORIGIN_DEVICE})) {
+                "select count(*) from sync_items where state in (?,?) and (kind in (?,?) or (kind in (?,?) and origin=?))",
+                new String[]{STATE_PENDING, STATE_FAILED, KIND_SMS_IN, KIND_MMS_IN, KIND_SMS_OUT, KIND_MMS_OUT, ORIGIN_DEVICE})) {
             return cursor.moveToFirst() ? cursor.getInt(0) : 0;
         }
     }

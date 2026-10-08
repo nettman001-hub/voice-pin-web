@@ -10,6 +10,8 @@ import android.provider.BlockedNumberContract;
 import android.provider.Telephony;
 import android.telephony.SmsMessage;
 
+import com.voicecap.sms.deposit.BankSmsDepositDetector;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -42,7 +44,12 @@ public final class SmsReceiver extends BroadcastReceiver {
                     Uri uri = store(app, message, subId, finalServiceCenter, receivedAt);
                     // 모든 받은 문자에 sync_items 행: 업무 대상이면 PENDING, 개인·차단 문자는 SKIPPED.
                     if (uri != null) UploadQueue.enqueueIncoming(app, LocalDb.KIND_SMS_IN, ContentUris.parseId(uri), message.address, message.body, receivedAt);
-                    if (!isBlocked(app, message.address)) MessageNotifier.notifyIncoming(app, message.address, message.body, subId);
+                    if (!isBlocked(app, message.address)) {
+                        MessageNotifier.notifyIncoming(app, message.address, message.body, subId);
+                        // 선택 기능(기본 꺼짐): 은행 발신번호의 입금 문자만 입금으로 읽는다. 문자는 위에서 이미 문자함에 남겼다.
+                        BankSmsDepositDetector.onSmsReceived(app, message.address, message.body,
+                                message.sentAtMillis > 0 ? message.sentAtMillis : receivedAt);
+                    }
                 }
                 SyncScheduler.scheduleNow(app);
             } finally {
