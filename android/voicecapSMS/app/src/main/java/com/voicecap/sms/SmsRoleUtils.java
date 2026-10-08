@@ -16,7 +16,15 @@ public final class SmsRoleUtils {
 
     private SmsRoleUtils() { }
 
+    /**
+     * Android 10+는 RoleManager로 확인한다. Telephony.Sms.getDefaultSmsPackage는 Android 16(API 36) 에뮬레이터에서
+     * 역할을 가진 앱에도 null을 돌려줘, 기본 문자앱인데도 경고 띠가 뜨고 동기화가 멈췄다.
+     */
     public static boolean isDefaultSmsApp(Context context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            RoleManager manager = context.getSystemService(RoleManager.class);
+            if (manager != null && manager.isRoleAvailable(RoleManager.ROLE_SMS)) return manager.isRoleHeld(RoleManager.ROLE_SMS);
+        }
         String defaultPackage = Telephony.Sms.getDefaultSmsPackage(context);
         return context.getPackageName().equals(defaultPackage);
     }

@@ -88,6 +88,33 @@ public final class BridgeClient {
         }
     }
 
+    /**
+     * 폰에서 직접 보낸 업무 문자 기록 (action: outgoing, PR #9). 서버가 이미 가진 externalId도 성공으로 돌려준다.
+     * 서버가 아직 outgoing을 모르면 UNSUPPORTED (PENDING 유지, 백오프 후 다시).
+     */
+    public static ReportResult postOutgoing(Context context, String externalId, String phoneNumber, String body,
+                                            long sentAtMillis, String status, String error) {
+        if (!BridgePreferences.configured(context)) return ReportResult.RETRY;
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("action", "outgoing");
+            payload.put("externalId", externalId);
+            payload.put("phoneNumber", phoneNumber);
+            payload.put("body", body);
+            payload.put("sentAt", java.time.Instant.ofEpochMilli(sentAtMillis > 0 ? sentAtMillis : System.currentTimeMillis()).toString());
+            payload.put("status", "FAILED".equals(status) ? "FAILED" : "SENT");
+            if ("FAILED".equals(status) && error != null && !error.isEmpty()) {
+                payload.put("error", error.length() > 500 ? error.substring(0, 500) : error);
+            }
+            payload.put("category", "GENERAL");
+            int[] code = new int[1];
+            JSONObject response = requestText(context, true, "sms-bridge", payload, code);
+            return ConversationLogic.classifyOutgoing(response.optBoolean("ok"), code[0], response.optString("error", null));
+        } catch (Exception ignored) {
+            return ReportResult.RETRY;
+        }
+    }
+
     public static List<JSONObject> getOutbox(Context context) {
         List<JSONObject> result = new ArrayList<>();
         if (!BridgePreferences.configured(context)) return result;
@@ -120,9 +147,9 @@ public final class BridgeClient {
 
     /**
      * REPORTED 성공, CONFLICT 409(발송 점유권 없음: 다른 휴대폰이 맡았거나 취소됨), REJECTED 그 밖의 4xx
-     * (다시 보내도 같음), RETRY 네트워크 오류·5xx.
+     * (다시 보내도 같음), RETRY 네트워크 오류·5xx, UNSUPPORTED 서버가 아직 그 액션을 모름(outgoing 전용, 나중에 다시).
      */
-    public enum ReportResult { REPORTED, CONFLICT, REJECTED, RETRY }
+    public enum ReportResult { REPORTED, CONFLICT, REJECTED, RETRY, UNSUPPORTED }
 
     private static ReportResult classify(JSONObject response, int code) {
         if (response.optBoolean("ok")) return ReportResult.REPORTED;

@@ -73,9 +73,16 @@ public final class SmsSentReceiver extends BroadcastReceiver {
             db.update(item);
             SyncScheduler.scheduleNow(context);
         } else {
-            // 기기에서 직접 보낸 문자의 서버 업로드(outgoing)는 Phase 2에서 추가한다.
-            item.state = LocalDb.STATE_SKIPPED;
+            // 폰에서 직접 보낸 문자: 업무 고객 번호에게 보낸 것만 outgoing으로 올린다 (개인 문자는 SKIPPED, 배지 없음).
+            // 보낸편지함 기록이 없으면(문자함 id 없음) 서버에 올릴 원문도 없으므로 올리지 않는다.
+            String phone = item.payload.optString("phone", "");
+            boolean upload = item.providerUri != null && ConversationLogic.shouldUploadOutgoing(
+                    item.origin, BusinessContactStore.contains(context, phone), SmsReceiver.isBlocked(context, phone));
+            item.state = upload ? LocalDb.STATE_PENDING : LocalDb.STATE_SKIPPED;
+            item.attempts = 0;
+            item.nextAt = 0;
             db.update(item);
+            if (upload) SyncScheduler.scheduleNow(context);
         }
         if (!sent) MessageNotifier.notifySendFailed(context, item.payload.optString("phone", ""));
     }

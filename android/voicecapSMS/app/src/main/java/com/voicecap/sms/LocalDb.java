@@ -10,6 +10,7 @@ import android.database.sqlite.SQLiteOpenHelper;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -62,7 +63,7 @@ public final class LocalDb extends SQLiteOpenHelper {
         return instance;
     }
 
-    private LocalDb(Context context) { super(context, "voicecap_local.db", null, 1); }
+    private LocalDb(Context context) { super(context, "voicecap_local.db", null, 2); }
 
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("create table sync_items ("
@@ -74,7 +75,18 @@ public final class LocalDb extends SQLiteOpenHelper {
         db.execSQL("create unique index sync_items_provider on sync_items(provider_uri)");
     }
 
-    @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) { }
+    @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        if (oldVersion < 2) migrateSentPrefix(db);
+    }
+
+    /** Phase 0의 device-send-<id> 행을 device-sms-sent-<id>로 바꾼다 (서버 outgoing externalId와 같게). */
+    static void migrateSentPrefix(SQLiteDatabase db) {
+        String legacy = ConversationLogic.LEGACY_SENT_PREFIX;
+        db.execSQL("update or ignore sync_items set external_id=? || substr(external_id, ?) where substr(external_id, 1, ?)=?",
+                new Object[]{ConversationLogic.SENT_PREFIX, legacy.length() + 1, legacy.length(), legacy});
+        // 같은 새 id가 이미 있어 바꾸지 못한 행은 중복이므로 지운다.
+        db.execSQL("delete from sync_items where substr(external_id, 1, ?)=?", new Object[]{legacy.length(), legacy});
+    }
 
     public synchronized boolean exists(String externalId) {
         try (Cursor cursor = getReadableDatabase().rawQuery("select 1 from sync_items where external_id=?", new String[]{externalId})) {
@@ -154,6 +166,45 @@ public final class LocalDb extends SQLiteOpenHelper {
         return items;
     }
 
+    /** {@link #page}와 같지만 origin도 맞는 행만 (폰 발신 업로드에서 웹 발송분을 빼기 위해). */
+    public synchronized List<Item> page(String kind, String origin, String state, long afterRowId, int limit) {
+        List<Item> items = new ArrayList<>();
+        try (Cursor cursor = getReadableDatabase().rawQuery(
+                "select rowid as row_id, * from sync_items where kind=? and origin=? and state=? and rowid>? order by rowid limit " + limit,
+                new String[]{kind, origin, state, String.valueOf(afterRowId)})) {
+            while (cursor.moveToNext()) items.add(read(cursor));
+        }
+        return items;
+    }
+
+    /** 말풍선 배지용: provider_uri → 행. 없는 uri는 빠진다. */
+    public synchronized Map<String, Item> findByProviderUris(List<String> providerUris) {
+        Map<String, Item> result = new HashMap<>();
+        SQLiteDatabase db = getReadableDatabase();
+        for (int start = 0; start < providerUris.size(); start += 200) {
+            List<String> chunk = providerUris.subList(start, Math.min(providerUris.size(), start + 200));
+            StringBuilder marks = new StringBuilder();
+            for (int index = 0; index < chunk.size(); index++) marks.append(index == 0 ? "?" : ",?");
+            try (Cursor cursor = db.rawQuery("select * from sync_items where provider_uri in (" + marks + ")", chunk.toArray(new String[0]))) {
+                while (cursor.moveToNext()) {
+                    Item item = read(cursor);
+                    result.put(item.providerUri, item);
+                }
+            }
+        }
+        return result;
+    }
+
+    /** 🔴 배지를 눌렀을 때: 실패한 업로드를 바로 다시 시도하도록 되돌린다. */
+    public synchronized void retryNow(String externalId) {
+        ContentValues values = new ContentValues();
+        values.put("state", STATE_PENDING);
+        values.put("attempts", 0);
+        values.put("next_at", 0);
+        values.putNull("last_error");
+        getWritableDatabase().update("sync_items", values, "external_id=? and state=?", new String[]{externalId, STATE_FAILED});
+    }
+
     /** now 이후로 잡힌 재시도 시각 중 가장 이른 값. 없으면 0. */
     public synchronized long nextRetryAt(long now) {
         try (Cursor cursor = getReadableDatabase().rawQuery(
@@ -162,11 +213,11 @@ public final class LocalDb extends SQLiteOpenHelper {
         }
     }
 
-    /** 서버에 아직 저장되지 않은 업무 문자 수 (업로드 대기 + 실패). */
+    /** 서버에 아직 저장되지 않은 업무 문자 수 (받은 문자·폰에서 보낸 문자의 업로드 대기 + 실패). */
     public synchronized int unsyncedCount() {
         try (Cursor cursor = getReadableDatabase().rawQuery(
-                "select count(*) from sync_items where kind in (?,?) and state in (?,?)",
-                new String[]{KIND_SMS_IN, KIND_MMS_IN, STATE_PENDING, STATE_FAILED})) {
+                "select count(*) from sync_items where state in (?,?) and (kind in (?,?) or (kind=? and origin=?))",
+                new String[]{STATE_PENDING, STATE_FAILED, KIND_SMS_IN, KIND_MMS_IN, KIND_SMS_OUT, ORIGIN_DEVICE})) {
             return cursor.moveToFirst() ? cursor.getInt(0) : 0;
         }
     }

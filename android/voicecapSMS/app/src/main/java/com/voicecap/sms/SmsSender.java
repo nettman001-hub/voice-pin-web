@@ -28,24 +28,27 @@ public final class SmsSender {
     /**
      * @param origin {@link LocalDb#ORIGIN_WEB}(웹 발송함) 또는 {@link LocalDb#ORIGIN_DEVICE}
      * @param serverMessageId 웹 발송분의 customer_messages.id, 기기 발송이면 null
+     * @return sync_items의 external_id (웹: web-out-<id>, 폰: device-sms-sent-<문자함 id>)
      */
-    public static void send(Context context, String phone, String body, int subId, String origin, String serverMessageId) throws Exception {
+    public static String send(Context context, String phone, String body, int subId, String origin, String serverMessageId) throws Exception {
         if (phone == null || phone.trim().isEmpty()) throw new IllegalArgumentException("받는 번호가 없습니다.");
         if (body == null || body.isEmpty()) throw new IllegalArgumentException("보낼 내용이 없습니다.");
         SmsManager manager = smsManager(context, subId);
         ArrayList<String> parts = manager.divideMessage(body);
         Uri providerUri = recordOutbox(context, phone, body, subId);
 
+        // 보낸편지함 기록에 실패하면(기본 문자앱 아님 등) 문자함 id가 없으므로 업로드할 수 없는 로컬 전용 id를 쓴다.
         String externalId = serverMessageId != null
                 ? webExternalId(serverMessageId)
-                : "device-send-" + (providerUri != null ? providerUri.getLastPathSegment() : System.currentTimeMillis());
+                : ConversationLogic.sentExternalId(providerUri != null ? providerUri.getLastPathSegment() : "local-" + System.currentTimeMillis());
         LocalDb.Item item = new LocalDb.Item();
         item.externalId = externalId;
         item.kind = LocalDb.KIND_SMS_OUT;
         item.origin = origin;
         item.serverId = serverMessageId;
         item.providerUri = providerUri == null ? null : providerUri.toString();
-        item.payload = new JSONObject().put("phone", phone).put("parts", parts.size()).put("done", 0).put("failed", 0);
+        item.payload = new JSONObject().put("phone", phone).put("parts", parts.size()).put("done", 0).put("failed", 0)
+                .put("sentAt", System.currentTimeMillis());
         item.state = LocalDb.STATE_SENDING;
         LocalDb.get(context).insert(item);
 
@@ -64,6 +67,28 @@ public final class SmsSender {
         } catch (RuntimeException error) {
             SmsSentReceiver.finish(context, externalId, false, error.getMessage());
             throw error;
+        }
+        return externalId;
+    }
+
+    /**
+     * 말풍선의 "전송 실패 · 다시 보내기": 실패한 보낸편지함 행을 지우고 같은 번호·내용으로 새로 보낸다.
+     * 실패 기록이 서버에 이미 올라갔더라도 새 발송은 새 externalId로 따로 올라간다.
+     */
+    public static void resend(Context context, String providerUri, int subId) throws Exception {
+        String phone;
+        String body;
+        try (android.database.Cursor cursor = context.getContentResolver().query(Uri.parse(providerUri),
+                new String[]{Telephony.Sms.ADDRESS, Telephony.Sms.BODY}, null, null, null)) {
+            if (cursor == null || !cursor.moveToFirst()) throw new IllegalStateException("다시 보낼 문자를 찾지 못했습니다.");
+            phone = cursor.getString(0);
+            body = cursor.getString(1);
+        }
+        send(context, phone, body, subId, LocalDb.ORIGIN_DEVICE, null);
+        try {
+            context.getContentResolver().delete(Uri.parse(providerUri), null, null);
+        } catch (RuntimeException error) {
+            android.util.Log.w("VoiceCAP", "failed SMS row delete failed", error);
         }
     }
 

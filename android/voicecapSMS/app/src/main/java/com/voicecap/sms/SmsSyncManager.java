@@ -39,7 +39,7 @@ public final class SmsSyncManager {
             int uploaded = UploadQueue.uploadPending(context, force);
             int queued = sendOutbox(context);
             reportOutboxResults(context, force);
-            return "수신 " + uploaded + "건 업로드, 발송 " + queued + "건 요청";
+            return "문자 " + uploaded + "건 업로드, 웹 발송 " + queued + "건 요청";
         } finally {
             scheduleNextRetry(context);
         }

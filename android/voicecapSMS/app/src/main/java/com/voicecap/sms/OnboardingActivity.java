@@ -82,6 +82,7 @@ public final class OnboardingActivity extends Activity {
         nav.addView(next);
         root.addView(nav);
 
+        Ui.applySystemBarInsets(root);
         setContentView(root);
         if (Build.VERSION.SDK_INT >= 33) {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, () -> {
