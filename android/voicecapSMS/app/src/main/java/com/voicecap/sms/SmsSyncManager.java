@@ -5,6 +5,9 @@ import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 
+import com.voicecap.sms.deposit.DepositSettings;
+import com.voicecap.sms.deposit.PaymentUploader;
+
 import org.json.JSONObject;
 
 public final class SmsSyncManager {
@@ -30,6 +33,10 @@ public final class SmsSyncManager {
             }
             // MMS 다시 받기는 서버 연결·전송 동의와 상관없이 기본 문자앱이면 항상 한다.
             if (defaultApp) MmsDownloads.retryDue(context, force);
+            // 은행 알림 입금은 기본 문자앱·문자 동의와 상관없이, 입금 정보 전송 동의와 기기 연결만 있으면 올린다.
+            if (BridgePreferences.configured(context) && DepositSettings.hasConsent(context)) {
+                PaymentUploader.uploadPending(context, force);
+            }
             if (!BridgePreferences.hasDataTransferConsent(context)) return "문자 정보 전송 동의가 필요합니다.";
             if (!defaultApp) return "기본 SMS 앱으로 설정되어 있지 않아 동기화를 중단했습니다.";
             if (!SmsRoleUtils.hasSmsPermissions(context)) return "SMS/MMS 권한이 없어 동기화를 중단했습니다.";

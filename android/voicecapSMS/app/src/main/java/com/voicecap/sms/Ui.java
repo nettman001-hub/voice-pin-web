@@ -11,23 +11,23 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /** 코드로 만드는 화면(탭·설정·온보딩)이 같이 쓰는 색과 위젯. 기존 SmsBridgeView와 같은 색을 쓴다. */
-final class Ui {
-    static final int BRAND_50 = Color.rgb(240, 247, 255);
-    static final int BRAND_200 = Color.rgb(186, 224, 253);
-    static final int BRAND_500 = Color.rgb(14, 140, 233);
-    static final int BRAND_600 = Color.rgb(2, 111, 199);
-    static final int BRAND_800 = Color.rgb(7, 75, 132);
-    static final int SLATE_50 = Color.rgb(248, 250, 252);
-    static final int SLATE_100 = Color.rgb(241, 245, 249);
-    static final int SLATE_200 = Color.rgb(226, 232, 240);
-    static final int SLATE_400 = Color.rgb(148, 163, 184);
-    static final int SLATE_500 = Color.rgb(100, 116, 139);
-    static final int SLATE_700 = Color.rgb(51, 65, 85);
-    static final int SLATE_900 = Color.rgb(15, 23, 42);
-    static final int EMERALD_500 = Color.rgb(16, 185, 129);
-    static final int AMBER_50 = Color.rgb(255, 251, 235);
-    static final int AMBER_200 = Color.rgb(253, 230, 138);
-    static final int AMBER_800 = Color.rgb(146, 64, 14);
+public final class Ui {
+    public static final int BRAND_50 = Color.rgb(240, 247, 255);
+    public static final int BRAND_200 = Color.rgb(186, 224, 253);
+    public static final int BRAND_500 = Color.rgb(14, 140, 233);
+    public static final int BRAND_600 = Color.rgb(2, 111, 199);
+    public static final int BRAND_800 = Color.rgb(7, 75, 132);
+    public static final int SLATE_50 = Color.rgb(248, 250, 252);
+    public static final int SLATE_100 = Color.rgb(241, 245, 249);
+    public static final int SLATE_200 = Color.rgb(226, 232, 240);
+    public static final int SLATE_400 = Color.rgb(148, 163, 184);
+    public static final int SLATE_500 = Color.rgb(100, 116, 139);
+    public static final int SLATE_700 = Color.rgb(51, 65, 85);
+    public static final int SLATE_900 = Color.rgb(15, 23, 42);
+    public static final int EMERALD_500 = Color.rgb(16, 185, 129);
+    public static final int AMBER_50 = Color.rgb(255, 251, 235);
+    public static final int AMBER_200 = Color.rgb(253, 230, 138);
+    public static final int AMBER_800 = Color.rgb(146, 64, 14);
 
     private Ui() { }
 
@@ -35,7 +35,7 @@ final class Ui {
      * targetSdk 35+는 Android 15부터 화면이 상태 표시줄·내비게이션 바 아래까지 그려진다(edge-to-edge 강제).
      * 루트 뷰에 시스템 바와 키보드 높이만큼 안쪽 여백을 준다. 그보다 낮은 버전은 시스템이 이미 비켜 준다.
      */
-    static void applySystemBarInsets(android.view.View root) {
+    public static void applySystemBarInsets(android.view.View root) {
         if (android.os.Build.VERSION.SDK_INT < 35) return;
         int left = root.getPaddingLeft();
         int top = root.getPaddingTop();
@@ -49,11 +49,11 @@ final class Ui {
         });
     }
 
-    static int dp(Context context, float value) {
+    public static int dp(Context context, float value) {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
     }
 
-    static GradientDrawable roundRect(Context context, int fill, int stroke, float radiusDp) {
+    public static GradientDrawable roundRect(Context context, int fill, int stroke, float radiusDp) {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(fill);
         drawable.setCornerRadius(dp(context, radiusDp));
@@ -61,7 +61,7 @@ final class Ui {
         return drawable;
     }
 
-    static LinearLayout card(Context context) {
+    public static LinearLayout card(Context context) {
         LinearLayout card = new LinearLayout(context);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(context, 18), dp(context, 16), dp(context, 18), dp(context, 16));
@@ -73,13 +73,13 @@ final class Ui {
     }
 
     /** 주의 띠 (노란 배경). */
-    static LinearLayout banner(Context context) {
+    public static LinearLayout banner(Context context) {
         LinearLayout banner = card(context);
         banner.setBackground(roundRect(context, AMBER_50, AMBER_200, 16));
         return banner;
     }
 
-    static TextView title(Context context, String value, float size) {
+    public static TextView title(Context context, String value, float size) {
         TextView text = new TextView(context);
         text.setText(value);
         text.setTextSize(size);
@@ -88,7 +88,7 @@ final class Ui {
         return text;
     }
 
-    static TextView body(Context context, String value) {
+    public static TextView body(Context context, String value) {
         TextView text = new TextView(context);
         text.setText(value);
         text.setTextSize(14);
@@ -98,7 +98,7 @@ final class Ui {
         return text;
     }
 
-    static Button button(Context context, String label, boolean primary) {
+    public static Button button(Context context, String label, boolean primary) {
         Button button = new Button(context);
         button.setText(label);
         button.setAllCaps(false);

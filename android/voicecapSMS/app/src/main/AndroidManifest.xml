@@ -18,6 +18,18 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.front" android:required="false" />
 
+    <!-- 입금확인 탭의 은행 프리셋 설치 확인용. QUERY_ALL_PACKAGES는 쓰지 않는다 (deposit/BankPresets와 함께 고친다). -->
+    <queries>
+        <package android:name="com.kbstar.kbbank" />
+        <package android:name="com.shinhan.sbanking" />
+        <package android:name="com.wooribank.smart.npib" />
+        <package android:name="nh.smart.banking" />
+        <package android:name="com.kakaobank.channel" />
+        <package android:name="viva.republica.toss" />
+        <package android:name="com.ibk.neobanking" />
+        <package android:name="com.kbankwith.smartbank" />
+    </queries>
+
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -64,6 +76,14 @@
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
         </receiver>
+        <!-- 은행 입금 알림 읽기. 사용자가 설정 → 알림 접근에서 직접 켜야 동작한다. 고르지 않은 앱의 알림은 즉시 버린다. -->
+        <service
+            android:name=".deposit.BankNotificationListener"
+            android:label="VoiceCAP 입금확인"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
+        </service>
         <service android:name=".SmsSyncJobService" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="true" />
         <service android:name=".RespondViaMessageService" android:permission="android.permission.SEND_RESPOND_VIA_MESSAGE" android:exported="true">
             <intent-filter><action android:name="android.intent.action.RESPOND_VIA_MESSAGE" /><category android:name="android.intent.category.DEFAULT" /><data android:scheme="sms" /><data android:scheme="smsto" /><data android:scheme="mms" /><data android:scheme="mmsto" /></intent-filter>
