@@ -12,6 +12,7 @@ import java.util.TimeZone;
 final class ConversationLogic {
     /** 폰에서 직접 보낸 문자의 서버 externalId 접두어. 뒤에 문자함(content://sms) id가 붙는다. */
     static final String SENT_PREFIX = "device-sms-sent-";
+    static final String MMS_SENT_PREFIX = "device-mms-sent-";
     /** Phase 0이 쓰던 접두어. LocalDb 업그레이드 때 {@link #SENT_PREFIX}로 바꾼다. */
     static final String LEGACY_SENT_PREFIX = "device-send-";
     /** PR #9 배포 전 서버가 outgoing 액션에 돌려주는 400 오류 문구. */
@@ -24,6 +25,9 @@ final class ConversationLogic {
     private ConversationLogic() { }
 
     static String sentExternalId(String providerId) { return SENT_PREFIX + providerId; }
+
+    /** 폰에서 보낸 MMS: device-mms-sent-&lt;문자함 id&gt;. */
+    static String mmsSentExternalId(String providerId) { return MMS_SENT_PREFIX + providerId; }
 
     /** device-send-123 → device-sms-sent-123. 다른 id는 그대로. */
     static String migrateLegacyExternalId(String externalId) {

@@ -18,6 +18,7 @@ import java.util.List;
 
 public final class BridgeClient {
     public static final int MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+    public static final int MAX_ATTACHMENTS = 8;
 
     public static final class ImageAttachment {
         public final String name;
@@ -70,16 +71,7 @@ public final class BridgeClient {
             payload.put("body", body.isEmpty() ? "(이미지 첨부 문자)" : body);
             payload.put("category", category);
             payload.put("receivedAt", java.time.Instant.ofEpochMilli(receivedAtMillis > 0 ? receivedAtMillis : System.currentTimeMillis()).toString());
-            JSONArray attachments = new JSONArray();
-            for (ImageAttachment image : images) {
-                if (image.bytes.length > MAX_IMAGE_BYTES) continue;
-                JSONObject attachment = new JSONObject();
-                attachment.put("fileName", image.name);
-                attachment.put("mimeType", image.mimeType);
-                attachment.put("dataUrl", "data:" + image.mimeType + ";base64," + Base64.encodeToString(image.bytes, Base64.NO_WRAP));
-                attachments.put(attachment);
-            }
-            payload.put("attachments", attachments);
+            payload.put("attachments", attachments(images));
             int[] code = new int[1];
             JSONObject response = requestText(context, true, "sms-bridge", payload, code);
             return classify(response, code[0]);
@@ -94,13 +86,20 @@ public final class BridgeClient {
      */
     public static ReportResult postOutgoing(Context context, String externalId, String phoneNumber, String body,
                                             long sentAtMillis, String status, String error) {
+        return postOutgoing(context, externalId, phoneNumber, body, sentAtMillis, status, error, new ArrayList<>());
+    }
+
+    /** 사진 문자(MMS)는 받은 MMS와 같은 base64 첨부 형식(최대 4MB×8)으로 함께 올린다. 글이 없으면 자리 문구를 넣는다. */
+    public static ReportResult postOutgoing(Context context, String externalId, String phoneNumber, String body,
+                                            long sentAtMillis, String status, String error, List<ImageAttachment> images) {
         if (!BridgePreferences.configured(context)) return ReportResult.RETRY;
         try {
             JSONObject payload = new JSONObject();
             payload.put("action", "outgoing");
             payload.put("externalId", externalId);
             payload.put("phoneNumber", phoneNumber);
-            payload.put("body", body);
+            payload.put("body", body.isEmpty() ? "(이미지 첨부 문자)" : body);
+            if (!images.isEmpty()) payload.put("attachments", attachments(images));
             payload.put("sentAt", java.time.Instant.ofEpochMilli(sentAtMillis > 0 ? sentAtMillis : System.currentTimeMillis()).toString());
             payload.put("status", "FAILED".equals(status) ? "FAILED" : "SENT");
             if ("FAILED".equals(status) && error != null && !error.isEmpty()) {
@@ -113,6 +112,20 @@ public final class BridgeClient {
         } catch (Exception ignored) {
             return ReportResult.RETRY;
         }
+    }
+
+    /** 서버 첨부 규격: 최대 8개, 한 장 4MB 이하, data URL(base64). 넘는 것은 뺀다. */
+    private static JSONArray attachments(List<ImageAttachment> images) throws Exception {
+        JSONArray attachments = new JSONArray();
+        for (ImageAttachment image : images) {
+            if (image.bytes.length > MAX_IMAGE_BYTES || attachments.length() >= MAX_ATTACHMENTS) continue;
+            JSONObject attachment = new JSONObject();
+            attachment.put("fileName", image.name);
+            attachment.put("mimeType", image.mimeType);
+            attachment.put("dataUrl", "data:" + image.mimeType + ";base64," + Base64.encodeToString(image.bytes, Base64.NO_WRAP));
+            attachments.put(attachment);
+        }
+        return attachments;
     }
 
     /** payment-incoming 결과. matchStatus는 서버가 대조 결과를 돌려줄 때만 (MATCHED / NEEDS_REVIEW / UNMATCHED). */

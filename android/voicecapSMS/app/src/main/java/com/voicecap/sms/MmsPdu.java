@@ -11,9 +11,12 @@ import java.util.Map;
 /**
  * 기본 문자앱이 직접 처리해야 하는 MMS PDU(OMA-MMS-ENC / WAP-230-WSP)의 최소 파서·조립기.
  * Android 프레임워크에 공개 API가 없어 수신 알림(m-notification-ind), 수신 본문(m-retrieve-conf),
- * 수신 확인(m-notifyresp-ind)만 다룬다. 안드로이드 의존성이 없어 JVM 단위 테스트로 검증한다.
+ * 수신 확인(m-notifyresp-ind), 발송 결과(m-send-conf)를 다룬다. 보내는 m-send-req 조립은 AOSP에서 이식한
+ * {@code com.voicecap.sms.pdu.PduComposer}가 한다. 안드로이드 의존성이 없어 JVM 단위 테스트로 검증한다.
  */
 public final class MmsPdu {
+    public static final int TYPE_SEND_REQ = 0x80;
+    public static final int TYPE_SEND_CONF = 0x81;
     public static final int TYPE_NOTIFICATION_IND = 0x82;
     public static final int TYPE_NOTIFYRESP_IND = 0x83;
     public static final int TYPE_RETRIEVE_CONF = 0x84;
@@ -21,11 +24,14 @@ public final class MmsPdu {
     static final int H_BCC = 0x81, H_CC = 0x82, H_CONTENT_LOCATION = 0x83, H_CONTENT_TYPE = 0x84,
             H_DATE = 0x85, H_EXPIRY = 0x88, H_FROM = 0x89, H_MESSAGE_ID = 0x8B, H_MESSAGE_TYPE = 0x8C,
             H_MMS_VERSION = 0x8D, H_MESSAGE_SIZE = 0x8E, H_STATUS = 0x95, H_SUBJECT = 0x96, H_TO = 0x97,
-            H_TRANSACTION_ID = 0x98, H_RETRIEVE_STATUS = 0x99;
+            H_TRANSACTION_ID = 0x98, H_RETRIEVE_STATUS = 0x99, H_RESPONSE_STATUS = 0x92;
 
     static final int STATUS_RETRIEVED = 0x81;
     /** X-Mms-Retrieve-Status: Ok. 헤더가 없으면 성공으로 본다. */
     public static final int RETRIEVE_STATUS_OK = 0x80;
+
+    /** X-Mms-Response-Status: Ok. */
+    public static final int RESPONSE_STATUS_OK = 0x80;
 
     /** 받은 retrieve.conf의 결과: 저장 / 나중에 다시 받기 / 포기. */
     public enum RetrieveOutcome { OK, RETRY, DROP }
@@ -124,6 +130,15 @@ public final class MmsPdu {
         }
     }
 
+    /** MMSC가 돌려준 m-send-conf (sendMultimediaMessage 결과의 EXTRA_MMS_DATA). */
+    public static final class SendConf {
+        public int responseStatus = RESPONSE_STATUS_OK;
+        public String messageId = "";
+        public String transactionId = "";
+
+        public boolean ok() { return responseStatus == RESPONSE_STATUS_OK; }
+    }
+
     private MmsPdu() { }
 
     /** 한국어(KS_C_5601·EUC-KR)는 확장 완성형까지 읽는 CP949로 먼저 읽고, 없으면 EUC-KR로 읽는다. */
@@ -203,6 +218,38 @@ public final class MmsPdu {
 
     /** 다운로드한 m-retrieve-conf를 해석한다. 형식이 다르면 null. */
     public static RetrieveConf parseRetrieveConf(byte[] pdu) {
+        return parseMessage(pdu, TYPE_RETRIEVE_CONF);
+    }
+
+    /** 조립한 m-send-req를 다시 읽는다 (헤더 + 멀티파트 본문 모양이 retrieve.conf와 같다). 형식이 다르면 null. */
+    public static RetrieveConf parseSendReq(byte[] pdu) {
+        return parseMessage(pdu, TYPE_SEND_REQ);
+    }
+
+    /** m-send-conf를 해석한다. 형식이 다르면 null. */
+    public static SendConf parseSendConf(byte[] pdu) {
+        if (pdu == null) return null;
+        try {
+            Reader in = new Reader(pdu);
+            SendConf conf = new SendConf();
+            int type = -1;
+            while (in.hasMore()) {
+                int field = in.u8();
+                switch (field) {
+                    case H_MESSAGE_TYPE: type = in.u8(); break;
+                    case H_TRANSACTION_ID: conf.transactionId = in.textString(); break;
+                    case H_MESSAGE_ID: conf.messageId = in.textString(); break;
+                    case H_RESPONSE_STATUS: conf.responseStatus = in.u8(); break;
+                    default: in.skipValue(field); break;
+                }
+            }
+            return type == TYPE_SEND_CONF ? conf : null;
+        } catch (RuntimeException malformed) {
+            return null;
+        }
+    }
+
+    private static RetrieveConf parseMessage(byte[] pdu, int expectedType) {
         if (pdu == null) return null;
         try {
             Reader in = new Reader(pdu);
@@ -237,7 +284,7 @@ public final class MmsPdu {
                     default: in.skipValue(field); break;
                 }
             }
-            if (type != TYPE_RETRIEVE_CONF) return null;
+            if (type != expectedType) return null;
             return conf;
         } catch (RuntimeException malformed) {
             return null;

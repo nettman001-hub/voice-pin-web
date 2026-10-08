@@ -7,7 +7,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** 은행 알림 글자 → 입금 한 건. 그 패키지 규칙에 맞지 않으면 아무것도 만들지 않는다 (범용 폴백 없음). */
+/** 은행 알림·은행 SMS 글자 → 입금 한 건. 그 패키지(발신번호) 규칙에 맞지 않으면 아무것도 만들지 않는다 (범용 폴백 없음). */
 public final class DepositParser {
     /** 입금자명을 뽑지 못한 경우 서버로 보내는 값 (payment_receipts.payer_name NOT NULL). */
     public static final String UNKNOWN_PAYER = "미확인";
@@ -84,7 +84,18 @@ public final class DepositParser {
     }
 
     public Result parse(String packageName, String text, long postTime) {
-        List<BankRules.Rule> candidates = rules.forPackage(packageName);
+        return match(rules.forPackage(packageName), text, postTime);
+    }
+
+    /**
+     * 은행 SMS 입금 문자 (설계 4.5). 발신번호가 SMS 규칙의 senders에 있을 때만 그 규칙으로 읽는다.
+     * 결과 Deposit의 packageName은 "sms:&lt;규칙 id&gt;".
+     */
+    public Result parseSms(String sender, String body, long sentAt) {
+        return match(rules.forSender(BankSmsDepositDetector.normalizeSender(sender)), body == null ? "" : body, sentAt);
+    }
+
+    private Result match(List<BankRules.Rule> candidates, String text, long postTime) {
         if (candidates.isEmpty()) return new Result(null, Failure.NO_RULE);
         Failure failure = Failure.NO_MATCH;
         for (BankRules.Rule rule : candidates) {
@@ -101,7 +112,7 @@ public final class DepositParser {
                 String payer = cleanPayer(group(matcher, "payer"));
                 Long balance = number(group(matcher, "balance"));
                 String receiver = cleanReceiver(group(matcher, "receiverFrom"));
-                return new Result(new Deposit(packageName, rule.bank, amount, payer, balance, receiver, postTime, rule.verified), null);
+                return new Result(new Deposit(rule.packageName, rule.bank, amount, payer, balance, receiver, postTime, rule.verified), null);
             }
         }
         return new Result(null, failure);

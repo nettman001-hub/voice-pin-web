@@ -89,6 +89,70 @@ public final class MmsStore {
         return messageUri;
     }
 
+    /**
+     * 보낼 MMS를 보낸편지함(msg_box=OUTBOX)에 먼저 기록한다. 결과는 {@link SmsSentReceiver}가 SENT/FAILED로 바꾼다.
+     * 기본 문자앱이 아니거나 제조사 문자함이 거절하면 예외: 호출한 쪽이 "기록하지 못함"을 화면에 알린다.
+     */
+    public static Uri insertOutbox(Context context, MmsOutgoing message, String transactionId, int subId, long nowMillis) throws Exception {
+        long threadId = Telephony.Threads.getOrCreateThreadId(context, message.to);
+        long nowSeconds = nowMillis / 1000L;
+        ContentValues values = new ContentValues();
+        values.put(Telephony.Mms.THREAD_ID, threadId);
+        values.put(Telephony.Mms.DATE, nowSeconds);
+        values.put(Telephony.Mms.DATE_SENT, nowSeconds);
+        values.put(Telephony.Mms.MESSAGE_BOX, Telephony.Mms.MESSAGE_BOX_OUTBOX);
+        values.put(Telephony.Mms.READ, 1);
+        values.put(Telephony.Mms.SEEN, 1);
+        values.put(Telephony.Mms.MESSAGE_TYPE, MmsPdu.TYPE_SEND_REQ);
+        values.put(Telephony.Mms.MMS_VERSION, MmsPdu.MMS_VERSION_1_2 & 0x7F);
+        values.put(Telephony.Mms.CONTENT_TYPE, MmsOutgoing.MESSAGE_CONTENT_TYPE);
+        values.put(Telephony.Mms.TRANSACTION_ID, transactionId);
+        values.put(Telephony.Mms.MESSAGE_CLASS, "personal");
+        values.put(Telephony.Mms.EXPIRY, MmsOutgoing.EXPIRY_SECONDS);
+        values.put(Telephony.Mms.PRIORITY, 0x81);
+        values.put(Telephony.Mms.DELIVERY_REPORT, 0x81);
+        values.put(Telephony.Mms.READ_REPORT, 0x81);
+        if (subId >= 0) values.put(Telephony.Mms.SUBSCRIPTION_ID, subId);
+        Uri messageUri = context.getContentResolver().insert(Telephony.Mms.Outbox.CONTENT_URI, values);
+        if (messageUri == null) throw new IllegalStateException("MMS outbox insert failed");
+        long messageId = ContentUris.parseId(messageUri);
+        try {
+            Uri addrUri = Uri.parse("content://mms/" + messageId + "/addr");
+            insertAddress(context, addrUri, "insert-address-token", ADDRESS_FROM);
+            insertAddress(context, addrUri, message.to, ADDRESS_TO);
+
+            Uri partsUri = Uri.parse("content://mms/" + messageId + "/part");
+            int seq = 0;
+            for (MmsOutgoing.Part part : message.parts) {
+                ContentValues partValues = new ContentValues();
+                partValues.put(Telephony.Mms.Part.MSG_ID, messageId);
+                partValues.put(Telephony.Mms.Part.SEQ, MmsOutgoing.SMIL_TYPE.equals(part.contentType) ? -1 : seq++);
+                partValues.put(Telephony.Mms.Part.CONTENT_TYPE, part.contentType);
+                partValues.put(Telephony.Mms.Part.CONTENT_ID, "<" + part.contentId + ">");
+                partValues.put(Telephony.Mms.Part.CONTENT_LOCATION, part.contentLocation);
+                if (part.isText()) {
+                    partValues.put(Telephony.Mms.Part.CHARSET, CHARSET_UTF8);
+                    partValues.put(Telephony.Mms.Part.TEXT, part.text());
+                    context.getContentResolver().insert(partsUri, partValues);
+                } else {
+                    Uri partUri = context.getContentResolver().insert(partsUri, partValues);
+                    if (partUri == null) throw new IllegalStateException("MMS part insert failed");
+                    try (OutputStream output = context.getContentResolver().openOutputStream(partUri)) {
+                        if (output == null) throw new IllegalStateException("MMS part write failed");
+                        output.write(part.data);
+                    }
+                }
+            }
+        } catch (Exception error) {
+            // 반쯤 기록된 행(사진 없는 빈 말풍선)을 남기지 않는다.
+            try {
+                context.getContentResolver().delete(messageUri, null, null);
+            } catch (RuntimeException ignored) { }
+            throw error;
+        }
+        return messageUri;
+    }
+
     private static void insertAddress(Context context, Uri addrUri, String address, int type) {
         if (address == null || address.isEmpty()) return;
         ContentValues values = new ContentValues();
