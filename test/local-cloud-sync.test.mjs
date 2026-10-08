@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 import * as voiceSaleValidation from '../src/services/voiceSaleValidation.ts';
+import * as paymentMatching from '../src/services/paymentMatching.ts';
 import * as priceEvidence from '../src/services/priceEvidence.ts';
 import * as salesExtractor from '../src/services/salesExtractor.ts';
 import * as purchaseFirstSales from '../src/services/purchaseFirstSales.ts';
@@ -531,7 +532,7 @@ test('normal UUID voice sale evidence reaches the atomic commit and retains its 
 function voiceRemoteFixture(invoke) {
   return load('../src/services/remoteWorkspaceService.ts', {
     './supabaseClient': { isSupabaseConfigured: true, requireSupabase: () => ({ functions: { invoke } }) },
-    './commerceChanges': {}, './sttVocabularyService': {}, './voiceSaleValidation': voiceSaleValidation,
+    './commerceChanges': {}, './sttVocabularyService': {}, './voiceSaleValidation': voiceSaleValidation, './paymentMatching': paymentMatching,
   }).remoteWorkspaceService;
 }
 
@@ -991,7 +992,7 @@ test('bootstrap sale loading paginates beyond the PostgREST row cap', async () =
   const { remoteWorkspaceService } = load('../src/services/remoteWorkspaceService.ts', {
     './supabaseClient': { isSupabaseConfigured: true, requireSupabase: () => client }, './commerceChanges': {},
     './sttVocabularyService': { normalizeSttVocabulary: (words) => words },
-    './voiceSaleValidation': voiceSaleValidation,
+    './voiceSaleValidation': voiceSaleValidation, './paymentMatching': paymentMatching,
   });
   const loaded = await remoteWorkspaceService.loadSales('workspace-1');
   assert.equal(loaded.length, 1001);

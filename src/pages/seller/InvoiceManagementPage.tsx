@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Check, CreditCard, FileText, RefreshCw, Send, Smartphone, WalletCards, Layers } from 'lucide-react';
+import { Check, CreditCard, FileText, RefreshCw, Send, Smartphone, Layers } from 'lucide-react';
 import { useSales } from '../../context/SalesContext';
 import { useCommerce } from '../../context/CommerceContext';
 import { useAuth } from '../../context/AuthContext';
 import { productSalesApi } from '../../services/productSalesApi';
 import { LiveSession } from '../../types/productSales';
 import { formatSessionDisplay } from '../../utils/sessionFormatter';
+import { PaymentReconciliationPanel } from '../../components/seller/PaymentReconciliationPanel';
 
 const invoiceStatusLabel = {
   DRAFT: '작성중',
@@ -25,12 +26,15 @@ export const InvoiceManagementPage: React.FC = () => {
     payments,
     bridgeStatus,
     bridgeMessage,
+    phonePush,
     syncBridge,
     getClaimForSales,
     isPaid,
     createInvoice,
     sendInvoice,
-    cancelInvoice
+    cancelInvoice,
+    confirmPayment,
+    dismissPayment
   } = useCommerce();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -253,7 +257,7 @@ export const InvoiceManagementPage: React.FC = () => {
           {filteredInvoices.length === 0 ? <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">선택된 회차에 생성된 정산서가 없습니다.</p> : filteredInvoices.map((invoice) => (
             <article key={invoice.id} className="rounded-xl border border-slate-200 p-3">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div><div className="flex items-center gap-2"><strong className="text-xs font-bold text-slate-900">{invoice.customerNickname}</strong><span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{invoiceStatusLabel[invoice.status]}</span></div><p className="mt-0.5 text-[10px] text-slate-500">{invoice.phoneNumber} · 기한 {invoice.dueDate}</p></div>
+                <div><div className="flex items-center gap-2"><strong className="text-xs font-bold text-slate-900">{invoice.customerNickname}</strong><span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{invoiceStatusLabel[invoice.status]}</span>{invoice.depositCode && <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700" title="고객이 입금자명에 적으면 자동 확정됩니다">입금코드 {invoice.depositCode}</span>}</div><p className="mt-0.5 text-[10px] text-slate-500">{invoice.phoneNumber} · 기한 {invoice.dueDate}</p></div>
                 <strong className="text-sm font-black text-brand-700">{invoice.amount.toLocaleString()}원</strong>
               </div>
               <div className="mt-2 flex flex-wrap items-center justify-end gap-1.5">
@@ -291,14 +295,14 @@ export const InvoiceManagementPage: React.FC = () => {
             {isRemoteAuth ? bridgeMessage : '수파베이스 설정 후 사용 가능'}
           </span>
         </div>
+        {isRemoteAuth && phonePush === 'DELAYED' && (
+          <p className="mt-1.5 rounded-lg bg-amber-50 px-2 py-1 text-[10px] text-amber-800">
+            휴대폰에 즉시 발송 알림을 보내지 못했습니다. 휴대폰 앱이 문자를 가져갈 때까지 최대 15분 늦어질 수 있습니다.
+          </p>
+        )}
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-2.5 sm:p-3 shadow-sm">
-        <div className="mb-2 flex items-center justify-between"><h2 className="flex items-center gap-1.5 text-xs sm:text-sm font-black text-slate-900"><WalletCards className="h-4 w-4 text-emerald-600" /> 입금 대조</h2><span className="text-[10px] text-slate-500">스마트폰 입금 감지 앱 연동용 API 준비 완료</span></div>
-        {payments.length === 0 ? <p className="rounded-xl bg-slate-50 p-4 text-center text-xs text-slate-400">수신된 입금내역이 없습니다. 추후 입금 감지 앱이 전달하면 자동 대조됩니다.</p> : payments.map((payment) => (
-          <div key={payment.id} className="mb-1.5 flex items-center justify-between rounded-xl border border-slate-200 p-2 text-xs"><span><strong>{payment.payerName}</strong> · {new Date(payment.paidAt).toLocaleString('ko-KR')}</span><span className="font-black text-emerald-700">{payment.amount.toLocaleString()}원 · {payment.matchStatus === 'MATCHED' ? '입금완료' : '확인필요'}</span></div>
-        ))}
-      </section>
+      <PaymentReconciliationPanel payments={payments} invoices={invoices} onConfirm={confirmPayment} onDismiss={dismissPayment} />
     </div>
   );
 };

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 import * as voiceSaleValidation from '../src/services/voiceSaleValidation.ts';
+import * as paymentMatching from '../src/services/paymentMatching.ts';
 
 // Execute the application modules with a local Supabase stub; never connect to
 // the real database or browser storage during these persistence checks.
@@ -95,7 +96,7 @@ function remoteService(client) {
     './supabaseClient': { isSupabaseConfigured: true, requireSupabase: () => client },
     './commerceChanges': changesModule,
     './sttVocabularyService': { normalizeSttVocabulary: (words) => words },
-    './voiceSaleValidation': voiceSaleValidation,
+    './voiceSaleValidation': voiceSaleValidation, './paymentMatching': paymentMatching,
   }).remoteWorkspaceService;
 }
 
@@ -204,7 +205,7 @@ test('failed database writes still reject instead of reporting successful persis
     (error) => error.message === 'write failed');
 });
 
-function readyProvider(initial, save = async () => {}) {
+function readyProvider(initial, save = async () => {}, notifyOutbox = async () => ({ pushed: 1, devices: 1, configured: true })) {
   const localSaves = [];
   const stateUpdates = [];
   let stateIndex = 0;
@@ -238,8 +239,8 @@ function readyProvider(initial, save = async () => {}) {
     '../services/storageService': { storageService: {
       getCommerceState: () => initial, saveCommerceState: (state) => localSaves.push(state),
     } },
-    '../services/remoteWorkspaceService': { remoteWorkspaceService: { saveCommerceChanges: save } },
-    '../services/commerceChanges': changesModule,
+    '../services/remoteWorkspaceService': { remoteWorkspaceService: { saveCommerceChanges: save, notifyOutbox } },
+    '../services/commerceChanges': changesModule, '../services/paymentMatching': paymentMatching,
   });
   const value = CommerceProvider({ children: null }).props.value;
   return { value, localSaves, stateUpdates };
@@ -303,4 +304,24 @@ test('sending an invoice persists the message before updating its invoice refere
   assert.equal(remoteSaves[1].invoices[0].smsMessageId, queuedMessage.id);
   assert.equal(remoteSaves[1].invoices[0].status, 'QUEUED');
   assert.equal(remoteSaves[1].messages.length, 0);
+});
+
+test('queued outgoing SMS wakes the phone only after the message is saved', async () => {
+  const events = [];
+  const { value } = readyProvider(
+    populatedState(),
+    async (_workspace, changes) => events.push(changes.messages.length ? 'save-message' : 'save-other'),
+    async (workspace) => { events.push(`notify:${workspace}`); return { pushed: 1, devices: 1, configured: true }; },
+  );
+  await value.sendInvoice('invoice-1');
+  await new Promise(setImmediate);
+  assert.deepEqual(events, ['save-message', 'notify:workspace-1', 'save-other']);
+});
+
+test('changes without a queued outgoing SMS do not wake the phone', async () => {
+  const notified = [];
+  const { value } = readyProvider(populatedState(), async () => {}, async (workspace) => { notified.push(workspace); return { pushed: 0 }; });
+  value.setVerified(['sale-3'], true);
+  await new Promise(setImmediate);
+  assert.deepEqual(notified, []);
 });

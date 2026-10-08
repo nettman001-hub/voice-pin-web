@@ -6,6 +6,7 @@ import { smsBridgeService } from '../services/smsBridgeService';
 import { storageService } from '../services/storageService';
 import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
 import { areCommerceValuesEqual, getCommerceChanges, hasCommerceChanges } from '../services/commerceChanges';
+import { confirmPaymentInvoices, generateDepositCode, matchPayment } from '../services/paymentMatching';
 import {
   CommerceState,
   CustomerPurchaseClaim,
@@ -18,11 +19,14 @@ import {
 } from '../types/commerce';
 
 type BridgeStatus = 'CHECKING' | 'ONLINE' | 'OFFLINE';
+/** 마지막 웹 발송 때 휴대폰을 즉시 깨웠는지. DELAYED면 휴대폰 주기 확인(최대 15분)을 기다린다. */
+type PhonePushStatus = 'UNKNOWN' | 'INSTANT' | 'DELAYED';
 
 interface CommerceContextType extends CommerceState {
   bridgeConfig: SmsBridgeConfig;
   bridgeStatus: BridgeStatus;
   bridgeMessage: string;
+  phonePush: PhonePushStatus;
   saveBridgeConfig: (config: SmsBridgeConfig) => void;
   syncBridge: () => Promise<boolean>;
   getClaimForSales: (saleIds: string[]) => CustomerPurchaseClaim | undefined;
@@ -35,6 +39,10 @@ interface CommerceContextType extends CommerceState {
   createInvoice: (invoice: Omit<SettlementInvoice, 'id' | 'createdAt' | 'status'>) => SettlementInvoice;
   sendInvoice: (invoiceId: string) => Promise<SmsMessage | null>;
   cancelInvoice: (invoiceId: string) => void;
+  /** 확인 필요·미확인 입금을 판매자가 정산서(합산이면 여러 건)에 연결한다. */
+  confirmPayment: (paymentId: string, invoiceIds: string[]) => Promise<void>;
+  /** 판매와 관계없는 입금으로 표시한다(후보 해제). */
+  dismissPayment: (paymentId: string) => void;
   createShipmentsForSales: (saleIds: string[]) => Shipment[];
   updateShipment: (shipment: Shipment) => void;
   sendShippingNotice: (shipmentId: string) => Promise<SmsMessage | null>;
@@ -42,7 +50,6 @@ interface CommerceContextType extends CommerceState {
 
 const CommerceContext = createContext<CommerceContextType | undefined>(undefined);
 
-const normalize = (value: string) => value.replace(/\s+/g, '').replace(/님$/u, '').toLowerCase();
 const normalizePhone = (value: string) => {
   const compact = value.replace(/[^0-9+]/g, '');
   if (compact.startsWith('+82')) return `0${compact.slice(3)}`;
@@ -50,6 +57,20 @@ const normalizePhone = (value: string) => {
   return compact.replace(/\D/g, '');
 };
 const intersects = (left: string[], right: string[]) => left.some((id) => right.includes(id));
+
+// 옛 브리지 모드 전용. 클라우드 모드에서는 sms-bridge 서버가 입금 저장 즉시 같은 규칙으로 대조한다.
+const matchPayments = (payments: PaymentReceipt[], invoices: SettlementInvoice[]): PaymentReceipt[] =>
+  payments.map((payment) => {
+    if (payment.matchStatus === 'MATCHED') return payment;
+    const result = matchPayment(payment, invoices);
+    return {
+      ...payment,
+      matchStatus: result.status,
+      invoiceId: result.invoiceId,
+      saleIds: result.saleIds,
+      candidateIds: result.candidateIds,
+    };
+  });
 
 const mergeById = <T extends { id: string }>(local: T[], remote: T[]): T[] => {
   const map = new Map(local.map((item) => [item.id, { ...item }]));
@@ -67,6 +88,7 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>('CHECKING');
   const [bridgeMessage, setBridgeMessage] = useState('연동 서버 확인 중');
   const [remoteReady, setRemoteReady] = useState(false);
+  const [phonePush, setPhonePush] = useState<PhonePushStatus>('UNKNOWN');
   const stateRef = useRef(state);
   const remoteSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const currentWorkspaceRef = useRef<string | null>(null);
@@ -95,6 +117,13 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         .then(async () => {
           if (currentWorkspaceRef.current !== workspaceId) return;
           await remoteWorkspaceService.saveCommerceChanges(workspaceId, changes);
+          if (changes.messages.some((message) => message.direction === 'OUTGOING' && message.status === 'QUEUED')) {
+            void remoteWorkspaceService.notifyOutbox(workspaceId)
+              .then((result) => {
+                if (currentWorkspaceRef.current === workspaceId) setPhonePush(result.pushed > 0 ? 'INSTANT' : 'DELAYED');
+              })
+              .catch((error) => console.warn('[Commerce] phone push failed', error));
+          }
         })
         .catch((error) => {
           console.error('[Commerce] remote save failed', error);
@@ -165,20 +194,6 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   }, [sales, commit]);
 
-  const matchPayments = useCallback((payments: PaymentReceipt[]): PaymentReceipt[] => {
-    return payments.map((payment) => {
-      if (payment.saleIds.length > 0 && payment.matchStatus === 'MATCHED') return payment;
-      const candidates = sales.filter(
-        (sale) => sale.status !== '보류' && sale.status !== '취소' && sale.syncStatus !== 'PENDING'
-          && normalize(sale.buyerNickname) === normalize(payment.payerName) && sale.amount === payment.amount
-      );
-      if (candidates.length === 1) {
-        return { ...payment, saleIds: [candidates[0].id], matchStatus: 'MATCHED' };
-      }
-      return { ...payment, matchStatus: candidates.length > 1 ? 'NEEDS_REVIEW' : 'UNMATCHED' };
-    });
-  }, [sales]);
-
   const syncBridge = useCallback(async () => {
     setBridgeStatus('CHECKING');
     setBridgeMessage(isRemoteAuth ? 'VoiceCAP 클라우드 동기화 중' : 'voicecapSMS 연동 확인 중');
@@ -228,7 +243,7 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (linkedSaleIds) message.saleIds = linkedSaleIds;
         });
 
-        const payments = matchPayments(mergeById(previous.payments, remotePayments));
+        const payments = matchPayments(mergeById(previous.payments, remotePayments), previous.invoices);
         const paidInvoiceIds = new Set(payments.filter((payment) => payment.matchStatus === 'MATCHED').map((p) => p.invoiceId).filter(Boolean));
         const invoices = previous.invoices.map((invoice) =>
           paidInvoiceIds.has(invoice.id) ? { ...invoice, status: 'PAID' as const } : invoice
@@ -243,7 +258,7 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setBridgeMessage(error instanceof Error ? error.message : '연동 서버에 연결할 수 없습니다.');
       return false;
     }
-  }, [applyRemoteState, bridgeConfig, commit, isRemoteAuth, matchPayments, sales, workspaceId]);
+  }, [applyRemoteState, bridgeConfig, commit, isRemoteAuth, sales, workspaceId]);
 
   useEffect(() => {
     void syncBridge();
@@ -347,10 +362,14 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const createInvoice = (input: Omit<SettlementInvoice, 'id' | 'createdAt' | 'status'>) => {
+    const openCodes = stateRef.current.invoices
+      .filter((invoice) => invoice.depositCode && !['PAID', 'CANCELLED'].includes(invoice.status))
+      .map((invoice) => invoice.depositCode as string);
     const invoice: SettlementInvoice = {
       ...input,
       id: `invoice-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       status: 'DRAFT',
+      depositCode: input.depositCode || generateDepositCode(openCodes),
       createdAt: new Date().toISOString()
     };
     commit((previous) => ({ ...previous, invoices: [invoice, ...previous.invoices] }));
@@ -366,7 +385,9 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       `청구금액: ${invoice.amount.toLocaleString()}원`,
       `입금계좌: ${invoice.bankAccount}`,
       `입금기한: ${invoice.dueDate}`,
-      '입금 후 이 문자로 회신해 주세요.'
+      invoice.depositCode
+        ? `입금자명을 "${invoice.customerNickname}" 또는 "${invoice.depositCode}"로 적어 주세요.`
+        : `입금자명을 "${invoice.customerNickname}"로 적어 주세요.`
     ].join('\n');
     const message = await sendSms(invoice.phoneNumber, body, 'INVOICE', invoice.saleIds);
     commit((previous) => ({
@@ -387,6 +408,41 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     commit((previous) => ({
       ...previous,
       invoices: previous.invoices.map((invoice) => invoice.id === invoiceId ? { ...invoice, status: 'CANCELLED' } : invoice)
+    }));
+  };
+
+  const confirmPayment = async (paymentId: string, invoiceIds: string[]) => {
+    const current = stateRef.current;
+    const payment = current.payments.find((item) => item.id === paymentId);
+    const invoices = invoiceIds
+      .map((id) => current.invoices.find((invoice) => invoice.id === id))
+      .filter((invoice): invoice is SettlementInvoice => Boolean(invoice));
+    if (!payment || invoices.length === 0) return;
+    const confirmed = confirmPaymentInvoices(invoices);
+    const paidIds = new Set(invoices.map((invoice) => invoice.id));
+    commit((previous) => ({
+      ...previous,
+      payments: previous.payments.map((item) => item.id === paymentId
+        ? { ...item, matchStatus: 'MATCHED', invoiceId: confirmed.invoiceId, saleIds: confirmed.saleIds, candidateIds: [] }
+        : item),
+      invoices: previous.invoices.map((invoice) => paidIds.has(invoice.id) ? { ...invoice, status: 'PAID' } : invoice)
+    }));
+    const nicknames = new Set(invoices.map((invoice) => invoice.customerNickname));
+    if (isRemoteAuth && workspaceId && nicknames.size === 1) {
+      try {
+        await remoteWorkspaceService.saveDepositorAlias(workspaceId, payment.payerName, invoices[0].customerNickname);
+      } catch (error) {
+        console.warn('[Commerce] 입금자명 별칭 저장 실패:', error);
+      }
+    }
+  };
+
+  const dismissPayment = (paymentId: string) => {
+    commit((previous) => ({
+      ...previous,
+      payments: previous.payments.map((item) => item.id === paymentId && item.matchStatus !== 'MATCHED'
+        ? { ...item, matchStatus: 'UNMATCHED', candidateIds: [] }
+        : item)
     }));
   };
 
@@ -454,6 +510,7 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     bridgeConfig,
     bridgeStatus,
     bridgeMessage,
+    phonePush,
     saveBridgeConfig,
     syncBridge,
     getClaimForSales,
@@ -466,10 +523,12 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     createInvoice,
     sendInvoice,
     cancelInvoice,
+    confirmPayment,
+    dismissPayment,
     createShipmentsForSales,
     updateShipment,
     sendShippingNotice
-  }), [state, bridgeConfig, bridgeStatus, bridgeMessage, syncBridge, getClaimForSales, getMessagesForSales, isVerified, isPaid]);
+  }), [state, bridgeConfig, bridgeStatus, bridgeMessage, phonePush, syncBridge, getClaimForSales, getMessagesForSales, isVerified, isPaid]);
 
   return <CommerceContext.Provider value={value}>{children}</CommerceContext.Provider>;
 };
