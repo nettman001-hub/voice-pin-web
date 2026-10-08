@@ -37,6 +37,7 @@ public final class MainActivity extends Activity {
     private static final int ROLE_REQUEST = 902;
     private static final int CAMERA_PERMISSION_REQUEST = 903;
     private static final int NOTIFICATION_PERMISSION_REQUEST = 904;
+    private static final int CONTACTS_PERMISSION_REQUEST = 905;
     private static final String STATE_SELECTED_TAB = "state_selected_tab";
 
     private FrameLayout contentContainer;
@@ -67,9 +68,34 @@ public final class MainActivity extends Activity {
         if (state != null) currentTab = state.getInt(STATE_SELECTED_TAB, TAB_SMS);
         if (currentTab == TAB_SALES && !BuildConfig.SALES_TAB_ENABLED) currentTab = TAB_SMS;
 
-        setContentView(buildRootLayout());
+        View root = buildRootLayout();
+        Ui.applySystemBarInsets(root);
+        setContentView(root);
         selectTab(currentTab);
         SyncScheduler.schedule(getApplicationContext());
+        if (state == null) openComposeFromIntent(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        openComposeFromIntent(intent);
+    }
+
+    /** 다른 앱의 "문자 보내기"(sms:/smsto: 링크)는 받는 사람·내용을 채운 새 문자 화면으로 연다. */
+    private void openComposeFromIntent(Intent intent) {
+        if (intent == null || !Intent.ACTION_SENDTO.equals(intent.getAction()) || intent.getData() == null) return;
+        String part = intent.getData().getSchemeSpecificPart();
+        if (part == null) return;
+        int query = part.indexOf('?');
+        String recipients = query >= 0 ? part.substring(0, query) : part;
+        String body = intent.getStringExtra("sms_body");
+        if (body == null) body = intent.getStringExtra(Intent.EXTRA_TEXT);
+        if (body == null && query >= 0) {
+            String bodyParam = android.net.Uri.parse("sms:?" + part.substring(query + 1)).getQueryParameter("body");
+            if (bodyParam != null) body = bodyParam;
+        }
+        startActivity(ComposeActivity.intent(this, recipients, body));
     }
 
     @Override
@@ -91,6 +117,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        if (smsHomeView != null) smsHomeView.stop();
         if (productSalesView != null) productSalesView.stop();
     }
 
@@ -214,6 +241,11 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /** 대화 목록에 연락처 이름을 보여 주기 위한 선택 권한. 거절해도 번호로 보여 준다. */
+    void requestContactsPermission() {
+        requestPermissions(new String[]{Manifest.permission.READ_CONTACTS}, CONTACTS_PERMISSION_REQUEST);
+    }
+
     public void requestProductCameraPermission(Runnable onGranted, Runnable onDenied) {
         List<String> missing = new ArrayList<>();
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
@@ -257,7 +289,8 @@ public final class MainActivity extends Activity {
         if (requestCode == SMS_PERMISSION_REQUEST && SmsRoleUtils.hasSmsPermissions(this)) {
             SyncScheduler.scheduleNow(getApplicationContext(), true);
         }
-        smsHomeView.refresh();
+        if (requestCode == CONTACTS_PERMISSION_REQUEST) smsHomeView.onContactsPermissionChanged();
+        else smsHomeView.refresh();
     }
 
     private int dp(float value) {

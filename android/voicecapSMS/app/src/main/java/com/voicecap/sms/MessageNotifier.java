@@ -41,6 +41,9 @@ public final class MessageNotifier {
         int id = conversationId(address);
         Notification.Builder builder = builder(context, CHANNEL_MESSAGES, title, text);
         if (address != null && !address.isEmpty()) {
+            // 알림을 누르면 그 대화방을 연다.
+            Intent chat = ChatActivity.intent(context, -1, address).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            builder.setContentIntent(PendingIntent.getActivity(context, id, chat, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT));
             List<String> unread = unreadBodies(context, address);
             if (unread.isEmpty() || !unread.get(unread.size() - 1).equals(text)) unread.add(text);
             if (Build.VERSION.SDK_INT >= 28) {

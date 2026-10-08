@@ -87,7 +87,58 @@ public final class UploadQueue {
                 }
             }
         }
-        return uploaded;
+        return uploaded + uploadOutgoing(context, force);
+    }
+
+    /**
+     * 폰에서 직접 보낸 업무 문자(origin=DEVICE)를 outgoing으로 올린다. 웹 발송분(origin=WEB)은 outbox-status로
+     * 이미 서버에 있으므로 여기서 읽지 않는다. 서버가 아직 outgoing을 모르면(PR #9 배포 전 400) 실패로 굳히지 않고
+     * PENDING으로 두어 백오프(상한 15분) 후 다시 시도한다.
+     */
+    private static int uploadOutgoing(Context context, boolean force) {
+        LocalDb db = LocalDb.get(context);
+        int uploaded = 0;
+        int consecutiveRetries = 0;
+        long afterRowId = 0;
+        while (true) {
+            List<LocalDb.Item> page = db.page(LocalDb.KIND_SMS_OUT, LocalDb.ORIGIN_DEVICE, LocalDb.STATE_PENDING, afterRowId, PAGE_SIZE);
+            if (page.isEmpty()) return uploaded;
+            for (LocalDb.Item item : page) {
+                afterRowId = item.rowId;
+                long now = System.currentTimeMillis();
+                if (!force && item.nextAt > now) continue;
+                Message message = item.providerUri == null ? null : readSms(context, item.providerUri);
+                if (message == null || message.body.isEmpty()) {
+                    item.state = LocalDb.STATE_SKIPPED;
+                    item.lastError = "문자함에서 삭제됨";
+                    db.update(item);
+                    continue;
+                }
+                String status = item.payload.optString("status", "SENT");
+                BridgeClient.ReportResult result = BridgeClient.postOutgoing(context, item.externalId,
+                        message.phone.isEmpty() ? item.payload.optString("phone", "알 수 없음") : message.phone, message.body,
+                        item.payload.optLong("sentAt", message.dateMillis), status, item.payload.optString("error", null));
+                if (result == BridgeClient.ReportResult.REPORTED) {
+                    item.state = LocalDb.STATE_SYNCED;
+                    item.lastError = null;
+                    uploaded++;
+                    consecutiveRetries = 0;
+                } else if (result == BridgeClient.ReportResult.RETRY || result == BridgeClient.ReportResult.UNSUPPORTED) {
+                    item.attempts++;
+                    item.nextAt = now + SyncBackoff.delayMillis(item.attempts);
+                    item.lastError = result == BridgeClient.ReportResult.UNSUPPORTED
+                            ? "서버가 아직 보낸 문자 저장을 지원하지 않음, 다시 시도 예정"
+                            : "업로드 실패 (네트워크·서버), 다시 시도 예정";
+                    consecutiveRetries++;
+                } else {
+                    item.state = LocalDb.STATE_FAILED;
+                    item.lastError = "서버가 업로드를 거절함";
+                    consecutiveRetries = 0;
+                }
+                db.update(item);
+                if (consecutiveRetries >= MAX_CONSECUTIVE_RETRIES) return uploaded;
+            }
+        }
     }
 
     /** 한 건 업로드. 문자함에서 지워졌으면 SKIPPED로 바꾸고 null을 돌려준다. */

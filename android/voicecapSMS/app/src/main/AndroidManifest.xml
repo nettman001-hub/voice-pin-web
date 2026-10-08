@@ -11,6 +11,9 @@
     <uses-permission android:name="android.permission.RECEIVE_WAP_PUSH" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 선택 권한: 대화 목록의 연락처 이름 / 듀얼 SIM 목록. 거절해도 번호·기본 SIM으로 동작한다. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.front" android:required="false" />
@@ -41,6 +44,9 @@
         </activity>
         <activity android:name=".OnboardingActivity" android:exported="false" />
         <activity android:name=".SettingsActivity" android:exported="false" android:parentActivityName=".MainActivity" />
+        <activity android:name=".ChatActivity" android:exported="false" android:parentActivityName=".MainActivity" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".ComposeActivity" android:exported="false" android:parentActivityName=".MainActivity" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".ImageViewerActivity" android:exported="false" />
         <receiver android:name=".MessageActionReceiver" android:exported="false" />
         <receiver android:name=".SmsReceiver" android:exported="true" android:permission="android.permission.BROADCAST_SMS">
             <intent-filter android:priority="1000"><action android:name="android.provider.Telephony.SMS_DELIVER" /></intent-filter>

@@ -31,6 +31,24 @@ final class Ui {
 
     private Ui() { }
 
+    /**
+     * targetSdk 35+는 Android 15부터 화면이 상태 표시줄·내비게이션 바 아래까지 그려진다(edge-to-edge 강제).
+     * 루트 뷰에 시스템 바와 키보드 높이만큼 안쪽 여백을 준다. 그보다 낮은 버전은 시스템이 이미 비켜 준다.
+     */
+    static void applySystemBarInsets(android.view.View root) {
+        if (android.os.Build.VERSION.SDK_INT < 35) return;
+        int left = root.getPaddingLeft();
+        int top = root.getPaddingTop();
+        int right = root.getPaddingRight();
+        int bottom = root.getPaddingBottom();
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars() | android.view.WindowInsets.Type.displayCutout());
+            android.graphics.Insets ime = insets.getInsets(android.view.WindowInsets.Type.ime());
+            view.setPadding(left + bars.left, top + bars.top, right + bars.right, bottom + Math.max(bars.bottom, ime.bottom));
+            return android.view.WindowInsets.CONSUMED;
+        });
+    }
+
     static int dp(Context context, float value) {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
     }

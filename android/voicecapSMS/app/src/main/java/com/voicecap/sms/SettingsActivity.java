@@ -55,6 +55,7 @@ public final class SettingsActivity extends Activity {
 
         smsBridgeView = new SmsBridgeView(this);
         root.addView(smsBridgeView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        Ui.applySystemBarInsets(root);
         setContentView(root);
     }
 
