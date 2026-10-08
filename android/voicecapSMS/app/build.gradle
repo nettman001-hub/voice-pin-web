@@ -1,4 +1,8 @@
-plugins { id 'com.android.application' }
+plugins {
+    id 'com.android.application'
+    // google-services.json(공개 설정, 비밀 키 아님)으로 Firebase 앱 ID를 넣는다. FCM 알림 토큰에만 쓴다.
+    id 'com.google.gms.google-services'
+}
 
 def releaseStoreFile = providers.environmentVariable('VOICECAP_UPLOAD_KEYSTORE').orNull
 def releaseStorePassword = providers.environmentVariable('VOICECAP_UPLOAD_STORE_PASSWORD').orNull
@@ -19,8 +23,8 @@ android {
         applicationId 'shop.voicecap.smsbridge'
         minSdk 26
         targetSdk 36
-        versionCode 10
-        versionName '1.5.0'
+        versionCode 11
+        versionName '1.6.0'
         def apiBaseUrl = (project.findProperty('VOICECAP_API_BASE_URL') ?: 'https://ymegrhxpbeanvxwdzfym.supabase.co/functions/v1').toString().replaceAll('/+$', '')
         buildConfigField 'String', 'VOICECAP_API_BASE_URL', '"' + apiBaseUrl.replace('"', '\\"') + '"'
         // 판매관리 탭. false인 동안 탭은 회색으로 보이고, 판매 코드(저장소·화면·작업)는 하나도 시작하지 않는다.
@@ -52,6 +56,9 @@ android {
 }
 
 dependencies {
+    // 유일한 런타임 의존성 예외: 웹 즉시 발송용 FCM (설계 3.2·3.7).
+    implementation platform('com.google.firebase:firebase-bom:34.4.0')
+    implementation 'com.google.firebase:firebase-messaging'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20240303'
 }

@@ -44,6 +44,7 @@ public class SmsBridgeView extends ScrollView {
     private final SettingsActivity activity;
     private EditText pairingCodeInput;
     private TextView status;
+    private TextView pushStatus;
 
     public SmsBridgeView(SettingsActivity activity) {
         super(activity);
@@ -83,7 +84,7 @@ public class SmsBridgeView extends ScrollView {
         brandCopy.addView(captionText("SMS Bridge · 판매자 휴대폰 연동"));
         header.addView(brandCopy);
 
-        TextView version = badge("v1.3");
+        TextView version = badge("v" + BuildConfig.VERSION_NAME);
         header.addView(version);
         column.addView(header);
 
@@ -94,6 +95,9 @@ public class SmsBridgeView extends ScrollView {
         status.setPadding(dp(14), dp(13), dp(14), dp(13));
         statusCard.addView(status);
         applyStatusTone(TONE_INFO);
+        pushStatus = captionText("");
+        pushStatus.setPadding(dp(4), dp(10), dp(4), 0);
+        statusCard.addView(pushStatus);
         column.addView(statusCard);
 
         LinearLayout pairingCard = card();
@@ -183,8 +187,14 @@ public class SmsBridgeView extends ScrollView {
 
         Button revoke = button("이 휴대폰 연결 해제", BUTTON_DANGER);
         revoke.setOnClickListener(v -> {
-            BridgeClient.revokeDevice(activity);
-            setStatus("휴대폰 연결을 해제했습니다. 이후 문자 정보는 서버로 전송되지 않습니다.", TONE_WARNING);
+            setStatus("휴대폰 연결을 해제하는 중...", TONE_INFO);
+            Executors.newSingleThreadExecutor().execute(() -> {
+                BridgeClient.revokeDevice(activity.getApplicationContext());
+                activity.runOnUiThread(() -> {
+                    setStatus("휴대폰 연결을 해제했습니다. 이후 문자 정보는 서버로 전송되지 않습니다.", TONE_WARNING);
+                    updatePushStatus();
+                });
+            });
         });
         managementCard.addView(revoke);
         column.addView(managementCard);
@@ -203,6 +213,12 @@ public class SmsBridgeView extends ScrollView {
         else if (!SmsRoleUtils.isDefaultSmsApp(activity)) setStatus(R.string.status_role_required, TONE_WARNING);
         else if (!SmsRoleUtils.hasSmsPermissions(activity)) setStatus(R.string.status_permission_required, TONE_WARNING);
         else setStatus(R.string.status_bridge_ready, TONE_SUCCESS);
+        updatePushStatus();
+    }
+
+    /** 웹 즉시 발송(FCM) 상태 한 줄: 켜짐 / 서버 설정 대기 / 이 폰에서는 사용할 수 없음. */
+    public void updatePushStatus() {
+        if (pushStatus != null) pushStatus.setText(PushLogic.label(PushRegistration.status(activity)));
     }
 
     public void setStatus(String value, int tone) {
@@ -247,7 +263,9 @@ public class SmsBridgeView extends ScrollView {
         String deviceName = Build.MANUFACTURER + " " + Build.MODEL;
         Executors.newSingleThreadExecutor().execute(() -> {
             boolean paired = BridgeClient.claimDevice(activity.getApplicationContext(), code, deviceName);
+            if (paired) PushRegistration.refreshAndRegister(activity.getApplicationContext());
             activity.runOnUiThread(() -> {
+                updatePushStatus();
                 if (paired) {
                     pairingCodeInput.setText("");
                     setStatus("휴대폰 연결이 완료되었습니다. 이제 문자 전송 동의와 권한 설정을 진행해 주세요.", TONE_SUCCESS);
@@ -270,7 +288,10 @@ public class SmsBridgeView extends ScrollView {
         setStatus("구매정보 문자와 발송 대기 문자를 처리하는 중...", TONE_INFO);
         Executors.newSingleThreadExecutor().execute(() -> {
             String result = SmsSyncManager.syncNow(activity.getApplicationContext());
-            activity.runOnUiThread(() -> setStatus(result, TONE_INFO));
+            activity.runOnUiThread(() -> {
+                setStatus(result, TONE_INFO);
+                updatePushStatus();
+            });
         });
     }
 

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "322214927308",
+    "project_id": "voicecap-sms",
+    "storage_bucket": "voicecap-sms.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:322214927308:android:8a4af3b9295c1574c0db69",
+        "android_client_info": {
+          "package_name": "shop.voicecap.smsbridge"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDKtdrZZRm5R2nEj6QbXRGvVriiC0M1V-k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
