@@ -2,6 +2,7 @@ package com.voicecap.sms;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -9,6 +10,8 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -22,6 +25,8 @@ import com.voicecap.sms.sales.SalesRepository;
 import com.voicecap.sms.sales.ui.ProductSalesView;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 탭 3개: 판매관리 / 문자연동(기본) / 입금확인. 첫 실행이면 {@link OnboardingActivity}로 보낸다.
@@ -50,6 +55,18 @@ public final class MainActivity extends Activity {
     private Button tabDepositBtn;
     private int currentTab = TAB_SMS;
 
+    /** 즉시 발송(FCM)이 켜지지 않은 동안 화면이 떠 있으면 30초마다 웹 발송함을 확인한다. */
+    private static final long OUTBOX_POLL_MILLIS = 30_000L;
+    private static final ExecutorService BACKGROUND = Executors.newSingleThreadExecutor();
+    private final Handler outboxPoller = new Handler(Looper.getMainLooper());
+    private final Runnable outboxPoll = new Runnable() {
+        @Override public void run() {
+            Context app = getApplicationContext();
+            if (PushRegistration.status(app) != PushLogic.Status.ON) BACKGROUND.execute(() -> SmsSyncManager.sendOutboxIfAllowed(app));
+            outboxPoller.postDelayed(this, OUTBOX_POLL_MILLIS);
+        }
+    };
+
     private Runnable pendingCameraGranted;
     private Runnable pendingCameraDenied;
 
@@ -73,6 +90,9 @@ public final class MainActivity extends Activity {
         setContentView(root);
         selectTab(currentTab);
         SyncScheduler.schedule(getApplicationContext());
+        // 앱 시작: 알림 토큰을 확인해 서버 등록과 다르면 다시 등록한다.
+        Context app = getApplicationContext();
+        BACKGROUND.execute(() -> PushRegistration.refreshAndRegister(app));
         if (state == null) openComposeFromIntent(getIntent());
     }
 
@@ -113,6 +133,8 @@ public final class MainActivity extends Activity {
         smsHomeView.refresh();
         if (currentTab == TAB_DEPOSIT) depositView.refresh();
         if (currentTab == TAB_SALES && productSalesView != null) productSalesView.start();
+        outboxPoller.removeCallbacks(outboxPoll);
+        outboxPoller.postDelayed(outboxPoll, OUTBOX_POLL_MILLIS);
     }
 
     @Override
@@ -120,6 +142,7 @@ public final class MainActivity extends Activity {
         super.onPause();
         if (smsHomeView != null) smsHomeView.stop();
         if (productSalesView != null) productSalesView.stop();
+        outboxPoller.removeCallbacks(outboxPoll);
     }
 
     private View buildRootLayout() {

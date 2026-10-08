@@ -12,7 +12,7 @@
     <string name="status_permission_required">SMS/MMS 권한 허용이 필요합니다.</string>
     <string name="status_bridge_ready">VoiceCAP 문자 연동 준비가 완료되었습니다.</string>
     <string name="data_transfer_title">문자 정보 전송 안내</string>
-    <string name="data_transfer_disclosure">VoiceCAP은 판매 처리 목적으로만 고객 전화번호, 구매정보가 포함된 SMS/MMS 본문, 고객이 첨부한 상품 이미지를 판매자가 설정한 VoiceCAP 서버로 전송합니다. 첫 구매정보 문자 또는 판매자 발신으로 업무 고객 번호가 등록되면 이후 해당 번호와 주고받는 배송·입금·계좌 관련 문의도 거래 이력으로 동기화합니다.\n\n등록되지 않은 번호의 인증번호와 일반 개인 문자는 전송하지 않습니다. 은행 앱 알림은 입금확인 탭에서 따로 동의하고 직접 고른 앱만 읽으며, 알림 원문이 아니라 금액·입금자명·시각·은행·받는 계좌 별칭만 보냅니다. 광고에 사용하거나 제3자에게 판매하지 않습니다. 설정 화면에서 언제든 동의를 철회할 수 있습니다.</string>
+    <string name="data_transfer_disclosure">VoiceCAP은 판매 처리 목적으로만 고객 전화번호, 구매정보가 포함된 SMS/MMS 본문, 고객이 첨부한 상품 이미지를 판매자가 설정한 VoiceCAP 서버로 전송합니다. 첫 구매정보 문자 또는 판매자 발신으로 업무 고객 번호가 등록되면 이후 해당 번호와 주고받는 배송·입금·계좌 관련 문의도 거래 이력으로 동기화합니다.\n\n등록되지 않은 번호의 인증번호와 일반 개인 문자는 전송하지 않습니다. 은행 앱 알림은 입금확인 탭에서 따로 동의하고 직접 고른 앱만 읽으며, 알림 원문이 아니라 금액·입금자명·시각·은행·받는 계좌 별칭만 보냅니다. 웹에서 문자를 보낼 때 휴대폰을 깨우기 위해 Firebase 클라우드 메시징(FCM) 알림 토큰을 VoiceCAP 서버에 저장하며, 휴대폰 연결을 해제하면 삭제합니다. 광고에 사용하거나 제3자에게 판매하지 않습니다. 설정 화면에서 언제든 동의를 철회할 수 있습니다.</string>
     <string name="data_transfer_decline">동의하지 않음</string>
     <string name="data_transfer_accept">동의하고 계속</string>
     <string name="status_consent_declined">동의하지 않아 문자 연동을 시작하지 않았습니다.</string>

@@ -53,6 +53,7 @@ public final class BridgeClient {
                     .putString(BridgePreferences.WORKSPACE_ID, workspaceId)
                     .putString(BridgePreferences.DEVICE_NAME, deviceName.trim())
                     .apply();
+            PushRegistration.forgetRegistration(context);
             return true;
         } catch (Exception ignored) {
             return false;
@@ -240,7 +241,33 @@ public final class BridgeClient {
         }
     }
 
+    /** register-push 결과. pushConfigured는 서버에 FCM 비밀값이 있는지 (없으면 기존 주기 동기화만 쓴다). */
+    public static final class PushResult {
+        public final ReportResult result;
+        public final boolean pushConfigured;
+
+        PushResult(ReportResult result, boolean pushConfigured) {
+            this.result = result;
+            this.pushConfigured = pushConfigured;
+        }
+    }
+
+    /** FCM 토큰 등록 (device-pair action: register-push). 빈 토큰이면 서버가 등록을 지운다. */
+    public static PushResult registerPush(Context context, String token) {
+        if (!BridgePreferences.configured(context)) return new PushResult(ReportResult.RETRY, false);
+        try {
+            JSONObject payload = new JSONObject().put("action", "register-push").put("token", token == null ? "" : token);
+            int[] code = new int[1];
+            JSONObject response = requestText(context, true, "device-pair", payload, code);
+            return new PushResult(classify(response, code[0]), response.optBoolean("pushConfigured"));
+        } catch (Exception ignored) {
+            return new PushResult(ReportResult.RETRY, false);
+        }
+    }
+
+    /** 네트워크를 쓰므로 백그라운드 스레드에서 부른다. 해제 전에 알림 토큰 등록부터 지운다. */
     public static void revokeDevice(Context context) {
+        PushRegistration.unregister(context);
         try {
             requestText(context, true, "device-pair", new JSONObject().put("action", "revoke-self"));
         } catch (Exception ignored) { }

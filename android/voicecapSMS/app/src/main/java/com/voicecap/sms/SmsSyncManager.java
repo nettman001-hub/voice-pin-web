@@ -31,6 +31,8 @@ public final class SmsSyncManager {
                 SyncScheduler.scheduleOnNetworkRecovery(context);
                 return "네트워크 연결이 없어 연결되는 즉시 다시 시도합니다.";
             }
+            // 웹 즉시 발송 알림 토큰: 서버에 있어야 할 토큰과 다르면 등록·삭제한다 (연결·전송 동의 기준).
+            PushRegistration.ensureRegistered(context, force);
             // MMS 다시 받기는 서버 연결·전송 동의와 상관없이 기본 문자앱이면 항상 한다.
             if (defaultApp) MmsDownloads.retryDue(context, force);
             // 은행 알림 입금은 기본 문자앱·문자 동의와 상관없이, 입금 정보 전송 동의와 기기 연결만 있으면 올린다.
@@ -50,6 +52,25 @@ public final class SmsSyncManager {
         } finally {
             scheduleNextRetry(context);
         }
+    }
+
+    /** 웹 발송함만 바로 처리할 수 있는지: 기존 동기화와 같은 규칙(동의·기본 문자앱·권한·연결·네트워크). */
+    static boolean canSendOutbox(Context context) {
+        return BridgePreferences.hasDataTransferConsent(context)
+                && SmsRoleUtils.isDefaultSmsApp(context)
+                && SmsRoleUtils.hasSmsPermissions(context)
+                && BridgePreferences.configured(context)
+                && isOnline(context);
+    }
+
+    /**
+     * FCM 신호·화면 30초 확인용: 업로드 없이 웹 발송함만 처리한다. 규칙을 못 지키면 아무것도 보내지 않는다.
+     * 같은 문자는 서버 점유(outbox-claim lease)와 SENDING 보고, 로컬 externalId 확인으로 두 번 보내지 않는다.
+     * @return 보낸 건수, 보낼 수 없는 상태면 -1
+     */
+    public static synchronized int sendOutboxIfAllowed(Context context) {
+        if (!canSendOutbox(context)) return -1;
+        return sendOutbox(context);
     }
 
     /** 백오프 중인 항목이 있으면 가장 이른 시각에 다시 동기화한다. */

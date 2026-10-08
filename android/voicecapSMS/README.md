@@ -4,13 +4,14 @@ VoiceCAP 웹앱의 판매자 작업공간에 1회용 연결 코드로 연결되�
 
 ## 지원 범위
 
-- 최소 Android 8.0 (API 26), 대상 Android 15 (API 35)
+- 최소 Android 8.0 (API 26), 대상 Android 16 (API 36)
 - 닉네임·주소·상품/금액 항목이 함께 있는 첫 구매정보 SMS/MMS로 업무 고객 번호를 등록
 - 등록 고객의 배송·입금·계좌번호 등 후속 문의와 판매자 답변을 같은 거래 문자 이력으로 동기화
 - 등록되지 않은 번호의 OTP와 일반 개인 문자는 서버로 전송하지 않음
 - 입금확인 탭(선택): 알림 접근을 켜고 직접 고른 은행 앱의 입금 알림만 읽어 금액·입금자명·시각·은행·받는 계좌 별칭만 `payment-incoming`으로 전송. 알림 원문은 기기 밖으로 나가지 않고, 고르지 않은 앱의 알림은 즉시 버림. 규칙은 `app/src/main/assets/bank_rules.json`, fixture는 `app/src/test/resources/bank-noti/`
 - 웹앱에서 큐에 넣은 정산서·배송·문의 SMS를 Android의 기본 메시지 기능으로 전송
 - Android 8.0 이상의 백그라운드 제한을 지키기 위해 수신 이벤트는 `JobScheduler`로 넘기고 15분마다 재동기화
+- 웹 즉시 발송(1.6.0): 웹이 문자를 대기열에 넣으면 서버(`device-pair` `notify-outbox`)가 내용 없는 FCM 고우선순위 신호(`data.type=OUTBOX`)를 보내고, `PushService`가 바로 `outbox-claim` → 발송한다. 웹에서 문자를 보낼 때 휴대폰을 깨우기 위해 Firebase 클라우드 메시징(FCM) 알림 토큰을 서버에 저장하며, 휴대폰 연결을 해제하면 삭제합니다. 구글 서비스가 없는 폰이나 서버에 `FCM_SERVICE_ACCOUNT_JSON`이 없을 때는 기존 15분 주기(앱 화면이 떠 있으면 30초마다)로 처리한다. Firebase 설정은 `app/google-services.json`(공개 설정, 비밀 키 아님)
 
 ## 설치 및 연결
 
