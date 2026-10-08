@@ -87,7 +87,8 @@ public final class LocalDb extends SQLiteOpenHelper {
 
     /**
      * 입금 피드 + 잔액 없는 은행의 90초 중복 창(deposits), 샘플 수집 모드의 알림 원문(notif_samples, 폰에만 30일).
-     * deposits.state는 서버 대조 결과(MATCHED / NEEDS_REVIEW / UNMATCHED), 아직 모르면 null.
+     * deposits.state는 서버 대조 결과(MATCHED / NEEDS_REVIEW / UNMATCHED), 아직 모르면 null,
+     * 다른 경로(은행 알림↔은행 입금 문자)의 같은 입금이라 올리지 않은 건은 LOCAL_DUPLICATE.
      */
     static void createDepositTables(SQLiteDatabase db) {
         db.execSQL("create table if not exists deposits ("
@@ -316,6 +317,8 @@ public final class LocalDb extends SQLiteOpenHelper {
                     if (cursor.moveToFirst()) return false;
                 }
             }
+            // 은행 알림과 은행 입금 문자를 둘 다 켰을 때 다른 경로로 이미 기록된 같은 입금이면 올리지 않고 짝 표시만 남긴다.
+            boolean duplicate = com.voicecap.sms.deposit.DepositDedupe.isDuplicate(row, nearbyDeposits(db, row));
             ContentValues values = new ContentValues();
             values.put("external_id", row.externalId);
             values.put("package", row.packageName);
@@ -326,15 +329,43 @@ public final class LocalDb extends SQLiteOpenHelper {
             else values.put("balance", row.balance);
             values.put("paid_at", row.paidAt);
             values.put("source", row.source);
-            values.putNull("state");
+            if (duplicate) values.put("state", com.voicecap.sms.deposit.DepositDedupe.STATE_LOCAL_DUPLICATE);
+            else values.putNull("state");
             values.put("created_at", System.currentTimeMillis());
             if (db.insertWithOnConflict("deposits", null, values, SQLiteDatabase.CONFLICT_IGNORE) == -1) return false;
+            if (duplicate) {
+                db.setTransactionSuccessful();
+                return false;
+            }
             if (!insertIfAbsent(syncItem)) return false;
             db.setTransactionSuccessful();
             return true;
         } finally {
             db.endTransaction();
         }
+    }
+
+    /** 같은 은행·금액으로 다른 경로 짝 후보가 될 수 있는 최근 입금 (짝 표시된 것 포함). */
+    private static List<DepositRow> nearbyDeposits(SQLiteDatabase db, DepositRow row) {
+        List<DepositRow> rows = new ArrayList<>();
+        if (row.bank == null) return rows;
+        long window = com.voicecap.sms.deposit.DepositDedupe.CROSS_SOURCE_WINDOW_MILLIS;
+        try (Cursor cursor = db.rawQuery("select external_id, bank, payer, amount, balance, paid_at, source from deposits"
+                        + " where bank=? and amount=? and paid_at between ? and ?",
+                new String[]{row.bank, String.valueOf(row.amount), String.valueOf(row.paidAt - 2 * window), String.valueOf(row.paidAt + 2 * window)})) {
+            while (cursor.moveToNext()) {
+                DepositRow nearby = new DepositRow();
+                nearby.externalId = cursor.getString(0);
+                nearby.bank = cursor.getString(1);
+                nearby.payer = cursor.getString(2);
+                nearby.amount = cursor.getLong(3);
+                nearby.balance = cursor.isNull(4) ? null : cursor.getLong(4);
+                nearby.paidAt = cursor.getLong(5);
+                nearby.source = cursor.getString(6);
+                rows.add(nearby);
+            }
+        }
+        return rows;
     }
 
     public synchronized void setDepositMatch(String externalId, String matchState) {
@@ -347,7 +378,9 @@ public final class LocalDb extends SQLiteOpenHelper {
         List<DepositRow> rows = new ArrayList<>();
         try (Cursor cursor = getReadableDatabase().rawQuery(
                 "select d.*, s.state as sync_state, s.last_error as sync_error from deposits d"
-                        + " left join sync_items s on s.external_id=d.external_id order by d.paid_at desc limit " + limit, null)) {
+                        + " left join sync_items s on s.external_id=d.external_id"
+                        + " where d.state is null or d.state != '" + com.voicecap.sms.deposit.DepositDedupe.STATE_LOCAL_DUPLICATE + "'"
+                        + " order by d.paid_at desc limit " + limit, null)) {
             while (cursor.moveToNext()) {
                 DepositRow row = new DepositRow();
                 row.externalId = cursor.getString(cursor.getColumnIndexOrThrow("external_id"));
