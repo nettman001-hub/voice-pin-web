@@ -42,7 +42,7 @@ public final class SmsReceiver extends BroadcastReceiver {
                     Uri uri = store(app, message, subId, finalServiceCenter, receivedAt);
                     // 모든 받은 문자에 sync_items 행: 업무 대상이면 PENDING, 개인·차단 문자는 SKIPPED.
                     if (uri != null) UploadQueue.enqueueIncoming(app, LocalDb.KIND_SMS_IN, ContentUris.parseId(uri), message.address, message.body, receivedAt);
-                    if (!isBlocked(app, message.address)) MessageNotifier.notifyIncoming(app, message.address, message.body);
+                    if (!isBlocked(app, message.address)) MessageNotifier.notifyIncoming(app, message.address, message.body, subId);
                 }
                 SyncScheduler.scheduleNow(app);
             } finally {

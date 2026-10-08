@@ -69,7 +69,7 @@ public final class MmsDownloadReceiver extends BroadcastReceiver {
                     String preview = conf.bodyText();
                     UploadQueue.enqueueIncoming(app, LocalDb.KIND_MMS_IN, ContentUris.parseId(uri), conf.from, preview, System.currentTimeMillis());
                     if (!SmsReceiver.isBlocked(app, conf.from)) {
-                        MessageNotifier.notifyIncoming(app, conf.from, preview.isEmpty() ? "(사진 문자)" : preview);
+                        MessageNotifier.notifyIncoming(app, conf.from, preview.isEmpty() ? "(사진 문자)" : preview, subId);
                     }
                 }
                 MmsDownloads.stored(app, noticeTransactionId);

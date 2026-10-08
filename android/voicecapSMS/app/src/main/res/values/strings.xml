@@ -16,4 +16,8 @@
     <string name="data_transfer_decline">동의하지 않음</string>
     <string name="data_transfer_accept">동의하고 계속</string>
     <string name="status_consent_declined">동의하지 않아 문자 연동을 시작하지 않았습니다.</string>
+    <string name="rcs_notice_title">채팅+(RCS) 안내</string>
+    <string name="rcs_notice_short">갤럭시: 기본 문자앱을 VoiceCAP으로 바꾸면 삼성 메시지의 채팅+(RCS)가 꺼집니다.</string>
+    <string name="rcs_notice_body">기본 문자앱을 VoiceCAP으로 바꾸면 삼성 메시지의 채팅+(RCS)가 꺼집니다.\n\n• 상대방이 채팅+로 보내던 문자는 일반 문자(SMS/MMS)로 받게 됩니다.\n• 채팅+의 읽음 표시, 입력 중 표시, 큰 파일 전송은 쓸 수 없습니다.\n• 이미 받은 문자는 휴대폰 문자함에 그대로 남습니다.\n\n다시 채팅+를 쓰려면 설정에서 기본 문자앱을 삼성 메시지로 되돌리면 됩니다. 그동안 VoiceCAP으로 고객 문자를 받고 보낼 수 없습니다.</string>
+    <string name="sales_coming_soon">판매관리 기능은 추후 오픈 예정입니다.</string>
 </resources>
