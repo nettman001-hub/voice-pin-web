@@ -40,12 +40,25 @@ const StatusPill: React.FC<{ label: string; className: string }> = ({ label, cla
   </span>
 );
 
-export const BuyerStatusBadges: React.FC<{ saleIds: string[] }> = ({ saleIds }) => {
-  const { getClaimForSales, getMessagesForSales, isPaid, isVerified } = useCommerce();
+export const BuyerStatusBadges: React.FC<{ saleIds: string[]; buyerNickname?: string }> = ({ saleIds, buyerNickname }) => {
+  const { getClaimForSales, getMessagesForSales, isPaid, isVerified, messages: allMessages } = useCommerce();
   const claim = getClaimForSales(saleIds);
   const messages = getMessagesForSales(saleIds);
   const outgoing = messages.filter((message) => message.direction === 'OUTGOING');
-  const match = matchLabels[claim?.matchStatus || 'NOT_RECEIVED'];
+
+  // 정형 claim이 없더라도 해당 구매자 닉네임이 포함된 수신 문자가 있으면 '문자 수신'으로 표시
+  const nicknameIncoming = buyerNickname
+    ? allMessages.filter((m) => m.direction === 'INCOMING' && m.body && m.body.toLowerCase().includes(buyerNickname.toLowerCase()))
+    : [];
+  const hasIncoming = messages.some((m) => m.direction === 'INCOMING') || nicknameIncoming.length > 0;
+
+  let match = matchLabels[claim?.matchStatus || 'NOT_RECEIVED'];
+  if (!claim && hasIncoming) {
+    match = {
+      label: `문자 수신 (${nicknameIncoming.length || messages.length}건)`,
+      className: 'bg-emerald-50 text-emerald-700 border-emerald-200 font-bold'
+    };
+  }
 
   return (
     <span className="flex flex-wrap items-center gap-1.5">

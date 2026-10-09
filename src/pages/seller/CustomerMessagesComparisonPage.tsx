@@ -271,6 +271,30 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     );
   }, [messages, pastTransactionPhoneMap, allBuyerNicknames]);
 
+  // 4-1. 구매자 닉네임 -> 일치하는 문자 스레드 매핑
+  const buyerToThreadMap = useMemo(() => {
+    const map = new Map<string, ThreadInfo>();
+    threads.forEach((t) => {
+      if (t.existingNickname) {
+        map.set(t.existingNickname.trim().toLowerCase(), t);
+      }
+      if (t.newMatchedNickname) {
+        map.set(t.newMatchedNickname.trim().toLowerCase(), t);
+      }
+      allBuyerNicknames.forEach((nick) => {
+        if (t.messages.some((m) => m.body && m.body.toLowerCase().includes(nick.toLowerCase()))) {
+          if (!map.has(nick.toLowerCase())) {
+            map.set(nick.toLowerCase(), t);
+          }
+        }
+      });
+    });
+    return map;
+  }, [threads, allBuyerNicknames]);
+
+  // 판매 목록 문자 수신 필터 ('ALL' | 'RECEIVED' | 'UNRECEIVED')
+  const [salesMessageFilter, setSalesMessageFilter] = useState<'ALL' | 'RECEIVED' | 'UNRECEIVED'>('ALL');
+
   // 5. 검색 및 필터링된 스레드 목록
   const filteredThreads = useMemo(() => {
     if (!messagesSearch.trim()) return threads;
@@ -294,9 +318,29 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
         const matchProduct = sale.productName?.toLowerCase().includes(q);
         if (!matchBuyer && !matchProduct) return false;
       }
+      const buyerNick = sale.buyerNickname?.trim().toLowerCase();
+      const hasMessage = buyerNick ? buyerToThreadMap.has(buyerNick) : false;
+      if (salesMessageFilter === 'RECEIVED' && !hasMessage) return false;
+      if (salesMessageFilter === 'UNRECEIVED' && hasMessage) return false;
       return true;
     });
-  }, [sales, selectedSessionId, salesSearch]);
+  }, [sales, selectedSessionId, salesSearch, salesMessageFilter, buyerToThreadMap]);
+
+  // 문자 수신 여부 건수 집계
+  const { receivedSalesCount, unreceivedSalesCount } = useMemo(() => {
+    let received = 0;
+    let unreceived = 0;
+    sales.forEach((s) => {
+      if (selectedSessionId !== 'ALL' && s.sessionId !== selectedSessionId) return;
+      const nick = s.buyerNickname?.trim().toLowerCase();
+      if (nick && buyerToThreadMap.has(nick)) {
+        received++;
+      } else {
+        unreceived++;
+      }
+    });
+    return { receivedSalesCount: received, unreceivedSalesCount: unreceived };
+  }, [sales, selectedSessionId, buyerToThreadMap]);
 
   // 7. 선택된 스레드
   const activeThread = useMemo(() => {
@@ -461,6 +505,44 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                 className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:border-brand-500 focus:outline-none"
               />
             </div>
+
+            {/* 문자 수신 필터 탭 */}
+            <div className="flex items-center gap-1 pt-1 text-[11px] font-bold">
+              <button
+                type="button"
+                onClick={() => setSalesMessageFilter('ALL')}
+                className={`px-2 py-1 rounded-lg transition-colors ${
+                  salesMessageFilter === 'ALL'
+                    ? 'bg-slate-800 text-white shadow-2xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                전체 ({receivedSalesCount + unreceivedSalesCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setSalesMessageFilter('RECEIVED')}
+                className={`px-2 py-1 rounded-lg transition-colors flex items-center gap-1 ${
+                  salesMessageFilter === 'RECEIVED'
+                    ? 'bg-emerald-600 text-white shadow-2xs'
+                    : 'bg-white text-emerald-700 hover:bg-emerald-50 border border-emerald-200'
+                }`}
+              >
+                <MessageSquare className="w-3 h-3" />
+                문자 수신 ({receivedSalesCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setSalesMessageFilter('UNRECEIVED')}
+                className={`px-2 py-1 rounded-lg transition-colors ${
+                  salesMessageFilter === 'UNRECEIVED'
+                    ? 'bg-slate-600 text-white shadow-2xs'
+                    : 'bg-white text-slate-500 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                미수신 ({unreceivedSalesCount})
+              </button>
+            </div>
           </div>
 
           {/* 판매 리스트 카드 뷰 */}
@@ -476,6 +558,10 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                   sale.buyerNickname?.trim().toLowerCase() === messagesSearch.trim().toLowerCase()
                 );
 
+                const matchedThread = sale.buyerNickname
+                  ? buyerToThreadMap.get(sale.buyerNickname.trim().toLowerCase())
+                  : undefined;
+
                 return (
                   <div
                     key={sale.id}
@@ -488,15 +574,28 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                     title="클릭 시 우측 문자함에서 해당 고객 대화를 찾습니다"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-black text-sm text-slate-900 group-hover:text-brand-600 transition-colors">
                           {sale.buyerNickname || '구매자 닉네임 없음'}
                         </span>
+
+                        {/* 문자 수신 여부 배지 */}
+                        {matchedThread ? (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                            <MessageSquare className="w-2.5 h-2.5 text-emerald-600" />
+                            문자 수신 ({matchedThread.messages.length}건)
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                            문자 미수신
+                          </span>
+                        )}
+
                         {sale.status && (
                           <span
                             className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
                               sale.status === '확정'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
                                 : 'bg-amber-50 text-amber-700 border border-amber-200'
                             }`}
                           >
@@ -525,11 +624,43 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                       </span>
                     </div>
 
+                    {/* 수신된 문자가 있는 경우: 전화번호 및 최근 문자 미리보기 박스 */}
+                    {matchedThread && (
+                      <div className="mt-2 p-2 rounded-xl bg-emerald-50/60 border border-emerald-100 text-[11px] space-y-1">
+                        <div className="flex items-center justify-between text-slate-700 font-semibold">
+                          <div className="flex items-center gap-1.5">
+                            <Smartphone className="w-3 h-3 text-emerald-600" />
+                            <span className="text-slate-900 font-bold">{matchedThread.displayPhone}</span>
+                            {matchedThread.isNew && (
+                              <span className="bg-amber-500 text-white text-[9px] font-black px-1.5 py-0.2 rounded-md shadow-2xs">
+                                신규
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-slate-400">
+                            {new Date(matchedThread.lastMessage.createdAt).toLocaleTimeString('ko-KR', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+                        <p className="text-slate-600 truncate text-[11px] leading-tight">
+                          {cleanMessageBody(matchedThread.lastMessage.body) || '(내용 없음 또는 첨부파일)'}
+                        </p>
+                      </div>
+                    )}
+
                     <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400 group-hover:text-brand-600 font-semibold">
                       <span>{sale.sessionId ? `회차: ${sale.sessionId}` : '일반 판매'}</span>
-                      <span className="flex items-center gap-0.5">
-                        문자 대조하기 <ChevronRight className="w-3 h-3" />
-                      </span>
+                      {matchedThread ? (
+                        <span className="text-emerald-700 font-bold flex items-center gap-0.5">
+                          문자 대화 확인 ({matchedThread.messages.length}건) <ChevronRight className="w-3 h-3" />
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-0.5">
+                          문자 대조하기 <ChevronRight className="w-3 h-3" />
+                        </span>
+                      )}
                     </div>
                   </div>
                 );

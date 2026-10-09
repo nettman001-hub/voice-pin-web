@@ -560,7 +560,7 @@ export const SalesListPage: React.FC = () => {
                                 약속 미이행 확정
                               </span>
                             )}
-                            {buyerSaleIds.length > 0 && <BuyerStatusBadges saleIds={buyerSaleIds} />}
+                            {buyerSaleIds.length > 0 && <BuyerStatusBadges saleIds={buyerSaleIds} buyerNickname={buyer.buyerNickname} />}
                           </div>
                           <div className="text-[11px] text-slate-500 mt-1 flex items-center space-x-2">
                             <span>최근 주문: {new Date(buyer.latestRecognizedAt).toLocaleTimeString('ko-KR')}</span>
@@ -809,7 +809,7 @@ export const SalesListPage: React.FC = () => {
                               {sale.status}
                             </span>
                             <AiSaleBadge sale={sale} />
-                            <BuyerStatusBadges saleIds={[sale.id]} />
+                            <BuyerStatusBadges saleIds={[sale.id]} buyerNickname={sale.buyerNickname} />
                             <span className="text-[10px] text-slate-700 font-semibold bg-slate-100 px-2 py-0.5 rounded border border-slate-200" title={`방송 회차: ${sale.sessionId}`}>
                               회차: {formatSessionDisplay(sale.sessionId, { sessions: availableSessions, recognizedAt: sale.recognizedAt })}
                             </span>
