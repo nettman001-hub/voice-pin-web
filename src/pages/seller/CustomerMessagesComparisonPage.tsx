@@ -24,7 +24,8 @@ import {
   Inbox,
   AlertCircle,
   ZoomIn,
-  Image as ImageIcon
+  Image as ImageIcon,
+  X
 } from 'lucide-react';
 
 const formatPhone = (raw: string): string => {
@@ -299,11 +300,14 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
 
   // 7. 선택된 스레드
   const activeThread = useMemo(() => {
-    if (!selectedPhoneKey && filteredThreads.length > 0) {
-      return filteredThreads[0];
+    if (selectedPhoneKey) {
+      const match = filteredThreads.find((t) => t.phoneKey === selectedPhoneKey);
+      if (match) return match;
+      const globalMatch = threads.find((t) => t.phoneKey === selectedPhoneKey);
+      if (globalMatch) return globalMatch;
     }
-    return filteredThreads.find((t) => t.phoneKey === selectedPhoneKey) || null;
-  }, [filteredThreads, selectedPhoneKey]);
+    return filteredThreads.length > 0 ? filteredThreads[0] : null;
+  }, [filteredThreads, threads, selectedPhoneKey]);
 
   // 메시지 스크롤 맨 아래로 이동
   useEffect(() => {
@@ -342,20 +346,24 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     }
   };
 
-  // 좌측 판매건 클릭 시 해당 구매자 닉네임으로 우측 스레드 찾기
-  const handleSelectBuyerFromSales = (buyerNickname: string) => {
+  // 좌측 판매건 클릭 시 해당 구매자 닉네임으로 우측 문자함 검색창 입력 및 스레드 선택
+  const handleSelectBuyerFromSales = (buyerNickname?: string) => {
     if (!buyerNickname) return;
-    // 1) 닉네임과 일치하는 스레드 탐색
+    const nick = buyerNickname.trim();
+    if (!nick) return;
+
+    // 1) 첫 번째 목록이든 다른 목록이든 항상 검색창에 닉네임을 설정하여 필터링
+    setMessagesSearch(nick);
+
+    // 2) 닉네임과 일치하는 스레드가 있으면 해당 대화방을 바로 활성화
     const found = threads.find(
       (t) =>
-        t.existingNickname?.toLowerCase() === buyerNickname.toLowerCase() ||
-        t.newMatchedNickname?.toLowerCase() === buyerNickname.toLowerCase()
+        t.existingNickname?.toLowerCase() === nick.toLowerCase() ||
+        t.newMatchedNickname?.toLowerCase() === nick.toLowerCase() ||
+        t.messages.some((m) => m.body.toLowerCase().includes(nick.toLowerCase()))
     );
     if (found) {
       setSelectedPhoneKey(found.phoneKey);
-    } else {
-      // 검색창에 닉네임 자동 입력하여 필터
-      setMessagesSearch(buyerNickname);
     }
   };
 
@@ -462,59 +470,70 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                 판매 내역이 없습니다.
               </div>
             ) : (
-              filteredSales.map((sale) => (
-                <div
-                  key={sale.id}
-                  onClick={() => handleSelectBuyerFromSales(sale.buyerNickname)}
-                  className="group p-3 rounded-2xl bg-white border border-slate-200 hover:border-brand-400 hover:shadow-sm cursor-pointer transition-all"
-                  title="클릭 시 우측 문자함에서 해당 고객 대화를 찾습니다"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-black text-sm text-slate-900 group-hover:text-brand-600 transition-colors">
-                        {sale.buyerNickname || '구매자 닉네임 없음'}
-                      </span>
-                      {sale.status && (
-                        <span
-                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
-                            sale.status === '확정'
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : 'bg-amber-50 text-amber-700 border border-amber-200'
-                          }`}
-                        >
-                          {sale.status}
+              filteredSales.map((sale) => {
+                const isSelected = Boolean(
+                  messagesSearch.trim() &&
+                  sale.buyerNickname?.trim().toLowerCase() === messagesSearch.trim().toLowerCase()
+                );
+
+                return (
+                  <div
+                    key={sale.id}
+                    onClick={() => handleSelectBuyerFromSales(sale.buyerNickname)}
+                    className={`group p-3 rounded-2xl border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-cyan-50/60 border-cyan-500 shadow-xs ring-1 ring-cyan-200'
+                        : 'bg-white border-slate-200 hover:border-brand-400 hover:shadow-xs'
+                    }`}
+                    title="클릭 시 우측 문자함에서 해당 고객 대화를 찾습니다"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-black text-sm text-slate-900 group-hover:text-brand-600 transition-colors">
+                          {sale.buyerNickname || '구매자 닉네임 없음'}
                         </span>
-                      )}
+                        {sale.status && (
+                          <span
+                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                              sale.status === '확정'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-amber-50 text-amber-700 border border-amber-200'
+                            }`}
+                          >
+                            {sale.status}
+                          </span>
+                        )}
+                      </div>
+
+                      <span className="text-xs font-black text-brand-700 whitespace-nowrap">
+                        {(sale.amount || 0).toLocaleString()}원
+                      </span>
                     </div>
 
-                    <span className="text-xs font-black text-brand-700 whitespace-nowrap">
-                      {(sale.amount || 0).toLocaleString()}원
-                    </span>
-                  </div>
+                    <div className="mt-1.5 text-xs text-slate-600 flex items-center justify-between">
+                      <span className="font-medium truncate max-w-[180px]">
+                        {sale.productName || '상품명 미지정'}
+                        {sale.quantity && sale.quantity > 1 ? ` (${sale.quantity}개)` : ''}
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {sale.recognizedAt
+                          ? new Date(sale.recognizedAt).toLocaleTimeString('ko-KR', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : ''}
+                      </span>
+                    </div>
 
-                  <div className="mt-1.5 text-xs text-slate-600 flex items-center justify-between">
-                    <span className="font-medium truncate max-w-[180px]">
-                      {sale.productName || '상품명 미지정'}
-                      {sale.quantity && sale.quantity > 1 ? ` (${sale.quantity}개)` : ''}
-                    </span>
-                    <span className="text-[10px] text-slate-400">
-                      {sale.recognizedAt
-                        ? new Date(sale.recognizedAt).toLocaleTimeString('ko-KR', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })
-                        : ''}
-                    </span>
+                    <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400 group-hover:text-brand-600 font-semibold">
+                      <span>{sale.sessionId ? `회차: ${sale.sessionId}` : '일반 판매'}</span>
+                      <span className="flex items-center gap-0.5">
+                        문자 대조하기 <ChevronRight className="w-3 h-3" />
+                      </span>
+                    </div>
                   </div>
-
-                  <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400 group-hover:text-brand-600 font-semibold">
-                    <span>{sale.sessionId ? `회차: ${sale.sessionId}` : '일반 판매'}</span>
-                    <span className="flex items-center gap-0.5">
-                      문자 대조하기 <ChevronRight className="w-3 h-3" />
-                    </span>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </section>
@@ -540,8 +559,17 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                   placeholder="전화번호, 닉네임, 문자 내용..."
                   value={messagesSearch}
                   onChange={(e) => setMessagesSearch(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:border-cyan-500 focus:outline-none"
+                  className="w-full pl-8 pr-7 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:border-cyan-500 focus:outline-none"
                 />
+                {messagesSearch && (
+                  <button
+                    onClick={() => setMessagesSearch('')}
+                    className="absolute right-2 top-2 p-0.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600"
+                    title="검색어 지우기"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
 
