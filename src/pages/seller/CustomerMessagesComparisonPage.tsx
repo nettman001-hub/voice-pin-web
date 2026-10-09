@@ -811,14 +811,13 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                       </div>
                     )}
 
-                    <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400 group-hover:text-brand-600 font-semibold">
-                      <span>{sale.sessionId ? `회차: ${sale.sessionId}` : '일반 판매'}</span>
+                    <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-end text-[11px] font-semibold">
                       {matchedThread ? (
-                        <span className="text-emerald-700 font-bold flex items-center gap-0.5">
+                        <span className="text-emerald-700 font-bold flex items-center gap-0.5 group-hover:text-emerald-800">
                           문자 대화 확인 ({matchedThread.messages.length}건) <ChevronRight className="w-3 h-3" />
                         </span>
                       ) : (
-                        <span className="flex items-center gap-0.5">
+                        <span className="text-slate-400 group-hover:text-brand-600 flex items-center gap-0.5">
                           문자 대조하기 <ChevronRight className="w-3 h-3" />
                         </span>
                       )}
