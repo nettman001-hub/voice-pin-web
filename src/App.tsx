@@ -32,6 +32,7 @@ import { SalesReviewPage } from './pages/seller/SalesReviewPage';
 import { SettlementPage } from './pages/seller/SettlementPage';
 import { CaptureViewerModal } from './pages/seller/CaptureViewerModal';
 import { InvoiceManagementPage } from './pages/seller/InvoiceManagementPage';
+import { CustomerMessagesComparisonPage } from './pages/seller/CustomerMessagesComparisonPage';
 import { ShipmentManagementPage } from './pages/seller/ShipmentManagementPage';
 import { DeviceManagementPage } from './pages/seller/DeviceManagementPage';
 import { ProductSalesPage } from './pages/seller/ProductSalesPage';
@@ -199,6 +200,8 @@ export const App: React.FC = () => {
                           <Route path="/rules" element={<RecognitionRulesPage />} />
                           <Route path="/comments" element={<CommentRecordsPage />} />
                           <Route path="/sales" element={<SalesListPage />} />
+                          <Route path="/customer-messages" element={<CustomerMessagesComparisonPage />} />
+                          <Route path="/seller/customer-messages" element={<CustomerMessagesComparisonPage />} />
                           <Route path="/sales/:id" element={<SalesDetailPage />} />
                           <Route path="/sales/:id/capture" element={<CaptureViewerModal />} />
                           <Route path="/sales/review" element={<SalesReviewPage />} />
