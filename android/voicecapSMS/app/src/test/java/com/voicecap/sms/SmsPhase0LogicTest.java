@@ -46,6 +46,21 @@ public class SmsPhase0LogicTest {
     }
 
     @Test
+    public void uploadsAll010NumbersExceptBlocked() {
+        assertTrue(UploadFilter.is010Number("010-1234-5678"));
+        assertTrue(UploadFilter.is010Number("01012345678"));
+        assertTrue(UploadFilter.is010Number("+82 10-9876-5432"));
+        assertTrue(UploadFilter.is010Number("+821098765432"));
+        assertFalse(UploadFilter.is010Number("02-123-4567"));
+        assertFalse(UploadFilter.is010Number("1588-1234"));
+        assertFalse(UploadFilter.is010Number("070-1234-5678"));
+
+        assertTrue(UploadFilter.shouldUpload("010-1234-5678", "안녕하세요", false, false));
+        assertTrue(UploadFilter.shouldUpload("+821012345678", "입금했습니다", false, false));
+        assertFalse(UploadFilter.shouldUpload("010-1234-5678", "스팸", false, true));
+    }
+
+    @Test
     public void normalizesKoreanPhoneNumbers() {
         assertEquals("01012345678", BusinessContactStore.normalize("+82 10-1234-5678"));
         assertEquals("01012345678", BusinessContactStore.normalize("821012345678"));

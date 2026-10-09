@@ -36,8 +36,8 @@ public final class UploadQueue {
     public static void enqueueIncoming(Context context, String kind, long providerId, String phone, String body, long receivedAtMillis) {
         boolean mms = LocalDb.KIND_MMS_IN.equals(kind);
         boolean blocked = SmsReceiver.isBlocked(context, phone);
-        boolean qualifies = UploadFilter.shouldUpload(body, BusinessContactStore.contains(context, phone), blocked);
-        if (qualifies && UploadFilter.isPurchaseMessage(body)) BusinessContactStore.register(context, phone);
+        boolean qualifies = UploadFilter.shouldUpload(phone, body, BusinessContactStore.contains(context, phone), blocked);
+        if (qualifies && (UploadFilter.isPurchaseMessage(body) || UploadFilter.is010Number(phone))) BusinessContactStore.register(context, phone);
 
         LocalDb.Item item = new LocalDb.Item();
         item.externalId = mms ? mmsExternalId(providerId) : smsExternalId(providerId);
@@ -160,7 +160,7 @@ public final class UploadQueue {
             return null;
         }
         boolean purchase = UploadFilter.isPurchaseMessage(message.body);
-        if (purchase) BusinessContactStore.register(context, message.phone);
+        if (purchase || UploadFilter.is010Number(message.phone)) BusinessContactStore.register(context, message.phone);
         List<BridgeClient.ImageAttachment> images = mms ? readMmsImages(context, message.id) : new ArrayList<>();
         long receivedAt = item.payload.optLong("receivedAt", message.dateMillis);
         return BridgeClient.postIncoming(context, item.externalId, message.phone.isEmpty() ? "알 수 없음" : message.phone,
