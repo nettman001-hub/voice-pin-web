@@ -251,20 +251,93 @@ public final class UploadQueue {
         return "";
     }
 
-    static String readMmsText(Context context, String messageId, String fallback) {
-        StringBuilder result = new StringBuilder(fallback == null ? "" : fallback);
+    static String decodeMmsString(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return "";
+        String trimmed = raw.trim();
+        try {
+            byte[] bytes = trimmed.getBytes(StandardCharsets.ISO_8859_1);
+            String utf8 = new String(bytes, StandardCharsets.UTF_8);
+            if (containsKorean(utf8) && !utf8.contains("\uFFFD")) {
+                trimmed = utf8.trim();
+            } else {
+                try {
+                    String euckr = new String(bytes, java.nio.charset.Charset.forName("EUC-KR"));
+                    if (containsKorean(euckr) && !euckr.contains("\uFFFD")) {
+                        trimmed = euckr.trim();
+                    }
+                } catch (Exception ignored) { }
+            }
+        } catch (Exception ignored) { }
+        return trimmed;
+    }
+
+    static boolean isNoSubject(String s) {
+        if (s == null) return true;
+        String norm = s.trim().replaceAll("\\s+", "").toLowerCase();
+        return norm.isEmpty()
+                || norm.equals("제목없음")
+                || norm.equals("(제목없음)")
+                || norm.equals("[제목없음]")
+                || norm.equals("<제목없음>")
+                || norm.equals("nosubject")
+                || norm.equals("(nosubject)")
+                || norm.equals("[nosubject]")
+                || norm.contains("ìœëª©ì—†ìŒ")
+                || norm.contains("ìœëª©");
+    }
+
+    private static boolean containsKorean(String s) {
+        if (s == null) return false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if ((c >= 0xAC00 && c <= 0xD7A3) || (c >= 0x3131 && c <= 0x318E)) return true;
+        }
+        return false;
+    }
+
+    static String readMmsText(Context context, String messageId, String rawFallback) {
+        String decodedFallback = decodeMmsString(rawFallback);
+        String subject = isNoSubject(decodedFallback) ? "" : decodedFallback;
+
+        StringBuilder textBuilder = new StringBuilder();
         try (Cursor cursor = context.getContentResolver().query(Uri.parse("content://mms/part"),
                 new String[]{"_id", "ct", "text", "_data"}, "mid=?", new String[]{messageId}, null)) {
             while (cursor != null && cursor.moveToNext()) {
                 if (!"text/plain".equals(cursor.getString(1))) continue;
                 String text = cursor.getString(2);
-                if (text != null) result.append('\n').append(text);
-                else try (InputStream input = context.getContentResolver().openInputStream(Uri.parse("content://mms/part/" + cursor.getString(0)))) {
-                    if (input != null) result.append('\n').append(new String(BridgeClient.readLimited(input), StandardCharsets.UTF_8));
+                if (text != null) {
+                    String decoded = decodeMmsString(text);
+                    if (decoded.isEmpty()) decoded = text;
+                    if (textBuilder.length() > 0) textBuilder.append('\n');
+                    textBuilder.append(decoded);
+                } else try (InputStream input = context.getContentResolver().openInputStream(Uri.parse("content://mms/part/" + cursor.getString(0)))) {
+                    if (input != null) {
+                        byte[] bytes = BridgeClient.readLimited(input);
+                        String decoded = new String(bytes, StandardCharsets.UTF_8);
+                        if (!containsKorean(decoded) && bytes.length > 0) {
+                            try {
+                                String euckr = new String(bytes, java.nio.charset.Charset.forName("EUC-KR"));
+                                if (containsKorean(euckr)) decoded = euckr;
+                            } catch (Exception ignored) { }
+                        }
+                        if (textBuilder.length() > 0) textBuilder.append('\n');
+                        textBuilder.append(decoded);
+                    }
                 } catch (Exception ignored) { }
             }
         } catch (RuntimeException ignored) { }
-        return result.toString().trim();
+
+        String body = textBuilder.toString().trim();
+        if (subject.isEmpty()) {
+            return body;
+        }
+        if (body.isEmpty()) {
+            return subject;
+        }
+        if (body.startsWith(subject)) {
+            return body;
+        }
+        return subject + "\n" + body;
     }
 
     private static List<BridgeClient.ImageAttachment> readMmsImages(Context context, String messageId) {

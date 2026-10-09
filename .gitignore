@@ -41,6 +41,8 @@ android/voicecapSMS/build/
 android/voicecapSMS/app/build/
 android/voicecapSMS/signing/
 android/voicecapSMS/release-output/
+*.apk
+*.aab
 __pycache__/
 *.pyc
 android/voicecapSMS/*.jks

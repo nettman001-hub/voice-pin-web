@@ -1,8 +1,11 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useSales } from '../../context/SalesContext';
 import { useCommerce } from '../../context/CommerceContext';
-import { SmsMessage } from '../../types/commerce';
+import { SmsAttachment, SmsMessage } from '../../types/commerce';
 import { SaleRecord } from '../../types/live';
+import { cleanMessageBody } from '../../utils/textCleaner';
+import { resolvePrivateImageUrl } from '../../services/remoteWorkspaceService';
+import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 import {
   MessageSquare,
   ShoppingBag,
@@ -19,7 +22,9 @@ import {
   ChevronRight,
   User,
   Inbox,
-  AlertCircle
+  AlertCircle,
+  ZoomIn,
+  Image as ImageIcon
 } from 'lucide-react';
 
 const formatPhone = (raw: string): string => {
@@ -56,6 +61,81 @@ interface ThreadInfo {
   isNew: boolean; // "신규" 아이콘/배지 대상 여부
 }
 
+const AttachmentItem: React.FC<{
+  attachment: SmsAttachment;
+  onOpenViewer: (url: string) => void;
+}> = ({ attachment, onOpenViewer }) => {
+  const [resolvedUrl, setResolvedUrl] = useState<string>(
+    attachment.dataUrl || (attachment.path?.startsWith('http') ? attachment.path : '')
+  );
+  const [loading, setLoading] = useState<boolean>(!resolvedUrl && Boolean(attachment.path));
+  const [error, setError] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (resolvedUrl) return;
+    if (!attachment.path) return;
+    let active = true;
+    setLoading(true);
+    resolvePrivateImageUrl(attachment.path)
+      .then((url) => {
+        if (active) {
+          if (url) {
+            setResolvedUrl(url);
+          } else {
+            setError(true);
+          }
+        }
+      })
+      .catch(() => {
+        if (active) setError(true);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [attachment.path, resolvedUrl]);
+
+  if (loading) {
+    return (
+      <div className="flex h-28 w-full items-center justify-center rounded-xl border border-slate-200 bg-slate-100 animate-pulse text-slate-400 text-xs">
+        <span className="text-[11px]">사진 불러오는 중...</span>
+      </div>
+    );
+  }
+
+  if (error || !resolvedUrl) {
+    return (
+      <div className="flex h-28 w-full flex-col items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-500 text-xs p-2 text-center">
+        <AlertCircle className="w-5 h-5 mb-1 text-rose-400" />
+        <span className="text-[10px] truncate max-w-full font-medium">{attachment.fileName || '사진'}</span>
+        <span className="text-[9px] text-rose-400">불러올 수 없음</span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={() => onOpenViewer(resolvedUrl)}
+      className="group relative cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-black/5 hover:border-brand-500 hover:shadow-md transition-all"
+      title="클릭하여 원본 크기로 보기"
+    >
+      <img
+        src={resolvedUrl}
+        alt={attachment.fileName || '첨부 사진'}
+        className="h-28 w-full object-cover transition-transform duration-200 group-hover:scale-105"
+        loading="lazy"
+      />
+      <div className="absolute inset-0 bg-slate-950/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+        <span className="bg-slate-900/80 text-white text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 shadow-md">
+          <ZoomIn className="w-3.5 h-3.5" /> 크게 보기
+        </span>
+      </div>
+    </div>
+  );
+};
+
 export const CustomerMessagesComparisonPage: React.FC = () => {
   const { sales } = useSales();
   const {
@@ -74,6 +154,9 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
   const [messagesSearch, setMessagesSearch] = useState('');
   const [selectedSessionId, setSelectedSessionId] = useState<string>('ALL');
   const [selectedPhoneKey, setSelectedPhoneKey] = useState<string | null>(null);
+
+  // 이미지 크게보기 뷰어 상태
+  const [viewingImages, setViewingImages] = useState<{ urls: string[]; index: number } | null>(null);
 
   // 답장 입력 상태
   const [replyText, setReplyText] = useState('');
@@ -521,12 +604,19 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                       </div>
 
                       {/* 최근 메시지 미리보기 */}
-                      <p className="text-xs text-slate-600 line-clamp-1 break-all">
-                        {thread.lastMessage.direction === 'OUTGOING' && (
-                          <span className="text-slate-400 font-semibold mr-1">[발신]</span>
-                        )}
-                        {thread.lastMessage.body || '(내용 없음)'}
-                      </p>
+                      {(() => {
+                        const cleaned = cleanMessageBody(thread.lastMessage.body);
+                        const attCount = thread.lastMessage.attachments?.length || 0;
+                        const preview = cleaned || (attCount > 0 ? (attCount > 1 ? `[사진 ${attCount}장]` : '[사진]') : '(내용 없음)');
+                        return (
+                          <p className="text-xs text-slate-600 line-clamp-1 break-all">
+                            {thread.lastMessage.direction === 'OUTGOING' && (
+                              <span className="text-slate-400 font-semibold mr-1">[발신]</span>
+                            )}
+                            {preview}
+                          </p>
+                        );
+                      })()}
 
                       <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400">
                         <span>총 {thread.messages.length}건</span>
@@ -614,27 +704,33 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                             </span>
                           </div>
 
-                          <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
-                            {msg.body}
-                          </p>
+                          {(() => {
+                            const cleaned = cleanMessageBody(msg.body);
+                            return cleaned ? (
+                              <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
+                                {cleaned}
+                              </p>
+                            ) : null;
+                          })()}
 
                           {/* 첨부 이미지 목록 */}
                           {msg.attachments && msg.attachments.length > 0 && (
-                            <div className="mt-2 grid grid-cols-2 gap-1.5">
+                            <div className={`grid gap-1.5 ${msg.attachments.length === 1 ? 'grid-cols-1 max-w-[240px]' : 'grid-cols-2'} ${cleanMessageBody(msg.body) ? 'mt-2' : ''}`}>
                               {msg.attachments.map((att) => (
-                                <a
+                                <AttachmentItem
                                   key={att.id}
-                                  href={att.path}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="block overflow-hidden rounded-lg border border-slate-200 bg-black/5"
-                                >
-                                  <img
-                                    src={att.path}
-                                    alt={att.fileName || '첨부 이미지'}
-                                    className="h-24 w-full object-cover"
-                                  />
-                                </a>
+                                  attachment={att}
+                                  onOpenViewer={(clickedUrl) => {
+                                    const allUrls = (msg.attachments || [])
+                                      .map((a) => a.dataUrl || (a.path?.startsWith('http') ? a.path : ''))
+                                      .filter(Boolean);
+                                    if (!allUrls.includes(clickedUrl)) {
+                                      allUrls.push(clickedUrl);
+                                    }
+                                    const idx = Math.max(0, allUrls.indexOf(clickedUrl));
+                                    setViewingImages({ urls: allUrls, index: idx });
+                                  }}
+                                />
                               ))}
                             </div>
                           )}
@@ -687,6 +783,16 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
           </div>
         </section>
       </div>
+
+      {viewingImages && (
+        <ImageViewerModal
+          isOpen={Boolean(viewingImages)}
+          onClose={() => setViewingImages(null)}
+          images={viewingImages.urls}
+          initialIndex={viewingImages.index}
+          titlePrefix={activeThread?.displayPhone || '문자 첨부 사진'}
+        />
+      )}
     </div>
   );
 };

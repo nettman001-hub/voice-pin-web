@@ -23,8 +23,8 @@ android {
         applicationId 'shop.voicecap.smsbridge'
         minSdk 26
         targetSdk 36
-        versionCode 12
-        versionName '1.6.1'
+        versionCode 13
+        versionName '1.6.2'
         def apiBaseUrl = (project.findProperty('VOICECAP_API_BASE_URL') ?: 'https://ymegrhxpbeanvxwdzfym.supabase.co/functions/v1').toString().replaceAll('/+$', '')
         buildConfigField 'String', 'VOICECAP_API_BASE_URL', '"' + apiBaseUrl.replace('"', '\\"') + '"'
         // 판매관리 탭. false인 동안 탭은 회색으로 보이고, 판매 코드(저장소·화면·작업)는 하나도 시작하지 않는다.

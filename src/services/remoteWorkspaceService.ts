@@ -11,6 +11,7 @@ import { normalizeSttVocabulary } from './sttVocabularyService';
 import type { PromiseDefaultRecord } from './promiseDefaultService';
 import { invalidVoiceSaleFields, voiceSaleValidationMessage } from './voiceSaleValidation';
 import { decideAliasUpdate, isUnknownPayer, normalizePayerName } from './paymentMatching';
+import { cleanMessageBody } from '../utils/textCleaner';
 
 export interface CloudSessionTranscriptsPayload {
   sessionId: string;
@@ -158,7 +159,7 @@ const mapMessage = async (row: Row, workspaceId: string): Promise<SmsMessage> =>
   sellerId: workspaceId,
   externalId: row.external_id || undefined,
   phoneNumber: row.phone_number,
-  body: row.body,
+  body: cleanMessageBody(row.body),
   direction: row.direction,
   category: row.category,
   status: row.status,

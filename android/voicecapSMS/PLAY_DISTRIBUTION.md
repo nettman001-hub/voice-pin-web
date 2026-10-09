@@ -6,7 +6,7 @@
 
 - 앱 이름: VoiceCAP SMS Bridge
 - 패키지 ID: `shop.voicecap.smsbridge`
-- 버전: 1.6.1 (versionCode 12)
+- 버전: 1.6.2 (versionCode 13)
 - 최소 Android: 8.0 (API 26)
 - 대상 Android: 16 (API 36)
 

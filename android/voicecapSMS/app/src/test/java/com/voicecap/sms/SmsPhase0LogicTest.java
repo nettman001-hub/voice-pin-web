@@ -77,4 +77,21 @@ public class SmsPhase0LogicTest {
         assertEquals(900_000L, SyncBackoff.delayMillis(4));
         assertEquals(900_000L, SyncBackoff.delayMillis(50));
     }
+
+    @Test
+    public void decodesMmsSubjectAndFiltersNoSubject() {
+        // UTF-8 bytes of "제목없음" read as ISO-8859-1
+        byte[] utf8Bytes = "제목없음".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String mojibake = new String(utf8Bytes, java.nio.charset.StandardCharsets.ISO_8859_1);
+
+        String decoded = UploadQueue.decodeMmsString(mojibake);
+        assertEquals("제목없음", decoded);
+        assertTrue(UploadQueue.isNoSubject(decoded));
+
+        // Real subject like "입금 확인"
+        byte[] realUtf8 = "입금 확인".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String realMojibake = new String(realUtf8, java.nio.charset.StandardCharsets.ISO_8859_1);
+        assertEquals("입금 확인", UploadQueue.decodeMmsString(realMojibake));
+        assertFalse(UploadQueue.isNoSubject(UploadQueue.decodeMmsString(realMojibake)));
+    }
 }
