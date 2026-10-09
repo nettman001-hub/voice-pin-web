@@ -40,6 +40,7 @@ android/voicecapSMS/.gradle/
 android/voicecapSMS/build/
 android/voicecapSMS/app/build/
 android/voicecapSMS/signing/
+android/voicecapSMS/release-output/
 __pycache__/
 *.pyc
 android/voicecapSMS/*.jks
