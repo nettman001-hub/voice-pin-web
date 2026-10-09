@@ -585,7 +585,7 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
           </div>
           <div>
             <h1 className="text-base font-black text-slate-900 flex items-center gap-2">
-              고객 문자함 비교
+              판매내역/문자비교
               <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
                 실시간 대조 모드
               </span>
