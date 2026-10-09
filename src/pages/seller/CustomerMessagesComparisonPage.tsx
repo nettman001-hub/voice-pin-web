@@ -1,11 +1,13 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useSales } from '../../context/SalesContext';
 import { useCommerce } from '../../context/CommerceContext';
-import { SmsAttachment, SmsMessage } from '../../types/commerce';
+import { useAuth } from '../../context/AuthContext';
+import { CustomerPurchaseClaim, SmsAttachment, SmsMessage } from '../../types/commerce';
 import { SaleRecord } from '../../types/live';
 import { cleanMessageBody } from '../../utils/textCleaner';
 import { resolvePrivateImageUrl } from '../../services/remoteWorkspaceService';
 import { ImageViewerModal } from '../../components/common/ImageViewerModal';
+import { requireSupabase, isSupabaseConfigured } from '../../services/supabaseClient';
 import {
   MessageSquare,
   ShoppingBag,
@@ -50,6 +52,69 @@ const normalizePhone = (raw: string): string => {
   if (compact.startsWith('+82')) compact = '0' + compact.slice(3);
   if (compact.startsWith('82') && compact.length >= 11) compact = '0' + compact.slice(2);
   return compact.replace(/\D/g, '');
+};
+
+// 날짜 + 시각 포맷 (예: "2026.10.10 오후 10:14")
+const formatDateTime = (iso?: string): string => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const time = d.toLocaleTimeString('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return `${year}.${month}.${day} ${time}`;
+};
+
+// 날짜 + 시각 + 초 포맷 (예: "2026.10.10 오후 10:14:24")
+const formatDateTimeWithSeconds = (iso?: string): string => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const time = d.toLocaleTimeString('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  return `${year}.${month}.${day} ${time}`;
+};
+
+// 일자 구분선 포맷 (예: "2026년 10월 10일 토요일")
+const formatDateDivider = (iso?: string): string => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString('ko-KR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'short',
+  });
+};
+
+const MANUAL_NICKNAME_KEY = 'voicecap_manual_phone_nicknames';
+
+const loadManualNicknames = (workspaceId?: string | null): Map<string, string> => {
+  try {
+    const key = workspaceId ? `${MANUAL_NICKNAME_KEY}_${workspaceId}` : MANUAL_NICKNAME_KEY;
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const obj = JSON.parse(raw);
+      return new Map(Object.entries(obj));
+    }
+  } catch {}
+  return new Map();
+};
+
+const saveManualNicknames = (map: Map<string, string>, workspaceId?: string | null) => {
+  try {
+    const key = workspaceId ? `${MANUAL_NICKNAME_KEY}_${workspaceId}` : MANUAL_NICKNAME_KEY;
+    const obj = Object.fromEntries(map.entries());
+    localStorage.setItem(key, JSON.stringify(obj));
+  } catch {}
 };
 
 interface ThreadInfo {
@@ -138,6 +203,7 @@ const AttachmentItem: React.FC<{
 };
 
 export const CustomerMessagesComparisonPage: React.FC = () => {
+  const { workspaceId, isRemoteAuth } = useAuth();
   const { sales } = useSales();
   const {
     messages,
@@ -147,8 +213,19 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     syncBridge,
     bridgeStatus,
     bridgeMessage,
-    sendSms
+    sendSms,
+    updateClaim,
   } = useCommerce();
+
+  // 수동 닉네임 연결 상태 (localStorage 및 실시간 상태 동기화)
+  const [manualNicknames, setManualNicknames] = useState<Map<string, string>>(() =>
+    loadManualNicknames(workspaceId)
+  );
+  const [nicknameInput, setNicknameInput] = useState('');
+
+  useEffect(() => {
+    setManualNicknames(loadManualNicknames(workspaceId));
+  }, [workspaceId]);
 
   // 검색 및 필터 상태
   const [salesSearch, setSalesSearch] = useState('');
@@ -176,14 +253,14 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     return Array.from(set);
   }, [sales]);
 
-  // 2. 웹앱 전체 구매자 닉네임 목록 (신규 매칭에 사용)
+  // 2. 웹앱 전체 구매자 닉네임 목록 (신규 매칭 및 연결에 사용)
   const allBuyerNicknames = useMemo(() => {
     const list = sales.map((s) => s.buyerNickname?.trim()).filter(Boolean) as string[];
     // 긴 닉네임부터 우선 매칭되도록 정렬
     return Array.from(new Set(list)).sort((a, b) => b.length - a.length);
   }, [sales]);
 
-  // 3. 과거 거래 내역이 있는 전화번호 -> 닉네임 맵 생성
+  // 3. 과거 거래 내역 및 수동 연결된 전화번호 -> 닉네임 맵 생성
   const pastTransactionPhoneMap = useMemo(() => {
     const map = new Map<string, string>();
 
@@ -211,8 +288,15 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
       }
     });
 
+    // 수동으로 연결한 닉네임 매핑 수집 (최우선 반영)
+    manualNicknames.forEach((nick, norm) => {
+      if (norm && nick) {
+        map.set(norm, nick);
+      }
+    });
+
     return map;
-  }, [claims, invoices, shipments]);
+  }, [claims, invoices, shipments, manualNicknames]);
 
   // 4. 문자 메시지들을 전화번호별 스레드(Thread)로 그룹핑 & 요구사항 로직 적용
   const threads = useMemo<ThreadInfo[]>(() => {
@@ -409,6 +493,86 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     if (found) {
       setSelectedPhoneKey(found.phoneKey);
     }
+  };
+
+  // 고객 닉네임 수동 연결 함수
+  const handleLinkNickname = async (phoneKey: string, rawNickname: string) => {
+    const nick = rawNickname.trim();
+    if (!nick) return;
+
+    // 1. 상태 및 로컬 스토리지 업데이트
+    const nextMap = new Map(manualNicknames);
+    nextMap.set(phoneKey, nick);
+    setManualNicknames(nextMap);
+    saveManualNicknames(nextMap, workspaceId);
+    setNicknameInput('');
+
+    // 2. 해당 구매자 닉네임을 가진 판매 건 조회
+    const matchingSales = sales.filter(
+      (s) => s.buyerNickname?.trim().toLowerCase() === nick.toLowerCase()
+    );
+    const matchingSaleIds = matchingSales.map((s) => s.id);
+
+    // 3. activeThread 기준 claim 등록/업데이트
+    const thread = threads.find((t) => t.phoneKey === phoneKey);
+    const claimId = crypto.randomUUID();
+    const newClaim: CustomerPurchaseClaim = {
+      id: claimId,
+      messageId: thread?.lastMessage?.id || '',
+      phoneNumber: thread?.displayPhone || formatPhone(phoneKey),
+      nickname: nick,
+      address: '',
+      productName: matchingSales[0]?.productName || '',
+      amount: matchingSales.reduce((sum, s) => sum + (s.amount || 0), 0) || null,
+      captureImageUrls: [],
+      saleIds: matchingSaleIds,
+      matchStatus: 'MATCHED',
+      fieldMatches: { nickname: true, amount: null, capture: null },
+      sellerNote: '고객 문자함에서 닉네임 수동 연결',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    updateClaim(newClaim);
+
+    // 4. Supabase 연동 시 purchase_claims 테이블에 저장
+    if (isRemoteAuth && workspaceId && isSupabaseConfigured) {
+      try {
+        const client = requireSupabase();
+        await client.from('purchase_claims').upsert({
+          id: claimId,
+          workspace_id: workspaceId,
+          message_id: thread?.lastMessage?.id || null,
+          phone_number: thread?.displayPhone || formatPhone(phoneKey),
+          nickname: nick,
+          address: '',
+          product_name: matchingSales[0]?.productName || '',
+          amount: matchingSales.reduce((sum, s) => sum + (s.amount || 0), 0) || null,
+          sale_ids: matchingSaleIds,
+          match_status: 'MATCHED',
+          field_matches: { nickname: true, amount: null, capture: null },
+          seller_note: '고객 문자함에서 닉네임 수동 연결',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.warn('Supabase claim upsert 오류:', err);
+      }
+    }
+
+    setFeedback(`'${nick}' 닉네임이 ${formatPhone(phoneKey)} 번호와 연결되었습니다.`);
+    setTimeout(() => setFeedback(null), 3000);
+  };
+
+  // 고객 닉네임 수동 연결 해제 함수
+  const handleUnlinkNickname = async (phoneKey: string) => {
+    const nextMap = new Map(manualNicknames);
+    const prevNick = nextMap.get(phoneKey);
+    nextMap.delete(phoneKey);
+    setManualNicknames(nextMap);
+    saveManualNicknames(nextMap, workspaceId);
+
+    setFeedback(`'${prevNick || ''}' 번호(${formatPhone(phoneKey)}) 연결이 해제되었습니다.`);
+    setTimeout(() => setFeedback(null), 3000);
   };
 
   return (
@@ -637,11 +801,8 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                               </span>
                             )}
                           </div>
-                          <span className="text-[10px] text-slate-400">
-                            {new Date(matchedThread.lastMessage.createdAt).toLocaleTimeString('ko-KR', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
+                          <span className="text-[10px] text-slate-400 font-medium">
+                            {formatDateTime(matchedThread.lastMessage.createdAt)}
                           </span>
                         </div>
                         <p className="text-slate-600 truncate text-[11px] leading-tight">
@@ -753,12 +914,9 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                           )}
                         </div>
 
-                        {/* 시각 */}
-                        <span className="text-[10px] text-slate-400 whitespace-nowrap">
-                          {new Date(thread.lastMessage.createdAt).toLocaleTimeString('ko-KR', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
+                        {/* 날짜 및 시각 */}
+                        <span className="text-[10px] text-slate-400 whitespace-nowrap font-medium">
+                          {formatDateTime(thread.lastMessage.createdAt)}
                         </span>
                       </div>
 
@@ -807,21 +965,82 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                       <Smartphone className="w-4 h-4" />
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-black text-sm text-slate-900">
                           {activeThread.displayPhone}
                         </span>
-                        {activeThread.existingNickname && (
-                          <span className="text-xs font-bold text-brand-700 bg-brand-50 px-2 py-0.5 rounded-full border border-brand-200">
-                            {activeThread.existingNickname}
-                          </span>
-                        )}
-                        {activeThread.newMatchedNickname && !activeThread.existingNickname && (
-                          <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
-                            {activeThread.newMatchedNickname}
-                            <span className="bg-emerald-600 text-white text-[9px] px-1 py-0.2 rounded-full">신규</span>
-                          </span>
-                        )}
+
+                        {/* 연결된 닉네임이 이미 있는 경우: 닉네임 배지만 표시 (입력창 제외) */}
+                        {(() => {
+                          const connectedNickname =
+                            activeThread.existingNickname ||
+                            activeThread.newMatchedNickname ||
+                            manualNicknames.get(activeThread.phoneKey) ||
+                            null;
+                          const isManuallyLinked = manualNicknames.has(activeThread.phoneKey);
+
+                          if (connectedNickname) {
+                            return (
+                              <div className="flex items-center gap-1">
+                                <span className="text-xs font-bold text-brand-700 bg-brand-50 px-2 py-0.5 rounded-full border border-brand-200 flex items-center gap-1 shadow-2xs">
+                                  <UserCheck className="w-3 h-3 text-brand-600" />
+                                  {connectedNickname}
+                                  {activeThread.isNew && (
+                                    <span className="bg-amber-500 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full">
+                                      신규
+                                    </span>
+                                  )}
+                                </span>
+                                {isManuallyLinked && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUnlinkNickname(activeThread.phoneKey)}
+                                    className="text-slate-400 hover:text-red-500 transition-colors p-0.5"
+                                    title="닉네임 연결 해제"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          /* 연결된 닉네임이 없는 경우: 닉네임 직접 입력 및 연결 UI */
+                          return (
+                            <form
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                if (nicknameInput.trim()) {
+                                  handleLinkNickname(activeThread.phoneKey, nicknameInput.trim());
+                                }
+                              }}
+                              className="flex items-center gap-1.5"
+                            >
+                              <div className="relative">
+                                <input
+                                  type="text"
+                                  list="buyer-nicknames-datalist"
+                                  placeholder="고객 닉네임 입력/선택"
+                                  value={nicknameInput}
+                                  onChange={(e) => setNicknameInput(e.target.value)}
+                                  className="text-xs px-2.5 py-1 bg-amber-50/70 border border-amber-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-500 w-36"
+                                />
+                                <datalist id="buyer-nicknames-datalist">
+                                  {allBuyerNicknames.map((nick) => (
+                                    <option key={nick} value={nick} />
+                                  ))}
+                                </datalist>
+                              </div>
+                              <button
+                                type="submit"
+                                disabled={!nicknameInput.trim()}
+                                className="px-2.5 py-1 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors disabled:opacity-40 shadow-2xs whitespace-nowrap"
+                              >
+                                닉네임 연결
+                              </button>
+                            </form>
+                          );
+                        })()}
                       </div>
                       <p className="text-[11px] text-slate-400">
                         총 {activeThread.messages.length}건의 대화 내역
@@ -832,69 +1051,76 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
 
                 {/* 말풍선 목록 영역 */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/70">
-                  {activeThread.messages.map((msg) => {
+                  {activeThread.messages.map((msg, index) => {
                     const isOutgoing = msg.direction === 'OUTGOING';
+                    const prevMsg = index > 0 ? activeThread.messages[index - 1] : null;
+                    const isNewDay =
+                      !prevMsg ||
+                      new Date(msg.createdAt).toDateString() !== new Date(prevMsg.createdAt).toDateString();
 
                     return (
-                      <div
-                        key={msg.id}
-                        className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}
-                      >
+                      <React.Fragment key={msg.id}>
+                        {isNewDay && (
+                          <div className="flex items-center justify-center my-2">
+                            <div className="bg-slate-200/90 text-slate-600 text-[11px] font-bold px-3 py-0.5 rounded-full shadow-2xs">
+                              {formatDateDivider(msg.createdAt)}
+                            </div>
+                          </div>
+                        )}
+
                         <div
-                          className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-xs shadow-xs ${
-                            isOutgoing
-                              ? 'bg-brand-600 text-white rounded-br-none'
-                              : 'bg-white text-slate-800 border border-slate-200 rounded-bl-none'
-                          }`}
+                          className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}
                         >
                           <div
-                            className={`mb-1 flex items-center gap-2 text-[10px] ${
-                              isOutgoing ? 'text-brand-100' : 'text-slate-400'
+                            className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-xs shadow-xs ${
+                              isOutgoing
+                                ? 'bg-brand-600 text-white rounded-br-none'
+                                : 'bg-white text-slate-800 border border-slate-200 rounded-bl-none'
                             }`}
                           >
-                            <span>{isOutgoing ? '발신 (판매자)' : '수신 (고객)'}</span>
-                            <span>·</span>
-                            <span>
-                              {new Date(msg.createdAt).toLocaleTimeString('ko-KR', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                second: '2-digit',
-                              })}
-                            </span>
-                          </div>
-
-                          {(() => {
-                            const cleaned = cleanMessageBody(msg.body);
-                            return cleaned ? (
-                              <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
-                                {cleaned}
-                              </p>
-                            ) : null;
-                          })()}
-
-                          {/* 첨부 이미지 목록 */}
-                          {msg.attachments && msg.attachments.length > 0 && (
-                            <div className={`grid gap-1.5 ${msg.attachments.length === 1 ? 'grid-cols-1 max-w-[240px]' : 'grid-cols-2'} ${cleanMessageBody(msg.body) ? 'mt-2' : ''}`}>
-                              {msg.attachments.map((att) => (
-                                <AttachmentItem
-                                  key={att.id}
-                                  attachment={att}
-                                  onOpenViewer={(clickedUrl) => {
-                                    const allUrls = (msg.attachments || [])
-                                      .map((a) => a.dataUrl || (a.path?.startsWith('http') ? a.path : ''))
-                                      .filter(Boolean);
-                                    if (!allUrls.includes(clickedUrl)) {
-                                      allUrls.push(clickedUrl);
-                                    }
-                                    const idx = Math.max(0, allUrls.indexOf(clickedUrl));
-                                    setViewingImages({ urls: allUrls, index: idx });
-                                  }}
-                                />
-                              ))}
+                            <div
+                              className={`mb-1 flex items-center gap-1.5 text-[10px] ${
+                                isOutgoing ? 'text-brand-100' : 'text-slate-400'
+                              }`}
+                            >
+                              <span className="font-semibold">{isOutgoing ? '발신 (판매자)' : '수신 (고객)'}</span>
+                              <span>·</span>
+                              <span>{formatDateTimeWithSeconds(msg.createdAt)}</span>
                             </div>
-                          )}
+
+                            {(() => {
+                              const cleaned = cleanMessageBody(msg.body);
+                              return cleaned ? (
+                                <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
+                                  {cleaned}
+                                </p>
+                              ) : null;
+                            })()}
+
+                            {/* 첨부 이미지 목록 */}
+                            {msg.attachments && msg.attachments.length > 0 && (
+                              <div className={`grid gap-1.5 ${msg.attachments.length === 1 ? 'grid-cols-1 max-w-[240px]' : 'grid-cols-2'} ${cleanMessageBody(msg.body) ? 'mt-2' : ''}`}>
+                                {msg.attachments.map((att) => (
+                                  <AttachmentItem
+                                    key={att.id}
+                                    attachment={att}
+                                    onOpenViewer={(clickedUrl) => {
+                                      const allUrls = (msg.attachments || [])
+                                        .map((a) => a.dataUrl || (a.path?.startsWith('http') ? a.path : ''))
+                                        .filter(Boolean);
+                                      if (!allUrls.includes(clickedUrl)) {
+                                        allUrls.push(clickedUrl);
+                                      }
+                                      const idx = Math.max(0, allUrls.indexOf(clickedUrl));
+                                      setViewingImages({ urls: allUrls, index: idx });
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
+                      </React.Fragment>
                     );
                   })}
                   <div ref={messagesEndRef} />
