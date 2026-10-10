@@ -993,114 +993,6 @@ export const LiveHomePage: React.FC = () => {
               )}
             </div>
           </div>
-
-          {/* 최근 감지된 단어 규칙 및 음성 처리 결과 */}
-          <div className="order-4 bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between gap-2 sm:gap-3 min-h-[48px] sm:min-h-[50px]">
-            <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
-              <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
-                <Sparkles className="w-4 h-4 text-amber-500" />
-              </div>
-              <h3 className="text-xs sm:text-sm font-bold text-slate-900 whitespace-nowrap">
-                최근 감지·처리 결과
-              </h3>
-            </div>
-
-            {effectiveMatchedRuleItem ? (
-              <div className="flex-1 min-w-0 flex items-center justify-between gap-2 p-1.5 sm:px-2.5 rounded-xl bg-amber-50/70 border border-amber-200">
-                <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
-                  <div className="flex items-center space-x-1 flex-shrink-0">
-                    {effectiveMatchedRuleItem.matchedKeywords.slice(0, 2).map((kw, idx) => (
-                      <span key={idx} className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-bold text-[10px] border border-amber-300">
-                        #{kw}
-                      </span>
-                    ))}
-                  </div>
-                  <span className="text-xs font-bold text-slate-900 truncate">
-                    "{effectiveMatchedRuleItem.text}"
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <span className="px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-[10px] font-bold whitespace-nowrap">
-                    {effectiveMatchedRuleItem.action}
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">{effectiveMatchedRuleItem.timestamp}</span>
-                </div>
-              </div>
-            ) : (
-              <div className="flex-1 min-w-0 flex items-center justify-center py-1 px-2.5 rounded-xl border border-dashed border-slate-200 text-[11px] sm:text-xs text-slate-400 truncate italic">
-                등록된 단어 규칙과 판매·음성 정정·캡처 처리 결과를 표시합니다.
-              </div>
-            )}
-          </div>
-
-          {/* 테스트 멘트 주입 툴바 (모바일 가로 스크롤 지원) */}
-          <div className="order-5 bg-white border border-slate-200 rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2.5 text-xs shadow-sm space-y-1.5">
-            <div className="flex items-center justify-between">
-              <p className="font-bold text-slate-700 flex items-center">
-                <Sparkles className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
-                <span>빠른 시연 & 테스트 멘트 주입 버튼</span>
-              </p>
-              <button
-                type="button"
-                onClick={handleToggleDemo}
-                className={`px-2.5 py-0.5 rounded-lg text-[11px] font-black whitespace-nowrap active:scale-95 transition flex items-center gap-1 shadow-xs ${
-                  isDemoActive
-                    ? 'bg-rose-500 hover:bg-rose-600 text-white animate-pulse'
-                    : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white'
-                }`}
-              >
-                {isDemoActive ? (
-                  <>
-                    <Square className="w-3 h-3 fill-current" />
-                    <span>데모 중지 ({Math.floor(demoElapsedSeconds / 60).toString().padStart(2, '0')}:{(demoElapsedSeconds % 60).toString().padStart(2, '0')})</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-3 h-3 text-amber-300" />
-                    <span>🎬 실시간 전체 데모</span>
-                  </>
-                )}
-              </button>
-            </div>
-            <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar pb-0.5">
-              <button
-                onClick={() => injectTestMent('구매확정 됐습니다! 구매하신 분은 러블리님 이시구요 금액은 3만5천원입니다.')}
-                className="px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
-              >
-                + "러블리님 35,000원"
-              </button>
-              <button
-                onClick={() => injectTestMent('구매확정! 닉네임 민트초코님 가격 19,900원입니다. 캡처하세요.')}
-                className="px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
-              >
-                + "민트초코 19,900원 + 캡처하세요"
-              </button>
-              <button
-                onClick={() => injectTestMent('화면 캡처하세요.')}
-                className="px-2.5 py-1 rounded-lg bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border border-cyan-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
-              >
-                + "화면 캡처하세요"
-              </button>
-              <button
-                onClick={() => injectTestMent('수정 시작')}
-                className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold whitespace-nowrap active:scale-95 transition"
-              >
-                + "수정 시작"
-              </button>
-              <button
-                onClick={() => injectTestMent('닉네임은 달콤한하루님, 금액은 48,000원')}
-                className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold whitespace-nowrap active:scale-95 transition"
-              >
-                + "닉네임/금액 수정"
-              </button>
-              <button
-                onClick={() => injectTestMent('수정 완료')}
-                className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold whitespace-nowrap active:scale-95 transition"
-              >
-                + "수정 완료"
-              </button>
-            </div>
-          </div>
         </div>
 
         {/* 우측 영역 (6 cols) */}
@@ -1204,6 +1096,114 @@ export const LiveHomePage: React.FC = () => {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+
+          {/* 최근 감지된 단어 규칙 및 음성 처리 결과 */}
+          <div className="bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between gap-2 sm:gap-3 min-h-[48px] sm:min-h-[50px]">
+            <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
+                <Sparkles className="w-4 h-4 text-amber-500" />
+              </div>
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 whitespace-nowrap">
+                최근 감지·처리 결과
+              </h3>
+            </div>
+
+            {effectiveMatchedRuleItem ? (
+              <div className="flex-1 min-w-0 flex items-center justify-between gap-2 p-1.5 sm:px-2.5 rounded-xl bg-amber-50/70 border border-amber-200">
+                <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                  <div className="flex items-center space-x-1 flex-shrink-0">
+                    {effectiveMatchedRuleItem.matchedKeywords.slice(0, 2).map((kw, idx) => (
+                      <span key={idx} className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-bold text-[10px] border border-amber-300">
+                        #{kw}
+                      </span>
+                    ))}
+                  </div>
+                  <span className="text-xs font-bold text-slate-900 truncate">
+                    "{effectiveMatchedRuleItem.text}"
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <span className="px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-[10px] font-bold whitespace-nowrap">
+                    {effectiveMatchedRuleItem.action}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">{effectiveMatchedRuleItem.timestamp}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 min-w-0 flex items-center justify-center py-1 px-2.5 rounded-xl border border-dashed border-slate-200 text-[11px] sm:text-xs text-slate-400 truncate italic">
+                등록된 단어 규칙과 판매·음성 정정·캡처 처리 결과를 표시합니다.
+              </div>
+            )}
+          </div>
+
+          {/* 테스트 멘트 주입 툴바 (모바일 가로 스크롤 지원) */}
+          <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2.5 text-xs shadow-sm space-y-1.5">
+            <div className="flex items-center justify-between">
+              <p className="font-bold text-slate-700 flex items-center">
+                <Sparkles className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
+                <span>빠른 시연 & 테스트 멘트 주입 버튼</span>
+              </p>
+              <button
+                type="button"
+                onClick={handleToggleDemo}
+                className={`px-2.5 py-0.5 rounded-lg text-[11px] font-black whitespace-nowrap active:scale-95 transition flex items-center gap-1 shadow-xs ${
+                  isDemoActive
+                    ? 'bg-rose-500 hover:bg-rose-600 text-white animate-pulse'
+                    : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white'
+                }`}
+              >
+                {isDemoActive ? (
+                  <>
+                    <Square className="w-3 h-3 fill-current" />
+                    <span>데모 중지 ({Math.floor(demoElapsedSeconds / 60).toString().padStart(2, '0')}:{(demoElapsedSeconds % 60).toString().padStart(2, '0')})</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3 h-3 text-amber-300" />
+                    <span>🎬 실시간 전체 데모</span>
+                  </>
+                )}
+              </button>
+            </div>
+            <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar pb-0.5">
+              <button
+                onClick={() => injectTestMent('구매확정 됐습니다! 구매하신 분은 러블리님 이시구요 금액은 3만5천원입니다.')}
+                className="px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
+              >
+                + "러블리님 35,000원"
+              </button>
+              <button
+                onClick={() => injectTestMent('구매확정! 닉네임 민트초코님 가격 19,900원입니다. 캡처하세요.')}
+                className="px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
+              >
+                + "민트초코 19,900원 + 캡처하세요"
+              </button>
+              <button
+                onClick={() => injectTestMent('화면 캡처하세요.')}
+                className="px-2.5 py-1 rounded-lg bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border border-cyan-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
+              >
+                + "화면 캡처하세요"
+              </button>
+              <button
+                onClick={() => injectTestMent('수정 시작')}
+                className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold whitespace-nowrap active:scale-95 transition"
+              >
+                + "수정 시작"
+              </button>
+              <button
+                onClick={() => injectTestMent('닉네임은 달콤한하루님, 금액은 48,000원')}
+                className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold whitespace-nowrap active:scale-95 transition"
+              >
+                + "닉네임/금액 수정"
+              </button>
+              <button
+                onClick={() => injectTestMent('수정 완료')}
+                className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold whitespace-nowrap active:scale-95 transition"
+              >
+                + "수정 완료"
+              </button>
             </div>
           </div>
 
