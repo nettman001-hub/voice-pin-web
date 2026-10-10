@@ -124,7 +124,14 @@ public final class DepositParser {
     }
 
     static boolean containsAny(String text, List<String> words) {
-        for (String word : words) if (text.contains(word)) return true;
+        String sanitized = text.replace("입출금", "");
+        for (String word : words) {
+            if ("출금".equals(word)) {
+                if (sanitized.contains("출금")) return true;
+            } else {
+                if (text.contains(word)) return true;
+            }
+        }
         return false;
     }
 
