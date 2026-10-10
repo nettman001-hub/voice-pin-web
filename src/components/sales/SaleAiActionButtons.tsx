@@ -20,12 +20,14 @@ interface SaleAiActionButtonsProps {
   sale: SaleRecord;
   className?: string;
   onRefresh?: () => void;
+  hideEvidence?: boolean;
 }
 
 export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
   sale,
   className = '',
   onRefresh,
+  hideEvidence = false,
 }) => {
   const { updateSale, refreshSales } = useSales();
   const { syncCurrentTranscriptsToCloud } = useLive();
@@ -285,19 +287,21 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
       {/* 핵심 액션 3종 버튼: 근거 보기, 후보 적용, 되돌리기 */}
       <div className="flex items-center gap-1.5 flex-wrap">
         {/* 1. 근거 보기 버튼 */}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setShowEvidenceModal(true);
-          }}
-          className="px-2.5 py-1 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-bold rounded-lg border border-slate-200 shadow-2xs flex items-center gap-1 transition active:scale-95"
-          title="발화 원본, 관련 댓글, 상품 스냅샷 및 전체 변경 이력 확인"
-        >
-          <FileText className="w-3 h-3 text-brand-600" />
-          <span>근거 보기</span>
-        </button>
+        {!hideEvidence && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setShowEvidenceModal(true);
+            }}
+            className="px-2.5 py-1 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-bold rounded-lg border border-slate-200 shadow-2xs flex items-center gap-1 transition active:scale-95"
+            title="발화 원본, 관련 댓글, 상품 스냅샷 및 전체 변경 이력 확인"
+          >
+            <FileText className="w-3 h-3 text-brand-600" />
+            <span>근거 보기</span>
+          </button>
+        )}
 
         {/* 2. 후보 적용 버튼 (후보가 있을 경우) */}
         {hasCandidate && sale.status === '보류' && (
