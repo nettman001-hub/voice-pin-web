@@ -1,11 +1,13 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
+import { useCommerce } from '../../context/CommerceContext';
 import { productSalesApi } from '../../services/productSalesApi';
 import { LiveSession } from '../../types/productSales';
 import { SaleRecord } from '../../types/live';
 import { BuyerReconciliationPanel, BuyerStatusBadges } from '../../components/sales/BuyerReconciliationPanel';
 import { AiSaleBadge } from '../../components/sales/AiSaleBadge';
+import { cleanMessageBody } from '../../utils/textCleaner';
 import {
   ShoppingBag,
   Search,
@@ -17,7 +19,13 @@ import {
   Layers,
   ArrowRight,
   Clock,
-  ZoomIn
+  ZoomIn,
+  MessageSquare,
+  CreditCard,
+  CheckCircle2,
+  Smartphone,
+  ChevronRight,
+  ExternalLink
 } from 'lucide-react';
 import { formatAmountAsDecimal, formatMultiSaleAmount } from '../../services/salesExtractor';
 import { areNicknamesSimilar } from '../../services/nicknameMatcher';
@@ -25,6 +33,55 @@ import { formatSessionDisplay } from '../../utils/sessionFormatter';
 import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 import { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults } from '../../services/promiseDefaultService';
 import { calculateSalesListRevenue } from '../../services/salesListRevenue';
+
+const getBankBadgeStyle = (bank?: string | null): string => {
+  if (!bank) return 'bg-slate-100 text-slate-700 border-slate-200';
+  if (bank.includes('국민') || bank.includes('KB')) return 'bg-amber-50 text-amber-800 border-amber-200';
+  if (bank.includes('농협') || bank.includes('NH')) return 'bg-emerald-50 text-emerald-800 border-emerald-200';
+  if (bank.includes('신한')) return 'bg-blue-50 text-blue-800 border-blue-200';
+  if (bank.includes('우리')) return 'bg-sky-50 text-sky-800 border-sky-200';
+  if (bank.includes('카카오')) return 'bg-yellow-50 text-yellow-800 border-yellow-200';
+  if (bank.includes('토스')) return 'bg-blue-50 text-blue-700 border-blue-200';
+  if (bank.includes('기업') || bank.includes('IBK')) return 'bg-indigo-50 text-indigo-800 border-indigo-200';
+  return 'bg-cyan-50 text-cyan-800 border-cyan-200';
+};
+
+const normalizePhone = (raw: string): string => {
+  if (!raw) return '';
+  let compact = raw.replace(/[^0-9+]/g, '');
+  if (compact.startsWith('+82')) compact = '0' + compact.slice(3);
+  if (compact.startsWith('82') && compact.length >= 11) compact = '0' + compact.slice(2);
+  return compact.replace(/\D/g, '');
+};
+
+const formatPhone = (raw: string): string => {
+  if (!raw) return '';
+  const digits = raw.replace(/\D/g, '');
+  if (digits.startsWith('82')) {
+    const local = '0' + digits.slice(2);
+    return formatPhone(local);
+  }
+  if (digits.length === 11) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+  }
+  if (digits.length === 10) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+  return raw;
+};
+
+const formatDateTime = (iso?: string): string => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const time = d.toLocaleTimeString('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return `${year}.${month}.${day} ${time}`;
+};
 
 interface BuyerGroupedSale {
   groupKey: string;
@@ -42,6 +99,7 @@ interface BuyerGroupedSale {
 
 export const SalesListPage: React.FC = () => {
   const { sales, promiseDefaults, setPromiseDefault, exportCsv, refreshSales } = useSales();
+  const { messages, payments, claims, invoices, shipments } = useCommerce();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -155,6 +213,154 @@ export const SalesListPage: React.FC = () => {
       return true;
     });
   }, [sales, sessionFilter, searchTerm, statusFilter]);
+
+  // 과거 거래 내역 전화번호 -> 닉네임 맵
+  const pastTransactionPhoneMap = useMemo(() => {
+    const map = new Map<string, string>();
+    claims.forEach((c) => {
+      const norm = normalizePhone(c.phoneNumber);
+      if (norm && c.nickname?.trim()) map.set(norm, c.nickname.trim());
+    });
+    invoices.forEach((inv) => {
+      const norm = normalizePhone(inv.phoneNumber);
+      if (norm && inv.customerNickname?.trim()) map.set(norm, inv.customerNickname.trim());
+    });
+    shipments.forEach((s) => {
+      const norm = normalizePhone(s.phoneNumber);
+      if (norm && s.recipientName?.trim()) map.set(norm, s.recipientName.trim());
+    });
+    return map;
+  }, [claims, invoices, shipments]);
+
+  // 전체 구매자 닉네임 목록
+  const allBuyerNicknames = useMemo(() => {
+    const list = sales.map((s) => s.buyerNickname?.trim()).filter(Boolean) as string[];
+    return Array.from(new Set(list)).sort((a, b) => b.length - a.length);
+  }, [sales]);
+
+  // 문자 메시지 스레드 목록
+  const threads = useMemo(() => {
+    const groupMap = new Map<string, any[]>();
+    messages.forEach((msg) => {
+      const norm = normalizePhone(msg.phoneNumber);
+      if (!norm) return;
+      const list = groupMap.get(norm) || [];
+      list.push(msg);
+      groupMap.set(norm, list);
+    });
+
+    const list: any[] = [];
+    groupMap.forEach((msgList, norm) => {
+      msgList.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      const lastMsg = msgList[msgList.length - 1];
+      const existingNick = pastTransactionPhoneMap.get(norm) || null;
+      let matchedNick: string | null = null;
+      for (const m of msgList) {
+        if (m.direction === 'INCOMING' && m.body) {
+          for (const nick of allBuyerNicknames) {
+            if (nick.length >= 2 && m.body.includes(nick)) {
+              matchedNick = nick;
+              break;
+            }
+          }
+        }
+        if (matchedNick) break;
+      }
+      list.push({
+        phoneKey: norm,
+        displayPhone: formatPhone(norm),
+        messages: msgList,
+        lastMessage: lastMsg,
+        existingNickname: existingNick,
+        newMatchedNickname: matchedNick,
+        isNew: Boolean(matchedNick && !existingNick),
+      });
+    });
+    return list;
+  }, [messages, pastTransactionPhoneMap, allBuyerNicknames]);
+
+  // 구매자 닉네임 -> 일치하는 문자 스레드 매핑
+  const buyerToThreadMap = useMemo(() => {
+    const map = new Map<string, any>();
+    threads.forEach((t) => {
+      if (t.existingNickname) map.set(t.existingNickname.trim().toLowerCase(), t);
+      if (t.newMatchedNickname) map.set(t.newMatchedNickname.trim().toLowerCase(), t);
+      allBuyerNicknames.forEach((nick) => {
+        if (t.messages.some((m: any) => m.body && m.body.toLowerCase().includes(nick.toLowerCase()))) {
+          if (!map.has(nick.toLowerCase())) map.set(nick.toLowerCase(), t);
+        }
+      });
+    });
+    return map;
+  }, [threads, allBuyerNicknames]);
+
+  // 은행 입금 내역 매핑
+  const buyerPaymentsMap = useMemo(() => {
+    const map = new Map<string, any[]>();
+    const saleIdToBuyerMap = new Map<string, string>();
+    sales.forEach((s) => {
+      if (s.id && s.buyerNickname?.trim()) saleIdToBuyerMap.set(s.id, s.buyerNickname.trim());
+    });
+    const invoiceIdToBuyerMap = new Map<string, string>();
+    invoices.forEach((inv) => {
+      if (inv.id && inv.customerNickname?.trim()) invoiceIdToBuyerMap.set(inv.id, inv.customerNickname.trim());
+    });
+
+    payments.forEach((p) => {
+      let matchedBuyer: string | null = null;
+      if (p.saleIds && p.saleIds.length > 0) {
+        for (const sid of p.saleIds) {
+          const found = saleIdToBuyerMap.get(sid);
+          if (found) { matchedBuyer = found; break; }
+        }
+      }
+      if (!matchedBuyer && p.invoiceId) {
+        matchedBuyer = invoiceIdToBuyerMap.get(p.invoiceId) || null;
+      }
+      if (!matchedBuyer && p.payerName) {
+        const cleanPayer = p.payerName.replace(/[\s\-_]/g, '').toLowerCase();
+        for (const nick of allBuyerNicknames) {
+          const cleanNick = nick.replace(/[\s\-_]/g, '').toLowerCase();
+          if (cleanNick.length >= 2 && (cleanPayer === cleanNick || cleanPayer.includes(cleanNick))) {
+            matchedBuyer = nick;
+            break;
+          }
+        }
+      }
+
+      if (matchedBuyer) {
+        const key = matchedBuyer.trim().toLowerCase();
+        const list = map.get(key) || [];
+        list.push(p);
+        map.set(key, list);
+      }
+    });
+    return map;
+  }, [payments, sales, invoices, allBuyerNicknames]);
+
+  // 구매자 입금 요약 계산 헬퍼
+  const getBuyerPaymentSummary = useMemo(() => {
+    return (buyerNickname?: string | null, requiredAmount?: number) => {
+      if (!buyerNickname?.trim()) {
+        return { totalPaid: 0, paymentList: [] as any[], status: 'UNPAID' as const, diff: 0 };
+      }
+      const key = buyerNickname.trim().toLowerCase();
+      const list = buyerPaymentsMap.get(key) || [];
+      const totalPaid = list.reduce((sum, p) => sum + (p.amount || 0), 0);
+      const req = requiredAmount || 0;
+      const diff = totalPaid - req;
+      let status: 'PAID' | 'PARTIAL' | 'OVERPAID' | 'UNPAID' = 'UNPAID';
+      if (totalPaid === 0) status = 'UNPAID';
+      else if (req > 0) {
+        if (totalPaid === req) status = 'PAID';
+        else if (totalPaid > req) status = 'OVERPAID';
+        else status = 'PARTIAL';
+      } else {
+        status = 'PAID';
+      }
+      return { totalPaid, paymentList: list, status, diff };
+    };
+  }, [buyerPaymentsMap]);
 
   // 구매자 묶음 집계
   const buyerGroupedList: BuyerGroupedSale[] = useMemo(() => {
@@ -486,6 +692,12 @@ export const SalesListPage: React.FC = () => {
                   || buyer.records.find((r) => r.productImageUrl)?.productImageUrl
                   || buyer.records.find((r) => r.captureImageUrls && r.captureImageUrls.length > 0)?.captureImageUrls?.[0];
 
+                const paymentSummary = getBuyerPaymentSummary(buyer.buyerNickname, buyer.totalAmount);
+                const lastPayment = paymentSummary.paymentList[paymentSummary.paymentList.length - 1];
+                const matchedThread = buyer.buyerNickname
+                  ? buyerToThreadMap.get(buyer.buyerNickname.trim().toLowerCase())
+                  : undefined;
+
                 return (
                   <div
                     key={buyer.groupKey}
@@ -501,7 +713,7 @@ export const SalesListPage: React.FC = () => {
                       aria-expanded={isExpanded}
                       className="w-full p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left cursor-pointer hover:bg-slate-50/80 transition"
                     >
-                      <div className="flex items-center space-x-3.5">
+                      <div className="flex items-start space-x-3.5 min-w-0 flex-1">
                         {buyerThumbnail ? (
                           <div
                             role="button"
@@ -520,7 +732,7 @@ export const SalesListPage: React.FC = () => {
                                 `${buyer.buyerNickname}님 관련 이미지`
                               );
                             }}
-                            className="group/thumb relative w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex-shrink-0 shadow-sm flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-brand-500 transition"
+                            className="group/thumb relative w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex-shrink-0 shadow-sm flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-brand-500 transition mt-0.5"
                             title="클릭하여 원본 이미지 보기"
                           >
                             <img src={buyerThumbnail} alt={`${buyer.buyerNickname} 구매 상품`} className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform" />
@@ -534,13 +746,13 @@ export const SalesListPage: React.FC = () => {
                             )}
                           </div>
                         ) : (
-                          <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-brand-600 to-purple-600 text-white flex items-center justify-center font-bold text-sm shadow flex-shrink-0">
+                          <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-brand-600 to-purple-600 text-white flex items-center justify-center font-bold text-sm shadow flex-shrink-0 mt-0.5">
                             {buyer.buyerNickname[0]}
                           </div>
                         )}
 
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
                             <span className="font-bold text-base text-slate-900">{buyer.buyerNickname}</span>
                             <span className="text-xs px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 font-bold border border-brand-200">
                               {buyer.orderCount ? `총 ${buyer.orderCount}건 구매` : '원본 판매내역 없음'}
@@ -550,6 +762,44 @@ export const SalesListPage: React.FC = () => {
                                 ★ 다건 구매자
                               </span>
                             )}
+
+                            {/* 문자 수신 상태 배지 */}
+                            {matchedThread ? (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                                <MessageSquare className="w-2.5 h-2.5 text-emerald-600" />
+                                문자 확인 ({matchedThread.messages.length}건)
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                                문자 미수신
+                              </span>
+                            )}
+
+                            {/* 은행 입금 상태 배지 */}
+                            {paymentSummary.status === 'PAID' && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-cyan-50 text-cyan-700 border border-cyan-200 flex items-center gap-1">
+                                <CheckCircle2 className="w-2.5 h-2.5 text-cyan-600" />
+                                입금완료
+                              </span>
+                            )}
+                            {paymentSummary.status === 'OVERPAID' && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200 flex items-center gap-1">
+                                <CheckCircle2 className="w-2.5 h-2.5 text-purple-600" />
+                                초과입금 (+{paymentSummary.diff.toLocaleString()}원)
+                              </span>
+                            )}
+                            {paymentSummary.status === 'PARTIAL' && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
+                                <Clock className="w-2.5 h-2.5 text-amber-600" />
+                                부분입금 ({paymentSummary.totalPaid.toLocaleString()}원)
+                              </span>
+                            )}
+                            {paymentSummary.status === 'UNPAID' && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                                입금대기
+                              </span>
+                            )}
+
                             {buyer.hasPending && (
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 font-bold">
                                 보류 포함
@@ -562,15 +812,57 @@ export const SalesListPage: React.FC = () => {
                             )}
                             {buyerSaleIds.length > 0 && <BuyerStatusBadges saleIds={buyerSaleIds} buyerNickname={buyer.buyerNickname} />}
                           </div>
+
                           <div className="text-[11px] text-slate-500 mt-1 flex items-center space-x-2">
                             <span>최근 주문: {new Date(buyer.latestRecognizedAt).toLocaleTimeString('ko-KR')}</span>
                             <span>•</span>
                             <span>회차: {buyer.sessionIds.map((id) => formatSessionDisplay(id, { sessions: availableSessions, recognizedAt: buyer.latestRecognizedAt })).join(', ')}</span>
                           </div>
+
+                          {/* 입금 내역이 있는 경우: 은행/입금자 및 입금액 미리보기 박스 */}
+                          {paymentSummary.paymentList.length > 0 && lastPayment && (
+                            <div className="mt-2 p-2 rounded-xl bg-cyan-50/70 border border-cyan-100 text-[11px] space-y-1">
+                              <div className="flex items-center justify-between text-slate-700 font-semibold">
+                                <div className="flex items-center gap-1.5 truncate">
+                                  <CreditCard className="w-3 h-3 text-cyan-600 flex-shrink-0" />
+                                  <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${getBankBadgeStyle(lastPayment.bank)}`}>
+                                    {lastPayment.bank || '은행'}
+                                  </span>
+                                  <span className="text-slate-900 font-bold truncate">{lastPayment.payerName}</span>
+                                </div>
+                                <span className="text-cyan-800 font-extrabold text-[11px] whitespace-nowrap ml-1">
+                                  {paymentSummary.totalPaid.toLocaleString()}원 입금
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 수신된 문자가 있는 경우: 전화번호 및 최근 문자 미리보기 박스 */}
+                          {matchedThread && (
+                            <div className="mt-2 p-2 rounded-xl bg-emerald-50/70 border border-emerald-100 text-[11px] space-y-1">
+                              <div className="flex items-center justify-between text-slate-700 font-semibold">
+                                <div className="flex items-center gap-1.5">
+                                  <Smartphone className="w-3 h-3 text-emerald-600" />
+                                  <span className="text-slate-900 font-bold">{matchedThread.displayPhone}</span>
+                                  {matchedThread.isNew && (
+                                    <span className="bg-amber-500 text-white text-[9px] font-black px-1.5 py-0.2 rounded-md shadow-2xs">
+                                      신규
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[10px] text-slate-400 font-medium">
+                                  {formatDateTime(matchedThread.lastMessage.createdAt)}
+                                </span>
+                              </div>
+                              <p className="text-slate-600 truncate text-[11px] leading-tight">
+                                {cleanMessageBody(matchedThread.lastMessage.body) || '(내용 없음 또는 첨부파일)'}
+                              </p>
+                            </div>
+                          )}
                         </div>
                       </div>
 
-                      <div className="flex items-center space-x-4 w-full sm:w-auto justify-between sm:justify-end">
+                      <div className="flex items-center space-x-4 w-full sm:w-auto justify-between sm:justify-end flex-shrink-0">
                         <div className="text-right">
                           <span className="text-[10px] text-slate-500">총 구매 합계</span>
                           {(() => {
@@ -738,6 +1030,12 @@ export const SalesListPage: React.FC = () => {
 
                 const saleImage = sale.productImageUrl || sale.captureImageUrls?.[0];
 
+                const paymentSummary = getBuyerPaymentSummary(sale.buyerNickname, sale.amount);
+                const lastPayment = paymentSummary.paymentList[paymentSummary.paymentList.length - 1];
+                const matchedThread = sale.buyerNickname
+                  ? buyerToThreadMap.get(sale.buyerNickname.trim().toLowerCase())
+                  : undefined;
+
                 return (
                   <Link
                     key={sale.id}
@@ -747,7 +1045,7 @@ export const SalesListPage: React.FC = () => {
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                       <div className="flex items-start space-x-3.5 sm:space-x-4 min-w-0 flex-1">
                         <div
-                          className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-slate-100 border border-slate-200/80 flex items-center justify-center overflow-hidden flex-shrink-0 shadow-sm relative group/thumb cursor-pointer"
+                          className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-slate-100 border border-slate-200/80 flex items-center justify-center overflow-hidden flex-shrink-0 shadow-sm relative group/thumb cursor-pointer mt-0.5"
                           onClick={(e) => {
                             if (saleImage) {
                               e.preventDefault();
@@ -786,7 +1084,7 @@ export const SalesListPage: React.FC = () => {
                         </div>
 
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center space-x-2 flex-wrap gap-1">
+                          <div className="flex items-center space-x-2 flex-wrap gap-1.5">
                             <span className="text-base font-bold text-slate-900 group-hover:text-brand-600 transition">
                               {sale.buyerNickname}
                             </span>
@@ -795,6 +1093,44 @@ export const SalesListPage: React.FC = () => {
                                 ★ 다건 {buyerSales.length}건
                               </span>
                             )}
+
+                            {/* 문자 수신 상태 배지 */}
+                            {matchedThread ? (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                                <MessageSquare className="w-2.5 h-2.5 text-emerald-600" />
+                                문자 확인 ({matchedThread.messages.length}건)
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                                문자 미수신
+                              </span>
+                            )}
+
+                            {/* 은행 입금 상태 배지 */}
+                            {paymentSummary.status === 'PAID' && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-cyan-50 text-cyan-700 border border-cyan-200 flex items-center gap-1">
+                                <CheckCircle2 className="w-2.5 h-2.5 text-cyan-600" />
+                                입금완료
+                              </span>
+                            )}
+                            {paymentSummary.status === 'OVERPAID' && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200 flex items-center gap-1">
+                                <CheckCircle2 className="w-2.5 h-2.5 text-purple-600" />
+                                초과입금 (+{paymentSummary.diff.toLocaleString()}원)
+                              </span>
+                            )}
+                            {paymentSummary.status === 'PARTIAL' && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
+                                <Clock className="w-2.5 h-2.5 text-amber-600" />
+                                부분입금 ({paymentSummary.totalPaid.toLocaleString()}원)
+                              </span>
+                            )}
+                            {paymentSummary.status === 'UNPAID' && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                                입금대기
+                              </span>
+                            )}
+
                             <span
                               className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                                 sale.status === '보류'
@@ -824,27 +1160,71 @@ export const SalesListPage: React.FC = () => {
                           <p className="text-xs text-slate-600 mt-1 line-clamp-1">
                             "{sale.rawTranscript}"
                           </p>
+
+                          {/* 입금 내역이 있는 경우: 은행/입금자 및 입금액 미리보기 박스 */}
+                          {paymentSummary.paymentList.length > 0 && lastPayment && (
+                            <div className="mt-2 p-2 rounded-xl bg-cyan-50/70 border border-cyan-100 text-[11px] space-y-1">
+                              <div className="flex items-center justify-between text-slate-700 font-semibold">
+                                <div className="flex items-center gap-1.5 truncate">
+                                  <CreditCard className="w-3 h-3 text-cyan-600 flex-shrink-0" />
+                                  <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${getBankBadgeStyle(lastPayment.bank)}`}>
+                                    {lastPayment.bank || '은행'}
+                                  </span>
+                                  <span className="text-slate-900 font-bold truncate">{lastPayment.payerName}</span>
+                                </div>
+                                <span className="text-cyan-800 font-extrabold text-[11px] whitespace-nowrap ml-1">
+                                  {paymentSummary.totalPaid.toLocaleString()}원 입금
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 수신된 문자가 있는 경우: 전화번호 및 최근 문자 미리보기 박스 */}
+                          {matchedThread && (
+                            <div className="mt-2 p-2 rounded-xl bg-emerald-50/70 border border-emerald-100 text-[11px] space-y-1">
+                              <div className="flex items-center justify-between text-slate-700 font-semibold">
+                                <div className="flex items-center gap-1.5">
+                                  <Smartphone className="w-3 h-3 text-emerald-600" />
+                                  <span className="text-slate-900 font-bold">{matchedThread.displayPhone}</span>
+                                  {matchedThread.isNew && (
+                                    <span className="bg-amber-500 text-white text-[9px] font-black px-1.5 py-0.2 rounded-md shadow-2xs">
+                                      신규
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[10px] text-slate-400 font-medium">
+                                  {formatDateTime(matchedThread.lastMessage.createdAt)}
+                                </span>
+                              </div>
+                              <p className="text-slate-600 truncate text-[11px] leading-tight">
+                                {cleanMessageBody(matchedThread.lastMessage.body) || '(내용 없음 또는 첨부파일)'}
+                              </p>
+                            </div>
+                          )}
                         </div>
                       </div>
 
-                      <div className="flex sm:flex-col items-baseline sm:items-end justify-between w-full sm:w-auto gap-1">
-                        {multi.isMulti ? (
-                          <div className="flex flex-col items-start sm:items-end">
-                            <span className="text-xs font-bold text-brand-600 font-mono">
-                              {multi.decimalExpression} =
-                            </span>
-                            <span className="text-lg font-black text-brand-700">
-                              {multi.totalFormatted}
-                            </span>
-                            <span className="text-[10px] text-slate-400">
-                              (현재건: {sale.amount > 0 ? `${sale.amount.toLocaleString()}원 (${formatAmountAsDecimal(sale.amount)})` : '금액 미확인'})
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="text-lg font-black text-brand-600">
-                            {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}
-                          </div>
-                        )}
+                      <div className="flex sm:flex-col items-baseline sm:items-end justify-between w-full sm:w-auto gap-1 flex-shrink-0">
+                        <div className="text-right">
+                          <span className="text-[10px] text-slate-500">판매 금액</span>
+                          {multi.isMulti ? (
+                            <div className="flex flex-col items-start sm:items-end">
+                              <span className="text-xs font-bold text-brand-600 font-mono">
+                                {multi.decimalExpression} =
+                              </span>
+                              <span className="text-lg font-black text-brand-700">
+                                {multi.totalFormatted}
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                (현재건: {sale.amount > 0 ? `${sale.amount.toLocaleString()}원 (${formatAmountAsDecimal(sale.amount)})` : '금액 미확인'})
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="text-lg font-black text-brand-600">
+                              {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}
+                            </div>
+                          )}
+                        </div>
                         <div className="text-[11px] text-slate-400 flex items-center space-x-1">
                           <Clock className="w-3 h-3" />
                           <span>{new Date(sale.recognizedAt).toLocaleString('ko-KR')}</span>

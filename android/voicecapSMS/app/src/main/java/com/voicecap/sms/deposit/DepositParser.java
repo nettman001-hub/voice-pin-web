@@ -84,7 +84,9 @@ public final class DepositParser {
     }
 
     public Result parse(String packageName, String text, long postTime) {
-        return match(rules.forPackage(packageName), text, postTime);
+        Result result = match(rules.forPackage(packageName), text, postTime);
+        if (result.ok()) return result;
+        return parseSmartFallback(packageName, text, postTime);
     }
 
     /**
@@ -92,7 +94,10 @@ public final class DepositParser {
      * 결과 Deposit의 packageName은 "sms:&lt;규칙 id&gt;".
      */
     public Result parseSms(String sender, String body, long sentAt) {
-        return match(rules.forSender(BankSmsDepositDetector.normalizeSender(sender)), body == null ? "" : body, sentAt);
+        String safeBody = body == null ? "" : body;
+        Result result = match(rules.forSender(BankSmsDepositDetector.normalizeSender(sender)), safeBody, sentAt);
+        if (result.ok()) return result;
+        return parseSmartFallback("sms:" + sender, safeBody, sentAt);
     }
 
     private Result match(List<BankRules.Rule> candidates, String text, long postTime) {
@@ -116,6 +121,105 @@ public final class DepositParser {
             }
         }
         return new Result(null, failure);
+    }
+
+    /**
+     * 규칙 매칭이 실패한 경우에도 한국 주요 은행 입금 알림(토스, 카카오뱅크, 시중은행 등)의
+     * "입금", "보냈", 금액 숫자 패턴을 인식해 유연하게 입금을 복원하는 스마트 폴백
+     */
+    private Result parseSmartFallback(String packageName, String text, long postTime) {
+        if (text == null || text.trim().isEmpty()) return new Result(null, Failure.NO_MATCH);
+
+        // 출금, 승인, 취소, 체크카드 등 명확한 지출/취소 알림은 즉시 제외
+        java.util.List<String> excludes = java.util.Arrays.asList("출금", "카드승인", "체크카드", "결제완료", "취소완료", "자동이체출금");
+        if (containsAny(text, excludes)) {
+            return new Result(null, Failure.EXCLUDED);
+        }
+
+        // 입금 관련 핵심 키워드 검사 ("입금", "보냈", "송금")
+        boolean hasDepositKeyword = text.contains("입금") || text.contains("보냈") || text.contains("송금");
+        if (!hasDepositKeyword) {
+            return new Result(null, Failure.NO_MATCH);
+        }
+
+        // 1. 금액 추출
+        Long amount = null;
+        // 패턴 A: 10,000원 또는 10000원
+        Matcher amountMatcher = Pattern.compile("([0-9][0-9,]*)\\s*원").matcher(text);
+        if (amountMatcher.find()) {
+            amount = number(amountMatcher.group(1));
+        }
+        // 패턴 B: 입금 10,000 또는 입금: 10,000
+        if (amount == null || amount <= 0) {
+            Matcher altAmount = Pattern.compile("입금[\\s:]*([0-9][0-9,]+)").matcher(text);
+            if (altAmount.find()) {
+                amount = number(altAmount.group(1));
+            }
+        }
+
+        if (amount == null || amount <= 0) {
+            return new Result(null, Failure.NO_MATCH);
+        }
+
+        // 2. 은행명 추론
+        String bank = "은행";
+        BankPresets.Preset preset = BankPresets.find(packageName);
+        if (preset != null) {
+            bank = preset.name;
+        } else if (packageName.contains("kakaobank")) {
+            bank = "카카오뱅크";
+        } else if (packageName.contains("toss")) {
+            bank = "토스";
+        } else if (packageName.contains("kb") || packageName.contains("star")) {
+            bank = "KB국민은행";
+        } else if (packageName.contains("shinhan")) {
+            bank = "신한은행";
+        } else if (packageName.contains("nh") || packageName.contains("nonghyup")) {
+            bank = "NH농협은행";
+        } else if (packageName.contains("woori")) {
+            bank = "우리은행";
+        } else if (packageName.contains("ibk")) {
+            bank = "IBK기업은행";
+        } else if (packageName.contains("hana")) {
+            bank = "하나은행";
+        } else if (packageName.contains("kbank")) {
+            bank = "케이뱅크";
+        }
+
+        // 3. 입금자명 추론
+        String payer = UNKNOWN_PAYER;
+        // 패턴 A: "홍길동님이 10,000원을 보냈어요" -> 홍길동
+        Matcher senderMatcher = Pattern.compile("([^\\n\\s]+)님이\\s+[0-9]").matcher(text);
+        if (senderMatcher.find()) {
+            payer = cleanPayer(senderMatcher.group(1));
+        } else {
+            // 패턴 B: "홍길동 -> 내계좌" -> 홍길동
+            Matcher arrowMatcher = Pattern.compile("([^→\\-\\n\\s]+?)\\s*(?:→|->)").matcher(text);
+            if (arrowMatcher.find()) {
+                payer = cleanPayer(arrowMatcher.group(1));
+            } else {
+                // 패턴 C: "입금 10,000원 홍길동"
+                Matcher tailMatcher = Pattern.compile("(?:입금|보냈음|송금)\\s*[0-9,]*원?\\s+([가-힣a-zA-Z0-9_]{2,10})").matcher(text);
+                if (tailMatcher.find()) {
+                    payer = cleanPayer(tailMatcher.group(1));
+                } else {
+                    // 패턴 D: "홍길동 10,000원 입금"
+                    Matcher headMatcher = Pattern.compile("([가-힣a-zA-Z0-9_]{2,10})\\s+[0-9,]*원?\\s*입금").matcher(text);
+                    if (headMatcher.find()) {
+                        payer = cleanPayer(headMatcher.group(1));
+                    }
+                }
+            }
+        }
+
+        // 잔액 추출 시도
+        Long balance = null;
+        Matcher balanceMatcher = Pattern.compile("잔액\\s*([0-9][0-9,]*)").matcher(text);
+        if (balanceMatcher.find()) {
+            balance = number(balanceMatcher.group(1));
+        }
+
+        return new Result(new Deposit(packageName, bank, amount, payer, balance, null, postTime, false), null);
     }
 
     static boolean containsAll(String text, List<String> words) {

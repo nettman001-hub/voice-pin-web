@@ -636,23 +636,106 @@ export const remoteWorkspaceService = {
 
   async loadCommerce(workspaceId: string): Promise<CommerceState> {
     const client = ensureEnabled();
-    const [messagesResult, claimsResult, invoicesResult, paymentsResult, shipmentsResult, verifiedResult] = await Promise.all([
-      client.from('customer_messages').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }),
-      client.from('purchase_claims').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }),
-      client.from('invoices').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }),
-      client.from('payment_receipts').select('*').eq('workspace_id', workspaceId).order('paid_at', { ascending: false }),
-      client.from('shipments').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }),
-      client.from('verified_sales').select('sale_id').eq('workspace_id', workspaceId),
-    ]);
-    const error = [messagesResult, claimsResult, invoicesResult, paymentsResult, shipmentsResult, verifiedResult].find((result) => result.error)?.error;
-    if (error) throw error;
+
+    // 1) 고객 문자 목록 조회 (실패 시 빈 배열 fallback)
+    let messagesRows: Row[] = [];
+    try {
+      const { data, error } = await client
+        .from('customer_messages')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false });
+      if (error) console.warn('[RemoteWorkspace] customer_messages 조회 경고:', error);
+      else if (data) messagesRows = data;
+    } catch (e) {
+      console.warn('[RemoteWorkspace] customer_messages 조회 실패:', e);
+    }
+
+    // 2) 실시간 은행 입금 내역 조회 (paid_at 정렬 우선, 에러 시 created_at 정렬 fallback)
+    let paymentsRows: Row[] = [];
+    try {
+      let { data, error } = await client
+        .from('payment_receipts')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .order('paid_at', { ascending: false });
+      if (error) {
+        console.warn('[RemoteWorkspace] payment_receipts paid_at 정렬 실패, created_at 정렬 시도:', error);
+        const fallbackRes = await client
+          .from('payment_receipts')
+          .select('*')
+          .eq('workspace_id', workspaceId)
+          .order('created_at', { ascending: false });
+        if (!fallbackRes.error && fallbackRes.data) paymentsRows = fallbackRes.data;
+      } else if (data) {
+        paymentsRows = data;
+      }
+    } catch (e) {
+      console.warn('[RemoteWorkspace] payment_receipts 조회 실패:', e);
+    }
+
+    // 3) 구매 신청 내역 조회
+    let claimsRows: Row[] = [];
+    try {
+      const { data, error } = await client
+        .from('purchase_claims')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false });
+      if (error) console.warn('[RemoteWorkspace] purchase_claims 조회 경고:', error);
+      else if (data) claimsRows = data;
+    } catch (e) {
+      console.warn('[RemoteWorkspace] purchase_claims 조회 실패:', e);
+    }
+
+    // 4) 정산서 내역 조회
+    let invoicesRows: Row[] = [];
+    try {
+      const { data, error } = await client
+        .from('invoices')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false });
+      if (error) console.warn('[RemoteWorkspace] invoices 조회 경고:', error);
+      else if (data) invoicesRows = data;
+    } catch (e) {
+      console.warn('[RemoteWorkspace] invoices 조회 실패:', e);
+    }
+
+    // 5) 배송 내역 조회
+    let shipmentsRows: Row[] = [];
+    try {
+      const { data, error } = await client
+        .from('shipments')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false });
+      if (error) console.warn('[RemoteWorkspace] shipments 조회 경고:', error);
+      else if (data) shipmentsRows = data;
+    } catch (e) {
+      console.warn('[RemoteWorkspace] shipments 조회 실패:', e);
+    }
+
+    // 6) 확인된 판매 건 조회
+    let verifiedSaleIds: string[] = [];
+    try {
+      const { data, error } = await client
+        .from('verified_sales')
+        .select('sale_id')
+        .eq('workspace_id', workspaceId);
+      if (error) console.warn('[RemoteWorkspace] verified_sales 조회 경고:', error);
+      else if (data) verifiedSaleIds = data.map((r) => r.sale_id);
+    } catch (e) {
+      console.warn('[RemoteWorkspace] verified_sales 조회 실패:', e);
+    }
+
     return {
-      messages: await Promise.all((messagesResult.data || []).map((row) => mapMessage(row, workspaceId))),
-      claims: await Promise.all((claimsResult.data || []).map(mapClaim)),
-      invoices: (invoicesResult.data || []).map(mapInvoice),
-      payments: (paymentsResult.data || []).map((row) => mapPayment(row, workspaceId)),
-      shipments: (shipmentsResult.data || []).map(mapShipment),
-      verifiedSaleIds: (verifiedResult.data || []).map((row) => row.sale_id),
+      messages: await Promise.all(messagesRows.map((row) => mapMessage(row, workspaceId))),
+      claims: await Promise.all(claimsRows.map(mapClaim)),
+      invoices: invoicesRows.map(mapInvoice),
+      payments: paymentsRows.map((row) => mapPayment(row, workspaceId)),
+      shipments: shipmentsRows.map(mapShipment),
+      verifiedSaleIds,
     };
   },
 

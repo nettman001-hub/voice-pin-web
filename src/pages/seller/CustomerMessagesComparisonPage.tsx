@@ -743,31 +743,28 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     }
   };
 
-  // 좌측 판매건 클릭 시 해당 구매자 닉네임으로 우측 문자함 검색창 입력 및 스레드 선택
+  // 좌측 판매건 클릭 시 해당 구매자의 대화방 활성화 또는 매칭 안내
   const handleSelectBuyerFromSales = (sale: SaleRecord) => {
     setSelectedSaleId(sale.id);
     const nick = sale.buyerNickname?.trim();
 
     if (!nick) {
-      setMessagesSearch('');
       setSelectedPhoneKey(null);
       return;
     }
 
-    // 1) 첫 번째 목록이든 다른 목록이든 항상 검색창에 닉네임을 설정하여 필터링
-    setMessagesSearch(nick);
-
-    // 2) 닉네임과 일치하는 스레드가 있으면 해당 대화방을 바로 활성화
+    // 닉네임과 일치하는 스레드가 있으면 해당 대화방을 바로 활성화
     const found = threads.find(
       (t) =>
         t.existingNickname?.toLowerCase() === nick.toLowerCase() ||
         t.newMatchedNickname?.toLowerCase() === nick.toLowerCase() ||
-        t.messages.some((m) => m.body.toLowerCase().includes(nick.toLowerCase()))
+        t.messages.some((m) => m.body && m.body.toLowerCase().includes(nick.toLowerCase()))
     );
+
     if (found) {
       setSelectedPhoneKey(found.phoneKey);
     } else {
-      // 문자가 없는 경우 이전 선택 번호를 null로 초기화하여 대화내역창이 올바르게 갱신되도록 처리
+      // 문자가 없는 경우 이전 선택 번호를 null로 초기화하여 우측 대화창에 판매 정보 안내 카드 표시
       setSelectedPhoneKey(null);
     }
   };
