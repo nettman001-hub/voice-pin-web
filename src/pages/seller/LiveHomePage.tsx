@@ -750,9 +750,13 @@ export const LiveHomePage: React.FC = () => {
             </div>
           </div>
 
-          {/* 최근 전사 로그 */}
+          {/* 실시간 판매 멘트 */}
           <div className="order-3 bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
-            {!isListening && (sttEngineStatus === 'ERROR' || sttEngineStatus === 'DISCONNECTED') && sttEngineMessage && <p role="alert" className="mb-2 text-xs leading-relaxed text-amber-800">{sttEngineMessage}</p>}
+            {!isListening && sttEngineStatus === 'ERROR' && sttEngineMessage && (
+              <p role="alert" className="mb-2 text-xs leading-relaxed text-rose-700 bg-rose-50 px-2.5 py-1.5 rounded-xl border border-rose-200">
+                ⚠️ {sttEngineMessage}
+              </p>
+            )}
             {isListening && pipelineDiagnostics && <div className="mb-2 space-y-1 text-[11px] text-slate-600" aria-label="실시간 전사 연결 진단">
               <p>실제 오디오 입력 {pipelineDiagnostics.audio.audioSeconds.toFixed(1)}초
                 {sttMode === 'CLOUD' && <> · 현재 STT 연결 전송 {pipelineDiagnostics.stt.audioSeconds.toFixed(1)}초 · 서버 응답 {pipelineDiagnostics.stt.receivedResponses}회 · 전사 수신 {pipelineDiagnostics.stt.receivedTextCharacters}자</>}
@@ -767,8 +771,20 @@ export const LiveHomePage: React.FC = () => {
               <div className="flex items-center space-x-2 flex-wrap">
                 <Clock className="w-4 h-4 text-brand-600 shrink-0" />
                 <h3 className="text-xs sm:text-sm font-bold text-slate-900">
-                  최근 실시간 전사 로그
+                  실시간 판매 멘트
                 </h3>
+                {!isListening && (
+                  <span
+                    role="status"
+                    className={`text-[10px] sm:text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                      sttEngineStatus === 'ERROR'
+                        ? 'bg-rose-50 text-rose-700 border-rose-200'
+                        : 'bg-amber-50 text-amber-800 border-amber-200'
+                    }`}
+                  >
+                    {sttEngineMessage || '대기 중'}
+                  </span>
+                )}
                 <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
                   화면 {effectiveTranscriptLogs.length}건 / 오늘 누적 {totalSessionTranscriptCount || transcriptLogs.length}건
                 </span>
