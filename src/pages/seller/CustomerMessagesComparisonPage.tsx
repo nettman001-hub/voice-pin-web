@@ -8,6 +8,8 @@ import { cleanMessageBody } from '../../utils/textCleaner';
 import { resolvePrivateImageUrl } from '../../services/remoteWorkspaceService';
 import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 import { requireSupabase, isSupabaseConfigured } from '../../services/supabaseClient';
+import { formatSessionDisplay, SessionInfoLike } from '../../utils/sessionFormatter';
+import { productSalesApi } from '../../services/productSalesApi';
 import {
   MessageSquare,
   ShoppingBag,
@@ -241,17 +243,50 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
   const [isSending, setIsSending] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [cloudSessions, setCloudSessions] = useState<SessionInfoLike[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // 1. 고유 세션(방송회차) 목록
-  const sessionIds = useMemo(() => {
-    const set = new Set<string>();
-    sales.forEach((s) => {
-      if (s.sessionId) set.add(s.sessionId);
+  // 클라우드 방송 회차 목록 로드
+  useEffect(() => {
+    productSalesApi.listSessions()
+      .then((data) => setCloudSessions(data.sessions))
+      .catch((err) => console.warn('[CustomerMessages] 세션 목록 로드 실패:', err));
+  }, []);
+
+  // 1. 고유 방송 회차(세션) 목록 (사람이 알아보기 쉬운 명칭으로 매핑)
+  const availableSessions = useMemo(() => {
+    const sessionsById = new Map<string, { id: string; displayCode: string; startedAt?: string }>();
+
+    // 1) 클라우드 등록 세션 우선 매핑
+    cloudSessions.forEach((s) => {
+      sessionsById.set(s.id, {
+        id: s.id,
+        displayCode: s.displayCode || formatSessionDisplay(s.id, { recognizedAt: s.startedAt }),
+        startedAt: s.startedAt || undefined,
+      });
     });
-    return Array.from(set);
-  }, [sales]);
+
+    // 2) 판매 내역에 존재하는 세션 ID 보완
+    sales.forEach((sale) => {
+      if (sale.sessionId && !sessionsById.has(sale.sessionId)) {
+        sessionsById.set(sale.sessionId, {
+          id: sale.sessionId,
+          displayCode: formatSessionDisplay(sale.sessionId, {
+            sessions: cloudSessions,
+            recognizedAt: sale.recognizedAt,
+          }),
+          startedAt: sale.recognizedAt,
+        });
+      }
+    });
+
+    return Array.from(sessionsById.values()).sort((left, right) => {
+      const tLeft = left.startedAt ? new Date(left.startedAt).getTime() : 0;
+      const tRight = right.startedAt ? new Date(right.startedAt).getTime() : 0;
+      return tRight - tLeft;
+    });
+  }, [cloudSessions, sales]);
 
   // 2. 웹앱 전체 구매자 닉네임 목록 (신규 매칭 및 연결에 사용)
   const allBuyerNicknames = useMemo(() => {
@@ -639,18 +674,18 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
               </span>
 
               {/* 회차 필터 */}
-              {sessionIds.length > 0 && (
+              {availableSessions.length > 0 && (
                 <div className="flex items-center gap-1">
                   <Filter className="w-3 h-3 text-slate-400" />
                   <select
                     value={selectedSessionId}
                     onChange={(e) => setSelectedSessionId(e.target.value)}
-                    className="text-[11px] font-semibold bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-700 outline-none"
+                    className="text-[11px] font-semibold bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-700 outline-none max-w-[180px] sm:max-w-[220px] truncate"
                   >
                     <option value="ALL">전체 방송회차</option>
-                    {sessionIds.map((sid) => (
-                      <option key={sid} value={sid}>
-                        {sid}
+                    {availableSessions.map((session) => (
+                      <option key={session.id} value={session.id}>
+                        {session.displayCode}
                       </option>
                     ))}
                   </select>
