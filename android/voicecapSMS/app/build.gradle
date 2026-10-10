@@ -4,16 +4,12 @@ plugins {
     id 'com.google.gms.google-services'
 }
 
-def releaseStoreFile = providers.environmentVariable('VOICECAP_UPLOAD_KEYSTORE').orNull
-def releaseStorePassword = providers.environmentVariable('VOICECAP_UPLOAD_STORE_PASSWORD').orNull
-def releaseKeyAlias = providers.environmentVariable('VOICECAP_UPLOAD_KEY_ALIAS').orNull
-def releaseKeyPassword = providers.environmentVariable('VOICECAP_UPLOAD_KEY_PASSWORD').orNull
-def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
-def hasPartialReleaseSigning = [releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword].any { it } && !hasReleaseSigning
-
-if (hasPartialReleaseSigning) {
-    throw new GradleException('VOICECAP_UPLOAD_* 서명 환경 변수 4개를 모두 설정해야 합니다.')
-}
+def defaultKeystore = file("${rootDir}/signing/voicecap-upload.jks")
+def releaseStoreFile = providers.environmentVariable('VOICECAP_UPLOAD_KEYSTORE').orNull ?: (defaultKeystore.exists() ? defaultKeystore.absolutePath : null)
+def releaseStorePassword = providers.environmentVariable('VOICECAP_UPLOAD_STORE_PASSWORD').orNull ?: (defaultKeystore.exists() ? 'VoiceCAP!2026UploadKey#982' : null)
+def releaseKeyAlias = providers.environmentVariable('VOICECAP_UPLOAD_KEY_ALIAS').orNull ?: (defaultKeystore.exists() ? 'voicecap-upload' : null)
+def releaseKeyPassword = providers.environmentVariable('VOICECAP_UPLOAD_KEY_PASSWORD').orNull ?: (defaultKeystore.exists() ? 'VoiceCAP!2026UploadKey#982' : null)
+def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword && file(releaseStoreFile).exists()
 
 android {
     namespace 'com.voicecap.sms'
@@ -52,6 +48,74 @@ android {
             minifyEnabled false
             if (hasReleaseSigning) signingConfig signingConfigs.release
         }
+    }
+}
+
+// 빌드 완료 시 항상 c:\dev\voice-pin-anti\android\voicecapSMS\outputs 에 간결하게 복사
+tasks.register('copyOutputsToRoot') {
+    doLast {
+        def targetDir = file("${rootDir}/outputs")
+        if (!targetDir.exists()) {
+            targetDir.mkdirs()
+        }
+
+        def vName = android.defaultConfig.versionName
+
+        // 1. Debug APK 복사
+        def debugApk = file("${buildDir}/outputs/apk/debug/app-debug.apk")
+        if (debugApk.exists()) {
+            copy {
+                from debugApk
+                into targetDir
+                rename { 'app-debug.apk' }
+            }
+            copy {
+                from debugApk
+                into targetDir
+                rename { "voicecap-sms-${vName}-debug.apk" }
+            }
+            println "[VoiceCAP] Debug APK 복사 완료 -> ${targetDir.absolutePath}/app-debug.apk"
+        }
+
+        // 2. Release APK (휴대폰 직접 설치용 서명 완료본) 복사
+        def releaseApk = file("${buildDir}/outputs/apk/release/app-release.apk")
+        if (releaseApk.exists()) {
+            copy {
+                from releaseApk
+                into targetDir
+                rename { 'app-release.apk' }
+            }
+            copy {
+                from releaseApk
+                into targetDir
+                rename { "voicecap-sms-${vName}.apk" }
+            }
+            println "[VoiceCAP] Release APK 복사 완료 -> ${targetDir.absolutePath}/app-release.apk"
+        }
+
+        // 3. Play Store 업로드용 Release AAB (Android App Bundle) 복사
+        def releaseAab = file("${buildDir}/outputs/bundle/release/app-release.aab")
+        if (releaseAab.exists()) {
+            copy {
+                from releaseAab
+                into targetDir
+                rename { 'app-release.aab' }
+            }
+            copy {
+                from releaseAab
+                into targetDir
+                rename { "voicecap-sms-${vName}.aab" }
+            }
+            println "[VoiceCAP] Play Store용 Release AAB 복사 완료 -> ${targetDir.absolutePath}/app-release.aab"
+        }
+    }
+}
+
+gradle.projectsEvaluated {
+    tasks.matching {
+        it.name in ['assembleDebug', 'assembleRelease', 'bundleRelease', 'assemble', 'bundle']
+    }.configureEach {
+        finalizedBy 'copyOutputsToRoot'
     }
 }
 
