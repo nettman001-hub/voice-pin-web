@@ -750,47 +750,8 @@ export const LiveHomePage: React.FC = () => {
             </div>
           </div>
 
-          {/* 최근 감지된 단어 규칙 및 음성 처리 결과 */}
-          <div className="order-3 bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between gap-2 sm:gap-3 min-h-[48px] sm:min-h-[50px]">
-            <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
-              <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
-                <Sparkles className="w-4 h-4 text-amber-500" />
-              </div>
-              <h3 className="text-xs sm:text-sm font-bold text-slate-900 whitespace-nowrap">
-                최근 감지·처리 결과
-              </h3>
-            </div>
-
-            {effectiveMatchedRuleItem ? (
-              <div className="flex-1 min-w-0 flex items-center justify-between gap-2 p-1.5 sm:px-2.5 rounded-xl bg-amber-50/70 border border-amber-200">
-                <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
-                  <div className="flex items-center space-x-1 flex-shrink-0">
-                    {effectiveMatchedRuleItem.matchedKeywords.slice(0, 2).map((kw, idx) => (
-                      <span key={idx} className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-bold text-[10px] border border-amber-300">
-                        #{kw}
-                      </span>
-                    ))}
-                  </div>
-                  <span className="text-xs font-bold text-slate-900 truncate">
-                    "{effectiveMatchedRuleItem.text}"
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <span className="px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-[10px] font-bold whitespace-nowrap">
-                    {effectiveMatchedRuleItem.action}
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">{effectiveMatchedRuleItem.timestamp}</span>
-                </div>
-              </div>
-            ) : (
-              <div className="flex-1 min-w-0 flex items-center justify-center py-1 px-2.5 rounded-xl border border-dashed border-slate-200 text-[11px] sm:text-xs text-slate-400 truncate italic">
-                등록된 단어 규칙과 판매·음성 정정·캡처 처리 결과를 표시합니다.
-              </div>
-            )}
-          </div>
-
           {/* 최근 전사 로그 */}
-          <div className="order-4 bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
+          <div className="order-3 bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
             {!isListening && (sttEngineStatus === 'ERROR' || sttEngineStatus === 'DISCONNECTED') && sttEngineMessage && <p role="alert" className="mb-2 text-xs leading-relaxed text-amber-800">{sttEngineMessage}</p>}
             {isListening && pipelineDiagnostics && <div className="mb-2 space-y-1 text-[11px] text-slate-600" aria-label="실시간 전사 연결 진단">
               <p>실제 오디오 입력 {pipelineDiagnostics.audio.audioSeconds.toFixed(1)}초
@@ -896,6 +857,45 @@ export const LiveHomePage: React.FC = () => {
                 ))
               )}
             </div>
+          </div>
+
+          {/* 최근 감지된 단어 규칙 및 음성 처리 결과 */}
+          <div className="order-4 bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between gap-2 sm:gap-3 min-h-[48px] sm:min-h-[50px]">
+            <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
+                <Sparkles className="w-4 h-4 text-amber-500" />
+              </div>
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 whitespace-nowrap">
+                최근 감지·처리 결과
+              </h3>
+            </div>
+
+            {effectiveMatchedRuleItem ? (
+              <div className="flex-1 min-w-0 flex items-center justify-between gap-2 p-1.5 sm:px-2.5 rounded-xl bg-amber-50/70 border border-amber-200">
+                <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                  <div className="flex items-center space-x-1 flex-shrink-0">
+                    {effectiveMatchedRuleItem.matchedKeywords.slice(0, 2).map((kw, idx) => (
+                      <span key={idx} className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-bold text-[10px] border border-amber-300">
+                        #{kw}
+                      </span>
+                    ))}
+                  </div>
+                  <span className="text-xs font-bold text-slate-900 truncate">
+                    "{effectiveMatchedRuleItem.text}"
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <span className="px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-[10px] font-bold whitespace-nowrap">
+                    {effectiveMatchedRuleItem.action}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">{effectiveMatchedRuleItem.timestamp}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 min-w-0 flex items-center justify-center py-1 px-2.5 rounded-xl border border-dashed border-slate-200 text-[11px] sm:text-xs text-slate-400 truncate italic">
+                등록된 단어 규칙과 판매·음성 정정·캡처 처리 결과를 표시합니다.
+              </div>
+            )}
           </div>
 
           {/* 테스트 멘트 주입 툴바 (모바일 가로 스크롤 지원) */}
