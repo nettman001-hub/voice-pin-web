@@ -470,24 +470,34 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
   const productNames = Array.from(new Set(records.map((record) => record.productName).filter(Boolean)));
   const primaryProductName = productNames.join(', ') || records[0]?.productName || '상품';
 
-  // 1. 다중 소스 통합: 고객 전화번호 스마트 탐색
-  const matchedPhone = useMemo(() => {
-    if (claim?.phoneNumber?.trim()) return claim.phoneNumber.trim();
+  // 1. 다중 소스 통합: 해당 구매자와 연결된 모든 전화번호 수집
+  const matchedPhoneList = useMemo(() => {
+    const phones = new Set<string>();
+    const addPhone = (p?: string | null) => {
+      if (!p) return;
+      const norm = normalizePhone(p);
+      if (norm && norm.length >= 7) phones.add(norm);
+    };
 
-    const nickClaim = allClaims.find(
-      (c) => c.nickname?.trim().toLowerCase() === buyerNickname?.trim().toLowerCase() && c.phoneNumber
-    );
-    if (nickClaim?.phoneNumber?.trim()) return nickClaim.phoneNumber.trim();
+    if (claim?.phoneNumber) addPhone(claim.phoneNumber);
 
-    const inv = allInvoices.find(
-      (i) => i.customerNickname?.trim().toLowerCase() === buyerNickname?.trim().toLowerCase() && i.phoneNumber
-    );
-    if (inv?.phoneNumber?.trim()) return inv.phoneNumber.trim();
+    allClaims.forEach((c) => {
+      if (c.nickname?.trim().toLowerCase() === buyerNickname?.trim().toLowerCase()) {
+        addPhone(c.phoneNumber);
+      }
+    });
 
-    const shp = allShipments.find(
-      (s) => s.recipientName?.trim().toLowerCase() === buyerNickname?.trim().toLowerCase() && s.phoneNumber
-    );
-    if (shp?.phoneNumber?.trim()) return shp.phoneNumber.trim();
+    allInvoices.forEach((i) => {
+      if (i.customerNickname?.trim().toLowerCase() === buyerNickname?.trim().toLowerCase()) {
+        addPhone(i.phoneNumber);
+      }
+    });
+
+    allShipments.forEach((s) => {
+      if (s.recipientName?.trim().toLowerCase() === buyerNickname?.trim().toLowerCase()) {
+        addPhone(s.phoneNumber);
+      }
+    });
 
     try {
       const raw = localStorage.getItem('voicecap_manual_phone_nicknames');
@@ -495,24 +505,30 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
         const obj = JSON.parse(raw);
         for (const [phone, nick] of Object.entries(obj)) {
           if (String(nick).trim().toLowerCase() === buyerNickname?.trim().toLowerCase()) {
-            return formatPhone(phone);
+            addPhone(phone);
           }
         }
       }
     } catch {}
 
-    const foundMsg = allMessages.find(
-      (m) =>
-        m.direction === 'INCOMING' &&
-        m.body &&
-        buyerNickname &&
-        buyerNickname.length >= 2 &&
-        m.body.toLowerCase().includes(buyerNickname.toLowerCase())
-    );
-    if (foundMsg?.phoneNumber) return formatPhone(foundMsg.phoneNumber);
+    if (buyerNickname && buyerNickname.length >= 2) {
+      const q = buyerNickname.toLowerCase();
+      allMessages.forEach((m) => {
+        if (m.body && m.body.toLowerCase().includes(q)) {
+          addPhone(m.phoneNumber);
+        }
+      });
+    }
 
-    return '';
+    return Array.from(phones);
   }, [claim, allClaims, allInvoices, allShipments, allMessages, buyerNickname]);
+
+  // 대표 전화번호 (문자 발송 기본 번호)
+  const matchedPhone = useMemo(() => {
+    if (claim?.phoneNumber?.trim()) return formatPhone(claim.phoneNumber.trim());
+    if (matchedPhoneList.length > 0) return formatPhone(matchedPhoneList[0]);
+    return '';
+  }, [claim, matchedPhoneList]);
 
   // 2. 다중 소스 통합: 해당 구매자와 연관된 모든 수발신 문자 메시지 목록
   const relevantMessages = useMemo(() => {
@@ -520,7 +536,7 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
     const list: typeof allMessages = [];
 
     const add = (m: (typeof allMessages)[0]) => {
-      if (!set.has(m.id)) {
+      if (m && !set.has(m.id)) {
         set.add(m.id);
         list.push(m);
       }
@@ -530,17 +546,29 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
     const saleMsgs = getMessagesForSales(saleIds);
     saleMsgs.forEach(add);
 
-    // 2) 전화번호 매칭 문자
-    const targetNorm = normalizePhone(matchedPhone || claim?.phoneNumber || '');
-    if (targetNorm) {
+    // 2) claim.messageId 및 동일 닉네임 claim 문자
+    if (claim?.messageId) {
+      const m = allMessages.find((msg) => msg.id === claim.messageId);
+      if (m) add(m);
+    }
+    allClaims.forEach((c) => {
+      if (c.nickname?.trim().toLowerCase() === buyerNickname?.trim().toLowerCase() && c.messageId) {
+        const m = allMessages.find((msg) => msg.id === c.messageId);
+        if (m) add(m);
+      }
+    });
+
+    // 3) 연결된 모든 전화번호 매칭 문자
+    const phoneNormSet = new Set(matchedPhoneList);
+    if (phoneNormSet.size > 0) {
       allMessages.forEach((m) => {
-        if (normalizePhone(m.phoneNumber) === targetNorm) {
+        if (phoneNormSet.has(normalizePhone(m.phoneNumber))) {
           add(m);
         }
       });
     }
 
-    // 3) 닉네임 키워드가 본문에 포함된 문자
+    // 4) 닉네임 키워드가 본문에 포함된 문자
     if (buyerNickname && buyerNickname.length >= 2) {
       const q = buyerNickname.toLowerCase();
       allMessages.forEach((m) => {
@@ -552,11 +580,11 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
 
     // 최신 순 정렬
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [allMessages, saleIds, getMessagesForSales, matchedPhone, claim, buyerNickname]);
+  }, [allMessages, saleIds, getMessagesForSales, matchedPhoneList, claim, allClaims, buyerNickname]);
 
-  // 가장 최근 수신 문자
-  const recentIncomingMessage = useMemo(() => {
-    return relevantMessages.find((m) => m.direction === 'INCOMING') || null;
+  // 해당 고객이 보낸 모든 수신 문자 목록 (최신순)
+  const incomingMessages = useMemo(() => {
+    return relevantMessages.filter((m) => m.direction === 'INCOMING');
   }, [relevantMessages]);
 
   const [draft, setDraft] = useState<CustomerPurchaseClaim | null>(claim || null);
@@ -675,20 +703,64 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
             </div>
           </div>
 
-          {/* ★ 수신된 고객 문자 원문 내용 표시 박스 */}
-          {recentIncomingMessage ? (
-            <div className="mb-3 p-3 rounded-xl bg-white border border-cyan-200 shadow-2xs space-y-1.5">
-              <div className="flex items-center justify-between text-[11px] text-slate-500 font-semibold border-b border-slate-100 pb-1">
-                <div className="flex items-center gap-1 text-cyan-800">
+          {/* ★ 수신된 고객 문자 원문 내용 모두 표시 */}
+          {incomingMessages.length > 0 ? (
+            <div className="mb-3 space-y-2">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[11px] font-bold text-cyan-900 flex items-center gap-1.5">
                   <MessageSquare className="w-3.5 h-3.5 text-cyan-600" />
-                  <span className="font-bold">고객 수신 문자 원문</span>
-                  <span className="text-slate-400 font-normal">({formatPhone(recentIncomingMessage.phoneNumber)})</span>
-                </div>
-                <span className="text-[10px] text-slate-400">{formatDateTime(recentIncomingMessage.createdAt)}</span>
+                  고객 수신 문자 원문 ({incomingMessages.length}건)
+                </span>
+                {incomingMessages.length > 1 && (
+                  <span className="text-[10px] text-cyan-700 font-semibold bg-cyan-100/70 px-1.5 py-0.5 rounded">최신순</span>
+                )}
               </div>
-              <p className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed font-sans font-medium">
-                {cleanMessageBody(recentIncomingMessage.body) || '(내용 없음 또는 첨부파일)'}
-              </p>
+
+              <div className={`space-y-2.5 ${incomingMessages.length > 2 ? 'max-h-[380px] overflow-y-auto pr-1' : ''}`}>
+                {incomingMessages.map((msg, idx) => {
+                  const bodyText = cleanMessageBody(msg.body) || msg.body?.trim();
+                  const attachments = msg.attachments || [];
+                  return (
+                    <div
+                      key={msg.id || `inc-msg-${idx}`}
+                      className="p-3 rounded-xl bg-white border border-cyan-200 shadow-2xs space-y-2 hover:border-cyan-300 transition"
+                    >
+                      <div className="flex items-center justify-between text-[11px] text-slate-500 font-semibold border-b border-slate-100 pb-1.5">
+                        <div className="flex items-center gap-1.5 text-cyan-800">
+                          <span className="font-bold text-cyan-900">
+                            {incomingMessages.length > 1 ? `#${idx + 1}` : '수신 문자'}
+                          </span>
+                          {idx === 0 && incomingMessages.length > 1 && (
+                            <span className="rounded bg-cyan-100 px-1.5 py-0.2 text-[9px] font-bold text-cyan-700">
+                              최신
+                            </span>
+                          )}
+                          <span className="text-slate-600 font-semibold text-[11px]">
+                            ({formatPhone(msg.phoneNumber)})
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-400">{formatDateTime(msg.createdAt)}</span>
+                      </div>
+
+                      {/* 본문 전체 표시 (줄바꿈 및 긴 내용 온전하게 표시) */}
+                      <div className="rounded-lg bg-slate-50/80 p-2.5 text-xs font-medium text-slate-800 leading-relaxed whitespace-pre-wrap break-words border border-slate-100">
+                        {bodyText || '(내용 없음 또는 첨부파일)'}
+                      </div>
+
+                      {/* 이미지 첨부파일이 있을 경우 */}
+                      {attachments.length > 0 && (
+                        <div className="pt-1">
+                          <ImageGallery
+                            urls={attachments.map((a) => a.dataUrl || a.path || '').filter(Boolean)}
+                            altPrefix={`${buyerNickname} 수신 문자 이미지`}
+                            emptyText=""
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ) : null}
 
@@ -716,7 +788,7 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
                 <Save className="h-3.5 w-3.5" /> 수정정보 저장 후 재대조
               </button>
             </div>
-          ) : !recentIncomingMessage ? (
+          ) : incomingMessages.length === 0 ? (
             <div className="flex min-h-52 flex-col items-center justify-center rounded-xl border border-dashed border-cyan-200 bg-white/70 p-4 text-center">
               <MessageSquare className="mb-2 h-6 w-6 text-cyan-500" />
               <p className="text-xs font-bold text-slate-700">아직 고객 구매문자가 수신되지 않았습니다.</p>
