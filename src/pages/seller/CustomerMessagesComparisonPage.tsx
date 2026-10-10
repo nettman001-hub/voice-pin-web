@@ -729,13 +729,23 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                 return (
                   <div
                     key={sale.id}
-                    onClick={() => handleSelectBuyerFromSales(sale.buyerNickname)}
+                    onClick={() => {
+                      if (isSelected) {
+                        setMessagesSearch('');
+                      } else {
+                        handleSelectBuyerFromSales(sale.buyerNickname);
+                      }
+                    }}
                     className={`group p-3 rounded-2xl border transition-all cursor-pointer ${
                       isSelected
                         ? 'bg-cyan-50/60 border-cyan-500 shadow-xs ring-1 ring-cyan-200'
                         : 'bg-white border-slate-200 hover:border-brand-400 hover:shadow-xs'
                     }`}
-                    title="클릭 시 우측 문자함에서 해당 고객 대화를 찾습니다"
+                    title={
+                      isSelected
+                        ? '클릭 시 선택 해제하고 전체 문자를 표시합니다'
+                        : '클릭 시 우측 문자함에서 해당 고객 대화를 찾습니다'
+                    }
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -839,7 +849,18 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                   <Inbox className="w-3.5 h-3.5 text-cyan-600" />
                   고객 문자 인박스 ({filteredThreads.length})
                 </span>
-                <span className="text-[10px] text-slate-400">전체 수발신</span>
+                {messagesSearch.trim() ? (
+                  <button
+                    type="button"
+                    onClick={() => setMessagesSearch('')}
+                    className="text-[11px] font-bold text-cyan-700 bg-cyan-100 hover:bg-cyan-200 border border-cyan-300 px-2.5 py-0.5 rounded-lg transition-all cursor-pointer shadow-2xs hover:shadow-xs active:scale-95 flex items-center gap-1"
+                    title="전체 수발신 문자 목록 보기"
+                  >
+                    전체 수발신
+                  </button>
+                ) : (
+                  <span className="text-[10px] text-slate-400 font-medium">전체 수발신</span>
+                )}
               </div>
 
               {/* 문자 검색창 */}
