@@ -11,13 +11,22 @@ import {
   Send,
   Smartphone,
   WalletCards,
-  ZoomIn
+  ZoomIn,
+  Plus,
+  Trash2,
+  Settings2,
+  Sparkles,
+  Clock,
+  X,
+  RotateCcw,
+  Check
 } from 'lucide-react';
 import { useCommerce } from '../../context/CommerceContext';
 import { CustomerPurchaseClaim, MatchStatus } from '../../types/commerce';
 import { SaleRecord } from '../../types/live';
 import { productSalesApi } from '../../services/productSalesApi';
 import { formatSessionDisplay, SessionInfoLike } from '../../utils/sessionFormatter';
+import { cleanMessageBody } from '../../utils/textCleaner';
 import { ImageViewerModal } from '../common/ImageViewerModal';
 
 interface BuyerReconciliationPanelProps {
@@ -26,6 +35,98 @@ interface BuyerReconciliationPanelProps {
   captureImageUrls: string[];
   availableSessions?: SessionInfoLike[];
 }
+
+export interface QuickSmsTemplate {
+  id: string;
+  title: string;
+  content: string;
+}
+
+const QUICK_TEMPLATES_STORAGE_KEY = 'voicecap_quick_sms_templates';
+
+const DEFAULT_QUICK_TEMPLATES: QuickSmsTemplate[] = [
+  {
+    id: 'tmpl-account',
+    title: '계좌 및 입금 안내',
+    content: '안녕하세요 {고객명}님! 주문해주신 {상품명} ({금액}원) 입금 계좌 안내드립니다.\n[은행명 000-0000-0000 예금주: OOO]\n입금 후 답장 문자 부탁드립니다. 감사합니다!'
+  },
+  {
+    id: 'tmpl-paid',
+    title: '입금 확인 완료',
+    content: '{고객명}님, 입금 {금액}원 정상 확인되었습니다!\n상품 정성껏 포장하여 빠른 발송 도와드리겠습니다. 좋은 하루 보내세요!'
+  },
+  {
+    id: 'tmpl-address',
+    title: '배송지 주소 요청',
+    content: '안녕하세요 {고객명}님! 안전하고 정확한 배송을 위해 받으실 분 성함, 연락처, 도로명 주소를 문자로 남겨주세요. 감사합니다.'
+  },
+  {
+    id: 'tmpl-shipping',
+    title: '발송 및 송장 안내',
+    content: '{고객명}님, 주문하신 {상품명} 상품이 오늘 발송되었습니다.\n택배사: [택배사명] / 송장번호: [송장번호]\n이용해 주셔서 감사합니다!'
+  }
+];
+
+const loadQuickTemplates = (): QuickSmsTemplate[] => {
+  try {
+    const raw = localStorage.getItem(QUICK_TEMPLATES_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return DEFAULT_QUICK_TEMPLATES;
+};
+
+const saveQuickTemplates = (templates: QuickSmsTemplate[]) => {
+  try {
+    localStorage.setItem(QUICK_TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
+  } catch {}
+};
+
+const fillTemplate = (content: string, vars: { buyerNickname: string; productName: string; amount: number }) => {
+  return content
+    .replace(/\{고객명\}|\[고객명\]/g, vars.buyerNickname || '고객')
+    .replace(/\{상품명\}|\[상품명\]/g, vars.productName || '상품')
+    .replace(/\{금액\}|\[금액\]/g, (vars.amount || 0).toLocaleString());
+};
+
+const normalizePhone = (raw: string): string => {
+  if (!raw) return '';
+  let compact = raw.replace(/[^0-9+]/g, '');
+  if (compact.startsWith('+82')) compact = '0' + compact.slice(3);
+  if (compact.startsWith('82') && compact.length >= 11) compact = '0' + compact.slice(2);
+  return compact.replace(/\D/g, '');
+};
+
+const formatPhone = (raw: string): string => {
+  if (!raw) return '';
+  const digits = raw.replace(/\D/g, '');
+  if (digits.startsWith('82')) {
+    const local = '0' + digits.slice(2);
+    return formatPhone(local);
+  }
+  if (digits.length === 11) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+  }
+  if (digits.length === 10) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+  return raw;
+};
+
+const formatDateTime = (iso?: string): string => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const time = d.toLocaleTimeString('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return `${year}.${month}.${day} ${time}`;
+};
 
 const matchLabels: Record<MatchStatus, { label: string; className: string }> = {
   NOT_RECEIVED: { label: '문자 미수신', className: 'bg-slate-100 text-slate-600 border-slate-200' },
@@ -46,7 +147,6 @@ export const BuyerStatusBadges: React.FC<{ saleIds: string[]; buyerNickname?: st
   const messages = getMessagesForSales(saleIds);
   const outgoing = messages.filter((message) => message.direction === 'OUTGOING');
 
-  // 정형 claim이 없더라도 해당 구매자 닉네임이 포함된 수신 문자가 있으면 '문자 수신'으로 표시
   const nicknameIncoming = buyerNickname
     ? allMessages.filter((m) => m.direction === 'INCOMING' && m.body && m.body.toLowerCase().includes(buyerNickname.toLowerCase()))
     : [];
@@ -137,6 +237,198 @@ const ImageGallery: React.FC<{ urls: string[]; altPrefix: string; emptyText: str
   );
 };
 
+/** 자주 쓰는 문자 템플릿 관리 모달 */
+const QuickTemplateManagerModal: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  templates: QuickSmsTemplate[];
+  onSaveTemplates: (next: QuickSmsTemplate[]) => void;
+}> = ({ isOpen, onClose, templates, onSaveTemplates }) => {
+  const [list, setList] = useState<QuickSmsTemplate[]>(templates);
+  const [selectedId, setSelectedId] = useState<string>(templates[0]?.id || '');
+
+  useEffect(() => {
+    setList(templates);
+    if (!selectedId && templates.length > 0) setSelectedId(templates[0].id);
+  }, [templates, selectedId]);
+
+  if (!isOpen) return null;
+
+  const current = list.find((t) => t.id === selectedId) || list[0];
+
+  const handleUpdateCurrent = (field: 'title' | 'content', val: string) => {
+    if (!current) return;
+    setList((prev) =>
+      prev.map((t) => (t.id === current.id ? { ...t, [field]: val } : t))
+    );
+  };
+
+  const handleAdd = () => {
+    const newTmpl: QuickSmsTemplate = {
+      id: `tmpl-${Date.now()}`,
+      title: '새 문자 템플릿',
+      content: '안녕하세요 {고객명}님! [문자 내용을 작성해 주세요]'
+    };
+    const next = [...list, newTmpl];
+    setList(next);
+    setSelectedId(newTmpl.id);
+  };
+
+  const handleDelete = (id: string) => {
+    if (list.length <= 1) {
+      alert('최소 1개의 템플릿은 유지되어야 합니다.');
+      return;
+    }
+    const next = list.filter((t) => t.id !== id);
+    setList(next);
+    if (selectedId === id) setSelectedId(next[0].id);
+  };
+
+  const handleResetDefaults = () => {
+    if (window.confirm('기본 자주 쓰는 문자 템플릿으로 초기화하시겠습니까?')) {
+      setList(DEFAULT_QUICK_TEMPLATES);
+      setSelectedId(DEFAULT_QUICK_TEMPLATES[0].id);
+    }
+  };
+
+  const handleSave = () => {
+    onSaveTemplates(list);
+    saveQuickTemplates(list);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
+      <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5 bg-slate-50">
+          <div className="flex items-center gap-2">
+            <Settings2 className="h-5 w-5 text-brand-600" />
+            <h3 className="font-black text-slate-900 text-sm">자주 쓰는 문자(템플릿) 설정·관리</h3>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="flex flex-1 min-h-0 divide-x divide-slate-100 overflow-hidden">
+          {/* 좌측 템플릿 목록 */}
+          <div className="w-48 sm:w-56 flex flex-col bg-slate-50/50 p-3 space-y-2">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-bold text-slate-500">템플릿 목록</span>
+              <button
+                type="button"
+                onClick={handleAdd}
+                className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-brand-50 text-brand-700 border border-brand-200 hover:bg-brand-100 transition flex items-center gap-0.5"
+              >
+                <Plus className="w-3 h-3" /> 추가
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
+              {list.map((tmpl) => (
+                <div
+                  key={tmpl.id}
+                  onClick={() => setSelectedId(tmpl.id)}
+                  className={`p-2.5 rounded-xl text-xs font-bold cursor-pointer transition flex items-center justify-between gap-1 group ${
+                    tmpl.id === current?.id
+                      ? 'bg-brand-600 text-white shadow-xs'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <span className="truncate">{tmpl.title || '제목 없음'}</span>
+                  {list.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(tmpl.id);
+                      }}
+                      className={`opacity-0 group-hover:opacity-100 p-1 rounded-md transition ${
+                        tmpl.id === current?.id ? 'hover:bg-brand-700 text-white' : 'hover:bg-slate-200 text-slate-400 hover:text-rose-600'
+                      }`}
+                      title="삭제"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleResetDefaults}
+              className="text-[10px] text-slate-400 hover:text-slate-600 flex items-center gap-1 justify-center pt-2 border-t border-slate-200"
+            >
+              <RotateCcw className="w-3 h-3" /> 기본값 복원
+            </button>
+          </div>
+
+          {/* 우측 템플릿 편집 영역 */}
+          {current ? (
+            <div className="flex-1 p-4 flex flex-col space-y-3 overflow-y-auto bg-white">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">템플릿 제목 (버튼에 표시)</label>
+                <input
+                  type="text"
+                  value={current.title}
+                  onChange={(e) => handleUpdateCurrent('title', e.target.value)}
+                  placeholder="예: 계좌 및 입금 안내"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div className="flex-1 flex flex-col min-h-0">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-bold text-slate-600">문자 내용 본문</label>
+                  <span className="text-[10px] text-slate-400">
+                    치환 변수: <code className="bg-slate-100 px-1 py-0.5 rounded text-brand-700 font-mono">&#123;고객명&#125;</code>, <code className="bg-slate-100 px-1 py-0.5 rounded text-brand-700 font-mono">&#123;상품명&#125;</code>, <code className="bg-slate-100 px-1 py-0.5 rounded text-brand-700 font-mono">&#123;금액&#125;</code>
+                  </span>
+                </div>
+                <textarea
+                  value={current.content}
+                  onChange={(e) => handleUpdateCurrent('content', e.target.value)}
+                  placeholder="문자 발송 시 사용할 내용을 입력하세요..."
+                  rows={8}
+                  className="w-full flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-brand-500 resize-none font-sans leading-relaxed"
+                />
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200 text-[11px] text-amber-800 space-y-1">
+                <p className="font-bold flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600" /> 자동 치환 안내
+                </p>
+                <p className="text-[10px] leading-tight text-amber-700">
+                  문자 발송 시 <strong>&#123;고객명&#125;</strong>은 구매자 닉네임으로, <strong>&#123;상품명&#125;</strong>은 판매 상품으로, <strong>&#123;금액&#125;</strong>은 주문 금액으로 자동 변경됩니다.
+                </p>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-5 py-3 bg-slate-50">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition"
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            className="px-5 py-2 text-xs font-bold bg-brand-600 hover:bg-brand-700 text-white rounded-xl shadow-sm transition flex items-center gap-1.5"
+          >
+            <Save className="w-3.5 h-3.5" /> 저장하기
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> = ({
   buyerNickname,
   records,
@@ -156,6 +448,7 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
   const effectiveSessions = (availableSessions && availableSessions.length > 0)
     ? availableSessions
     : internalSessions;
+
   const {
     bridgeStatus,
     getClaimForSales,
@@ -164,36 +457,166 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
     isVerified,
     setVerified,
     updateClaim,
-    sendSms
+    sendSms,
+    messages: allMessages,
+    claims: allClaims,
+    invoices: allInvoices,
+    shipments: allShipments,
   } = useCommerce();
+
   const saleIds = useMemo(() => records.map((record) => record.id), [records]);
   const claim = getClaimForSales(saleIds);
-  const messages = getMessagesForSales(saleIds);
   const totalAmount = records.reduce((sum, record) => sum + (record.amount || 0), 0);
   const productNames = Array.from(new Set(records.map((record) => record.productName).filter(Boolean)));
+  const primaryProductName = productNames.join(', ') || records[0]?.productName || '상품';
+
+  // 1. 다중 소스 통합: 고객 전화번호 스마트 탐색
+  const matchedPhone = useMemo(() => {
+    if (claim?.phoneNumber?.trim()) return claim.phoneNumber.trim();
+
+    const nickClaim = allClaims.find(
+      (c) => c.nickname?.trim().toLowerCase() === buyerNickname?.trim().toLowerCase() && c.phoneNumber
+    );
+    if (nickClaim?.phoneNumber?.trim()) return nickClaim.phoneNumber.trim();
+
+    const inv = allInvoices.find(
+      (i) => i.customerNickname?.trim().toLowerCase() === buyerNickname?.trim().toLowerCase() && i.phoneNumber
+    );
+    if (inv?.phoneNumber?.trim()) return inv.phoneNumber.trim();
+
+    const shp = allShipments.find(
+      (s) => s.recipientName?.trim().toLowerCase() === buyerNickname?.trim().toLowerCase() && s.phoneNumber
+    );
+    if (shp?.phoneNumber?.trim()) return shp.phoneNumber.trim();
+
+    try {
+      const raw = localStorage.getItem('voicecap_manual_phone_nicknames');
+      if (raw) {
+        const obj = JSON.parse(raw);
+        for (const [phone, nick] of Object.entries(obj)) {
+          if (String(nick).trim().toLowerCase() === buyerNickname?.trim().toLowerCase()) {
+            return formatPhone(phone);
+          }
+        }
+      }
+    } catch {}
+
+    const foundMsg = allMessages.find(
+      (m) =>
+        m.direction === 'INCOMING' &&
+        m.body &&
+        buyerNickname &&
+        buyerNickname.length >= 2 &&
+        m.body.toLowerCase().includes(buyerNickname.toLowerCase())
+    );
+    if (foundMsg?.phoneNumber) return formatPhone(foundMsg.phoneNumber);
+
+    return '';
+  }, [claim, allClaims, allInvoices, allShipments, allMessages, buyerNickname]);
+
+  // 2. 다중 소스 통합: 해당 구매자와 연관된 모든 수발신 문자 메시지 목록
+  const relevantMessages = useMemo(() => {
+    const set = new Set<string>();
+    const list: typeof allMessages = [];
+
+    const add = (m: (typeof allMessages)[0]) => {
+      if (!set.has(m.id)) {
+        set.add(m.id);
+        list.push(m);
+      }
+    };
+
+    // 1) saleIds 직접 연결 문자
+    const saleMsgs = getMessagesForSales(saleIds);
+    saleMsgs.forEach(add);
+
+    // 2) 전화번호 매칭 문자
+    const targetNorm = normalizePhone(matchedPhone || claim?.phoneNumber || '');
+    if (targetNorm) {
+      allMessages.forEach((m) => {
+        if (normalizePhone(m.phoneNumber) === targetNorm) {
+          add(m);
+        }
+      });
+    }
+
+    // 3) 닉네임 키워드가 본문에 포함된 문자
+    if (buyerNickname && buyerNickname.length >= 2) {
+      const q = buyerNickname.toLowerCase();
+      allMessages.forEach((m) => {
+        if (m.body && m.body.toLowerCase().includes(q)) {
+          add(m);
+        }
+      });
+    }
+
+    // 최신 순 정렬
+    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [allMessages, saleIds, getMessagesForSales, matchedPhone, claim, buyerNickname]);
+
+  // 가장 최근 수신 문자
+  const recentIncomingMessage = useMemo(() => {
+    return relevantMessages.find((m) => m.direction === 'INCOMING') || null;
+  }, [relevantMessages]);
+
   const [draft, setDraft] = useState<CustomerPurchaseClaim | null>(claim || null);
-  const [questionPhone, setQuestionPhone] = useState(claim?.phoneNumber || '');
+  const [questionPhone, setQuestionPhone] = useState(matchedPhone || claim?.phoneNumber || '');
   const [question, setQuestion] = useState('');
   const [feedback, setFeedback] = useState('');
+  const [isSending, setIsSending] = useState(false);
 
+  // 자주 쓰는 문자 템플릿 관리 상태
+  const [templates, setTemplates] = useState<QuickSmsTemplate[]>(() => loadQuickTemplates());
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+
+  // 전화번호 자동 채우기
   useEffect(() => {
     setDraft(claim ? { ...claim } : null);
-    setQuestionPhone(claim?.phoneNumber || '');
-  }, [claim]);
+    if (matchedPhone) {
+      setQuestionPhone(formatPhone(matchedPhone));
+    } else if (claim?.phoneNumber) {
+      setQuestionPhone(formatPhone(claim.phoneNumber));
+    }
+  }, [claim, matchedPhone]);
 
   const handleClaimSave = () => {
     if (!draft) return;
     updateClaim(draft);
     setFeedback('고객 문자 구매정보를 수정하고 다시 대조했습니다.');
+    setTimeout(() => setFeedback(''), 3000);
+  };
+
+  // 자주 쓰는 템플릿 클릭 시 입력창에 치환 주입
+  const handleApplyTemplate = (tmpl: QuickSmsTemplate) => {
+    const filled = fillTemplate(tmpl.content, {
+      buyerNickname,
+      productName: primaryProductName,
+      amount: totalAmount,
+    });
+    setQuestion(filled);
   };
 
   const handleQuestionSend = async () => {
     if (!questionPhone.trim() || !question.trim()) {
-      setFeedback('고객 전화번호와 질문 내용을 입력해 주세요.');
+      setFeedback('고객 전화번호와 발송할 내용을 입력해 주세요.');
       return;
     }
-    const result = await sendSms(questionPhone.trim(), question.trim(), 'QUESTION', saleIds);
-    setFeedback(result.status === 'FAILED' ? `발송 요청 실패: ${result.error || '연동 상태를 확인해 주세요.'}` : 'voicecapSMS 앱에 문자 발송을 요청했습니다.');
+    setIsSending(true);
+    setFeedback('');
+    try {
+      const result = await sendSms(questionPhone.trim(), question.trim(), 'QUESTION', saleIds);
+      if (result.status === 'FAILED') {
+        setFeedback(`발송 요청 실패: ${result.error || '연동 상태를 확인해 주세요.'}`);
+      } else {
+        setFeedback('voicecapSMS 앱에 문자 발송을 요청했습니다.');
+        setQuestion('');
+      }
+    } catch (e: any) {
+      setFeedback(`문자 발송 오류: ${e?.message || '네트워크를 확인해 주세요.'}`);
+    } finally {
+      setIsSending(false);
+      setTimeout(() => setFeedback(''), 4000);
+    }
   };
 
   return (
@@ -203,7 +626,7 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
           <h3 className="text-sm font-black text-slate-900">판매·구매정보 대조</h3>
           <p className="mt-0.5 text-[11px] text-slate-500">자동 판매정보와 고객이 보낸 문자를 나란히 확인합니다.</p>
         </div>
-        <BuyerStatusBadges saleIds={saleIds} />
+        <BuyerStatusBadges saleIds={saleIds} buyerNickname={buyerNickname} />
       </div>
 
       {feedback && (
@@ -213,6 +636,7 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
       )}
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {/* ===================== [좌측: 자동 생성 판매정보] ===================== */}
         <section className="rounded-2xl border border-brand-200 bg-brand-50/40 p-3 sm:p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h4 className="flex items-center gap-1.5 text-xs font-bold text-brand-800">
@@ -233,13 +657,40 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
           <ImageGallery urls={captureImageUrls} altPrefix={`${buyerNickname} 자동 판매 캡처`} emptyText="자동 판매정보에 연결된 캡처 이미지가 없습니다." />
         </section>
 
+        {/* ===================== [우측: 고객 문자 구매정보] ===================== */}
         <section className={`rounded-2xl border p-3 sm:p-4 ${claim?.matchStatus === 'MISMATCH' ? 'border-rose-200 bg-rose-50/40' : 'border-cyan-200 bg-cyan-50/40'}`}>
           <div className="mb-3 flex items-center justify-between gap-2">
-            <h4 className="flex items-center gap-1.5 text-xs font-bold text-cyan-900">
-              <Smartphone className="h-4 w-4" /> 고객 문자 구매정보
-            </h4>
-            <span className={`h-2 w-2 rounded-full ${bridgeStatus === 'ONLINE' ? 'bg-emerald-500' : 'bg-slate-300'}`} title="voicecapSMS 연동 상태" />
+            <div className="flex items-center gap-1.5">
+              <Smartphone className="h-4 w-4 text-cyan-700" />
+              <h4 className="text-xs font-bold text-cyan-900">고객 문자 구매정보</h4>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link
+                to={`/customer-messages?search=${encodeURIComponent(buyerNickname)}`}
+                className="text-[10px] font-bold text-cyan-700 hover:underline"
+              >
+                문자함에서 보기 &gt;
+              </Link>
+              <span className={`h-2 w-2 rounded-full ${bridgeStatus === 'ONLINE' ? 'bg-emerald-500' : 'bg-slate-300'}`} title="voicecapSMS 연동 상태" />
+            </div>
           </div>
+
+          {/* ★ 수신된 고객 문자 원문 내용 표시 박스 */}
+          {recentIncomingMessage ? (
+            <div className="mb-3 p-3 rounded-xl bg-white border border-cyan-200 shadow-2xs space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] text-slate-500 font-semibold border-b border-slate-100 pb-1">
+                <div className="flex items-center gap-1 text-cyan-800">
+                  <MessageSquare className="w-3.5 h-3.5 text-cyan-600" />
+                  <span className="font-bold">고객 수신 문자 원문</span>
+                  <span className="text-slate-400 font-normal">({formatPhone(recentIncomingMessage.phoneNumber)})</span>
+                </div>
+                <span className="text-[10px] text-slate-400">{formatDateTime(recentIncomingMessage.createdAt)}</span>
+              </div>
+              <p className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed font-sans font-medium">
+                {cleanMessageBody(recentIncomingMessage.body) || '(내용 없음 또는 첨부파일)'}
+              </p>
+            </div>
+          ) : null}
 
           {draft ? (
             <div className="space-y-2.5">
@@ -261,17 +712,17 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
                 <input value={draft.phoneNumber} onChange={(event) => setDraft({ ...draft, phoneNumber: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-900" />
               </label>
               <ImageGallery urls={draft.captureImageUrls} altPrefix={`${buyerNickname} 고객 문자 캡처`} emptyText="고객 문자에 첨부된 이미지가 없습니다." />
-              <button onClick={handleClaimSave} className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-cyan-700 px-3 py-2.5 text-xs font-bold text-white hover:bg-cyan-600">
+              <button onClick={handleClaimSave} className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-cyan-700 px-3 py-2.5 text-xs font-bold text-white hover:bg-cyan-600 transition">
                 <Save className="h-3.5 w-3.5" /> 수정정보 저장 후 재대조
               </button>
             </div>
-          ) : (
+          ) : !recentIncomingMessage ? (
             <div className="flex min-h-52 flex-col items-center justify-center rounded-xl border border-dashed border-cyan-200 bg-white/70 p-4 text-center">
               <MessageSquare className="mb-2 h-6 w-6 text-cyan-500" />
               <p className="text-xs font-bold text-slate-700">아직 고객 구매문자가 수신되지 않았습니다.</p>
               <p className="mt-1 text-[10px] text-slate-500">voicecapSMS 앱에서 문자를 전달하면 자동으로 비교합니다.</p>
             </div>
-          )}
+          ) : null}
         </section>
       </div>
 
@@ -290,55 +741,173 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
         </div>
       )}
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
-        <h4 className="mb-2 flex items-center gap-1.5 text-xs font-bold text-slate-800">
-          <MessageCircleQuestion className="h-4 w-4 text-purple-600" /> 고객에게 문자 보내기
-        </h4>
-        <p className="mb-2 text-[10px] text-slate-500">배송 문의 답변, 입금 확인, 계좌번호 안내 등 거래에 필요한 내용을 자유롭게 보낼 수 있습니다.</p>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[11rem_1fr_auto]">
-          <input value={questionPhone} onChange={(event) => setQuestionPhone(event.target.value)} placeholder="010-0000-0000" className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs" />
-          <textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={2} placeholder="예: 입금 계좌는 OO은행 000-0000-0000 예금주 OOO입니다." className="resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs" />
-          <button onClick={handleQuestionSend} className="flex items-center justify-center gap-1.5 rounded-xl bg-purple-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-purple-500">
-            <Send className="h-3.5 w-3.5" /> 문자 발송
+      {/* ===================== [고객에게 문자 보내기 + 자주 쓰는 문자] ===================== */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <MessageCircleQuestion className="h-4 w-4 text-purple-600" />
+            <h4 className="text-xs font-bold text-slate-800">고객에게 문자 보내기</h4>
+            {matchedPhone && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                번호 자동 감지됨
+              </span>
+            )}
+          </div>
+
+          {/* 자주 쓰는 문자 관리 버튼 */}
+          <button
+            type="button"
+            onClick={() => setIsTemplateModalOpen(true)}
+            className="text-[11px] font-bold text-purple-700 hover:text-purple-900 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2.5 py-1 rounded-lg transition flex items-center gap-1 self-start sm:self-auto"
+          >
+            <Settings2 className="w-3.5 h-3.5" />
+            자주 쓰는 문자 관리/수정
           </button>
+        </div>
+
+        {/* 자주 쓰는 문자 원클릭 버튼 칩들 */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+          <span className="text-[11px] font-bold text-slate-400 whitespace-nowrap flex items-center gap-1 mr-1">
+            <Sparkles className="w-3 h-3 text-purple-500" /> 빠른 템플릿:
+          </span>
+          {templates.map((tmpl) => (
+            <button
+              key={tmpl.id}
+              type="button"
+              onClick={() => handleApplyTemplate(tmpl)}
+              className="text-[11px] font-bold px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-purple-50 hover:text-purple-700 hover:border-purple-200 text-slate-700 border border-slate-200 transition whitespace-nowrap"
+              title="클릭 시 메시지 입력창에 자동 입력됩니다"
+            >
+              {tmpl.title}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[12rem_1fr_auto]">
+          <div>
+            <label className="block text-[10px] font-bold text-slate-500 mb-1">
+              수신 번호 {matchedPhone && <span className="text-emerald-600 font-bold">✓</span>}
+            </label>
+            <input
+              value={questionPhone}
+              onChange={(event) => setQuestionPhone(event.target.value)}
+              placeholder="010-0000-0000"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-900 focus:bg-white focus:outline-none focus:border-purple-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-bold text-slate-500 mb-1">발송할 문자 내용</label>
+            <textarea
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              rows={2}
+              placeholder="예: 입금 계좌는 OO은행 000-0000-0000 예금주 OOO입니다. (위 빠른 템플릿 클릭 시 자동 입력)"
+              className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-purple-500 leading-relaxed font-sans"
+            />
+          </div>
+
+          <div className="flex items-end">
+            <button
+              onClick={handleQuestionSend}
+              disabled={isSending || !questionPhone.trim() || !question.trim()}
+              className="w-full sm:w-auto h-9 px-4 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-xs transition flex items-center justify-center gap-1.5 disabled:opacity-40"
+            >
+              <Send className="h-3.5 w-3.5" />
+              <span>{isSending ? '발송 중...' : '문자 발송'}</span>
+            </button>
+          </div>
         </div>
       </section>
 
+      {/* 상태 및 확인완료 버튼 */}
       <div className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-3 text-xs">
-          <span className="flex items-center gap-1 font-bold text-slate-700"><MessageSquare className="h-4 w-4 text-cyan-600" /> 문자 {messages.length}건</span>
-          <span className={`flex items-center gap-1 font-bold ${isPaid(saleIds) ? 'text-emerald-700' : 'text-slate-500'}`}><WalletCards className="h-4 w-4" /> {isPaid(saleIds) ? '입금완료' : '미입금'}</span>
+          <span className="flex items-center gap-1 font-bold text-slate-700">
+            <MessageSquare className="h-4 w-4 text-cyan-600" /> 문자 {relevantMessages.length}건
+          </span>
+          <span className={`flex items-center gap-1 font-bold ${isPaid(saleIds) ? 'text-emerald-700' : 'text-slate-500'}`}>
+            <WalletCards className="h-4 w-4" /> {isPaid(saleIds) ? '입금완료' : '미입금'}
+          </span>
         </div>
         <button
           onClick={() => setVerified(saleIds, !isVerified(saleIds))}
-          className={`rounded-xl border px-4 py-2 text-xs font-bold ${isVerified(saleIds) ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-slate-300 bg-slate-900 text-white'}`}
+          className={`rounded-xl border px-4 py-2 text-xs font-bold transition ${isVerified(saleIds) ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-slate-300 bg-slate-900 text-white'}`}
         >
           {isVerified(saleIds) ? '확인완료 취소' : '판매자 확인완료'}
         </button>
       </div>
 
+      {/* ===================== [문자 수발신 내역] ===================== */}
       <section className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
-        <h4 className="mb-3 text-xs font-bold text-slate-800">문자 수발신 내역 ({messages.length}건)</h4>
-        {messages.length === 0 ? (
-          <p className="rounded-xl bg-slate-50 p-4 text-center text-xs text-slate-400">연결된 문자 내역이 없습니다.</p>
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-xs font-bold text-slate-800">
+            문자 수발신 내역 ({relevantMessages.length}건)
+          </h4>
+          <span className="text-[10px] text-slate-400">
+            고객과 주고받은 모든 SMS/MMS 내역입니다
+          </span>
+        </div>
+
+        {relevantMessages.length === 0 ? (
+          <p className="rounded-xl bg-slate-50 p-6 text-center text-xs text-slate-400">
+            연결된 문자 내역이 아직 없습니다.
+          </p>
         ) : (
-          <div className="max-h-64 space-y-2 overflow-y-auto">
-            {messages.map((message) => (
-              <div key={message.id} className={`flex ${message.direction === 'OUTGOING' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[88%] rounded-2xl px-3 py-2 text-xs ${message.direction === 'OUTGOING' ? 'bg-brand-600 text-white' : 'border border-slate-200 bg-slate-50 text-slate-700'}`}>
-                  <div className="mb-1 flex items-center gap-2 text-[10px] opacity-75">
-                    <span>{message.direction === 'OUTGOING' ? '발신' : '수신'} · {message.phoneNumber}</span>
-                    {message.category === 'CUSTOMER_INQUIRY' && <span>고객문의</span>}
-                    <span>{message.status === 'FAILED' ? '실패' : message.status === 'SENT' ? '발송완료' : message.status === 'QUEUED' ? '발송대기' : '수신완료'}</span>
+          <div className="max-h-80 space-y-2.5 overflow-y-auto pr-1">
+            {relevantMessages.map((message) => {
+              const isOutgoing = message.direction === 'OUTGOING';
+              const cleaned = cleanMessageBody(message.body);
+
+              return (
+                <div key={message.id} className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs shadow-2xs ${
+                    isOutgoing ? 'bg-brand-600 text-white rounded-br-none' : 'border border-slate-200 bg-slate-50 text-slate-800 rounded-bl-none'
+                  }`}>
+                    <div className={`mb-1 flex items-center gap-2 text-[10px] ${isOutgoing ? 'text-brand-100' : 'text-slate-400'}`}>
+                      <span className="font-bold">{isOutgoing ? '발신 (판매자)' : '수신 (고객)'}</span>
+                      <span>·</span>
+                      <span>{formatPhone(message.phoneNumber)}</span>
+                      <span>·</span>
+                      <span>{message.status === 'FAILED' ? '실패' : message.status === 'SENT' ? '발송완료' : message.status === 'QUEUED' ? '발송대기' : '수신완료'}</span>
+                    </div>
+
+                    <p className="whitespace-pre-wrap break-words leading-relaxed text-xs font-sans">
+                      {cleaned || '(내용 없음)'}
+                    </p>
+
+                    {/* 첨부 이미지 */}
+                    {message.attachments && message.attachments.length > 0 && (
+                      <div className="mt-2 grid grid-cols-2 gap-1.5">
+                        {message.attachments.map((att) => (
+                          <img
+                            key={att.id}
+                            src={att.dataUrl || att.path}
+                            alt={att.fileName || '첨부 이미지'}
+                            className="h-20 w-full object-cover rounded-lg border border-black/10"
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    <time className={`mt-1.5 block text-[9px] ${isOutgoing ? 'text-brand-200' : 'text-slate-400'}`}>
+                      {formatDateTime(message.createdAt)}
+                    </time>
                   </div>
-                  <p className="whitespace-pre-wrap break-words">{message.body}</p>
-                  <time className="mt-1 block text-[9px] opacity-60">{new Date(message.createdAt).toLocaleString('ko-KR')}</time>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
+
+      {/* 자주 쓰는 문자 템플릿 관리 모달 */}
+      <QuickTemplateManagerModal
+        isOpen={isTemplateModalOpen}
+        onClose={() => setIsTemplateModalOpen(false)}
+        templates={templates}
+        onSaveTemplates={(next) => setTemplates(next)}
+      />
     </div>
   );
 };
