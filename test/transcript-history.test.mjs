@@ -7,6 +7,7 @@ import * as voiceSaleValidation from '../src/services/voiceSaleValidation.ts';
 import * as paymentMatching from '../src/services/paymentMatching.ts';
 
 function load(path, dependencies = {}, globals = {}) {
+  dependencies = { '../utils/textCleaner': { cleanMessageBody: (t) => t }, ...dependencies };
   const source = fs.readFileSync(new URL(path, import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },

@@ -365,7 +365,7 @@ export async function handleGetAiTasks(
   _auth: AuthContext,
   body: any
 ) {
-  const { sessionId, status, saleId, limit = 50, offset = 0 } = body || {};
+  const { sessionId, status, saleId, taskId, limit = 50, offset = 0 } = body || {};
 
   let query = admin
     .from('ai_tasks')
@@ -382,6 +382,9 @@ export async function handleGetAiTasks(
   }
   if (saleId) {
     query = query.eq('sale_id', saleId);
+  }
+  if (taskId) {
+    query = query.eq('task_id', taskId);
   }
 
   const { data: dbTasks, error: taskErr } = await query;

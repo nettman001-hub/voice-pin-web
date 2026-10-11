@@ -32,18 +32,40 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
   const { data: rows, count, error } = await admin.from('live_comments')
     .select('id,session_id,platform_message_id,buyer_id,nickname_snapshot,content,captured_at', { count: 'exact' })
     .eq('workspace_id', workspaceId).eq('session_id', sale.sessionId)
-    .gte('captured_at', new Date(when - 100_000).toISOString())
-    .lte('captured_at', new Date(when + 100_000).toISOString()).order('captured_at', { ascending: false }).limit(1001);
+    .gte('captured_at', new Date(when - 180_000).toISOString())
+    .lte('captured_at', new Date(when + 180_000).toISOString()).order('captured_at', { ascending: false }).limit(1001);
   if (error) return errorResponse('DATABASE_ERROR', error.message, 500);
   if ((count || 0) > 1000 || (rows || []).length > 1000) {
     return errorResponse('COMMENT_WINDOW_TOO_LARGE', '댓글 후보가 많아 일부만 선택하지 않고 판매자 확인을 기다립니다.', 409);
   }
-  const comments = (rows || []).map((c: any) => ({ id: c.id, sessionId: c.session_id,
+  const dbComments = (rows || []).map((c: any) => ({ id: c.id, sessionId: c.session_id,
     platformMessageId: c.platform_message_id, buyerId: c.buyer_id, nickname: c.nickname_snapshot,
     content: c.content, capturedAt: c.captured_at }));
+
+  const clientComments = (Array.isArray(body.comments) ? body.comments : []).map((c: any) => ({
+    id: c.id || `client-${c.platformMessageId || Math.random().toString(36).slice(2)}`,
+    sessionId: sale.sessionId,
+    platformMessageId: c.platformMessageId || c.id,
+    buyerId: c.buyerId,
+    nickname: c.nickname || c.nicknameSnapshot || '',
+    content: c.content || c.text || '',
+    capturedAt: c.capturedAt || c.timestamp || new Date().toISOString(),
+  }));
+
+  const commentMap = new Map<string, any>();
+  for (const c of clientComments) {
+    const key = `${c.sessionId}:${c.platformMessageId || c.id}`;
+    commentMap.set(key, c);
+  }
+  for (const c of dbComments) {
+    const key = `${c.sessionId}:${c.platformMessageId || c.id}`;
+    commentMap.set(key, c);
+  }
+  const comments = [...commentMap.values()].sort((a, b) => Date.parse(b.capturedAt) - Date.parse(a.capturedAt));
+
   if (!shouldReviewVoiceSale(sale, comments)) return successResponse({ sale: row, skipped: true,
     message: '검토 가능한 판매 발화·구매 댓글 근거가 없어 추가 근거를 기다립니다.' });
-  if (!isVoiceReviewReady(sale, comments)) return successResponse({ sale: row, skipped: true, waitingForWindow: true,
+  if (!isVoiceReviewReady(sale, comments) && !body.forceReanalyze) return successResponse({ sale: row, skipped: true, waitingForWindow: true,
     retryAfterMs: Math.max(...getVoiceReviewWindows(sale, comments).map((window) => Date.parse(window.endAt))) - Date.now(),
     message: '구매 댓글 이후 70초의 판매자 멘트를 모으고 있습니다.' });
   const setting = await getOperationalAiSetting();
@@ -54,8 +76,21 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
     .eq('workspace_id', workspaceId).eq('namespace', `session_transcripts_${sale.sessionId}`).maybeSingle();
   if (archiveError) return errorResponse('DATABASE_ERROR', archiveError.message, 500);
   const archive = transcriptArchive?.value;
-  const logs: ReviewTranscript[] = archive?.workspaceId === workspaceId && archive?.sessionId === sale.sessionId
+  const dbLogs: ReviewTranscript[] = archive?.workspaceId === workspaceId && archive?.sessionId === sale.sessionId
     && Array.isArray(archive.logs) ? archive.logs : [];
+  const clientLogs: ReviewTranscript[] = (Array.isArray(body.transcripts) ? body.transcripts : []).map((t: any) => ({
+    id: t.id || `client-log-${t.timestamp || Date.now()}`,
+    text: t.text || '',
+    timestamp: t.timestamp || t.recognizedAt || new Date().toISOString(),
+    recognizedAt: t.recognizedAt || t.timestamp || new Date().toISOString(),
+    isFinal: t.isFinal !== false,
+    sessionId: sale.sessionId,
+    confidence: t.confidence ?? 1,
+  }));
+  const logMap = new Map<string, ReviewTranscript>();
+  for (const l of clientLogs) logMap.set(l.id || `${l.timestamp}:${l.text}`, l);
+  for (const l of dbLogs) logMap.set(l.id || `${l.timestamp}:${l.text}`, l);
+  const logs = [...logMap.values()].sort((a, b) => Date.parse(a.timestamp || '') - Date.parse(b.timestamp || ''));
   const fingerprint = voiceReviewFingerprint(sale, comments, followingText, logs);
   const previous = sale.aiVerification;
   if ((previous?.reviewFingerprint === fingerprint && previous.aiStatus !== 'CHECKING' && !previous.errorMessage && !body.forceReanalyze)

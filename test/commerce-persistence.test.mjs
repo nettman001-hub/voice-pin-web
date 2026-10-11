@@ -9,6 +9,7 @@ import * as paymentMatching from '../src/services/paymentMatching.ts';
 // Execute the application modules with a local Supabase stub; never connect to
 // the real database or browser storage during these persistence checks.
 function loadModule(relativePath, dependencies = {}) {
+  dependencies = { '../utils/textCleaner': { cleanMessageBody: (t) => t }, ...dependencies };
   const source = fs.readFileSync(new URL(relativePath, import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React },

@@ -785,6 +785,8 @@ export const aiSettingsApi = {
       followUpUtterance?: string;
       followingUtterance?: string;
       followingUtterances?: Array<{ text: string; timestamp?: string }>;
+      comments?: any[];
+      transcripts?: any[];
       forceReanalyze?: boolean;
       workspaceId?: string;
     } = {}

@@ -173,15 +173,30 @@ export const SaleAiConversationView: React.FC<{ entry: ConversationEntry }> = ({
       setLoading(true);
       try {
         const result = await aiSettingsApi.getAiTasks({ workspaceId: entry.workspaceId, saleId: entry.sale.id, limit });
+        let taskList = result.tasks;
+        if (taskList.length === 0 && entry.sale.aiVerification?.aiTaskId) {
+          try {
+            const byTaskId = await aiSettingsApi.getAiTasks({
+              workspaceId: entry.workspaceId,
+              taskId: entry.sale.aiVerification.aiTaskId,
+              limit,
+            });
+            if (byTaskId.tasks.length > 0) {
+              taskList = byTaskId.tasks;
+            }
+          } catch {
+            // ignore fallback error
+          }
+        }
         if (disposed) return;
         // Fail closed even if an incompatible server responds with unfiltered tasks.
-        if (result.tasks.some((task) => task.workspaceId !== entry.workspaceId || task.saleId !== entry.sale.id)) {
+        if (taskList.some((task) => task.workspaceId !== entry.workspaceId || (task.saleId && task.saleId !== entry.sale.id))) {
           throw new Error('판매 내역에 연결되지 않은 AI 기록이 반환되었습니다. 다시 로그인한 후 확인해 주세요.');
         }
-        setTasks(result.tasks);
+        setTasks(taskList);
         setError(null);
-        setSelectedId((previous) => entry.reviewing || !result.tasks.some((task) => task.taskId === previous)
-          ? result.tasks[0]?.taskId || '' : previous);
+        setSelectedId((previous) => entry.reviewing || !taskList.some((task) => task.taskId === previous)
+          ? taskList[0]?.taskId || '' : previous);
         const waiting = entry.reviewing || result.tasks.some((task) => task.status === 'QUEUED' || task.status === 'PROCESSING');
         if (waiting && Date.now() < deadline) timer = setTimeout(() => void read(), 2000);
         else if (waiting) setPollExpired(true);

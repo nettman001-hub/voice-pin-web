@@ -5,6 +5,9 @@ import { useSaleAiConversationWindow } from './SaleAiConversationWindow';
 import { useSales } from '../../context/SalesContext';
 import { useLive } from '../../context/LiveContext';
 import { useAuth } from '../../context/AuthContext';
+import { useOptionalCommentCapture } from '../../context/CommentCaptureContext';
+import { storageService } from '../../services/storageService';
+import { flushPendingComments } from '../../services/commentSyncService';
 import { aiSettingsApi } from '../../services/aiSettingsApi';
 import { rollbackCorrection } from '../../services/voiceCorrectionService';
 import {
@@ -32,6 +35,7 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
   const { updateSale, refreshSales } = useSales();
   const { syncCurrentTranscriptsToCloud } = useLive();
   const { workspaceId } = useAuth();
+  const commentCapture = useOptionalCommentCapture();
   const { openConversation } = useSaleAiConversationWindow();
   const [showEvidenceModal, setShowEvidenceModal] = useState<boolean>(false);
   const [isApplyingCandidate, setIsApplyingCandidate] = useState<boolean>(false);
@@ -232,8 +236,36 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
               e.preventDefault(); e.stopPropagation();
               const conversation = openConversation(sale, { reviewing: true });
               setIsReviewing(true); setErrorMsg(null);
+
+              // 1. 화면 메모리 댓글 및 로컬 스토리지 댓글 병합
+              const liveList = commentCapture?.liveComments || [];
+              const localComments = storageService.getSessionCommentRecords(sale.sessionId, workspaceId || undefined);
+              const commentMap = new Map<string, any>();
+              for (const c of localComments) {
+                const key = c.platformMessageId || c.id;
+                if (key) commentMap.set(key, c);
+              }
+              for (const c of liveList) {
+                const key = c.platformMessageId || c.id;
+                if (key) commentMap.set(key, c);
+              }
+              const comments = [...commentMap.values()];
+
+              // 2. 로컬 스토리지 전사 로그 수집
+              const transcripts = storageService.getSessionTranscripts(workspaceId || '', sale.sessionId);
+
+              // 3. 댓글 클라우드 큐 flush 시도 (비동기)
+              if (workspaceId) {
+                void flushPendingComments(workspaceId);
+              }
+
               void syncCurrentTranscriptsToCloud(sale.sessionId)
-                .then(() => aiSettingsApi.triggerPendingAiResolution(sale.id, { forceReanalyze: true, workspaceId: workspaceId || undefined }))
+                .then(() => aiSettingsApi.triggerPendingAiResolution(sale.id, {
+                  forceReanalyze: true,
+                  workspaceId: workspaceId || undefined,
+                  comments,
+                  transcripts,
+                }))
                 .then((result) => {
                   const reviewError = result.sale?.ai_verification?.errorMessage || result.sale?.aiVerification?.errorMessage;
                   if (reviewError || (result.skipped && result.message)) setErrorMsg(reviewError || result.message);

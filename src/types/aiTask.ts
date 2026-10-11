@@ -108,6 +108,7 @@ export interface GetAiTasksQuery {
   sessionId?: string;
   status?: AiTaskStatus;
   saleId?: string;
+  taskId?: string;
   limit?: number;
   offset?: number;
 }

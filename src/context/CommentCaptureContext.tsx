@@ -36,6 +36,7 @@ interface CommentCaptureContextType {
   stopCapture: () => void;
   config: CommentCaptureConfig;
   saveConfig: (config: CommentCaptureConfig) => void;
+  flushComments: () => Promise<void>;
 }
 
 const CommentCaptureContext = createContext<CommentCaptureContextType | undefined>(undefined);
@@ -248,12 +249,8 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       console.warn('[CommentCaptureContext] 클라우드 댓글 적재 재시도:', error);
     } finally {
       cloudFlushInFlightRef.current = false;
-      const nextOwner = workspaceRef.current;
-      if (nextOwner && storageService.getCommentOutbox<QueuedCloudComment>(nextOwner).some((item) => !isTemporarySessionId(item.sessionId))) {
-        scheduleCloudFlush(1_000);
-      }
     }
-  }, [pollFeed, scheduleCloudFlush]);
+  }, [pollFeed]);
 
   flushCloudQueueRef.current = flushCloudQueue;
 
@@ -355,7 +352,8 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
           capturedAt: record.capturedAt,
           ingestSequence: cloudIngestSequenceRef.current,
         });
-        scheduleCloudFlush();
+        // [Supabase 부하 방지] 방송 중에는 실시간으로 서버에 전송하지 않고
+        // 로컬 아웃박스에만 보관하며, 청취 중지 시 일괄 전송합니다.
       }
 
       setNewCount((prev) => prev + 1);
@@ -521,7 +519,14 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   );
 
   const startCapture = useCallback(() => setIsActive(true), []);
-  const stopCapture = useCallback(() => setIsActive(false), []);
+  const stopCapture = useCallback(async () => {
+    setIsActive(false);
+    try {
+      await flushCloudQueueRef.current();
+    } catch (err) {
+      console.warn('[CommentCaptureContext] 청취 중지 시 댓글 클라우드 적재 실패:', err);
+    }
+  }, []);
 
   const isRunning = isActive && isListening && serverStatus === 'COLLECTING';
 
@@ -539,7 +544,8 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         startCapture,
         stopCapture,
         config,
-        saveConfig
+        saveConfig,
+        flushComments: flushCloudQueue,
       }}
     >
       {children}
@@ -621,6 +627,10 @@ export const useCommentCapture = () => {
     throw new Error('useCommentCapture must be used within a CommentCaptureProvider');
   }
   return context;
+};
+
+export const useOptionalCommentCapture = () => {
+  return useContext(CommentCaptureContext) ?? null;
 };
 
 export type { CommentRecord, CommentStreamStatus };
