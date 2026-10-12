@@ -4,15 +4,30 @@ plugins {
     id 'com.google.gms.google-services'
 }
 
-def releaseStoreFile = providers.environmentVariable('VOICECAP_UPLOAD_KEYSTORE').orNull
-def releaseStorePassword = providers.environmentVariable('VOICECAP_UPLOAD_STORE_PASSWORD').orNull
-def releaseKeyAlias = providers.environmentVariable('VOICECAP_UPLOAD_KEY_ALIAS').orNull
-def releaseKeyPassword = providers.environmentVariable('VOICECAP_UPLOAD_KEY_PASSWORD').orNull
-def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
+def signingPropsFile = rootProject.file('signing/signing.properties')
+def signingProps = new Properties()
+if (signingPropsFile.exists()) {
+    signingPropsFile.withInputStream { signingProps.load(it) }
+}
+
+def releaseStoreFile = providers.environmentVariable('VOICECAP_UPLOAD_KEYSTORE').orNull ?: signingProps.getProperty('storeFile')
+def releaseStorePassword = providers.environmentVariable('VOICECAP_UPLOAD_STORE_PASSWORD').orNull ?: signingProps.getProperty('storePassword')
+def releaseKeyAlias = providers.environmentVariable('VOICECAP_UPLOAD_KEY_ALIAS').orNull ?: signingProps.getProperty('keyAlias')
+def releaseKeyPassword = providers.environmentVariable('VOICECAP_UPLOAD_KEY_PASSWORD').orNull ?: signingProps.getProperty('keyPassword')
+
+def resolvedStoreFile = null
+if (releaseStoreFile) {
+    resolvedStoreFile = file(releaseStoreFile)
+    if (!resolvedStoreFile.isAbsolute() && signingPropsFile.exists()) {
+        resolvedStoreFile = new File(signingPropsFile.parentFile, releaseStoreFile)
+    }
+}
+
+def hasReleaseSigning = resolvedStoreFile && resolvedStoreFile.exists() && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
 def hasPartialReleaseSigning = [releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword].any { it } && !hasReleaseSigning
 
 if (hasPartialReleaseSigning) {
-    throw new GradleException('VOICECAP_UPLOAD_* 서명 환경 변수 4개를 모두 설정해야 합니다.')
+    throw new GradleException('VOICECAP_UPLOAD_* 서명 환경 변수 또는 signing.properties 설정 4개를 모두 유효하게 설정해야 합니다.')
 }
 
 android {
@@ -36,7 +51,7 @@ android {
     signingConfigs {
         release {
             if (hasReleaseSigning) {
-                storeFile file(releaseStoreFile)
+                storeFile resolvedStoreFile
                 storePassword releaseStorePassword
                 keyAlias releaseKeyAlias
                 keyPassword releaseKeyPassword
