@@ -76,6 +76,8 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   workspaceRef.current = workspaceId;
   const cloudFlushTimerRef = useRef<number | null>(null);
   const cloudFlushInFlightRef = useRef(false);
+  // 구매·취소 댓글이 아직 서버에 올라가지 않았다(판매 확정이 이 댓글을 기다린다).
+  const urgentCommentPendingRef = useRef(false);
   const cloudIngestSequenceRef = useRef(0);
   const flushCloudQueueRef = useRef<() => Promise<void>>(async () => {});
 
@@ -242,16 +244,21 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     const owner = workspaceRef.current;
     if (!owner || cloudFlushInFlightRef.current) return;
     cloudFlushInFlightRef.current = true;
+    urgentCommentPendingRef.current = false;
+    let failed = false;
     try {
       await flushPendingComments(owner);
       if (workspaceRef.current === owner) await pollFeed();
     } catch (error) {
+      failed = true;
       console.warn('[CommentCaptureContext] 클라우드 댓글 적재 재시도:', error);
     } finally {
       cloudFlushInFlightRef.current = false;
-      const nextOwner = workspaceRef.current;
-      if (nextOwner && storageService.getCommentOutbox<QueuedCloudComment>(nextOwner).some((item) => !isTemporarySessionId(item.sessionId))) {
-        scheduleCloudFlush(1_000);
+      // 일반 댓글만 남아 있으면 다시 보내지 않는다(다음 구매 댓글이나 청취 중지 때 함께 전송).
+      // 실패했거나 전송 중에 구매·취소 댓글이 들어온 경우에만 다시 시도한다.
+      if (failed || urgentCommentPendingRef.current) {
+        urgentCommentPendingRef.current = urgentCommentPendingRef.current || failed;
+        scheduleCloudFlush(failed ? 5_000 : 300);
       }
     }
   }, [pollFeed, scheduleCloudFlush]);
@@ -330,8 +337,9 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       // [동시 쓰기 1: 로컬DB] 로컬 댓글 테이블에 즉시 INSERT
       storageService.addCommentRecords([record], owner);
       const purchaseRequest = purchaseRequestFromComment(record);
+      const withdrawsPurchase = !purchaseRequest && commentWithdrawsPurchase(record.content);
       if (purchaseRequest) storageService.addPurchaseRequest(purchaseRequest, owner);
-      else if (commentWithdrawsPurchase(record.content)) storageService.withdrawPurchaseRequestsForComment(record, owner);
+      else if (withdrawsPurchase) storageService.withdrawPurchaseRequestsForComment(record, owner);
 
       pendingCommentsRef.current.set(platformMessageId, record);
 
@@ -356,9 +364,13 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
           capturedAt: record.capturedAt,
           ingestSequence: cloudIngestSequenceRef.current,
         });
-        // 판매 확정(commit-voice-sale)은 서버에 구매 댓글이 있어야 성공한다.
-        // 방송 중에도 1초 단위로 묶어 바로 올린다(타이머가 그 사이 댓글을 합친다).
-        scheduleCloudFlush(1_000);
+        // [Supabase 부하 방지] 일반 댓글은 로컬 아웃박스에 모았다가 함께 보낸다.
+        // 판매 확정(commit-voice-sale)은 서버에 구매 댓글이 있어야 성공하고
+        // 그 사이 취소 댓글도 서버에서 확인하므로, 구매·취소 댓글일 때만 바로 올린다.
+        if (purchaseRequest || withdrawsPurchase) {
+          urgentCommentPendingRef.current = true;
+          scheduleCloudFlush(300);
+        }
       }
 
       setNewCount((prev) => prev + 1);
