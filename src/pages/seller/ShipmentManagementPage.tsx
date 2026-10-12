@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Box, CheckCircle2, PackageCheck, Send, Truck, Layers, Pencil, Check, X, AlertCircle, AlertTriangle } from 'lucide-react';
+import { Box, CheckCircle2, PackageCheck, Send, Truck, Layers, Pencil, Check, X, AlertCircle, AlertTriangle, Settings } from 'lucide-react';
 import { useSales } from '../../context/SalesContext';
 import { useCommerce } from '../../context/CommerceContext';
 import { Shipment, ShipmentStatus } from '../../types/commerce';
 import { productSalesApi } from '../../services/productSalesApi';
 import { LiveSession } from '../../types/productSales';
 import { formatSessionDisplay } from '../../utils/sessionFormatter';
+import { ShippingConfigModal } from '../../components/shipping/ShippingConfigModal';
 
 const shipmentLabels: Record<ShipmentStatus, string> = {
   READY: '발송대기', PACKED: '포장완료', SHIPPED: '발송완료', DELIVERED: '배송완료', CANCELLED: '취소'
@@ -19,6 +20,7 @@ export const ShipmentManagementPage: React.FC = () => {
   const { shipments, isVerified, getClaimForSales, createShipmentsForSales, updateShipment, sendShippingNotice, invoices } = useCommerce();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [feedback, setFeedback] = useState('');
+  const [isShippingModalOpen, setIsShippingModalOpen] = useState(false);
 
   // 고객 정보 수정 중인 shipment ID 및 폼 상태
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -186,10 +188,22 @@ export const ShipmentManagementPage: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-7xl space-y-2.5 sm:space-y-3 p-2.5 sm:p-4">
-      <header className="rounded-2xl border border-slate-200 bg-white px-3 py-2 sm:px-4 sm:py-2.5 shadow-sm">
-        <h1 className="flex items-center gap-1.5 text-sm sm:text-base font-black text-slate-900"><Truck className="h-4 w-4 sm:h-5 sm:w-5 text-brand-600" /> 택배발송 관리</h1>
-        <p className="mt-0.5 text-[10px] sm:text-[11px] text-slate-500">확인된 구매정보의 배송지를 바탕으로 포장, 운송장, 발송 문자, 배송완료까지 관리합니다.</p>
+      <header className="rounded-2xl border border-slate-200 bg-white px-3 py-2 sm:px-4 sm:py-2.5 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+          <h1 className="flex items-center gap-1.5 text-sm sm:text-base font-black text-slate-900"><Truck className="h-4 w-4 sm:h-5 sm:w-5 text-brand-600" /> 택배발송 관리</h1>
+          <p className="mt-0.5 text-[10px] sm:text-[11px] text-slate-500">확인된 구매정보의 배송지를 바탕으로 포장, 운송장, 발송 문자, 배송완료까지 관리합니다.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsShippingModalOpen(true)}
+          className="h-8 px-2.5 sm:px-3 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 text-xs font-bold flex items-center justify-center space-x-1.5 transition active:scale-95 text-center self-start sm:self-auto flex-shrink-0"
+          title="택배비 기본 조건(무료, 조건부 무료, 고정 배송비) 설정"
+        >
+          <Settings className="w-3.5 h-3.5 text-purple-600 flex-shrink-0" />
+          <span>택배비 조건 설정</span>
+        </button>
       </header>
+
 
       {/* 방송 회차 선택 바 */}
       <div className="bg-white border border-slate-200 rounded-2xl p-2.5 sm:p-3 shadow-sm">
@@ -512,7 +526,13 @@ export const ShipmentManagementPage: React.FC = () => {
           );
         })}
       </section>
+
+      <ShippingConfigModal
+        isOpen={isShippingModalOpen}
+        onClose={() => setIsShippingModalOpen(false)}
+      />
     </div>
   );
 };
+
 

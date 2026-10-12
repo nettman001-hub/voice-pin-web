@@ -47,6 +47,8 @@ import { salesDemoService } from '../../services/salesDemoService';
 import { CommentRecord } from '../../types/comment';
 import { SaleRecord, SttTranscriptLog } from '../../types/live';
 import { MatchedRuleItem } from '../../context/LiveContext';
+import { customerKeepingService } from '../../services/customerKeepingService';
+import { KeepingBadge } from '../../components/shipping/KeepingBadge';
 
 const SILENCE_WARNING_DELAY_MS = 5 * 60 * 1000;
 const SILENCE_STOP_COUNTDOWN_SECONDS = 20;
@@ -779,13 +781,28 @@ export const LiveHomePage: React.FC = () => {
                                 ★ 다건 {buyerSessionSales.length}건
                               </span>
                             )}
-                            {!nicknameNeedsConfirmation && <CustomerStatsBadge
-                              nickname={sale.buyerNickname}
-                              buyerId={sale.buyerId}
-                              variant="pill"
-                              currentSessionId={sale.sessionId || currentSessionId || activeSession?.id}
-                            />}
+                            {!nicknameNeedsConfirmation && (
+                              <>
+                                <CustomerStatsBadge
+                                  nickname={sale.buyerNickname}
+                                  buyerId={sale.buyerId}
+                                  variant="pill"
+                                  currentSessionId={sale.sessionId || currentSessionId || activeSession?.id}
+                                />
+                                {(() => {
+                                  const keepingSummary = customerKeepingService.getBuyerSummary(
+                                    sale.buyerNickname,
+                                    sale.sessionId || currentSessionId || activeSession?.id,
+                                    workspaceId
+                                  );
+                                  return keepingSummary.hasActiveKeeping ? (
+                                    <KeepingBadge summary={keepingSummary} />
+                                  ) : null;
+                                })()}
+                              </>
+                            )}
                             <AiSaleBadge sale={sale} />
+
                           </div>
 
                           {/* 금액 표시 */}

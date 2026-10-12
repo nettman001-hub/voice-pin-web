@@ -28,6 +28,7 @@ import { productSalesApi } from '../../services/productSalesApi';
 import { formatSessionDisplay, SessionInfoLike } from '../../utils/sessionFormatter';
 import { cleanMessageBody } from '../../utils/textCleaner';
 import { ImageViewerModal } from '../common/ImageViewerModal';
+import { BuyerShippingCard } from '../shipping/BuyerShippingCard';
 
 interface BuyerReconciliationPanelProps {
   buyerNickname: string;
@@ -798,7 +799,16 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
         </section>
       </div>
 
+      {/* 배송비 & 키핑(보관) 묶음 정산 카드 */}
+      <BuyerShippingCard
+        buyerNickname={buyerNickname}
+        sessionId={records[0]?.sessionId || 'default'}
+        sessionCode={records[0]?.sessionId ? formatSessionDisplay(records[0].sessionId, { sessions: effectiveSessions, recognizedAt: records[0].recognizedAt }) : undefined}
+        currentSales={records}
+      />
+
       {claim && (
+
         <div className="grid grid-cols-3 gap-2">
           {([
             ['닉네임', claim.fieldMatches.nickname],

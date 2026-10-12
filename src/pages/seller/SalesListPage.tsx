@@ -25,8 +25,13 @@ import {
   CheckCircle2,
   Smartphone,
   ChevronRight,
-  ExternalLink
+  ExternalLink,
+  Truck
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { ShippingConfigModal } from '../../components/shipping/ShippingConfigModal';
+import { KeepingBadge } from '../../components/shipping/KeepingBadge';
+import { customerKeepingService } from '../../services/customerKeepingService';
 import { formatAmountAsDecimal, formatMultiSaleAmount } from '../../services/salesExtractor';
 import { areNicknamesSimilar } from '../../services/nicknameMatcher';
 import { formatSessionDisplay } from '../../utils/sessionFormatter';
@@ -98,11 +103,13 @@ interface BuyerGroupedSale {
 }
 
 export const SalesListPage: React.FC = () => {
+  const { workspaceId } = useAuth();
   const { sales, promiseDefaults, setPromiseDefault, exportCsv, refreshSales } = useSales();
   const { messages, payments, claims, invoices, shipments } = useCommerce();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [isShippingModalOpen, setIsShippingModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'BUYER_GROUPED' | 'INDIVIDUAL'>('BUYER_GROUPED');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [sortOrder, setSortOrder] = useState<'AMOUNT_DESC' | 'COUNT_DESC' | 'LATEST' | 'OLDEST'>('AMOUNT_DESC');
@@ -506,6 +513,15 @@ export const SalesListPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-1.5 w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={() => setIsShippingModalOpen(true)}
+            className="h-8 px-2.5 sm:px-3 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 text-xs font-bold flex items-center justify-center space-x-1 transition active:scale-95 text-center flex-1 sm:flex-initial"
+            title="택배비 정책 설정 (무료, 조건부 무료, 고정 배송비)"
+          >
+            <Truck className="w-3.5 h-3.5 text-purple-600 flex-shrink-0" />
+            <span>택배비 설정</span>
+          </button>
           <Link
             to="/sales/review"
             className="h-8 px-2.5 sm:px-3 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold flex items-center justify-center space-x-1 transition active:scale-95 text-center flex-1 sm:flex-initial"
@@ -754,6 +770,16 @@ export const SalesListPage: React.FC = () => {
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="font-bold text-base text-slate-900">{buyer.buyerNickname}</span>
+                            {(() => {
+                              const keepingSummary = customerKeepingService.getBuyerSummary(
+                                buyer.buyerNickname,
+                                sessionFilter !== 'ALL' ? sessionFilter : undefined,
+                                workspaceId
+                              );
+                              return keepingSummary.hasActiveKeeping ? (
+                                <KeepingBadge summary={keepingSummary} />
+                              ) : null;
+                            })()}
                             <span className="text-xs px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 font-bold border border-brand-200">
                               {buyer.orderCount ? `총 ${buyer.orderCount}건 구매` : '원본 판매내역 없음'}
                             </span>
@@ -1248,6 +1274,15 @@ export const SalesListPage: React.FC = () => {
           titlePrefix={viewerModal.title}
         />
       )}
+
+      <ShippingConfigModal
+        isOpen={isShippingModalOpen}
+        onClose={() => setIsShippingModalOpen(false)}
+        onSaved={() => {
+          void refreshSales();
+        }}
+      />
     </div>
+
   );
 };
