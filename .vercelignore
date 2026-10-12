@@ -22,7 +22,7 @@ server/data/
 .env.*.local
 *.secret
 *토큰*
-*token*
+*token*.txt
 new-pc-local-secrets.txt
 *.local
 scratch/
