@@ -928,6 +928,35 @@ test('comment capture removes deleted rows and does not resurrect them from a st
   assert.equal(hooks.render(CommentCaptureProvider).liveComments.length, 0);
 });
 
+test('a purchase comment captured during a broadcast is uploaded without stopping capture', async () => {
+  // commit-voice-sale returns COMMENT_NOT_SYNCED until live_comments has the
+  // buyer's comment, so holding comments until capture stops blocks every sale.
+  const ctx = storageFixture(), hooks = reactFixture(), { react } = hooks;
+  let ingest = null, flushes = 0;
+  const timers = [];
+  const stream = { onStatus: () => () => {}, onComment: (handler) => { ingest = handler; return () => {}; },
+    connect() {}, stopCollecting() {}, disconnect() {} };
+  const { CommentCaptureProvider } = load('../src/context/CommentCaptureContext.tsx', {
+    react: { ...react, default: react }, 'lucide-react': {},
+    './AuthContext': { useAuth: () => ({ workspaceId: 'workspace-1' }) },
+    './LiveContext': { useLive: () => ({ isListening: true, currentSessionId: session1, transcriptLogs: [] }) },
+    './ProductSalesContext': { useProductSales: () => ({ activeSession: { id: session1 }, feed: { comments: [] }, pollFeed: async () => {} }) },
+    '../services/storageService': { storageService: ctx.storage, isTemporarySessionId: ctx.isTemporarySessionId },
+    '../services/remoteWorkspaceService': { remoteWorkspaceService: { loadCommentCaptureConfig: async () => null, saveCommentCaptureConfig: async () => {} } },
+    '../services/commentSyncService': { flushPendingComments: async () => { flushes++; }, promoteCommentOutbox() {}, enqueueCloudComment() {} },
+    '../services/commentStreamService': { commentStreamService: stream, commentDedupeKey: (n, c, id) => `${n}:${c}:${id}` },
+    '../types/comment': load('../src/types/comment.ts'),
+    '../services/purchaseFirstSales': { purchaseRequestFromComment: () => null, commentWithdrawsPurchase: () => false },
+  }, { window: { ...ctx.globals.window, setTimeout: (callback) => { timers.push(callback); return timers.length; }, clearTimeout() {} } });
+  hooks.render(CommentCaptureProvider).startCapture();
+  hooks.render(CommentCaptureProvider); await tick();
+  timers.splice(0).forEach((run) => run()); await tick();
+  const before = flushes;
+  ingest({ id: 'msg-1', nickname: '지기지우', content: '저요', receivedAt: new Date().toISOString() });
+  timers.splice(0).forEach((run) => run()); await tick();
+  assert.equal(flushes, before + 1);
+});
+
 test('feed deletion reconciliation checks known IDs in scope and keeps older existing rows outside the newest page', async () => {
   const existingId = canonical(queued()).id, deletedId = '55555555-5555-5555-5555-555555555555';
   const probes = [];

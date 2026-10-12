@@ -249,8 +249,12 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       console.warn('[CommentCaptureContext] 클라우드 댓글 적재 재시도:', error);
     } finally {
       cloudFlushInFlightRef.current = false;
+      const nextOwner = workspaceRef.current;
+      if (nextOwner && storageService.getCommentOutbox<QueuedCloudComment>(nextOwner).some((item) => !isTemporarySessionId(item.sessionId))) {
+        scheduleCloudFlush(1_000);
+      }
     }
-  }, [pollFeed]);
+  }, [pollFeed, scheduleCloudFlush]);
 
   flushCloudQueueRef.current = flushCloudQueue;
 
@@ -352,8 +356,9 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
           capturedAt: record.capturedAt,
           ingestSequence: cloudIngestSequenceRef.current,
         });
-        // [Supabase 부하 방지] 방송 중에는 실시간으로 서버에 전송하지 않고
-        // 로컬 아웃박스에만 보관하며, 청취 중지 시 일괄 전송합니다.
+        // 판매 확정(commit-voice-sale)은 서버에 구매 댓글이 있어야 성공한다.
+        // 방송 중에도 1초 단위로 묶어 바로 올린다(타이머가 그 사이 댓글을 합친다).
+        scheduleCloudFlush(1_000);
       }
 
       setNewCount((prev) => prev + 1);
