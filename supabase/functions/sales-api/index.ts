@@ -81,6 +81,7 @@ import {
   handleGetAiTasks,
   handleGetAiRuntimeStatus,
 } from './handlers/aiTasks.ts'
+import { handleGetAiStatusSummary } from './handlers/aiStatusSummary.ts'
 
 import {
   handleResolvePendingSale,
@@ -305,6 +306,9 @@ serve(async (req: Request) => {
         return await handleGetAiTasks(workspaceId, actorId, auth, body)
       case 'get-ai-runtime-status':
         return await handleGetAiRuntimeStatus(workspaceId, actorId, auth, body)
+      case 'get-ai-status-summary':
+        requireCapability('SALES_READ')
+        return await handleGetAiStatusSummary(workspaceId, actorId, auth, body)
 
       // Pending Sales Resolution (자동 적재 판매 보류 해결)
       case 'resolve-pending-sale':

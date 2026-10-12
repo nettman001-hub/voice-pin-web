@@ -52,3 +52,29 @@ export const getCommerceChanges = (previous: CommerceState, next: CommerceState)
 export const hasCommerceChanges = (changes: CommerceChanges): boolean => (
   Object.values(changes).some((records) => records.length > 0)
 );
+
+// A Realtime/recovery read replaces only the requested tables. Local edits
+// made while the request was in flight must remain visible until saved.
+export function mergeRemoteCommerce(current: CommerceState, beforeRead: CommerceState, remote: Partial<CommerceState>): CommerceState {
+  const next = { ...current };
+  for (const key of ['messages', 'claims', 'invoices', 'payments', 'shipments'] as const) {
+    const incoming = remote[key];
+    if (!incoming) continue;
+    const rows = new Map<string, { id: string }>(incoming.map((row) => [row.id, row]));
+    const before = new Map(beforeRead[key].map((row) => [row.id, row]));
+    const latest = new Map(current[key].map((row) => [row.id, row]));
+    for (const [id, row] of latest) if (!areCommerceValuesEqual(before.get(id), row)) rows.set(id, row);
+    for (const id of before.keys()) if (!latest.has(id)) rows.delete(id);
+    // Server ordering is preserved; locally added records keep their identity.
+    (next[key] as { id: string }[]) = [...rows.values()];
+  }
+  if (remote.verifiedSaleIds) {
+    const values = new Set(remote.verifiedSaleIds);
+    const before = new Set(beforeRead.verifiedSaleIds);
+    const latest = new Set(current.verifiedSaleIds);
+    for (const id of latest) if (!before.has(id)) values.add(id);
+    for (const id of before) if (!latest.has(id)) values.delete(id);
+    next.verifiedSaleIds = [...values];
+  }
+  return areCommerceValuesEqual(current, next) ? current : next;
+}

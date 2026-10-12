@@ -9,6 +9,7 @@ import type { BatchConfirmResult, SaleHistoryRecord } from '../types/pendingSale
 import { aiSettingsApi } from '../services/aiSettingsApi';
 import { SalesSyncController } from '../services/salesSyncController';
 import type { PromiseDefaultRecord } from '../services/promiseDefaultService';
+import { createWorkspaceReadSync, workspaceReadsAvailable, type WorkspaceReadSync } from '../services/workspaceReadSync';
 
 interface SettlementSummary {
   totalCount: number;
@@ -62,6 +63,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     salesRef.current = [];
   }
   const controllerRef = useRef<{ workspaceId: string; generation: number; controller: SalesSyncController } | null>(null);
+  const readSyncRef = useRef<{ workspaceId: string; sync: WorkspaceReadSync<unknown> } | null>(null);
 
   const getController = useCallback(() => {
     if (!workspaceId || identityRef.current !== workspaceId || identityKeyRef.current !== identityKey) return null;
@@ -104,6 +106,11 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setSales(local);
       setPromiseDefaultsState({ workspaceId: '', records: [] });
       return local;
+    }
+
+    if (readSyncRef.current?.workspaceId === workspaceId) {
+      await readSyncRef.current.sync.request();
+      return getController()?.records || [];
     }
 
     const mutationVersion = promiseDefaultChangeRef.current;
@@ -155,12 +162,42 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
     let active = true;
     let timer: number | undefined;
-    const load = () => {
-      void refreshSales().catch((error) => {
+    let status: string | undefined;
+    let readFailed = false;
+    const dirtyTables = new Set<string>();
+    const restored = storageService.restoreWorkspace(workspaceId);
+    const sync = createWorkspaceReadSync({
+      tables: ['sales', 'buyer_promise_defaults'],
+      available: () => !isRemoteAuth || workspaceReadsAvailable(),
+      load: async (tables) => {
+        // The first subscription ACK may arrive before durable restoration.
+        // Do not initialize a controller until its pending outbox is recovered.
+        await restored;
+        if (!active) return { decisions: undefined, mutationVersion: promiseDefaultChangeRef.current };
+        const mutationVersion = promiseDefaultChangeRef.current;
+        const [, decisions] = await Promise.all([
+          tables.includes('sales') ? getController()?.refresh() : Promise.resolve(),
+          tables.includes('buyer_promise_defaults')
+            ? isRemoteAuth ? remoteWorkspaceService.loadPromiseDefaults(workspaceId)
+              : Promise.resolve(storageService.getPromiseDefaults(workspaceId))
+            : Promise.resolve(undefined),
+        ]);
+        return { decisions, mutationVersion };
+      },
+      apply: ({ decisions, mutationVersion }) => {
+        if (!active || identityRef.current !== workspaceId || promiseDefaultChangeRef.current !== mutationVersion || !decisions) return;
+        setPromiseDefaultsState({ workspaceId, records: decisions });
+        storageService.savePromiseDefaults(decisions, workspaceId);
+      },
+      success: () => { readFailed = false; },
+      failure: (error) => {
+        readFailed = true;
         if (active) console.error('[Sales] remote load failed', error);
-      });
-    };
-    void storageService.restoreWorkspace(workspaceId).then(() => {
+      },
+    });
+    readSyncRef.current = { workspaceId, sync };
+    const load = () => { void sync.request(); };
+    void restored.then(() => {
       if (!active || identityRef.current !== workspaceId) return;
       // Initialize after recovering the durable outbox; never replace a live controller.
       const controller = getController();
@@ -168,12 +205,40 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       retryAutomaticSync();
       load();
     });
-    const unsubscribe = isRemoteAuth ? remoteWorkspaceService.subscribe(workspaceId, () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(load, 350);
+    const unsubscribe = isRemoteAuth ? remoteWorkspaceService.subscribe(workspaceId, (change) => {
+      if (change.eventType === 'DELETE' && !change.old.workspace_id) {
+        if (change.table === 'sales' && !salesRef.current.some((sale) => sale.id === change.old.id) && !sync.isReading('sales')) return;
+        // Composite PK contains the buyer/session even when RLS strips old values.
+        if (change.table === 'buyer_promise_defaults' && !storageService.getPromiseDefaults(workspaceId)
+          .some((decision) => decision.buyerKey === change.old.buyer_key && decision.sessionId === change.old.session_id)
+          && !sync.isReading('buyer_promise_defaults')) return;
+      }
+      dirtyTables.add(change.table);
+      if (timer !== undefined) return;
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        const tables = [...dirtyTables]; dirtyTables.clear();
+        void sync.request(tables, true);
+      }, 350);
+    }, {
+      tables: ['sales', 'buyer_promise_defaults'],
+      onStatus: (next) => {
+        status = next;
+        if (next === 'SUBSCRIBED') {
+          void sync.request(undefined, true);
+        }
+      },
     }) : () => {};
     const retryTimer = window.setInterval(retryAutomaticSync, 10_000);
-    window.addEventListener('online', retryAutomaticSync);
+    const recover = () => {
+      retryAutomaticSync();
+      if (isRemoteAuth && workspaceReadsAvailable()) load();
+    };
+    window.addEventListener('online', recover);
+    if (isRemoteAuth && typeof document !== 'undefined') document.addEventListener('visibilitychange', recover);
+    const fallbackTimer = isRemoteAuth ? window.setInterval(() => {
+      if ((status !== 'SUBSCRIBED' || readFailed) && workspaceReadsAvailable()) load();
+    }, 5 * 60_000) : undefined;
     const reloadLocal = () => {
       void storageService.restoreWorkspace(workspaceId).then(async () => {
         if (!active) return;
@@ -191,7 +256,12 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     window.addEventListener('voicecap_sales_updated', handleLocal);
     return () => {
       active = false; window.clearTimeout(timer); window.clearInterval(retryTimer);
-      window.removeEventListener('online', retryAutomaticSync); unsubscribe();
+      sync.dispose();
+      if (readSyncRef.current?.sync === sync) readSyncRef.current = null;
+      window.clearInterval(fallbackTimer);
+      window.removeEventListener('online', recover);
+      if (isRemoteAuth && typeof document !== 'undefined') document.removeEventListener('visibilitychange', recover);
+      unsubscribe();
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('voicecap_sales_updated', handleLocal);
     };

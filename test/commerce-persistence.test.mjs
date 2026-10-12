@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import * as voiceSaleValidation from '../src/services/voiceSaleValidation.ts';
 import * as paymentMatching from '../src/services/paymentMatching.ts';
+import * as workspaceReadSync from '../src/services/workspaceReadSync.ts';
 
 // Execute the application modules with a local Supabase stub; never connect to
 // the real database or browser storage during these persistence checks.
@@ -242,6 +243,7 @@ function readyProvider(initial, save = async () => {}, notifyOutbox = async () =
     } },
     '../services/remoteWorkspaceService': { remoteWorkspaceService: { saveCommerceChanges: save, notifyOutbox } },
     '../services/commerceChanges': changesModule, '../services/paymentMatching': paymentMatching,
+    '../services/workspaceReadSync': workspaceReadSync,
   });
   const value = CommerceProvider({ children: null }).props.value;
   return { value, localSaves, stateUpdates };

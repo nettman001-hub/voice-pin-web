@@ -1,4 +1,6 @@
 import { isSupabaseConfigured, requireSupabase } from './supabaseClient';
+import { aiStatusCache } from './aiStatusCache';
+import type { AiStatusSummaryResponse } from '../types/aiStatusSummary';
 import { buildOpenAiModelsUrl } from '../utils/maskingUtils';
 import {
   AiSettings,
@@ -96,6 +98,11 @@ function saveLocalAiSettings(settings: AiSettings): void {
   }
 }
 
+function notifyAiStatusSettingsChanged() {
+  aiStatusCache.invalidateAll();
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('voicecap_ai_settings_changed'));
+}
+
 async function invokeSalesApi<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
   if (!isSupabaseConfigured) {
     throw new Error('Supabase client is not configured.');
@@ -136,6 +143,16 @@ async function invokeSalesApi<T>(action: string, payload: Record<string, unknown
 }
 
 export const aiSettingsApi = {
+  async getAiStatusSummary(workspaceId: string): Promise<AiStatusSummaryResponse> {
+    if (!isSupabaseConfigured) {
+      const [runtime, healthSummary] = await Promise.all([
+        this.getAiRuntimeStatus(workspaceId), this.getAiHealth(workspaceId),
+      ]);
+      return { runtimeStatus: runtime.runtimeStatus, healthSummary, settings: getLocalAiSettings() };
+    }
+    return invokeSalesApi<AiStatusSummaryResponse>('get-ai-status-summary', { workspaceId });
+  },
+
   async getAiSettings(workspaceId?: string, requireRemote = false): Promise<AiSettings> {
     if (!isSupabaseConfigured) {
       return getLocalAiSettings();
@@ -182,6 +199,7 @@ export const aiSettingsApi = {
         updatedAt: new Date().toISOString(),
       });
       saveLocalAiSettings(localUpdated);
+      notifyAiStatusSettingsChanged();
       return localUpdated;
     }
 
@@ -191,6 +209,7 @@ export const aiSettingsApi = {
     });
     const normalized = normalizeAiSettings(resp.settings);
     saveLocalAiSettings(normalized);
+    notifyAiStatusSettingsChanged();
     return normalized;
   },
 
@@ -203,6 +222,7 @@ export const aiSettingsApi = {
         updatedAt: new Date().toISOString(),
       });
       saveLocalAiSettings(localUpdated);
+      notifyAiStatusSettingsChanged();
       return localUpdated;
     }
 
@@ -212,6 +232,7 @@ export const aiSettingsApi = {
     });
     const normalized = normalizeAiSettings(resp.settings);
     saveLocalAiSettings(normalized);
+    notifyAiStatusSettingsChanged();
     return normalized;
   },
 

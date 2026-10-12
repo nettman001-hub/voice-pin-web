@@ -467,11 +467,23 @@ export async function handleGetAiRuntimeStatus(
   _auth: AuthContext,
   _body: any
 ) {
+  try {
+    const setting = await getOperationalAiSetting();
+    return successResponse({ runtimeStatus: await readAiRuntimeStatus(workspaceId, setting) });
+  } catch (err: any) {
+    return errorResponse('DATABASE_ERROR', `AI 상태 조회 실패: ${err.message}`, 500);
+  }
+}
+
+// The summary endpoint passes the already loaded applied setting here so the
+// runtime and health views always describe the same operational version.
+export async function readAiRuntimeStatus(workspaceId: string, setting: any): Promise<AiRuntimeStatus> {
   // 서킷 브레이커 상태 조회
-  const { data: dbBreakers } = await admin
+  const { data: dbBreakers, error: breakerError } = await admin
     .from('ai_circuit_breaker')
-    .select('*')
+    .select('slot_number, is_open, consecutive_failures, cooldown_until, consecutive_recovery_successes, last_failure_reason')
     .eq('workspace_id', workspaceId);
+  if (breakerError) throw breakerError;
 
   const slot1BreakerRow = dbBreakers?.find((b) => b.slot_number === 1);
   const slot2BreakerRow = dbBreakers?.find((b) => b.slot_number === 2);
@@ -495,12 +507,6 @@ export async function handleGetAiRuntimeStatus(
   };
 
   // 설정된 우선 슬롯을 기준으로 다음 작업의 실행 슬롯 계산
-  let setting: any;
-  try {
-    setting = await getOperationalAiSetting();
-  } catch (err: any) {
-    return errorResponse('DATABASE_ERROR', `운영 AI 설정 조회 실패: ${err.message}`, 500);
-  }
   const configuredPrimarySlot = getPrimaryAiSlot(setting);
   const primaryBreaker = configuredPrimarySlot === 1 ? slot1CircuitBreaker : slot2CircuitBreaker;
   const nowTime = Date.now();
@@ -512,12 +518,13 @@ export async function handleGetAiRuntimeStatus(
   const activeSlot: 1 | 2 = isPrimaryCooldown ? (configuredPrimarySlot === 1 ? 2 : 1) : configuredPrimarySlot;
 
   // 작업 상태별 카운트 조회
-  const { data: tasks } = await admin
+  const { data: tasks, error: taskError } = await admin
     .from('ai_tasks')
     .select('status, switch_reason, updated_at')
     .eq('workspace_id', workspaceId)
     .order('updated_at', { ascending: false })
     .limit(100);
+  if (taskError) throw taskError;
 
   let queued = 0;
   let processing = 0;
@@ -557,5 +564,5 @@ export async function handleGetAiRuntimeStatus(
     checkedAt: new Date().toISOString(),
   };
 
-  return successResponse({ runtimeStatus });
+  return runtimeStatus;
 }

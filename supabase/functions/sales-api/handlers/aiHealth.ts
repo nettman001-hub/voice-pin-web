@@ -6,7 +6,7 @@ import {
   generateRouteKey,
 } from './aiHealthCore.ts';
 import type { AiSlotConfig } from '../../../../src/types/aiSettings.ts';
-import type { AiSlotHealth } from '../../../../src/types/aiHealth.ts';
+import type { AiSlotHealth, AiHealthSummaryResponse } from '../../../../src/types/aiHealth.ts';
 import { getOperationalAiSetting } from './aiOperationalSettings.ts';
 
 function checkIsAdmin(auth: AuthContext): boolean {
@@ -155,27 +155,25 @@ export async function handleGetAiHealth(
   auth: AuthContext,
   body: any
 ) {
-  const { executorId = 'SERVER', deviceId } = body || {};
-
-  // 최신 ai_settings 조회
-  let setting: any;
   try {
-    setting = await getOperationalAiSetting();
+    const setting = await getOperationalAiSetting();
+    return successResponse(await readAiHealthSummary(workspaceId, setting, body));
   } catch (err: any) {
-    return errorResponse('DATABASE_ERROR', `운영 AI 설정 조회 실패: ${err.message}`, 500);
+    return errorResponse('DATABASE_ERROR', `AI 건강 상태 조회 실패: ${err.message}`, 500);
   }
+}
 
+export async function readAiHealthSummary(
+  workspaceId: string,
+  setting: any,
+  body: { executorId?: string; deviceId?: string } = {},
+): Promise<AiHealthSummaryResponse> {
+  const { executorId = 'SERVER', deviceId } = body || {};
   const slot1Config = setting?.slot1 || {};
   const slot2Config = setting?.slot2 || {};
   const appliedVersion = setting?.applied_version || 1;
 
-  // DB에서 최근 건강 상태 조회
-  const { data: healthRows } = await admin
-    .from('ai_health_status')
-    .select('*')
-    .order('last_checked_at', { ascending: false });
-
-  function formatSlotHealth(sNum: 1 | 2, cfg: any): AiSlotHealth {
+  async function readSlotHealth(sNum: 1 | 2, cfg: any): Promise<AiSlotHealth> {
     const routingMode = cfg.routingMode || (sNum === 1 ? 'PC_HELPER' : 'SERVER_DIRECT');
     const location = cfg.location || (sNum === 1 ? 'SAME_PC' : 'EXTERNAL_IP');
     const actualExecutor = routingMode === 'PC_HELPER' && deviceId ? `DEVICE:${deviceId}` : executorId;
@@ -189,10 +187,25 @@ export async function handleGetAiHealth(
       appliedVersion
     );
 
-    // 해당 routeKey 또는 슬롯 번호에 매칭되는 가장 최근 행 탐색
-    const matched = (healthRows || []).find((r: any) =>
-      r.slot_number === sNum && (r.route_key === routeKey || r.routing_mode === routingMode)
-    );
+    // A fresh result for an old model/endpoint/version is not evidence that the
+    // currently applied route is healthy. Shared GLOBAL rows remain eligible.
+    let query = admin.from('ai_health_status')
+      .select('slot_number, route_key, routing_mode, location, executor_id, endpoint_url, model, setting_version, overall_status, tier1_connection, tier2_model_readiness, tier3_synthetic_inference, consecutive_failures, consecutive_successes, last_latency_ms, last_checked_at, last_healthy_at')
+      .eq('slot_number', sNum)
+      .eq('routing_mode', routingMode)
+      .eq('executor_id', actualExecutor)
+      .eq('route_key', routeKey);
+    if (workspaceId && workspaceId !== 'default') {
+      const quotedWorkspace = JSON.stringify(workspaceId);
+      query = query.or(`workspace_id.eq.${quotedWorkspace},workspace_id.is.null`);
+    } else {
+      query = query.is('workspace_id', null);
+    }
+    const { data: rows, error } = await query
+      .order('last_checked_at', { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    const matched = rows?.[0];
 
     if (!matched) {
       return {
@@ -242,13 +255,15 @@ export async function handleGetAiHealth(
     };
   }
 
-  const slot1 = formatSlotHealth(1, slot1Config);
-  const slot2 = formatSlotHealth(2, slot2Config);
+  const [slot1, slot2] = await Promise.all([
+    readSlotHealth(1, slot1Config),
+    readSlotHealth(2, slot2Config),
+  ]);
 
-  return successResponse({
+  return {
     slot1,
     slot2,
     activePrimarySlot: setting?.primary_slot || 1,
     checkedAt: new Date().toISOString(),
-  });
+  };
 }
