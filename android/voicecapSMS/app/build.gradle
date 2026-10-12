@@ -51,10 +51,10 @@ android {
     }
 }
 
-// 빌드 완료 시 항상 c:\dev\voice-pin-anti\android\voicecapSMS\outputs 에 간결하게 복사
+// 빌드 완료 시 항상 android/voicecapSMS/release-output 에 복사
 tasks.register('copyOutputsToRoot') {
     doLast {
-        def targetDir = file("${rootDir}/outputs")
+        def targetDir = file("${rootDir}/release-output")
         if (!targetDir.exists()) {
             targetDir.mkdirs()
         }
@@ -67,14 +67,9 @@ tasks.register('copyOutputsToRoot') {
             copy {
                 from debugApk
                 into targetDir
-                rename { 'app-debug.apk' }
-            }
-            copy {
-                from debugApk
-                into targetDir
                 rename { "voicecap-sms-${vName}-debug.apk" }
             }
-            println "[VoiceCAP] Debug APK 복사 완료 -> ${targetDir.absolutePath}/app-debug.apk"
+            println "[VoiceCAP] Debug APK 복사 완료 -> ${targetDir.absolutePath}/voicecap-sms-${vName}-debug.apk"
         }
 
         // 2. Release APK (휴대폰 직접 설치용 서명 완료본) 복사
@@ -83,14 +78,9 @@ tasks.register('copyOutputsToRoot') {
             copy {
                 from releaseApk
                 into targetDir
-                rename { 'app-release.apk' }
+                rename { "voicecap-sms-${vName}-release.apk" }
             }
-            copy {
-                from releaseApk
-                into targetDir
-                rename { "voicecap-sms-${vName}.apk" }
-            }
-            println "[VoiceCAP] Release APK 복사 완료 -> ${targetDir.absolutePath}/app-release.apk"
+            println "[VoiceCAP] Release APK 복사 완료 -> ${targetDir.absolutePath}/voicecap-sms-${vName}-release.apk"
         }
 
         // 3. Play Store 업로드용 Release AAB (Android App Bundle) 복사
@@ -99,17 +89,13 @@ tasks.register('copyOutputsToRoot') {
             copy {
                 from releaseAab
                 into targetDir
-                rename { 'app-release.aab' }
+                rename { "voicecap-sms-${vName}-release.aab" }
             }
-            copy {
-                from releaseAab
-                into targetDir
-                rename { "voicecap-sms-${vName}.aab" }
-            }
-            println "[VoiceCAP] Play Store용 Release AAB 복사 완료 -> ${targetDir.absolutePath}/app-release.aab"
+            println "[VoiceCAP] Play Store용 Release AAB 복사 완료 -> ${targetDir.absolutePath}/voicecap-sms-${vName}-release.aab"
         }
     }
 }
+
 
 gradle.projectsEvaluated {
     tasks.matching {
