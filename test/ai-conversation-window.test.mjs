@@ -129,6 +129,12 @@ function actionFixture({ blocked = false, failure = null, skipped = false } = {}
     '../../context/LiveContext': { useLive: () => ({
       syncCurrentTranscriptsToCloud: async (sessionId) => { calls.push({ action: 'sync', sessionId }); },
     }) },
+    '../../context/CommentCaptureContext': { useOptionalCommentCapture: () => null },
+    '../../services/storageService': { storageService: {
+      getSessionCommentRecords: () => [],
+      getSessionTranscripts: () => [],
+    } },
+    '../../services/commentSyncService': { flushPendingComments: async () => {} },
     '../../services/aiSettingsApi': { aiSettingsApi: {
       triggerPendingAiResolution: async (id, options) => {
         calls.push({ action: 'review', id, options });

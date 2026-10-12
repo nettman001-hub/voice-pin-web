@@ -4,8 +4,9 @@ import { useSales } from './SalesContext';
 import { buildClaimFromMessage, compareClaimWithSales } from '../services/customerMessageParser';
 import { smsBridgeService } from '../services/smsBridgeService';
 import { storageService } from '../services/storageService';
-import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
-import { areCommerceValuesEqual, getCommerceChanges, hasCommerceChanges } from '../services/commerceChanges';
+import { COMMERCE_TABLES, remoteWorkspaceService, type CommerceTable } from '../services/remoteWorkspaceService';
+import { areCommerceValuesEqual, getCommerceChanges, hasCommerceChanges, mergeRemoteCommerce } from '../services/commerceChanges';
+import { createWorkspaceReadSync, workspaceReadsAvailable } from '../services/workspaceReadSync';
 import { confirmPaymentInvoices, generateDepositCode, matchPayment } from '../services/paymentMatching';
 import {
   CommerceState,
@@ -92,9 +93,11 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const stateRef = useRef(state);
   const remoteSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const currentWorkspaceRef = useRef<string | null>(null);
+  const remoteRefreshRef = useRef<(() => Promise<boolean>) | null>(null);
   currentWorkspaceRef.current = isRemoteAuth ? workspaceId : null;
 
   const applyRemoteState = useCallback((remote: CommerceState) => {
+    if (remote === stateRef.current) return;
     stateRef.current = remote;
     setState(remote);
     storageService.saveCommerceState(remote);
@@ -149,29 +152,94 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     let active = true;
     let timer: number | undefined;
-    const load = async () => {
-      try {
-        const remote = await remoteWorkspaceService.loadCommerce(workspaceId);
+    let status: string | undefined;
+    let readFailed = false;
+    const dirtyTables = new Set<CommerceTable>();
+    const sync = createWorkspaceReadSync({
+      tables: COMMERCE_TABLES,
+      available: workspaceReadsAvailable,
+      load: async (tables) => {
+        // Finish writes already queued before taking an authoritative snapshot.
+        let savedQueue: Promise<void>;
+        do {
+          savedQueue = remoteSaveQueueRef.current;
+          await savedQueue;
+        } while (active && savedQueue !== remoteSaveQueueRef.current);
+        const before = stateRef.current;
+        if (!active) return { before, remote: {} };
+        const remote = await remoteWorkspaceService.loadCommerceTables(workspaceId, tables as CommerceTable[]);
+        return { before, remote };
+      },
+      apply: ({ before, remote }) => {
+        if (active) applyRemoteState(mergeRemoteCommerce(stateRef.current, before, remote));
+      },
+      success: () => {
         if (!active) return;
-        applyRemoteState(remote);
+        readFailed = false;
         setRemoteReady(true);
         setBridgeStatus('ONLINE');
         setBridgeMessage('VoiceCAP 클라우드 연동 정상');
-      } catch (error) {
+      },
+      failure: (error) => {
         if (!active) return;
-        setRemoteReady(false);
+        readFailed = true;
         setBridgeStatus('OFFLINE');
         setBridgeMessage(error instanceof Error ? error.message : '클라우드 데이터를 불러오지 못했습니다.');
-      }
-    };
-    void load();
-    const unsubscribe = remoteWorkspaceService.subscribe(workspaceId, () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => void load(), 350);
+      },
     });
+    const refresh = () => sync.request();
+    remoteRefreshRef.current = refresh;
+    const keys = {
+      customer_messages: 'messages', payment_receipts: 'payments', purchase_claims: 'claims',
+      invoices: 'invoices', shipments: 'shipments', verified_sales: 'verifiedSaleIds',
+    } as const;
+    const unsubscribe = remoteWorkspaceService.subscribe(workspaceId, (change) => {
+      const table = change.table as CommerceTable;
+      if (change.eventType === 'DELETE' && !change.old.workspace_id) {
+        const key = keys[table];
+        const exists = key === 'verifiedSaleIds'
+          ? stateRef.current.verifiedSaleIds.includes(change.old.sale_id)
+          : stateRef.current[key].some((row) => row.id === change.old.id);
+        if (!exists && !sync.isReading(table)) return;
+      }
+      dirtyTables.add(table);
+      if (timer !== undefined) return;
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        const tables = [...dirtyTables];
+        dirtyTables.clear();
+        void sync.request(tables, true);
+      }, 350);
+    }, {
+      tables: COMMERCE_TABLES,
+      onStatus: (next) => {
+        status = next;
+        if (next === 'SUBSCRIBED') {
+          // REST may finish before Realtime starts delivering events. Repair
+          // that first connection gap as well as subsequent reconnect gaps.
+          void sync.request(undefined, true);
+        }
+      },
+    });
+    const recover = () => {
+      if (workspaceReadsAvailable()) void refresh();
+    };
+    void refresh();
+    window.addEventListener('online', recover);
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', recover);
+    // A disconnected/unsupported Realtime connection gets a slow repair read.
+    // A healthy subscription never causes periodic REST table reads.
+    const fallback = window.setInterval(() => {
+      if (status !== 'SUBSCRIBED' || readFailed) recover();
+    }, 5 * 60_000);
     return () => {
       active = false;
+      sync.dispose();
+      if (remoteRefreshRef.current === refresh) remoteRefreshRef.current = null;
       window.clearTimeout(timer);
+      window.clearInterval(fallback);
+      window.removeEventListener('online', recover);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', recover);
       unsubscribe();
     };
   }, [applyRemoteState, isRemoteAuth, workspaceId]);
@@ -198,18 +266,7 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setBridgeStatus('CHECKING');
     setBridgeMessage(isRemoteAuth ? 'VoiceCAP 클라우드 동기화 중' : 'voicecapSMS 연동 확인 중');
     if (isRemoteAuth && workspaceId) {
-      try {
-        const remote = await remoteWorkspaceService.loadCommerce(workspaceId);
-        applyRemoteState(remote);
-        setRemoteReady(true);
-        setBridgeStatus('ONLINE');
-        setBridgeMessage('VoiceCAP 클라우드 연동 정상');
-        return true;
-      } catch (error) {
-        setBridgeStatus('OFFLINE');
-        setBridgeMessage(error instanceof Error ? error.message : '클라우드 서버에 연결할 수 없습니다.');
-        return false;
-      }
+      return await remoteRefreshRef.current?.() || false;
     }
     try {
       await smsBridgeService.getStatus(bridgeConfig);
@@ -261,10 +318,11 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [applyRemoteState, bridgeConfig, commit, isRemoteAuth, sales, workspaceId]);
 
   useEffect(() => {
+    if (isRemoteAuth) return;
     void syncBridge();
     const timer = window.setInterval(() => void syncBridge(), 15000);
     return () => window.clearInterval(timer);
-  }, [syncBridge]);
+  }, [isRemoteAuth, syncBridge]);
 
   const saveBridgeConfig = (config: SmsBridgeConfig) => {
     const normalized = { ...config, baseUrl: config.baseUrl.trim().replace(/\/$/, '') };

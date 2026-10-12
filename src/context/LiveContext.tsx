@@ -369,22 +369,30 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * 방송 세션의 전체 발화 로그(SttTranscriptLog[])를 Supabase 클라우드(workspace_settings)에 저장합니다.
    * 방송 종료 시점이나 세션 전환 시점에 호출됩니다.
    */
-  const syncSessionTranscriptsToCloud = useCallback(async (sessionIdOverride?: string): Promise<boolean> => {
+  const syncSessionTranscriptsToCloud = useCallback(async (sessionIdOverride?: string, force = false): Promise<boolean> => {
     const targetWorkspaceId = workspaceId || user?.id;
     if (!targetWorkspaceId || transcriptWorkspaceIdRef.current !== targetWorkspaceId) return false;
     const targetSessionId = sessionIdOverride || currentSessionIdRef.current;
     if (!targetSessionId) return false;
 
-    const logs = sessionTranscriptsRef.current.get(targetSessionId)
+    const rawLogs = sessionTranscriptsRef.current.get(targetSessionId)
       || (targetSessionId === currentSessionIdRef.current ? allSessionTranscriptsRef.current
         : storageService.getSessionTranscripts(targetWorkspaceId, targetSessionId));
-    if (!logs || logs.length === 0) {
+    if (!rawLogs || rawLogs.length === 0) {
       return false;
     }
 
-    // 이미 이 세션의 동일한 개수만큼 클라우드에 성공적으로 저장된 적이 있다면 중복 업로드 스킵
+    // 전사 로그 내부 중복 항목 제거 (id 또는 timestamp:text 기준 고유화)
+    const logMap = new Map<string, SttTranscriptLog>();
+    for (const log of rawLogs) {
+      const key = log.id || `${log.timestamp}:${log.text}`;
+      logMap.set(key, log);
+    }
+    const logs = [...logMap.values()];
+
+    // force가 false일 때만 캐시 개수 확인 후 스킵, force가 true면 무조건 서버에 강제 전송
     const lastSavedCount = lastSavedCloudTranscriptCountRef.current.get(targetSessionId) || 0;
-    if (lastSavedCount === logs.length) {
+    if (!force && lastSavedCount === logs.length) {
       return true;
     }
 
@@ -2296,10 +2304,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // 라이브 청취 중지 (TAB_AUDIO는 파이프라인을 일시정지해 공유 연결을 유지한다)
   const stopListening = useCallback(() => {
     persistCurrentSessionTranscripts();
-    // 방송 종료 시 전체 멘트 이력을 Supabase 클라우드에 비동기 자동 저장
+    // 방송 종료 시 전체 멘트 이력을 Supabase 클라우드에 강제 전송
     const stoppedWorkflow=appliedWorkflowRef.current;
     const stoppedSession=currentSessionIdRef.current;
-    void syncSessionTranscriptsToCloud().then(saved=>{
+    void syncSessionTranscriptsToCloud(stoppedSession, true).then(saved=>{
       if(saved&&stoppedWorkflow?.mode==='SHADOW')return sellerAnalysisApi.observe(stoppedSession);
     }).catch(e=>console.error('[SalesWorkflow] 관찰 저장 실패:',e));
     workflowReplayRef.current=null;

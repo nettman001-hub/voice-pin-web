@@ -1,8 +1,12 @@
 # 웹앱 배포에 포함하지 않는 로컬/데스크톱 빌드 파일
 node_modules/
 server/node_modules/
+server/**
 desktop/
 android/
+voicecap-win/
+voicecap-win
+voicecap-win/**
 release/
 dist/
 .git/
@@ -12,11 +16,18 @@ supabase/.temp/
 # 로컬 비밀값과 개발용 환경 파일
 eulerstream_key.txt
 server/.env
+server/data/
+.env*
 .env.local
 .env.*.local
+*.secret
+*토큰*
+*token*.txt
+new-pc-local-secrets.txt
 *.local
 scratch/
 .tools/
+.tools/**
 
 # 로컬 진단/문서 파일
 chrome-net-export-log.json

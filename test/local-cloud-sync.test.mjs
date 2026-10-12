@@ -8,10 +8,11 @@ import * as paymentMatching from '../src/services/paymentMatching.ts';
 import * as priceEvidence from '../src/services/priceEvidence.ts';
 import * as salesExtractor from '../src/services/salesExtractor.ts';
 import * as purchaseFirstSales from '../src/services/purchaseFirstSales.ts';
+import * as workspaceReadSync from '../src/services/workspaceReadSync.ts';
 
 const quiet = { log() {}, warn() {}, error() {} };
 function load(path, dependencies = {}, globals = {}) {
-  dependencies = { '../../../../src/services/salesWorkflowEngine.ts': {}, './sellerWorkflow.ts': {}, ...dependencies };
+  dependencies = { '../../../../src/services/salesWorkflowEngine.ts': {}, './sellerWorkflow.ts': {}, '../utils/textCleaner': { cleanMessageBody: (t) => t }, ...dependencies };
   const source = fs.readFileSync(new URL(path, import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
@@ -702,6 +703,7 @@ test('SalesProvider receives other-tab changes without losing either offline ope
       '../services/remoteWorkspaceService': { remoteWorkspaceService: remote },
       '../services/commentStreamService': {}, '../services/aiSettingsApi': {},
       '../services/salesSyncController': { SalesSyncController },
+      '../services/workspaceReadSync': workspaceReadSync,
     }, { window });
     return { render: () => hooks.render(SalesProvider) };
   };

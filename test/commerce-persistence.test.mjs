@@ -5,10 +5,12 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import * as voiceSaleValidation from '../src/services/voiceSaleValidation.ts';
 import * as paymentMatching from '../src/services/paymentMatching.ts';
+import * as workspaceReadSync from '../src/services/workspaceReadSync.ts';
 
 // Execute the application modules with a local Supabase stub; never connect to
 // the real database or browser storage during these persistence checks.
 function loadModule(relativePath, dependencies = {}) {
+  dependencies = { '../utils/textCleaner': { cleanMessageBody: (t) => t }, ...dependencies };
   const source = fs.readFileSync(new URL(relativePath, import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React },
@@ -241,6 +243,7 @@ function readyProvider(initial, save = async () => {}, notifyOutbox = async () =
     } },
     '../services/remoteWorkspaceService': { remoteWorkspaceService: { saveCommerceChanges: save, notifyOutbox } },
     '../services/commerceChanges': changesModule, '../services/paymentMatching': paymentMatching,
+    '../services/workspaceReadSync': workspaceReadSync,
   });
   const value = CommerceProvider({ children: null }).props.value;
   return { value, localSaves, stateUpdates };

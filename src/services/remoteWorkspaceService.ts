@@ -27,6 +27,27 @@ const isValidUuid = (value: string | undefined | null): boolean => {
 };
 
 type Row = Record<string, any>;
+export const COMMERCE_TABLES = ['customer_messages', 'payment_receipts', 'purchase_claims', 'invoices', 'shipments', 'verified_sales'] as const;
+export type CommerceTable = typeof COMMERCE_TABLES[number];
+export type WorkspaceTable = CommerceTable | 'sales' | 'buyer_promise_defaults';
+export interface WorkspaceChange {
+  table: WorkspaceTable;
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+  new: Row;
+  old: Row;
+}
+export type WorkspaceSubscriptionStatus = 'SUBSCRIBED' | 'TIMED_OUT' | 'CLOSED' | 'CHANNEL_ERROR';
+interface WorkspaceListener {
+  callback: (change: WorkspaceChange) => void;
+  tables: readonly WorkspaceTable[];
+  onStatus?: (status: WorkspaceSubscriptionStatus) => void;
+}
+const workspaceChannels = new Map<string, {
+  channel: ReturnType<ReturnType<typeof requireSupabase>['channel']>;
+  listeners: Set<WorkspaceListener>;
+  status?: WorkspaceSubscriptionStatus;
+}>();
+const commerceReads = new Map<string, Promise<Partial<CommerceState>>>();
 const signedImageCache = new Map<string, { url: string; expiresAt: number }>();
 
 export const resolvePrivateImageUrl = async (value: string) => {
@@ -635,25 +656,40 @@ export const remoteWorkspaceService = {
   },
 
   async loadCommerce(workspaceId: string): Promise<CommerceState> {
+    return await this.loadCommerceTables(workspaceId, COMMERCE_TABLES) as CommerceState;
+  },
+
+  async loadCommerceTables(workspaceId: string, tables: readonly CommerceTable[]): Promise<Partial<CommerceState>> {
     const client = ensureEnabled();
-    const [messagesResult, claimsResult, invoicesResult, paymentsResult, shipmentsResult, verifiedResult] = await Promise.all([
-      client.from('customer_messages').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }),
-      client.from('purchase_claims').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }),
-      client.from('invoices').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }),
-      client.from('payment_receipts').select('*').eq('workspace_id', workspaceId).order('paid_at', { ascending: false }),
-      client.from('shipments').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }),
-      client.from('verified_sales').select('sale_id').eq('workspace_id', workspaceId),
-    ]);
-    const error = [messagesResult, claimsResult, invoicesResult, paymentsResult, shipmentsResult, verifiedResult].find((result) => result.error)?.error;
-    if (error) throw error;
-    return {
-      messages: await Promise.all((messagesResult.data || []).map((row) => mapMessage(row, workspaceId))),
-      claims: await Promise.all((claimsResult.data || []).map(mapClaim)),
-      invoices: (invoicesResult.data || []).map(mapInvoice),
-      payments: (paymentsResult.data || []).map((row) => mapPayment(row, workspaceId)),
-      shipments: (shipmentsResult.data || []).map(mapShipment),
-      verifiedSaleIds: (verifiedResult.data || []).map((row) => row.sale_id),
-    };
+    const reads = [...new Set(tables)].map((table) => {
+      const key = `${workspaceId}:${table}`;
+      const current = commerceReads.get(key);
+      if (current) return current;
+      const read = (async (): Promise<Partial<CommerceState>> => {
+        let query = client.from(table).select(table === 'verified_sales' ? 'sale_id' : '*').eq('workspace_id', workspaceId);
+        if (table !== 'verified_sales') query = query.order(table === 'payment_receipts' ? 'paid_at' : 'created_at', { ascending: false });
+        let { data, error } = await query;
+        // Only legacy schemas missing paid_at need the compatibility read;
+        // authorization/network errors must not issue the same request again.
+        if (table === 'payment_receipts' && error?.code === '42703') {
+          ({ data, error } = await client.from(table).select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }));
+        }
+        if (error) throw error;
+        const rows = (data || []) as Row[];
+        switch (table) {
+          case 'customer_messages': return { messages: await Promise.all(rows.map((row) => mapMessage(row, workspaceId))) };
+          case 'payment_receipts': return { payments: rows.map((row) => mapPayment(row, workspaceId)) };
+          case 'purchase_claims': return { claims: await Promise.all(rows.map(mapClaim)) };
+          case 'invoices': return { invoices: rows.map(mapInvoice) };
+          case 'shipments': return { shipments: rows.map(mapShipment) };
+          case 'verified_sales': return { verifiedSaleIds: rows.map((row) => row.sale_id) };
+        }
+      })().finally(() => { if (commerceReads.get(key) === read) commerceReads.delete(key); });
+      commerceReads.set(key, read);
+      return read;
+    });
+    // Do not replace failed tables with empty arrays and erase visible history.
+    return Object.assign({}, ...await Promise.all(reads));
   },
 
   async saveCommerceChanges(workspaceId: string, changes: CommerceChanges) {
@@ -750,17 +786,49 @@ export const remoteWorkspaceService = {
     if (error && error.code !== '23505') throw error;
   },
 
-  subscribe(workspaceId: string, callback: () => void) {
-    const channel = ensureEnabled().channel(`workspace:${workspaceId}:commerce:${crypto.randomUUID()}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales', filter: `workspace_id=eq.${workspaceId}` }, callback)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'buyer_promise_defaults', filter: `workspace_id=eq.${workspaceId}` }, callback)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'customer_messages', filter: `workspace_id=eq.${workspaceId}` }, callback)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_claims', filter: `workspace_id=eq.${workspaceId}` }, callback)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices', filter: `workspace_id=eq.${workspaceId}` }, callback)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'payment_receipts', filter: `workspace_id=eq.${workspaceId}` }, callback)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shipments', filter: `workspace_id=eq.${workspaceId}` }, callback)
-      .subscribe();
-    return () => { void ensureEnabled().removeChannel(channel); };
+  subscribe(workspaceId: string, callback: (change: WorkspaceChange) => void, options: {
+    tables?: readonly WorkspaceTable[];
+    onStatus?: (status: WorkspaceSubscriptionStatus) => void;
+  } = {}) {
+    const client = ensureEnabled();
+    const tables: readonly WorkspaceTable[] = [...COMMERCE_TABLES, 'sales', 'buyer_promise_defaults'];
+    let shared = workspaceChannels.get(workspaceId);
+    if (!shared) {
+      shared = { channel: client.channel(`workspace:${workspaceId}:sync:${crypto.randomUUID()}`), listeners: new Set() };
+      workspaceChannels.set(workspaceId, shared);
+      const entry = shared;
+      const dispatch = (table: WorkspaceTable) => (payload: { eventType: string; new: Row; old: Row }) => {
+        const row = payload.eventType === 'DELETE' ? payload.old : payload.new;
+        // DELETE events cannot use Realtime row filters. With RLS, old may
+        // contain only the primary key; consumers check it against local IDs.
+        if (row.workspace_id && row.workspace_id !== workspaceId) return;
+        const change = { table, eventType: payload.eventType, new: payload.new, old: payload.old } as WorkspaceChange;
+        for (const listener of entry.listeners) if (listener.tables.includes(table)) listener.callback(change);
+      };
+      for (const table of tables) {
+        entry.channel
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table, filter: `workspace_id=eq.${workspaceId}` }, dispatch(table))
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table, filter: `workspace_id=eq.${workspaceId}` }, dispatch(table))
+          .on('postgres_changes', { event: 'DELETE', schema: 'public', table }, dispatch(table));
+      }
+    }
+    const listener = { callback, tables: options.tables || tables, onStatus: options.onStatus };
+    shared.listeners.add(listener);
+    if (shared.listeners.size === 1) {
+      const entry = shared;
+      entry.channel.subscribe((status) => {
+        entry.status = status;
+        for (const active of entry.listeners) active.onStatus?.(status);
+      });
+    } else if (shared.status) options.onStatus?.(shared.status);
+    const entry = shared;
+    return () => {
+      entry.listeners.delete(listener);
+      if (entry.listeners.size === 0 && workspaceChannels.get(workspaceId) === entry) {
+        workspaceChannels.delete(workspaceId);
+        void client.removeChannel(entry.channel);
+      }
+    };
   },
 
   /**

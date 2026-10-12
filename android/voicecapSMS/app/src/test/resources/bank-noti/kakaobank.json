@@ -1,0 +1,54 @@
+{
+  "bank": "카카오뱅크",
+  "cases": [
+    {
+      "name": "입금 1원 + 정학현 + 잔액 (실제 카카오뱅크 알림 형태)",
+      "synthetic": false,
+      "package": "com.kakaobank.channel",
+      "title": "입금 1원",
+      "text": "정학현 → 입출금통장(6936) 잔액 39,012원",
+      "bigText": "정학현 → 입출금통장(6936)\n잔액 39,012원",
+      "postTime": 1791642120000,
+      "expect": {
+        "bank": "카카오뱅크",
+        "amount": 1,
+        "payer": "정학현",
+        "balance": 39012,
+        "receiverName": "입출금통장(6936)"
+      }
+    },
+    {
+      "name": "입금 2원 + 러블리 + 잔액 (실제 카카오뱅크 알림 형태)",
+      "synthetic": false,
+      "package": "com.kakaobank.channel",
+      "title": "입금 2원",
+      "text": "러블리 → 입출금통장(6936) 잔액 39,011원",
+      "postTime": 1791641940000,
+      "expect": {
+        "bank": "카카오뱅크",
+        "amount": 2,
+        "payer": "러블리",
+        "balance": 39011,
+        "receiverName": "입출금통장(6936)"
+      }
+    },
+    {
+      "name": "출금 알림은 올리지 않음",
+      "synthetic": true,
+      "package": "com.kakaobank.channel",
+      "title": "출금 10,000원",
+      "text": "출금통장(6936) 잔액 29,011원",
+      "postTime": 1791642000000,
+      "expect": null
+    },
+    {
+      "name": "체크카드 결제 승인은 올리지 않음",
+      "synthetic": true,
+      "package": "com.kakaobank.channel",
+      "title": "체크카드 결제 5,000원",
+      "text": "카카오페이 체크카드 승인",
+      "postTime": 1791642060000,
+      "expect": null
+    }
+  ]
+}

@@ -320,6 +320,15 @@ curl.exe -s -o NUL -w "%{http_code}" https://www.voicecap.shop
 
 `status ● Ready`와 운영 별칭 세 개를 확인한다. GitHub 자동 배포와 CLI 직접 배포가 겹치면 가장 최근 production deployment가 어떤 커밋인지 Vercel에서 확인한다.
 
+### 조회 부하 정책 (2026-10-12)
+
+- 판매 AI 배지는 `get-ai-status-summary` 한 번으로 상태를 읽는다. 사용자·작업공간별 캐시와 진행 중 요청을 공유하며, 상세창을 닫은 상태에는 주기 조회가 없다. 상세창은 화면이 보이고 온라인일 때만 1분마다 갱신한다.
+- 상태 요약은 인증·멤버십·적용 설정을 각각 한 번 조회한다. 비밀키 조회, 모델 점검, AI 작업 실행은 하지 않는다. 기존 실행·점검 API는 유지한다.
+- 판매·문자·입금·청구·배송·검증 화면은 작업공간 Realtime 채널 하나를 공유한다. 변경된 테이블만 350ms 단위로 조회하고, 정상 연결의 유휴 상태에서는 전체 반복 조회를 하지 않는다.
+- 최초 구독 연결·재연결·화면 복귀 시 보정한다. 연결 장애 또는 실패한 조회가 남은 경우에만 5분 간격으로 복구 조회한다. 저장 중 편집 및 조회와 겹친 삭제는 후속 조회/병합으로 보호한다.
+- `202610120001_workspace_realtime.sql`을 적용하여 구독 8개 테이블의 publication 등록을 확인한다. RLS, 방송 수집, 댓글 큐, AI 실행·재시도 주기는 변경하지 않는다.
+- 테스트에서 중복 메뉴의 초기 상태 요청 1회, 상세창 종료 후 조회 0회, 정상 Realtime 유휴 조회 0회, 변경 테이블별 조회 및 장애 복구를 검증한다. 실제 방송 테스트 없이 운영 방송 성공을 단정하지 않는다.
+
 `server/index.js`, `CloudCommentPublisher`, Socket.IO 이벤트를 바꾼 경우 Vercel 배포만으로 로컬 PC 도우미가 갱신되지 않는다. 운영 PC의 도우미 프로세스를 최신 코드로 재시작해야 한다. 브라우저는 도우미 연결 또는 재연결 시 `cloud:config`를 다시 보낸다.
 
 웹과 Vercel 배포는 설치된 Android APK에 영향을 주지 않는다. Android 코드를 바꾼 경우 별도 APK/AAB 빌드와 배포가 필요하다.
@@ -379,7 +388,7 @@ rg -n "from\('comments'\)|getCommentRecords|addCommentRecords" src supabase serv
 2. `list-sessions`를 계약 스키마와 fixture에 명시하고 계약 테스트 보강
 3. 보류 생성 직후가 아닌 후속 발화 기반 AI 호출이 제품 의도와 맞는지 운영 데이터로 확인
 4. 댓글 도우미 재연결 시 `cloud:config` 수신과 `live_comments.session_id` 점검
-5. Android 1.5초 폴링과 AI 상태 배지 호출량 측정
+5. Android 1.5초 폴링 호출량 측정 및 위 조회 부하 정책의 운영 로그 확인
 6. 운영 DB 백업 정책 확인. Free 플랜이면 자동 백업 부재 가능성에 대비
 
 ## 16. 인수 완료 체크리스트

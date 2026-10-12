@@ -43,15 +43,15 @@ export function formatSessionDisplay(
   const raw = sessionId.trim();
 
   // 1. 세션 맵이나 목록에서 매칭되는 displayCode 찾기
+  let matched: SessionInfoLike | undefined;
   if (options?.sessions) {
-    let matched: SessionInfoLike | undefined;
     if (options.sessions instanceof Map) {
       matched = options.sessions.get(raw);
     } else if (Array.isArray(options.sessions)) {
       matched = options.sessions.find((s) => s.id === raw);
     }
 
-    if (matched?.displayCode && matched.displayCode.trim()) {
+    if (matched?.displayCode && matched.displayCode.trim() && !UUID_REGEX.test(matched.displayCode.trim())) {
       return matched.displayCode.trim();
     }
   }
@@ -93,8 +93,9 @@ export function formatSessionDisplay(
   // 6. UUID 형식인 경우
   if (UUID_REGEX.test(raw)) {
     const shortCode = raw.slice(0, 4).toUpperCase();
-    if (options?.recognizedAt) {
-      const date = new Date(options.recognizedAt);
+    const fallbackDate = options?.recognizedAt || matched?.startedAt;
+    if (fallbackDate) {
+      const date = new Date(fallbackDate);
       if (!isNaN(date.getTime())) {
         const y = date.getFullYear();
         const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -108,8 +109,9 @@ export function formatSessionDisplay(
   }
 
   // 7. fallback 날짜가 제공된 경우
-  if (options?.recognizedAt) {
-    const date = new Date(options.recognizedAt);
+  const fallbackDate = options?.recognizedAt || matched?.startedAt;
+  if (fallbackDate) {
+    const date = new Date(fallbackDate);
     if (!isNaN(date.getTime())) {
       const y = date.getFullYear();
       const m = String(date.getMonth() + 1).padStart(2, '0');

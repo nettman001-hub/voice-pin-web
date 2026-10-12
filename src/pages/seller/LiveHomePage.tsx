@@ -613,185 +613,269 @@ export const LiveHomePage: React.FC = () => {
 
       {/* 메인 2열 그리드 */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 sm:gap-3.5">
-        {/* 좌측 영역 (7 cols) */}
-        <div className="lg:col-span-7 flex flex-col gap-2.5 sm:gap-3.5">
-          {/* 실시간 오디오 스트림 & 파형 분석 (라이브 청취 홈과 동일한 상하 높이 및 한 줄 배치) */}
-          <div className="order-1 bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between gap-2 sm:gap-3 min-h-[48px] sm:min-h-[50px]">
+        {/* 좌측 영역 (6 cols) */}
+        <div className="lg:col-span-6 flex flex-col gap-2.5 sm:gap-3.5">
+          {/* 오디오상태 및 이번회차판매 */}
+          <div className="bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between gap-2 sm:gap-3 min-h-[48px] sm:min-h-[50px]">
             {/* 타이틀 및 아이콘 */}
-            <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
-              <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${
+            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-shrink-0">
+              <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${
                 isListening
                   ? 'bg-brand-50 text-brand-600 ring-1 ring-brand-500/20 shadow-xs'
                   : 'bg-slate-100 text-slate-400'
               }`}>
-                <Volume2 className={`w-4 h-4 ${isListening ? 'text-brand-600 animate-pulse' : 'text-slate-400'}`} />
+                <Volume2 className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${isListening ? 'text-brand-600 animate-pulse' : 'text-slate-400'}`} />
               </div>
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 whitespace-nowrap">
-                실시간 오디오 스트림 & 파형 분석
+                오디오상태
               </h3>
             </div>
 
-            {/* 타이틀 바로 옆 좌우 한 줄 파형 표시 */}
-            <div className="flex-1 min-w-[70px] sm:min-w-[120px] max-w-[280px] lg:max-w-none h-7 flex items-center">
-              <AudioVisualizer
-                waveform={effectiveWaveform}
-                audioLevel={effectiveAudioLevel}
-                isActive={isListening}
-                variant="inline"
-                className="h-7 w-full"
-              />
+            {/* 좌우 길이 절반으로 줄인 파형 표시 및 레벨 */}
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <div className="w-16 sm:w-24 h-6 flex items-center">
+                <AudioVisualizer
+                  waveform={effectiveWaveform}
+                  audioLevel={effectiveAudioLevel}
+                  isActive={isListening}
+                  variant="inline"
+                  className="h-6 w-full"
+                />
+              </div>
+              <div className="text-[10px] sm:text-[11px] text-slate-500 font-mono flex-shrink-0 whitespace-nowrap bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
+                {effectiveAudioLevel}%
+              </div>
             </div>
 
-            {/* 우측 레벨 표시 */}
-            <div className="text-[11px] sm:text-xs text-slate-500 font-mono flex-shrink-0 whitespace-nowrap bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
-              레벨: <span className="text-brand-600 font-bold">{effectiveAudioLevel}%</span>
+            {/* 생긴 빈 공간에 합쳐서 표시: 이번회차판매 : x건 / xxxx원 */}
+            <div className="flex items-center gap-1 sm:gap-1.5 min-w-0 pl-2 sm:pl-3 border-l border-slate-200 text-xs sm:text-sm font-bold text-slate-700 whitespace-nowrap ml-auto">
+              <span className="text-slate-600">이번회차판매 :</span>
+              <span className="text-slate-900 font-black">{effectiveSalesCount}건</span>
+              <span className="text-slate-300">/</span>
+              <span className="text-brand-600 font-black">{effectiveTotalAmount.toLocaleString()}원</span>
             </div>
           </div>
 
-          {/* 실시간 댓글 캡처 피드 (아래쪽이 최신글) */}
-          <div className="order-2 bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
+          {/* 판매 내역 카드 리스트 (위아래 높낮이 낮춘 슬림 목록: 상품명, 회차/확정멘트, 근거보기 제외) */}
+          <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2.5 shadow-sm">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2 flex-wrap gap-y-1">
-                <MessageSquareText className={`w-4 h-4 ${isCommentCaptureRunning ? 'text-rose-500 animate-pulse' : 'text-cyan-600'}`} />
-                <span>실시간 댓글 캡처 ({effectiveComments.length}건)</span>
-                {!isCommentCaptureActive ? (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
-                    함께시작 꺼짐
-                  </span>
-                ) : (
-                  <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                      getCommentStatusBadge(commentServerStatus).tone === 'ok'
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        : getCommentStatusBadge(commentServerStatus).tone === 'warn'
-                        ? 'bg-amber-50 text-amber-800 border-amber-200'
-                        : getCommentStatusBadge(commentServerStatus).tone === 'bad'
-                        ? 'bg-rose-50 text-rose-600 border-rose-200'
-                        : 'bg-slate-100 text-slate-500 border-slate-200'
-                    }`}
-                  >
-                    {getCommentStatusBadge(commentServerStatus).label}
-                  </span>
-                )}
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                <span>판매 내역 · 확인 대기</span>
               </h3>
-              <div className="flex items-center space-x-2.5">
-                <Link to="/seller/helper" className="text-xs text-slate-500 hover:text-brand-600 font-bold flex items-center transition">
-                  <Bot className="w-3.5 h-3.5 mr-1 text-brand-600" />
-                  <span>도우미 설정</span>
-                </Link>
-                <Link to="/comments" className="text-xs text-brand-600 hover:underline font-bold flex items-center">
-                  <span>전체 기록</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleRefreshSessionSales()}
+                  disabled={isSalesRefreshing}
+                  className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                  title="판매 내역 새로고침"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isSalesRefreshing ? 'animate-spin' : ''}`} />
+                  <span>새로고침</span>
+                </button>
+                <Link to="/sales/review" className="text-xs text-brand-600 hover:underline font-bold flex items-center">
+                  <span>일괄 검토</span>
                   <ArrowRight className="w-3.5 h-3.5 ml-1" />
                 </Link>
               </div>
             </div>
 
-            {isCommentCaptureActive && (commentServerStatus === 'DISCONNECTED' || commentServerStatus === 'ERROR') && (
-              <div className="mb-2 px-3 py-1.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-bold flex items-center justify-between">
-                <span>⚠️ {commentServerMessage || 'VoiceCAP 내장 댓글 도우미 연결을 확인하세요.'}</span>
-                <button
-                  type="button"
-                  onClick={() => setShowHelperModal(true)}
-                  className="underline text-rose-800 hover:text-rose-950 ml-2 whitespace-nowrap flex items-center gap-1 font-bold"
-                >
-                  <Bot className="w-3 h-3" />
-                  도우미 설정/재시작
-                </button>
-              </div>
-            )}
-
-            {isCommentCaptureActive && !commentConfig.tiktokUsername && (
-              <div className="mb-2 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between">
-                <span>⚠️ 수집 대상 틱톡 ID가 설정되지 않았습니다.</span>
-                <Link to="/recognition-rules" className="font-bold underline text-amber-800 hover:text-amber-950 ml-2">
-                  ID 설정하러 가기
-                </Link>
-              </div>
-            )}
-
-            <div ref={commentFeedRef} className="max-h-[140px] min-h-[38px] overflow-y-auto space-y-1 pr-1">
-              {effectiveComments.length === 0 ? (
+            <div className="space-y-1.5 max-h-[220px] sm:max-h-[260px] overflow-y-auto pr-1">
+              {effectiveSessionSales.length === 0 ? (
                 <div className="py-2.5 sm:py-3 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl min-h-[38px] flex items-center justify-center">
-                  {isCommentCaptureRunning
-                    ? `@${commentConfig.tiktokUsername || '?'} 라이브 댓글을 실시간 수집 중입니다...`
-                    : '"댓글캡처" 체크 후 라이브 청취를 시작하면 틱톡 댓글이 실시간 표시됩니다.'}
+                  판매자 배정 발화와 구매 댓글이 연결되면 판매가 등록됩니다.
                 </div>
               ) : (
-                effectiveComments.map((c) => (
-                  <div
-                    key={c.id}
-                    className={`flex items-center space-x-2 px-2.5 py-1.5 rounded-lg border text-xs ${
-                      c.matchedAlertWord
-                        ? 'bg-rose-50/70 border-rose-200'
-                        : 'bg-slate-50/70 border-slate-200'
+                effectiveSessionSales.map((sale) => {
+                  const nicknameNeedsConfirmation = sale.source === 'WEB_VOICE' && sale.status === '보류'
+                    && (sale.aiVerification?.nicknameVerified === false || !sale.sourceCommentIds?.length);
+                  const productImage = sale.productImageUrl
+                    || sale.captureImageUrls?.[0]
+                    || (sale.productCode && sale.productCode === activeProduct?.productCode ? activeProduct?.imageUrl : undefined);
+                  const sourceLabel = sale.source === 'ANDROID_COMMENTS'
+                    ? '앱'
+                    : sale.source === 'WEB_VOICE'
+                      ? '음성'
+                      : sale.source === 'MANUAL'
+                        ? '수동'
+                        : '기타';
+                  const buyerSessionSales = (nicknameNeedsConfirmation ? [sale] : effectiveSessionSales
+                    .filter((s) => sale.buyerId && s.buyerId ? s.buyerId === sale.buyerId : s.buyerNickname === sale.buyerNickname))
+                    .sort((a, b) => new Date(a.recognizedAt).getTime() - new Date(b.recognizedAt).getTime());
+                  const multiAmount = formatMultiSaleAmount(buyerSessionSales.map((s) => s.amount));
+                  const purchaseIntentWord = getBuyerPurchaseIntentWord(sale, effectiveComments);
+
+                  return (
+                  <Link
+                    key={sale.id}
+                    to={isDemoActive ? '#' : `/sales/${sale.id}`}
+                    onClick={(e) => { if (isDemoActive) e.preventDefault(); }}
+                    className={`block p-2 sm:p-2.5 rounded-xl border transition active:scale-[0.99] hover:shadow-xs ${
+                      sale.status === '보류'
+                        ? 'bg-amber-50/70 border-amber-200 text-amber-900'
+                        : sale.status === '수동수정'
+                        ? 'bg-purple-50/70 border-purple-200 text-slate-800'
+                        : 'bg-slate-50/70 border-slate-200 text-slate-800'
                     }`}
                   >
-                    <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">
-                      {new Date(c.capturedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                    </span>
-                    <span className={`font-bold flex-shrink-0 max-w-[110px] truncate ${c.matchedAlertWord ? 'text-rose-700' : 'text-brand-700'}`}>
-                      {c.nickname}
-                    </span>
-                    <span className="text-slate-800 font-medium break-words min-w-0 flex-1">{c.content}</span>
-                    {c.matchedAlertWord && (
-                      <span className="flex-shrink-0 px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black whitespace-nowrap">
-                        {c.matchedAlertWord}
-                      </span>
-                    )}
-                    <CustomerStatsBadge
-                      nickname={c.nickname}
-                      buyerId={c.buyerId || undefined}
-                      variant="compact"
-                      currentSessionId={currentSessionId || activeSession?.id}
-                    />
-                  </div>
-                ))
+                    <div className="flex items-center gap-2 sm:gap-2.5">
+                      {/* 상품 이미지 썸네일 (컴팩트) */}
+                      <div
+                        className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg overflow-hidden border border-slate-200/80 bg-slate-100 flex-shrink-0 shadow-xs flex items-center justify-center relative group/thumb ${
+                          productImage ? 'cursor-pointer hover:ring-2 hover:ring-brand-500' : ''
+                        }`}
+                        onClick={(e) => {
+                          if (productImage) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const images = sale.captureImageUrls && sale.captureImageUrls.length > 0
+                              ? sale.captureImageUrls
+                              : [productImage];
+                            setViewerModal({
+                              isOpen: true,
+                              images,
+                              initialIndex: 0,
+                              title: `${sale.buyerNickname} 상품/캡처`
+                            });
+                          }
+                        }}
+                        title={productImage ? '클릭하여 원본 크기로 보기' : undefined}
+                      >
+                        {productImage ? (
+                          <>
+                            <img
+                              src={productImage}
+                              alt={`${sale.productCode || sale.buyerNickname} 상품`}
+                              className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform duration-200"
+                            />
+                            <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center text-white">
+                              <ZoomIn className="w-3 h-3" />
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex items-center justify-center text-slate-400">
+                            <ShoppingBag className="w-4 h-4 text-brand-600/70" />
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                          <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                            <span
+                              className="font-bold text-xs sm:text-sm text-slate-900 truncate hover:text-brand-600 transition-colors"
+                              title={purchaseIntentWord ? `구매의사: "${purchaseIntentWord}"` : undefined}
+                            >
+                              {sale.buyerNickname === '미확인(보류)' ? '구매자 미확인' : sale.buyerNickname}
+                            </span>
+                            {nicknameNeedsConfirmation && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                                추정 닉네임
+                              </span>
+                            )}
+                            {multiAmount.isMulti && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200">
+                                ★ 다건 {buyerSessionSales.length}건
+                              </span>
+                            )}
+                            {!nicknameNeedsConfirmation && <CustomerStatsBadge
+                              nickname={sale.buyerNickname}
+                              buyerId={sale.buyerId}
+                              variant="pill"
+                              currentSessionId={sale.sessionId || currentSessionId || activeSession?.id}
+                            />}
+                            <AiSaleBadge sale={sale} />
+                          </div>
+
+                          {/* 금액 표시 */}
+                          {multiAmount.isMulti ? (
+                            <div className="flex items-baseline gap-1 font-bold">
+                              <span className="text-[11px] text-brand-600 font-mono">{multiAmount.decimalExpression} =</span>
+                              <span className="text-sm sm:text-base font-black text-brand-700">{multiAmount.totalFormatted}</span>
+                            </div>
+                          ) : (
+                            <div className="text-xs sm:text-sm font-black text-brand-600">
+                              {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 출처 및 동기화/전표 배지 */}
+                        <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                          <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-bold border ${
+                            sale.source === 'ANDROID_COMMENTS'
+                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                              : sale.source === 'WEB_VOICE'
+                                ? 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200'
+                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                          }`}>
+                            {sourceLabel}
+                          </span>
+                          <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-bold ${
+                            sale.status === '보류'
+                              ? 'bg-amber-400 text-slate-950'
+                              : sale.status === '수동수정'
+                              ? 'bg-purple-100 text-purple-700'
+                              : 'bg-emerald-50 text-emerald-700'
+                          }`}>
+                            {sale.syncStatus === 'PENDING' ? '서버 저장 대기' : sale.status}
+                          </span>
+                          {sale.printStatus === 'PRINTED' && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded-full font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              전표 출력 완료
+                            </span>
+                          )}
+                          {sale.printStatus === 'QUEUED' && sale.syncStatus !== 'PENDING' && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded-full font-bold bg-sky-50 text-sky-700 border border-sky-200">
+                              전표 출력 중
+                            </span>
+                          )}
+                        </div>
+
+                        {/* AI 작업 이력 배지 (근거보기 제외) */}
+                        <div className="mt-1 pt-1 border-t border-slate-200/40">
+                          <SaleAiActionButtons sale={sale} hideEvidence={true} />
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
+                  );
+                })
               )}
             </div>
           </div>
 
-          {/* 최근 감지된 단어 규칙 및 음성 처리 결과 */}
-          <div className="order-3 bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between gap-2 sm:gap-3 min-h-[48px] sm:min-h-[50px]">
-            <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
-              <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
-                <Sparkles className="w-4 h-4 text-amber-500" />
-              </div>
-              <h3 className="text-xs sm:text-sm font-bold text-slate-900 whitespace-nowrap">
-                최근 감지·처리 결과
-              </h3>
-            </div>
-
-            {effectiveMatchedRuleItem ? (
-              <div className="flex-1 min-w-0 flex items-center justify-between gap-2 p-1.5 sm:px-2.5 rounded-xl bg-amber-50/70 border border-amber-200">
-                <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
-                  <div className="flex items-center space-x-1 flex-shrink-0">
-                    {effectiveMatchedRuleItem.matchedKeywords.slice(0, 2).map((kw, idx) => (
-                      <span key={idx} className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-bold text-[10px] border border-amber-300">
-                        #{kw}
-                      </span>
-                    ))}
-                  </div>
-                  <span className="text-xs font-bold text-slate-900 truncate">
-                    "{effectiveMatchedRuleItem.text}"
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <span className="px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-[10px] font-bold whitespace-nowrap">
-                    {effectiveMatchedRuleItem.action}
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">{effectiveMatchedRuleItem.timestamp}</span>
-                </div>
-              </div>
+          {/* 구매요청 · 판매자 배정 대기 (판매내역 밑으로 이동) */}
+          <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
+            <h3 className="text-xs sm:text-sm font-bold text-slate-900 mb-2">구매요청 · 판매자 배정 대기</h3>
+            {purchaseRequests.length === 0 ? (
+              <p className="text-xs text-slate-400">저요·ㅈㅇ 등 구매 의사 댓글이 들어오면 여기에 표시됩니다.</p>
             ) : (
-              <div className="flex-1 min-w-0 flex items-center justify-center py-1 px-2.5 rounded-xl border border-dashed border-slate-200 text-[11px] sm:text-xs text-slate-400 truncate italic">
-                등록된 단어 규칙과 판매·음성 정정·캡처 처리 결과를 표시합니다.
+              <div className="space-y-1.5 max-h-[140px] overflow-y-auto">
+                {purchaseRequests.map((request) => {
+                  const linked = currentSessionSales.find((sale) => sale.purchaseRequestId === request.id && sale.status !== '취소');
+                  const state = request.withdrawn ? '구매 의사 철회'
+                    : request.conditional ? '조건 확인'
+                    : linked?.status === '보류' ? '확인 필요'
+                    : linked?.syncStatus === 'PENDING' ? '서버 저장 대기'
+                      : linked ? '판매 확정' : '배정 대기';
+                  return <div key={request.id} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs">
+                    <span className="truncate"><strong>{request.nickname}</strong> · {request.content}</span>
+                    <span className={`shrink-0 font-bold ${linked?.syncStatus === 'SYNCED' && linked.status !== '보류' ? 'text-emerald-700' : 'text-amber-700'}`}>{state}</span>
+                  </div>;
+                })}
               </div>
             )}
           </div>
 
-          {/* 최근 전사 로그 */}
-          <div className="order-4 bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
-            {!isListening && (sttEngineStatus === 'ERROR' || sttEngineStatus === 'DISCONNECTED') && sttEngineMessage && <p role="alert" className="mb-2 text-xs leading-relaxed text-amber-800">{sttEngineMessage}</p>}
+          {/* 실시간 판매 멘트 */}
+          <div className="order-3 bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
+            {!isListening && sttEngineStatus === 'ERROR' && sttEngineMessage && (
+              <p role="alert" className="mb-2 text-xs leading-relaxed text-rose-700 bg-rose-50 px-2.5 py-1.5 rounded-xl border border-rose-200">
+                ⚠️ {sttEngineMessage}
+              </p>
+            )}
             {isListening && pipelineDiagnostics && <div className="mb-2 space-y-1 text-[11px] text-slate-600" aria-label="실시간 전사 연결 진단">
               <p>실제 오디오 입력 {pipelineDiagnostics.audio.audioSeconds.toFixed(1)}초
                 {sttMode === 'CLOUD' && <> · 현재 STT 연결 전송 {pipelineDiagnostics.stt.audioSeconds.toFixed(1)}초 · 서버 응답 {pipelineDiagnostics.stt.receivedResponses}회 · 전사 수신 {pipelineDiagnostics.stt.receivedTextCharacters}자</>}
@@ -806,8 +890,20 @@ export const LiveHomePage: React.FC = () => {
               <div className="flex items-center space-x-2 flex-wrap">
                 <Clock className="w-4 h-4 text-brand-600 shrink-0" />
                 <h3 className="text-xs sm:text-sm font-bold text-slate-900">
-                  최근 실시간 전사 로그
+                  실시간 판매 멘트
                 </h3>
+                {!isListening && (
+                  <span
+                    role="status"
+                    className={`text-[10px] sm:text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                      sttEngineStatus === 'ERROR'
+                        ? 'bg-rose-50 text-rose-700 border-rose-200'
+                        : 'bg-amber-50 text-amber-800 border-amber-200'
+                    }`}
+                  >
+                    {sttEngineMessage || '대기 중'}
+                  </span>
+                )}
                 <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
                   화면 {effectiveTranscriptLogs.length}건 / 오늘 누적 {totalSessionTranscriptCount || transcriptLogs.length}건
                 </span>
@@ -897,9 +993,153 @@ export const LiveHomePage: React.FC = () => {
               )}
             </div>
           </div>
+        </div>
+
+        {/* 우측 영역 (6 cols) */}
+        <div className="lg:col-span-6 flex flex-col gap-2.5 sm:gap-3.5">
+          {/* 실시간 댓글 캡처 피드 (넓어진 우측 열에서 시원하게 표시) */}
+          <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm flex-1 flex flex-col">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2 flex-wrap gap-y-1">
+                <MessageSquareText className={`w-4 h-4 ${isCommentCaptureRunning ? 'text-rose-500 animate-pulse' : 'text-cyan-600'}`} />
+                <span>실시간 댓글 캡처 ({effectiveComments.length}건)</span>
+                {!isCommentCaptureActive ? (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+                    함께시작 꺼짐
+                  </span>
+                ) : (
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                      getCommentStatusBadge(commentServerStatus).tone === 'ok'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : getCommentStatusBadge(commentServerStatus).tone === 'warn'
+                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                        : getCommentStatusBadge(commentServerStatus).tone === 'bad'
+                        ? 'bg-rose-50 text-rose-600 border-rose-200'
+                        : 'bg-slate-100 text-slate-500 border-slate-200'
+                    }`}
+                  >
+                    {getCommentStatusBadge(commentServerStatus).label}
+                  </span>
+                )}
+              </h3>
+              <div className="flex items-center space-x-2.5">
+                <Link to="/seller/helper" className="text-xs text-slate-500 hover:text-brand-600 font-bold flex items-center transition">
+                  <Bot className="w-3.5 h-3.5 mr-1 text-brand-600" />
+                  <span>도우미 설정</span>
+                </Link>
+                <Link to="/comments" className="text-xs text-brand-600 hover:underline font-bold flex items-center">
+                  <span>전체 기록</span>
+                  <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                </Link>
+              </div>
+            </div>
+
+            {isCommentCaptureActive && (commentServerStatus === 'DISCONNECTED' || commentServerStatus === 'ERROR') && (
+              <div className="mb-2 px-3 py-1.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-bold flex items-center justify-between">
+                <span>⚠️ {commentServerMessage || 'VoiceCAP 내장 댓글 도우미 연결을 확인하세요.'}</span>
+                <button
+                  type="button"
+                  onClick={() => setShowHelperModal(true)}
+                  className="underline text-rose-800 hover:text-rose-950 ml-2 whitespace-nowrap flex items-center gap-1 font-bold"
+                >
+                  <Bot className="w-3 h-3" />
+                  도우미 설정/재시작
+                </button>
+              </div>
+            )}
+
+            {isCommentCaptureActive && !commentConfig.tiktokUsername && (
+              <div className="mb-2 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between">
+                <span>⚠️ 수집 대상 틱톡 ID가 설정되지 않았습니다.</span>
+                <Link to="/recognition-rules" className="font-bold underline text-amber-800 hover:text-amber-950 ml-2">
+                  ID 설정하러 가기
+                </Link>
+              </div>
+            )}
+
+            <div ref={commentFeedRef} className="max-h-[380px] sm:max-h-[440px] min-h-[140px] overflow-y-auto space-y-1.5 pr-1 flex-1">
+              {effectiveComments.length === 0 ? (
+                <div className="py-2.5 sm:py-3 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl min-h-[38px] flex items-center justify-center">
+                  {isCommentCaptureRunning
+                    ? `@${commentConfig.tiktokUsername || '?'} 라이브 댓글을 실시간 수집 중입니다...`
+                    : '"댓글캡처" 체크 후 라이브 청취를 시작하면 틱톡 댓글이 실시간 표시됩니다.'}
+                </div>
+              ) : (
+                effectiveComments.map((c) => (
+                  <div
+                    key={c.id}
+                    className={`flex items-center space-x-2 px-2.5 py-1.5 rounded-lg border text-xs ${
+                      c.matchedAlertWord
+                        ? 'bg-rose-50/70 border-rose-200'
+                        : 'bg-slate-50/70 border-slate-200'
+                    }`}
+                  >
+                    <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">
+                      {new Date(c.capturedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
+                    <span className={`font-bold flex-shrink-0 max-w-[120px] truncate ${c.matchedAlertWord ? 'text-rose-700' : 'text-brand-700'}`}>
+                      {c.nickname}
+                    </span>
+                    <span className="text-slate-800 font-medium break-words min-w-0 flex-1">{c.content}</span>
+                    {c.matchedAlertWord && (
+                      <span className="flex-shrink-0 px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black whitespace-nowrap">
+                        {c.matchedAlertWord}
+                      </span>
+                    )}
+                    <CustomerStatsBadge
+                      nickname={c.nickname}
+                      buyerId={c.buyerId || undefined}
+                      variant="compact"
+                      currentSessionId={currentSessionId || activeSession?.id}
+                    />
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* 최근 감지된 단어 규칙 및 음성 처리 결과 */}
+          <div className="bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between gap-2 sm:gap-3 min-h-[48px] sm:min-h-[50px]">
+            <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
+                <Sparkles className="w-4 h-4 text-amber-500" />
+              </div>
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 whitespace-nowrap">
+                최근 감지·처리 결과
+              </h3>
+            </div>
+
+            {effectiveMatchedRuleItem ? (
+              <div className="flex-1 min-w-0 flex items-center justify-between gap-2 p-1.5 sm:px-2.5 rounded-xl bg-amber-50/70 border border-amber-200">
+                <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                  <div className="flex items-center space-x-1 flex-shrink-0">
+                    {effectiveMatchedRuleItem.matchedKeywords.slice(0, 2).map((kw, idx) => (
+                      <span key={idx} className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-bold text-[10px] border border-amber-300">
+                        #{kw}
+                      </span>
+                    ))}
+                  </div>
+                  <span className="text-xs font-bold text-slate-900 truncate">
+                    "{effectiveMatchedRuleItem.text}"
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <span className="px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-[10px] font-bold whitespace-nowrap">
+                    {effectiveMatchedRuleItem.action}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">{effectiveMatchedRuleItem.timestamp}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 min-w-0 flex items-center justify-center py-1 px-2.5 rounded-xl border border-dashed border-slate-200 text-[11px] sm:text-xs text-slate-400 truncate italic">
+                등록된 단어 규칙과 판매·음성 정정·캡처 처리 결과를 표시합니다.
+              </div>
+            )}
+          </div>
 
           {/* 테스트 멘트 주입 툴바 (모바일 가로 스크롤 지원) */}
-          <div className="order-5 bg-white border border-slate-200 rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2.5 text-xs shadow-sm space-y-1.5">
+          <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2.5 text-xs shadow-sm space-y-1.5">
             <div className="flex items-center justify-between">
               <p className="font-bold text-slate-700 flex items-center">
                 <Sparkles className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
@@ -964,281 +1204,6 @@ export const LiveHomePage: React.FC = () => {
               >
                 + "수정 완료"
               </button>
-            </div>
-          </div>
-        </div>
-
-        {/* 우측 영역 (5 cols) */}
-        <div className="lg:col-span-5 space-y-2.5 sm:space-y-3.5">
-          {/* 요약 카드 (실시간 오디오 스트림 카드 및 라이브 청취 홈과 동일한 상하 높이) */}
-          <div className="grid grid-cols-2 gap-2 sm:gap-3">
-            <div className="bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between min-h-[48px] sm:min-h-[50px]">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="w-2 h-2 rounded-full bg-brand-500 flex-shrink-0" />
-                <span className="text-[11px] sm:text-xs text-slate-600 font-bold whitespace-nowrap truncate">
-                  이번 회차 판매
-                </span>
-              </div>
-              <div className="text-sm sm:text-base font-black text-slate-900 flex-shrink-0 ml-1">
-                {effectiveSalesCount} <span className="text-[10px] sm:text-xs font-normal text-slate-400">건</span>
-              </div>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-2xl px-2.5 py-2 sm:px-3 shadow-sm flex items-center justify-between min-h-[48px] sm:min-h-[50px]">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
-                <span className="text-[11px] sm:text-xs text-slate-600 font-bold whitespace-nowrap truncate">
-                  실시간 합계
-                </span>
-              </div>
-              <div className="text-sm sm:text-base font-black text-brand-600 truncate flex-shrink-0 ml-1">
-                {effectiveTotalAmount.toLocaleString()} <span className="text-[10px] sm:text-xs font-normal text-slate-400">원</span>
-              </div>
-            </div>
-          </div>
-
-          {/* 구매 댓글은 판매가 아니다. 음성 배정 및 서버 확인을 따로 표시한다. */}
-          <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
-            <h3 className="text-xs sm:text-sm font-bold text-slate-900 mb-2">구매요청 · 판매자 배정 대기</h3>
-            {purchaseRequests.length === 0 ? (
-              <p className="text-xs text-slate-400">저요·ㅈㅇ 등 구매 의사 댓글이 들어오면 여기에 표시됩니다.</p>
-            ) : (
-              <div className="space-y-1.5 max-h-[140px] overflow-y-auto">
-                {purchaseRequests.map((request) => {
-                  const linked = currentSessionSales.find((sale) => sale.purchaseRequestId === request.id && sale.status !== '취소');
-                  const state = request.withdrawn ? '구매 의사 철회'
-                    : request.conditional ? '조건 확인'
-                    : linked?.status === '보류' ? '확인 필요'
-                    : linked?.syncStatus === 'PENDING' ? '서버 저장 대기'
-                      : linked ? '판매 확정' : '배정 대기';
-                  return <div key={request.id} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs">
-                    <span className="truncate"><strong>{request.nickname}</strong> · {request.content}</span>
-                    <span className={`shrink-0 font-bold ${linked?.syncStatus === 'SYNCED' && linked.status !== '보류' ? 'text-emerald-700' : 'text-amber-700'}`}>{state}</span>
-                  </div>;
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* 판매 내역 카드 리스트 */}
-          <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2.5 sm:px-3.5 sm:py-3 shadow-sm">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center space-x-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                <span>판매 내역 · 확인 대기</span>
-              </h3>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void handleRefreshSessionSales()}
-                  disabled={isSalesRefreshing}
-                  className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
-                  title="판매 내역 새로고침"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 ${isSalesRefreshing ? 'animate-spin' : ''}`} />
-                  <span>새로고침</span>
-                </button>
-                <Link to="/sales/review" className="text-xs text-brand-600 hover:underline font-bold flex items-center">
-                  <span>일괄 검토</span>
-                  <ArrowRight className="w-3.5 h-3.5 ml-1" />
-                </Link>
-              </div>
-            </div>
-
-            <div className="space-y-2 max-h-[200px] sm:max-h-[220px] overflow-y-auto pr-1">
-              {effectiveSessionSales.length === 0 ? (
-                <div className="py-2.5 sm:py-3 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl min-h-[38px] flex items-center justify-center">
-                  판매자 배정 발화와 구매 댓글이 연결되면 판매가 등록됩니다.
-                </div>
-              ) : (
-                effectiveSessionSales.map((sale) => {
-                  const nicknameNeedsConfirmation = sale.source === 'WEB_VOICE' && sale.status === '보류'
-                    && (sale.aiVerification?.nicknameVerified === false || !sale.sourceCommentIds?.length);
-                  const productImage = sale.productImageUrl
-                    || sale.captureImageUrls?.[0]
-                    || (sale.productCode && sale.productCode === activeProduct?.productCode ? activeProduct?.imageUrl : undefined);
-                  const sourceLabel = sale.source === 'ANDROID_COMMENTS'
-                    ? '앱'
-                    : sale.source === 'WEB_VOICE'
-                      ? '음성'
-                      : sale.source === 'MANUAL'
-                        ? '웹'
-                        : '기존';
-
-                  // 다건 구매자 판정 및 금액 포맷팅 (시간순 정렬)
-                  const buyerSessionSales = (nicknameNeedsConfirmation ? [sale] : effectiveSessionSales
-                    .filter((s) => sale.buyerId && s.buyerId ? s.buyerId === sale.buyerId : s.buyerNickname === sale.buyerNickname))
-                    .sort((a, b) => new Date(a.recognizedAt).getTime() - new Date(b.recognizedAt).getTime());
-                  const multiAmount = formatMultiSaleAmount(buyerSessionSales.map((s) => s.amount));
-                  const displayProductName = sale.productName;
-                  const purchaseIntentWord = getBuyerPurchaseIntentWord(sale, effectiveComments);
-
-                  return (
-                  <Link
-                    key={sale.id}
-                    to={isDemoActive ? '#' : `/sales/${sale.id}`}
-                    onClick={(e) => { if (isDemoActive) e.preventDefault(); }}
-                    className={`block p-3 sm:p-3.5 rounded-xl border transition active:scale-[0.99] hover:shadow-sm ${
-                      sale.status === '보류'
-                        ? 'bg-amber-50/70 border-amber-200 text-amber-900'
-                        : sale.status === '수동수정'
-                        ? 'bg-purple-50/70 border-purple-200 text-slate-800'
-                        : 'bg-slate-50/70 border-slate-200 text-slate-800'
-                    }`}
-                  >
-                    <div className="flex items-start gap-2.5 sm:gap-3">
-                      {/* 상품 이미지 썸네일 */}
-                      <div
-                        className={`w-12 h-12 sm:w-14 sm:h-14 rounded-lg overflow-hidden border border-slate-200/80 bg-slate-100 flex-shrink-0 shadow-sm flex items-center justify-center relative group/thumb ${
-                          productImage ? 'cursor-pointer hover:ring-2 hover:ring-brand-500' : ''
-                        }`}
-                        onClick={() => {
-                          if (productImage) {
-                            const images = sale.captureImageUrls && sale.captureImageUrls.length > 0
-                              ? sale.captureImageUrls
-                              : [productImage];
-                            setViewerModal({
-                              isOpen: true,
-                              images,
-                              initialIndex: 0,
-                              title: `${sale.buyerNickname} 상품/캡처`
-                            });
-                          }
-                        }}
-                        title={productImage ? '클릭하여 원본 크기로 보기' : undefined}
-                      >
-                        {productImage ? (
-                          <>
-                            <img
-                              src={productImage}
-                              alt={`${sale.productCode || sale.buyerNickname} 상품`}
-                              className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform duration-200"
-                            />
-                            <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center text-white">
-                              <ZoomIn className="w-3.5 h-3.5" />
-                            </div>
-                          </>
-                        ) : (
-                          <div className="flex flex-col items-center justify-center text-slate-400 p-1">
-                            <ShoppingBag className="w-5 h-5 text-brand-600/70" />
-                            <span className="text-[9px] font-mono text-slate-500 font-semibold mt-0.5">
-                              {sale.productCode || '상품'}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center space-x-2 flex-wrap gap-1">
-                          <div className="relative group/buyer inline-flex items-center">
-                            <span
-                              className="font-bold text-sm text-slate-900 truncate hover:text-brand-600 transition-colors cursor-help"
-                              title={purchaseIntentWord ? `구매의사: "${purchaseIntentWord}"` : undefined}
-                            >
-                              {sale.buyerNickname === '미확인(보류)' ? '구매자 미확인' : sale.buyerNickname}
-                            </span>
-                            {purchaseIntentWord && (
-                              <div className="pointer-events-none absolute bottom-full left-0 mb-1 z-30 hidden group-hover/buyer:flex items-center gap-1 px-2.5 py-1 bg-slate-900/95 text-white text-[11px] rounded-md shadow-xl whitespace-nowrap border border-slate-700/50">
-                                <span className="text-amber-300 font-bold">구매의사:</span>
-                                <span className="font-semibold text-white">"{purchaseIntentWord}"</span>
-                              </div>
-                            )}
-                          </div>
-                          {nicknameNeedsConfirmation && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
-                              추정 닉네임 · 확인 필요
-                            </span>
-                          )}
-                          {multiAmount.isMulti && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200">
-                              ★ 다건 {buyerSessionSales.length}건
-                            </span>
-                          )}
-                          {!nicknameNeedsConfirmation && <CustomerStatsBadge
-                            nickname={sale.buyerNickname}
-                            buyerId={sale.buyerId}
-                            variant="pill"
-                            currentSessionId={sale.sessionId || currentSessionId || activeSession?.id}
-                          />}
-                          <AiSaleBadge sale={sale} />
-                          <span className={`text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold border ${
-                            sale.source === 'ANDROID_COMMENTS'
-                              ? 'bg-blue-50 text-blue-700 border-blue-200'
-                              : sale.source === 'WEB_VOICE'
-                                ? 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200'
-                                : 'bg-slate-100 text-slate-600 border-slate-200'
-                          }`}>
-                            {sourceLabel}
-                          </span>
-                          <span className={`text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                            sale.status === '보류'
-                              ? 'bg-amber-400 text-slate-950'
-                              : sale.status === '수동수정'
-                              ? 'bg-purple-100 text-purple-700'
-                              : 'bg-emerald-50 text-emerald-700'
-                          }`}>
-                            {sale.syncStatus === 'PENDING' ? '서버 저장 대기' : sale.status}
-                          </span>
-                          {sale.note?.startsWith('댓글 닉네임 검증 완료') && (
-                            <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold bg-cyan-50 text-cyan-700 border border-cyan-200">
-                              댓글 닉네임 확인됨
-                            </span>
-                          )}
-                          {sale.note?.startsWith('댓글 닉네임 검증 필요') && (
-                            <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                              댓글 닉네임 확인 필요
-                            </span>
-                          )}
-                          {sale.printStatus === 'QUEUED' && sale.syncStatus !== 'PENDING' && (
-                            <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold bg-sky-50 text-sky-700 border border-sky-200">
-                              전표 출력 중
-                            </span>
-                          )}
-                          {sale.printStatus === 'PRINTED' && (
-                            <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              전표 출력 완료
-                            </span>
-                          )}
-                          {sale.printStatus === 'FAILED' && (
-                            <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                              전표 출력 실패
-                            </span>
-                          )}
-                        </div>
-                        {multiAmount.isMulti ? (
-                          <div className="mt-1 flex items-baseline flex-wrap gap-x-1.5 gap-y-0.5">
-                            <span className="text-xs sm:text-sm font-bold text-brand-600 font-mono">
-                              {multiAmount.decimalExpression} =
-                            </span>
-                            <span className="text-base sm:text-lg font-black text-brand-700">
-                              {multiAmount.totalFormatted}
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="text-base font-black text-brand-600 mt-1">
-                            {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}
-                          </div>
-                        )}
-                        {(sale.productCode || displayProductName) && (
-                          <div className="text-[11px] font-semibold text-slate-600 mt-0.5">
-                            상품 {sale.productCode || '번호 없음'}{displayProductName ? ` · ${displayProductName}` : ''}
-                          </div>
-                        )}
-
-                        <p className="text-[11px] text-slate-500 mt-1.5 truncate">
-                          "{sale.rawTranscript}"
-                        </p>
-
-                        {/* AI 작업 이력 배지, 전후 Diff 및 근거보기/후보적용/되돌리기 버튼 */}
-                        <div className="mt-2 pt-2 border-t border-slate-200/50">
-                          <SaleAiActionButtons sale={sale} />
-                        </div>
-                      </div>
-                    </div>
-                  </Link>
-                  );
-                })
-              )}
             </div>
           </div>
 

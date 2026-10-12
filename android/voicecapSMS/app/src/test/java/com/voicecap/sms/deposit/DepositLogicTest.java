@@ -128,4 +128,18 @@ public class DepositLogicTest {
         // 이름에 조사가 붙은 낱말은 통째로 가린다 (이름만 떼어 낼 방법이 없음).
         assertEquals("신한 SOL ○○○○○ #,###원 입금했어요",SampleMasker.mask("신한 SOL 김민지님이 1,000원 입금했어요", null));
     }
+
+    @Test
+    public void kakaoBankNotificationParsesDepositWithAccountAndBalance() throws Exception {
+        BankRules bankRules = BankRules.parse(new String(java.nio.file.Files.readAllBytes(new java.io.File("src/main/assets/bank_rules.json").toPath()), java.nio.charset.StandardCharsets.UTF_8));
+        DepositParser parser = new DepositParser(bankRules);
+        String text = DepositParser.joinParts(Arrays.asList("입금 1원", "정학현 → 입출금통장(6936) 잔액 39,012원", "정학현 → 입출금통장(6936)\n잔액 39,012원"));
+        DepositParser.Result res = parser.parse("com.kakaobank.channel", text, T);
+        assertTrue("failed with " + res.failure, res.ok());
+        assertEquals("카카오뱅크", res.deposit.bank);
+        assertEquals(1L, res.deposit.amount);
+        assertEquals("정학현", res.deposit.payerName);
+        assertEquals(Long.valueOf(39012L), res.deposit.balance);
+        assertEquals("입출금통장(6936)", res.deposit.receiverName);
+    }
 }

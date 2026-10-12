@@ -6,11 +6,13 @@ import { extractSaleFromTranscript, findExplicitPriceTranscript } from './salesE
 import { extractSpeechPrice } from './priceEvidence.ts';
 import { getPurchaseRequests, commentWithdrawsPurchase, type PurchaseRequest } from './purchaseFirstSales.ts';
 import { isWorkflowAllocation, extractCommentOrderCode } from './salesWorkflowEngine.ts';
+import { compareNicknames } from './nicknameMatcher.ts';
+import { hasCommentPurchaseIntent } from './commentNicknameVerifier.ts';
 
 export const VOICE_REVIEW_WINDOW = { BEFORE_MS: 30_000, AFTER_MS: 70_000 } as const;
 export type ReviewTranscript = SttTranscriptLog & { sessionId?: string };
 type ReviewSale = Pick<SaleRecord, 'sessionId' | 'recognizedAt' | 'rawTranscript'>
-  & Partial<Pick<SaleRecord, 'purchaseRequestId' | 'sourceCommentIds' | 'workflowEvidence'>>;
+  & Partial<Pick<SaleRecord, 'purchaseRequestId' | 'sourceCommentIds' | 'workflowEvidence' | 'buyerNickname'>>;
 
 function dedupeReviewComments(comments: CommentRecord[]): CommentRecord[] {
   const byMessage = new Map<string, CommentRecord>();
@@ -34,10 +36,75 @@ export function getVoiceReviewRequests(sale: ReviewSale,
         withdrawn:records.some(later=>later.sessionId===c.sessionId && later.capturedAt>c.capturedAt && later.capturedAt<=sale.recognizedAt
           && Boolean((c.buyerId&&later.buyerId===c.buyerId)||(c.platformUserId&&later.platformUserId===c.platformUserId)||(c.uniqueId&&later.uniqueId===c.uniqueId))
           && commentWithdrawsPurchase(later.content))})) : [];
-  const requests = [...new Map([...getPurchaseRequests(records, sale.sessionId),...numbered].map(r=>[r.id,r])).values()].filter((request) => {
+  const rawRequests = [...new Map([...getPurchaseRequests(records, sale.sessionId),...numbered].map(r=>[r.id,r])).values()];
+  const requests = rawRequests.filter((request) => {
     const age = when - Date.parse(request.capturedAt);
     return !request.withdrawn && age >= -VOICE_REVIEW_WINDOW.BEFORE_MS && age <= VOICE_REVIEW_WINDOW.AFTER_MS;
   });
+
+  // 1. 표준 윈도우 내 요청이 없고, 180초 확장 윈도우 내에 구매 의사 요청이 있는 경우
+  if (!requests.length) {
+    const extended = rawRequests.filter((request) => {
+      const age = when - Date.parse(request.capturedAt);
+      return !request.withdrawn && age >= -60_000 && age <= 180_000;
+    });
+    if (extended.length) requests.push(...extended);
+  }
+
+  // 2. 발화 닉네임과 일치하고 구매 의사가 있는 댓글 작성자가 있는 경우 (후보 연결 지원)
+  if (!requests.length) {
+    const spoken = (sale as any).buyerNickname || extractSaleFromTranscript((sale as any).rawTranscript || '')?.buyerNickname;
+    if (spoken) {
+      const nickMatches = records.filter((c) =>
+        (!c.sessionId || c.sessionId === sale.sessionId)
+        && !commentWithdrawsPurchase(c.content)
+        && hasCommentPurchaseIntent(c.content)
+        && compareNicknames(c.nickname, spoken)
+      );
+      for (const c of nickMatches) {
+        const age = when - Date.parse(c.capturedAt);
+        if (age >= -VOICE_REVIEW_WINDOW.BEFORE_MS && age <= 180_000) {
+          requests.push({
+            id: `${c.sessionId || sale.sessionId}:${c.platformMessageId || c.id}`,
+            sessionId: c.sessionId || sale.sessionId,
+            commentId: c.id,
+            platformMessageId: c.platformMessageId,
+            buyerId: c.buyerId,
+            accountKey: c.buyerId || (c.platformUserId ? `platform:${c.platformUserId}` : c.uniqueId ? `handle:${c.uniqueId.toLowerCase()}` : `unresolved:${c.id}`),
+            nickname: c.nickname,
+            content: c.content,
+            capturedAt: c.capturedAt,
+            requestedQuantity: 1,
+          });
+        }
+      }
+    }
+  }
+
+  // 3. 이미 판매에 연결된 commentId / purchaseRequestId가 있는 경우
+  if (!requests.length && (sale.purchaseRequestId || sale.sourceCommentIds?.length)) {
+    const linkedRecords = records.filter((c) =>
+      (!c.sessionId || c.sessionId === sale.sessionId)
+      && !commentWithdrawsPurchase(c.content)
+      && hasCommentPurchaseIntent(c.content)
+      && (c.id === sale.purchaseRequestId || `${c.sessionId}:${c.platformMessageId || c.id}` === sale.purchaseRequestId || sale.sourceCommentIds?.includes(c.id))
+    );
+    for (const c of linkedRecords) {
+      requests.push({
+        id: `${c.sessionId || sale.sessionId}:${c.platformMessageId || c.id}`,
+        sessionId: c.sessionId || sale.sessionId,
+        commentId: c.id,
+        platformMessageId: c.platformMessageId,
+        buyerId: c.buyerId,
+        accountKey: c.buyerId || (c.platformUserId ? `platform:${c.platformUserId}` : c.uniqueId ? `handle:${c.uniqueId.toLowerCase()}` : `unresolved:${c.id}`),
+        nickname: c.nickname,
+        content: c.content,
+        capturedAt: c.capturedAt,
+        requestedQuantity: 1,
+      });
+    }
+  }
+
   const linked = requests.filter((request) => request.id === sale.purchaseRequestId
     || sale.sourceCommentIds?.includes(request.commentId));
   return linked.length ? linked : requests;
@@ -93,8 +160,8 @@ export function buildVoiceReviewRequest(sale: SaleRecord, comments: CommentRecor
   const requests = getVoiceReviewRequests(sale, comments);
   const purchaseWindows = getVoiceReviewWindows(sale, comments);
   const sellerUtterances = getVoiceReviewUtterances(sale, comments, logs);
-  const relevantComments = dedupeReviewComments(comments).filter((c) => c.sessionId === sale.sessionId
-    && inWindows(Date.parse(c.capturedAt), purchaseWindows));
+  const relevantComments = dedupeReviewComments(comments).filter((c) => (!c.sessionId || c.sessionId === sale.sessionId)
+    && (inWindows(Date.parse(c.capturedAt), purchaseWindows) || requests.some((r) => r.commentId === c.id || r.nickname === c.nickname)));
   return {
     taskType: 'PENDING_RESOLUTION', workspaceId: '', sessionId: sale.sessionId,
     workflowProfile: sale.workflowEvidence?.profileSnapshot,

@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { aiSettingsApi } from '../../services/aiSettingsApi';
-import { AiRuntimeStatus } from '../../types/aiTask';
-import { AiHealthSummaryResponse, AiSlotHealth } from '../../types/aiHealth';
-import { AiSettings, DEFAULT_AI_SETTINGS } from '../../types/aiSettings';
+import { aiSettingsApi, normalizeAiSettings } from '../../services/aiSettingsApi';
+import { aiStatusCache } from '../../services/aiStatusCache';
+import { startVisibleRefresh } from '../../services/visibleRefresh';
+import { AiSlotHealth } from '../../types/aiHealth';
+import { DEFAULT_AI_SETTINGS } from '../../types/aiSettings';
+import type { AiStatusSummaryResponse } from '../../types/aiStatusSummary';
+import { useAuth } from '../../context/AuthContext';
 import { maskEndpointUrl } from '../../utils/maskingUtils';
 import { useSales } from '../../context/SalesContext';
 import {
@@ -27,9 +30,13 @@ interface AiLiveStatusBadgeProps {
 
 export const AiLiveStatusBadge: React.FC<AiLiveStatusBadgeProps> = ({ compact = false }) => {
   const { sales } = useSales();
-  const [runtimeStatus, setRuntimeStatus] = useState<AiRuntimeStatus | null>(null);
-  const [healthSummary, setHealthSummary] = useState<AiHealthSummaryResponse | null>(null);
-  const [settings, setSettings] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
+  const { user, workspaceId, isRemoteAuth } = useAuth();
+  const cacheKey = user && workspaceId ? `${user.id}:${workspaceId}` : null;
+  const [snapshot, setSnapshot] = useState<AiStatusSummaryResponse | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const runtimeStatus = snapshot?.runtimeStatus || null;
+  const healthSummary = snapshot?.healthSummary || null;
+  const settings = useMemo(() => normalizeAiSettings(snapshot?.settings || DEFAULT_AI_SETTINGS), [snapshot]);
   const [isOpenModal, setIsOpenModal] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
@@ -38,28 +45,55 @@ export const AiLiveStatusBadge: React.FC<AiLiveStatusBadgeProps> = ({ compact = 
     return sales.filter((s) => s.status === '보류').length;
   }, [sales]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async (force = false) => {
+    if (!cacheKey || !workspaceId || !isRemoteAuth || document.hidden || !navigator.onLine) return;
     try {
-      const [rtResp, hlResp, stData] = await Promise.all([
-        aiSettingsApi.getAiRuntimeStatus().catch(() => null),
-        aiSettingsApi.getAiHealth().catch(() => null),
-        aiSettingsApi.getAiSettings().catch(() => null),
-      ]);
-      if (rtResp?.runtimeStatus) setRuntimeStatus(rtResp.runtimeStatus);
-      if (hlResp) setHealthSummary(hlResp);
-      if (stData) setSettings(stData);
+      await aiStatusCache.refresh(cacheKey, () => aiSettingsApi.getAiStatusSummary(workspaceId), force);
+      setRefreshError(null);
     } catch (err) {
+      setRefreshError('상태를 갱신하지 못했습니다. 마지막 조회 결과를 표시합니다.');
       console.warn('[AiLiveStatusBadge] AI 상태 동기화 실패:', err);
+      throw err;
     }
-  };
+  }, [cacheKey, workspaceId, isRemoteAuth]);
 
   useEffect(() => {
-    void fetchData();
-    const interval = window.setInterval(() => {
-      void fetchData();
-    }, 15000); // 15초 주기 경량 상태 갱신
-    return () => window.clearInterval(interval);
-  }, []);
+    setSnapshot(cacheKey ? aiStatusCache.peek(cacheKey) || null : null);
+    setRefreshError(null);
+    if (!cacheKey || !isRemoteAuth) return;
+    const unsubscribe = aiStatusCache.subscribe(cacheKey, setSnapshot);
+    const refresh = () => { void fetchData().catch(() => {}); };
+    refresh();
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('online', refresh);
+    window.addEventListener('voicecap_ai_settings_changed', refresh);
+    return () => {
+      unsubscribe();
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('online', refresh);
+      window.removeEventListener('voicecap_ai_settings_changed', refresh);
+    };
+  }, [cacheKey, isRemoteAuth, fetchData]);
+
+  useEffect(() => {
+    if (!isOpenModal || !isRemoteAuth) return;
+    return startVisibleRefresh({
+      refresh: () => fetchData(),
+      isVisible: () => !document.hidden,
+      isOnline: () => navigator.onLine,
+      intervalMs: 60_000,
+      listen: (resume) => {
+        document.addEventListener('visibilitychange', resume);
+        window.addEventListener('online', resume);
+        window.addEventListener('offline', resume);
+        return () => {
+          document.removeEventListener('visibilitychange', resume);
+          window.removeEventListener('online', resume);
+          window.removeEventListener('offline', resume);
+        };
+      },
+    });
+  }, [isOpenModal, isRemoteAuth, fetchData]);
 
   useEffect(() => {
     if (!isOpenModal) return;
@@ -73,7 +107,9 @@ export const AiLiveStatusBadge: React.FC<AiLiveStatusBadgeProps> = ({ compact = 
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     try {
-      await fetchData();
+      await fetchData(true);
+    } catch {
+      // The error is shown in the modal; retain the last useful snapshot.
     } finally {
       setIsRefreshing(false);
     }
@@ -101,6 +137,11 @@ export const AiLiveStatusBadge: React.FC<AiLiveStatusBadgeProps> = ({ compact = 
 
   // 상단 배지 라벨 및 스타일 계산
   const badgeInfo = useMemo(() => {
+    if (!snapshot) return {
+      label: 'AI 상태 미확인',
+      colorClass: 'bg-slate-100 text-slate-700 border-slate-200',
+      dotColor: 'bg-slate-400',
+    };
     const s1Health = healthSummary?.slot1;
     const s2Health = healthSummary?.slot2;
     const s1Config = settings.slot1;
@@ -164,6 +205,14 @@ export const AiLiveStatusBadge: React.FC<AiLiveStatusBadgeProps> = ({ compact = 
 
     // 5. 1번 장애이고 2번만 가용한 대기 상태
     if (isSlot1Open && !isSlot2Open) {
+      const isSlot2Current = s2Health?.overallStatus === 'AVAILABLE' && !s2Health.isExpired
+        && Boolean(s2Health.lastCheckedAt)
+        && Date.now() - new Date(s2Health.lastCheckedAt).getTime() <= 45000;
+      if (!isSlot2Current) return {
+        label: 'AI 1번 장애 · 2번 상태 확인 필요',
+        colorClass: 'bg-slate-100 text-slate-700 border-slate-200',
+        dotColor: 'bg-slate-400',
+      };
       return {
         label: `AI 2번 사용 가능 · 1번 복구 점검 중`,
         colorClass: 'bg-amber-50 text-amber-800 border-amber-200',
@@ -171,10 +220,13 @@ export const AiLiveStatusBadge: React.FC<AiLiveStatusBadgeProps> = ({ compact = 
       };
     }
 
-    // 6. 점검 결과 만료 여부 확인 (45초 이상 경과)
-    if (s1Health?.isExpired || (s1Health?.lastCheckedAt && Date.now() - new Date(s1Health.lastCheckedAt).getTime() > 45000)) {
-      const minutesAgo = s1Health?.lastCheckedAt
-        ? Math.max(1, Math.round((Date.now() - new Date(s1Health.lastCheckedAt).getTime()) / 60000))
+    const primaryNum = settings.primarySlot || 1;
+    const primaryHealth = primaryNum === 1 ? s1Health : s2Health;
+    const isPrimaryOpen = primaryNum === 1 ? isSlot1Open : isSlot2Open;
+    // Only a checked, current primary route may be presented as available.
+    if (primaryHealth?.isExpired || (primaryHealth?.lastCheckedAt && Date.now() - new Date(primaryHealth.lastCheckedAt).getTime() > 45000)) {
+      const minutesAgo = primaryHealth?.lastCheckedAt
+        ? Math.max(1, Math.round((Date.now() - new Date(primaryHealth.lastCheckedAt).getTime()) / 60000))
         : 1;
       return {
         label: `AI 상태 확인 중 · 마지막 점검 ${minutesAgo}분 전`,
@@ -183,15 +235,19 @@ export const AiLiveStatusBadge: React.FC<AiLiveStatusBadgeProps> = ({ compact = 
       };
     }
 
-    // 7. 정상 대기 상태 (1번 슬롯 가용)
-    const primaryNum = settings.primarySlot || 1;
+    if (isPrimaryOpen || primaryHealth?.overallStatus !== 'AVAILABLE' || !primaryHealth.lastCheckedAt) return {
+      label: `AI ${primaryNum}번 · ${isPrimaryOpen ? '사용 불가' : primaryHealth?.overallStatus === 'UNCONFIGURED' ? '미설정' : '상태 확인 필요'}`,
+      colorClass: 'bg-slate-100 text-slate-700 border-slate-200',
+      dotColor: 'bg-slate-400',
+    };
+    // 7. 정상 대기 상태
     const primaryType = primaryNum === 1 ? s1Type : s2Type;
     return {
       label: `AI ${primaryNum}번 · ${primaryType} · 사용 가능`,
       colorClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
       dotColor: 'bg-emerald-500',
     };
-  }, [runtimeStatus, healthSummary, settings, pendingCount]);
+  }, [snapshot, runtimeStatus, healthSummary, settings, pendingCount]);
 
   return (
     <>
@@ -261,6 +317,11 @@ export const AiLiveStatusBadge: React.FC<AiLiveStatusBadgeProps> = ({ compact = 
 
             {/* 모달 본문 (스크롤) */}
             <div className="p-4 sm:p-6 overflow-y-auto space-y-4 text-xs">
+              <p className={refreshError ? 'text-amber-700' : 'text-slate-500'}>
+                {refreshError || (snapshot
+                  ? `마지막 상태 조회: ${new Date(runtimeStatus!.checkedAt).toLocaleTimeString()} · 상세창에서 1분마다 갱신`
+                  : 'AI 상태를 확인하고 있습니다.')}
+              </p>
               {/* 현재 런타임 요약 배너 */}
               <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center space-x-2">

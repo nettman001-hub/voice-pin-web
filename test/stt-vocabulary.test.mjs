@@ -11,6 +11,7 @@ import * as paymentMatching from '../src/services/paymentMatching.ts';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function loadTypescript(relativePath, globals = {}, dependencies = {}) {
+  dependencies = { '../utils/textCleaner': { cleanMessageBody: (t) => t }, ...dependencies };
   const source = fs.readFileSync(path.join(root, relativePath), 'utf8');
   const compiled = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },

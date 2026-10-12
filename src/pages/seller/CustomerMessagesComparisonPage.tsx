@@ -2,12 +2,14 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useSales } from '../../context/SalesContext';
 import { useCommerce } from '../../context/CommerceContext';
 import { useAuth } from '../../context/AuthContext';
-import { CustomerPurchaseClaim, SmsAttachment, SmsMessage } from '../../types/commerce';
+import { CustomerPurchaseClaim, SmsAttachment, SmsMessage, PaymentReceipt } from '../../types/commerce';
 import { SaleRecord } from '../../types/live';
 import { cleanMessageBody } from '../../utils/textCleaner';
 import { resolvePrivateImageUrl } from '../../services/remoteWorkspaceService';
 import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 import { requireSupabase, isSupabaseConfigured } from '../../services/supabaseClient';
+import { formatSessionDisplay, SessionInfoLike } from '../../utils/sessionFormatter';
+import { productSalesApi } from '../../services/productSalesApi';
 import {
   MessageSquare,
   ShoppingBag,
@@ -27,7 +29,13 @@ import {
   AlertCircle,
   ZoomIn,
   Image as ImageIcon,
-  X
+  X,
+  CreditCard,
+  Building2,
+  CheckCheck,
+  Link2,
+  Unlink,
+  Check
 } from 'lucide-react';
 
 const formatPhone = (raw: string): string => {
@@ -115,6 +123,40 @@ const saveManualNicknames = (map: Map<string, string>, workspaceId?: string | nu
     const obj = Object.fromEntries(map.entries());
     localStorage.setItem(key, JSON.stringify(obj));
   } catch {}
+};
+
+const MANUAL_PAYMENT_LINKS_KEY = 'voicecap_manual_payment_buyer_links';
+
+const loadManualPaymentLinks = (workspaceId?: string | null): Map<string, string> => {
+  try {
+    const key = workspaceId ? `${MANUAL_PAYMENT_LINKS_KEY}_${workspaceId}` : MANUAL_PAYMENT_LINKS_KEY;
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const obj = JSON.parse(raw);
+      return new Map(Object.entries(obj));
+    }
+  } catch {}
+  return new Map();
+};
+
+const saveManualPaymentLinks = (map: Map<string, string>, workspaceId?: string | null) => {
+  try {
+    const key = workspaceId ? `${MANUAL_PAYMENT_LINKS_KEY}_${workspaceId}` : MANUAL_PAYMENT_LINKS_KEY;
+    const obj = Object.fromEntries(map.entries());
+    localStorage.setItem(key, JSON.stringify(obj));
+  } catch {}
+};
+
+const getBankBadgeStyle = (bank?: string | null): string => {
+  if (!bank) return 'bg-slate-100 text-slate-700 border-slate-200';
+  if (bank.includes('국민') || bank.includes('KB')) return 'bg-amber-50 text-amber-800 border-amber-200';
+  if (bank.includes('농협') || bank.includes('NH')) return 'bg-emerald-50 text-emerald-800 border-emerald-200';
+  if (bank.includes('신한')) return 'bg-blue-50 text-blue-800 border-blue-200';
+  if (bank.includes('우리')) return 'bg-sky-50 text-sky-800 border-sky-200';
+  if (bank.includes('카카오')) return 'bg-yellow-50 text-yellow-800 border-yellow-200';
+  if (bank.includes('토스')) return 'bg-blue-50 text-blue-700 border-blue-200';
+  if (bank.includes('기업') || bank.includes('IBK')) return 'bg-indigo-50 text-indigo-800 border-indigo-200';
+  return 'bg-cyan-50 text-cyan-800 border-cyan-200';
 };
 
 interface ThreadInfo {
@@ -209,6 +251,7 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     messages,
     claims,
     invoices,
+    payments,
     shipments,
     syncBridge,
     bridgeStatus,
@@ -223,15 +266,33 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
   );
   const [nicknameInput, setNicknameInput] = useState('');
 
+  // 수동 입금 연결 상태 (paymentId -> buyerNickname)
+  const [manualPaymentLinks, setManualPaymentLinks] = useState<Map<string, string>>(() =>
+    loadManualPaymentLinks(workspaceId)
+  );
+
   useEffect(() => {
     setManualNicknames(loadManualNicknames(workspaceId));
+    setManualPaymentLinks(loadManualPaymentLinks(workspaceId));
   }, [workspaceId]);
+
+  // 우측 인박스 탭 상태 ('MESSAGES': 고객 문자함, 'PAYMENTS': 실시간 은행 입금함)
+  const [inboxTab, setInboxTab] = useState<'MESSAGES' | 'PAYMENTS'>('MESSAGES');
 
   // 검색 및 필터 상태
   const [salesSearch, setSalesSearch] = useState('');
   const [messagesSearch, setMessagesSearch] = useState('');
   const [selectedSessionId, setSelectedSessionId] = useState<string>('ALL');
   const [selectedPhoneKey, setSelectedPhoneKey] = useState<string | null>(null);
+  const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<'ALL' | 'UNMATCHED' | 'MATCHED'>('ALL');
+  const [paymentLinkInputs, setPaymentLinkInputs] = useState<Record<string, string>>({});
+
+  // 선택된 판매 정보
+  const selectedSale = useMemo(() => {
+    if (!selectedSaleId) return null;
+    return sales.find((s) => s.id === selectedSaleId) || null;
+  }, [sales, selectedSaleId]);
 
   // 이미지 크게보기 뷰어 상태
   const [viewingImages, setViewingImages] = useState<{ urls: string[]; index: number } | null>(null);
@@ -241,17 +302,50 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
   const [isSending, setIsSending] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [cloudSessions, setCloudSessions] = useState<SessionInfoLike[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // 1. 고유 세션(방송회차) 목록
-  const sessionIds = useMemo(() => {
-    const set = new Set<string>();
-    sales.forEach((s) => {
-      if (s.sessionId) set.add(s.sessionId);
+  // 클라우드 방송 회차 목록 로드
+  useEffect(() => {
+    productSalesApi.listSessions()
+      .then((data) => setCloudSessions(data.sessions))
+      .catch((err) => console.warn('[CustomerMessages] 세션 목록 로드 실패:', err));
+  }, []);
+
+  // 1. 고유 방송 회차(세션) 목록 (사람이 알아보기 쉬운 명칭으로 매핑)
+  const availableSessions = useMemo(() => {
+    const sessionsById = new Map<string, { id: string; displayCode: string; startedAt?: string }>();
+
+    // 1) 클라우드 등록 세션 우선 매핑
+    cloudSessions.forEach((s) => {
+      sessionsById.set(s.id, {
+        id: s.id,
+        displayCode: s.displayCode || formatSessionDisplay(s.id, { recognizedAt: s.startedAt }),
+        startedAt: s.startedAt || undefined,
+      });
     });
-    return Array.from(set);
-  }, [sales]);
+
+    // 2) 판매 내역에 존재하는 세션 ID 보완
+    sales.forEach((sale) => {
+      if (sale.sessionId && !sessionsById.has(sale.sessionId)) {
+        sessionsById.set(sale.sessionId, {
+          id: sale.sessionId,
+          displayCode: formatSessionDisplay(sale.sessionId, {
+            sessions: cloudSessions,
+            recognizedAt: sale.recognizedAt,
+          }),
+          startedAt: sale.recognizedAt,
+        });
+      }
+    });
+
+    return Array.from(sessionsById.values()).sort((left, right) => {
+      const tLeft = left.startedAt ? new Date(left.startedAt).getTime() : 0;
+      const tRight = right.startedAt ? new Date(right.startedAt).getTime() : 0;
+      return tRight - tLeft;
+    });
+  }, [cloudSessions, sales]);
 
   // 2. 웹앱 전체 구매자 닉네임 목록 (신규 매칭 및 연결에 사용)
   const allBuyerNicknames = useMemo(() => {
@@ -376,8 +470,155 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     return map;
   }, [threads, allBuyerNicknames]);
 
+  // 4-2. 은행 입금 내역 매핑 및 구매자별 결제 내역 분석
+  const { buyerPaymentsMap, unmatchedPayments } = useMemo(() => {
+    const map = new Map<string, PaymentReceipt[]>();
+    const unmatched: PaymentReceipt[] = [];
+
+    // saleId -> buyerNickname 매핑 사전 준비
+    const saleIdToBuyerMap = new Map<string, string>();
+    sales.forEach((s) => {
+      if (s.id && s.buyerNickname?.trim()) {
+        saleIdToBuyerMap.set(s.id, s.buyerNickname.trim());
+      }
+    });
+
+    // invoiceId -> customerNickname 매핑 사전 준비
+    const invoiceIdToBuyerMap = new Map<string, string>();
+    invoices.forEach((inv) => {
+      if (inv.id && inv.customerNickname?.trim()) {
+        invoiceIdToBuyerMap.set(inv.id, inv.customerNickname.trim());
+      }
+    });
+
+    payments.forEach((payment) => {
+      // 1) 수동 연결된 닉네임 우선 확인
+      const manualNick = manualPaymentLinks.get(payment.id);
+      if (manualNick) {
+        const key = manualNick.trim().toLowerCase();
+        const list = map.get(key) || [];
+        list.push(payment);
+        map.set(key, list);
+        return;
+      }
+
+      // 2) payment.saleIds 에 의한 매칭 확인
+      let matchedBuyer: string | null = null;
+      if (payment.saleIds && payment.saleIds.length > 0) {
+        for (const sid of payment.saleIds) {
+          const found = saleIdToBuyerMap.get(sid);
+          if (found) {
+            matchedBuyer = found;
+            break;
+          }
+        }
+      }
+
+      // 3) invoiceId 에 의한 매칭 확인
+      if (!matchedBuyer && payment.invoiceId) {
+        matchedBuyer = invoiceIdToBuyerMap.get(payment.invoiceId) || null;
+      }
+
+      // 4) 입금자명(payerName) 과 allBuyerNicknames 매칭 확인
+      if (!matchedBuyer && payment.payerName) {
+        const cleanPayer = payment.payerName.replace(/[\s\-_]/g, '').toLowerCase();
+        for (const nick of allBuyerNicknames) {
+          const cleanNick = nick.replace(/[\s\-_]/g, '').toLowerCase();
+          if (cleanNick.length >= 2 && (cleanPayer === cleanNick || cleanPayer.includes(cleanNick))) {
+            matchedBuyer = nick;
+            break;
+          }
+        }
+      }
+
+      if (matchedBuyer) {
+        const key = matchedBuyer.trim().toLowerCase();
+        const list = map.get(key) || [];
+        list.push(payment);
+        map.set(key, list);
+      } else {
+        unmatched.push(payment);
+      }
+    });
+
+    return { buyerPaymentsMap: map, unmatchedPayments: unmatched };
+  }, [payments, sales, invoices, manualPaymentLinks, allBuyerNicknames]);
+
+  // 구매자별 입금 합계 및 상태 계산 헬퍼
+  const getBuyerPaymentSummary = useMemo(() => {
+    return (buyerNickname?: string | null, requiredAmount?: number) => {
+      if (!buyerNickname?.trim()) {
+        return {
+          totalPaid: 0,
+          paymentList: [] as PaymentReceipt[],
+          status: 'UNPAID' as const,
+          diff: 0,
+        };
+      }
+
+      const key = buyerNickname.trim().toLowerCase();
+      const list = buyerPaymentsMap.get(key) || [];
+      const totalPaid = list.reduce((sum, p) => sum + (p.amount || 0), 0);
+      const req = requiredAmount || 0;
+      const diff = totalPaid - req;
+
+      let status: 'PAID' | 'PARTIAL' | 'OVERPAID' | 'UNPAID' = 'UNPAID';
+      if (totalPaid === 0) {
+        status = 'UNPAID';
+      } else if (req > 0) {
+        if (totalPaid === req) status = 'PAID';
+        else if (totalPaid > req) status = 'OVERPAID';
+        else status = 'PARTIAL';
+      } else {
+        status = 'PAID';
+      }
+
+      return { totalPaid, paymentList: list, status, diff };
+    };
+  }, [buyerPaymentsMap]);
+
+  // 특정 입금건의 매칭된 고객 닉네임 조회 헬퍼
+  const getMatchedNicknameForPayment = (paymentId: string): string | null => {
+    const manualNick = manualPaymentLinks.get(paymentId);
+    if (manualNick) return manualNick;
+    for (const [nick, pList] of buyerPaymentsMap.entries()) {
+      if (pList.some((item) => item.id === paymentId)) {
+        return nick;
+      }
+    }
+    return null;
+  };
+
   // 판매 목록 문자 수신 필터 ('ALL' | 'RECEIVED' | 'UNRECEIVED')
   const [salesMessageFilter, setSalesMessageFilter] = useState<'ALL' | 'RECEIVED' | 'UNRECEIVED'>('ALL');
+  // 판매 목록 입금 상태 필터 ('ALL' | 'PAID' | 'UNPAID')
+  const [salesPaymentFilter, setSalesPaymentFilter] = useState<'ALL' | 'PAID' | 'UNPAID'>('ALL');
+  // 은행 입금함 검색어
+  const [paymentsSearch, setPaymentsSearch] = useState('');
+
+  // 4-3. 필터링된 은행 입금 목록
+  const filteredPayments = useMemo(() => {
+    return payments
+      .filter((p) => {
+        const matchedNick = getMatchedNicknameForPayment(p.id);
+        const isMatched = Boolean(matchedNick);
+
+        if (paymentStatusFilter === 'UNMATCHED' && isMatched) return false;
+        if (paymentStatusFilter === 'MATCHED' && !isMatched) return false;
+
+        if (paymentsSearch.trim()) {
+          const q = paymentsSearch.trim().toLowerCase();
+          const matchPayer = p.payerName?.toLowerCase().includes(q);
+          const matchBank = p.bank?.toLowerCase().includes(q);
+          const matchAmount = p.amount?.toString().includes(q);
+          const matchNick = matchedNick ? matchedNick.toLowerCase().includes(q) : false;
+          if (!matchPayer && !matchBank && !matchAmount && !matchNick) return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => new Date(b.paidAt || b.createdAt).getTime() - new Date(a.paidAt || a.createdAt).getTime());
+  }, [payments, manualPaymentLinks, buyerPaymentsMap, paymentStatusFilter, paymentsSearch]);
 
   // 5. 검색 및 필터링된 스레드 목록
   const filteredThreads = useMemo(() => {
@@ -406,14 +647,26 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
       const hasMessage = buyerNick ? buyerToThreadMap.has(buyerNick) : false;
       if (salesMessageFilter === 'RECEIVED' && !hasMessage) return false;
       if (salesMessageFilter === 'UNRECEIVED' && hasMessage) return false;
+
+      // 입금 상태 필터
+      if (salesPaymentFilter !== 'ALL') {
+        const pSummary = getBuyerPaymentSummary(sale.buyerNickname, sale.amount);
+        const isPaid = pSummary.status === 'PAID' || pSummary.status === 'OVERPAID';
+        if (salesPaymentFilter === 'PAID' && !isPaid) return false;
+        if (salesPaymentFilter === 'UNPAID' && isPaid) return false;
+      }
+
       return true;
     });
-  }, [sales, selectedSessionId, salesSearch, salesMessageFilter, buyerToThreadMap]);
+  }, [sales, selectedSessionId, salesSearch, salesMessageFilter, salesPaymentFilter, buyerToThreadMap, getBuyerPaymentSummary]);
 
-  // 문자 수신 여부 건수 집계
-  const { receivedSalesCount, unreceivedSalesCount } = useMemo(() => {
+  // 문자 수신 및 입금 건수 집계
+  const { receivedSalesCount, unreceivedSalesCount, paidSalesCount, unpaidSalesCount } = useMemo(() => {
     let received = 0;
     let unreceived = 0;
+    let paid = 0;
+    let unpaid = 0;
+
     sales.forEach((s) => {
       if (selectedSessionId !== 'ALL' && s.sessionId !== selectedSessionId) return;
       const nick = s.buyerNickname?.trim().toLowerCase();
@@ -422,20 +675,36 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
       } else {
         unreceived++;
       }
+
+      const pSummary = getBuyerPaymentSummary(s.buyerNickname, s.amount);
+      if (pSummary.status === 'PAID' || pSummary.status === 'OVERPAID') {
+        paid++;
+      } else {
+        unpaid++;
+      }
     });
-    return { receivedSalesCount: received, unreceivedSalesCount: unreceived };
-  }, [sales, selectedSessionId, buyerToThreadMap]);
+
+    return {
+      receivedSalesCount: received,
+      unreceivedSalesCount: unreceived,
+      paidSalesCount: paid,
+      unpaidSalesCount: unpaid,
+    };
+  }, [sales, selectedSessionId, buyerToThreadMap, getBuyerPaymentSummary]);
 
   // 7. 선택된 스레드
   const activeThread = useMemo(() => {
     if (selectedPhoneKey) {
       const match = filteredThreads.find((t) => t.phoneKey === selectedPhoneKey);
       if (match) return match;
-      const globalMatch = threads.find((t) => t.phoneKey === selectedPhoneKey);
-      if (globalMatch) return globalMatch;
+      // 검색어가 없을 때만 전체 스레드에서 매칭 허용 (검색어가 있을 때 엉뚱한 이전 대화가 남는 버그 방지)
+      if (!messagesSearch.trim()) {
+        const globalMatch = threads.find((t) => t.phoneKey === selectedPhoneKey);
+        if (globalMatch) return globalMatch;
+      }
     }
     return filteredThreads.length > 0 ? filteredThreads[0] : null;
-  }, [filteredThreads, threads, selectedPhoneKey]);
+  }, [filteredThreads, threads, selectedPhoneKey, messagesSearch]);
 
   // 메시지 스크롤 맨 아래로 이동
   useEffect(() => {
@@ -474,24 +743,29 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     }
   };
 
-  // 좌측 판매건 클릭 시 해당 구매자 닉네임으로 우측 문자함 검색창 입력 및 스레드 선택
-  const handleSelectBuyerFromSales = (buyerNickname?: string) => {
-    if (!buyerNickname) return;
-    const nick = buyerNickname.trim();
-    if (!nick) return;
+  // 좌측 판매건 클릭 시 해당 구매자의 대화방 활성화 또는 매칭 안내
+  const handleSelectBuyerFromSales = (sale: SaleRecord) => {
+    setSelectedSaleId(sale.id);
+    const nick = sale.buyerNickname?.trim();
 
-    // 1) 첫 번째 목록이든 다른 목록이든 항상 검색창에 닉네임을 설정하여 필터링
-    setMessagesSearch(nick);
+    if (!nick) {
+      setSelectedPhoneKey(null);
+      return;
+    }
 
-    // 2) 닉네임과 일치하는 스레드가 있으면 해당 대화방을 바로 활성화
+    // 닉네임과 일치하는 스레드가 있으면 해당 대화방을 바로 활성화
     const found = threads.find(
       (t) =>
         t.existingNickname?.toLowerCase() === nick.toLowerCase() ||
         t.newMatchedNickname?.toLowerCase() === nick.toLowerCase() ||
-        t.messages.some((m) => m.body.toLowerCase().includes(nick.toLowerCase()))
+        t.messages.some((m) => m.body && m.body.toLowerCase().includes(nick.toLowerCase()))
     );
+
     if (found) {
       setSelectedPhoneKey(found.phoneKey);
+    } else {
+      // 문자가 없는 경우 이전 선택 번호를 null로 초기화하여 우측 대화창에 판매 정보 안내 카드 표시
+      setSelectedPhoneKey(null);
     }
   };
 
@@ -575,6 +849,29 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     setTimeout(() => setFeedback(null), 3000);
   };
 
+  // 입금 내역 수동 연결 함수 (paymentId -> buyerNickname)
+  const handleLinkPaymentToBuyer = (paymentId: string, rawNickname: string) => {
+    const nick = rawNickname.trim();
+    if (!nick) return;
+    const nextMap = new Map(manualPaymentLinks);
+    nextMap.set(paymentId, nick);
+    setManualPaymentLinks(nextMap);
+    saveManualPaymentLinks(nextMap, workspaceId);
+    setFeedback(`입금 내역이 '${nick}' 고객과 연결되었습니다.`);
+    setTimeout(() => setFeedback(null), 3000);
+  };
+
+  // 입금 내역 수동 연결 해제 함수
+  const handleUnlinkPayment = (paymentId: string) => {
+    const nextMap = new Map(manualPaymentLinks);
+    const prevNick = nextMap.get(paymentId);
+    nextMap.delete(paymentId);
+    setManualPaymentLinks(nextMap);
+    saveManualPaymentLinks(nextMap, workspaceId);
+    setFeedback(`'${prevNick || ''}' 고객과의 입금 연결이 해제되었습니다.`);
+    setTimeout(() => setFeedback(null), 3000);
+  };
+
   return (
     <div className="flex flex-col h-[calc(100vh-4.25rem)] overflow-hidden bg-slate-100">
       {/* 최상단 제어 바 */}
@@ -585,7 +882,7 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
           </div>
           <div>
             <h1 className="text-base font-black text-slate-900 flex items-center gap-2">
-              고객 문자함 비교
+              판매내역/문자비교
               <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
                 실시간 대조 모드
               </span>
@@ -639,18 +936,18 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
               </span>
 
               {/* 회차 필터 */}
-              {sessionIds.length > 0 && (
+              {availableSessions.length > 0 && (
                 <div className="flex items-center gap-1">
                   <Filter className="w-3 h-3 text-slate-400" />
                   <select
                     value={selectedSessionId}
                     onChange={(e) => setSelectedSessionId(e.target.value)}
-                    className="text-[11px] font-semibold bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-700 outline-none"
+                    className="text-[11px] font-semibold bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-700 outline-none max-w-[180px] sm:max-w-[220px] truncate"
                   >
                     <option value="ALL">전체 방송회차</option>
-                    {sessionIds.map((sid) => (
-                      <option key={sid} value={sid}>
-                        {sid}
+                    {availableSessions.map((session) => (
+                      <option key={session.id} value={session.id}>
+                        {session.displayCode}
                       </option>
                     ))}
                   </select>
@@ -670,12 +967,12 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
               />
             </div>
 
-            {/* 문자 수신 필터 탭 */}
-            <div className="flex items-center gap-1 pt-1 text-[11px] font-bold">
+            {/* 문자 수신 및 입금 필터 탭 */}
+            <div className="flex items-center gap-1 pt-1 text-[11px] font-bold overflow-x-auto pb-0.5">
               <button
                 type="button"
                 onClick={() => setSalesMessageFilter('ALL')}
-                className={`px-2 py-1 rounded-lg transition-colors ${
+                className={`px-2 py-1 rounded-lg transition-colors whitespace-nowrap ${
                   salesMessageFilter === 'ALL'
                     ? 'bg-slate-800 text-white shadow-2xs'
                     : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
@@ -686,7 +983,7 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setSalesMessageFilter('RECEIVED')}
-                className={`px-2 py-1 rounded-lg transition-colors flex items-center gap-1 ${
+                className={`px-2 py-1 rounded-lg transition-colors flex items-center gap-1 whitespace-nowrap ${
                   salesMessageFilter === 'RECEIVED'
                     ? 'bg-emerald-600 text-white shadow-2xs'
                     : 'bg-white text-emerald-700 hover:bg-emerald-50 border border-emerald-200'
@@ -698,13 +995,41 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setSalesMessageFilter('UNRECEIVED')}
-                className={`px-2 py-1 rounded-lg transition-colors ${
+                className={`px-2 py-1 rounded-lg transition-colors whitespace-nowrap ${
                   salesMessageFilter === 'UNRECEIVED'
                     ? 'bg-slate-600 text-white shadow-2xs'
                     : 'bg-white text-slate-500 hover:bg-slate-100 border border-slate-200'
                 }`}
               >
                 미수신 ({unreceivedSalesCount})
+              </button>
+
+              <div className="h-3 w-px bg-slate-300 mx-0.5" />
+
+              <button
+                type="button"
+                onClick={() => setSalesPaymentFilter(salesPaymentFilter === 'PAID' ? 'ALL' : 'PAID')}
+                className={`px-2 py-1 rounded-lg transition-colors flex items-center gap-1 whitespace-nowrap ${
+                  salesPaymentFilter === 'PAID'
+                    ? 'bg-cyan-700 text-white shadow-2xs'
+                    : 'bg-white text-cyan-700 hover:bg-cyan-50 border border-cyan-200'
+                }`}
+                title="입금 완료된 판매 건만 필터"
+              >
+                <CreditCard className="w-3 h-3" />
+                입금완료 ({paidSalesCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setSalesPaymentFilter(salesPaymentFilter === 'UNPAID' ? 'ALL' : 'UNPAID')}
+                className={`px-2 py-1 rounded-lg transition-colors whitespace-nowrap ${
+                  salesPaymentFilter === 'UNPAID'
+                    ? 'bg-amber-600 text-white shadow-2xs'
+                    : 'bg-white text-amber-700 hover:bg-amber-50 border border-amber-200'
+                }`}
+                title="입금 대기 판매 건만 필터"
+              >
+                입금대기 ({unpaidSalesCount})
               </button>
             </div>
           </div>
@@ -717,25 +1042,37 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
               </div>
             ) : (
               filteredSales.map((sale) => {
-                const isSelected = Boolean(
-                  messagesSearch.trim() &&
-                  sale.buyerNickname?.trim().toLowerCase() === messagesSearch.trim().toLowerCase()
-                );
+                const isSelected = selectedSaleId === sale.id;
 
                 const matchedThread = sale.buyerNickname
                   ? buyerToThreadMap.get(sale.buyerNickname.trim().toLowerCase())
                   : undefined;
 
+                const paymentSummary = getBuyerPaymentSummary(sale.buyerNickname, sale.amount);
+                const lastPayment = paymentSummary.paymentList[paymentSummary.paymentList.length - 1];
+
                 return (
                   <div
                     key={sale.id}
-                    onClick={() => handleSelectBuyerFromSales(sale.buyerNickname)}
+                    onClick={() => {
+                      if (isSelected) {
+                        setSelectedSaleId(null);
+                        setMessagesSearch('');
+                        setSelectedPhoneKey(null);
+                      } else {
+                        handleSelectBuyerFromSales(sale);
+                      }
+                    }}
                     className={`group p-3 rounded-2xl border transition-all cursor-pointer ${
                       isSelected
                         ? 'bg-cyan-50/60 border-cyan-500 shadow-xs ring-1 ring-cyan-200'
                         : 'bg-white border-slate-200 hover:border-brand-400 hover:shadow-xs'
                     }`}
-                    title="클릭 시 우측 문자함에서 해당 고객 대화를 찾습니다"
+                    title={
+                      isSelected
+                        ? '클릭 시 선택 해제하고 전체 문자를 표시합니다'
+                        : '클릭 시 우측 문자함 및 입금 내역에서 해당 고객을 대조합니다'
+                    }
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -752,6 +1089,31 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                         ) : (
                           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
                             문자 미수신
+                          </span>
+                        )}
+
+                        {/* 은행 입금 상태 배지 */}
+                        {paymentSummary.status === 'PAID' && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-cyan-50 text-cyan-700 border border-cyan-200 flex items-center gap-1">
+                            <CheckCircle2 className="w-2.5 h-2.5 text-cyan-600" />
+                            입금완료
+                          </span>
+                        )}
+                        {paymentSummary.status === 'OVERPAID' && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200 flex items-center gap-1">
+                            <CheckCircle2 className="w-2.5 h-2.5 text-purple-600" />
+                            초과입금 (+{paymentSummary.diff.toLocaleString()}원)
+                          </span>
+                        )}
+                        {paymentSummary.status === 'PARTIAL' && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5 text-amber-600" />
+                            부분입금 ({paymentSummary.totalPaid.toLocaleString()}원)
+                          </span>
+                        )}
+                        {paymentSummary.status === 'UNPAID' && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                            입금대기
                           </span>
                         )}
 
@@ -788,6 +1150,24 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                       </span>
                     </div>
 
+                    {/* 입금 내역이 있는 경우: 은행/입금자 및 입금액 미리보기 박스 */}
+                    {paymentSummary.paymentList.length > 0 && lastPayment && (
+                      <div className="mt-2 p-2 rounded-xl bg-cyan-50/60 border border-cyan-100 text-[11px] space-y-1">
+                        <div className="flex items-center justify-between text-slate-700 font-semibold">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <CreditCard className="w-3 h-3 text-cyan-600 flex-shrink-0" />
+                            <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${getBankBadgeStyle(lastPayment.bank)}`}>
+                              {lastPayment.bank || '은행'}
+                            </span>
+                            <span className="text-slate-900 font-bold truncate">{lastPayment.payerName}</span>
+                          </div>
+                          <span className="text-cyan-800 font-extrabold text-[11px] whitespace-nowrap ml-1">
+                            {paymentSummary.totalPaid.toLocaleString()}원 입금
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
                     {/* 수신된 문자가 있는 경우: 전화번호 및 최근 문자 미리보기 박스 */}
                     {matchedThread && (
                       <div className="mt-2 p-2 rounded-xl bg-emerald-50/60 border border-emerald-100 text-[11px] space-y-1">
@@ -811,14 +1191,13 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                       </div>
                     )}
 
-                    <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400 group-hover:text-brand-600 font-semibold">
-                      <span>{sale.sessionId ? `회차: ${sale.sessionId}` : '일반 판매'}</span>
+                    <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-end text-[11px] font-semibold">
                       {matchedThread ? (
-                        <span className="text-emerald-700 font-bold flex items-center gap-0.5">
+                        <span className="text-emerald-700 font-bold flex items-center gap-0.5 group-hover:text-emerald-800">
                           문자 대화 확인 ({matchedThread.messages.length}건) <ChevronRight className="w-3 h-3" />
                         </span>
                       ) : (
-                        <span className="flex items-center gap-0.5">
+                        <span className="text-slate-400 group-hover:text-brand-600 flex items-center gap-0.5">
                           문자 대조하기 <ChevronRight className="w-3 h-3" />
                         </span>
                       )}
@@ -830,17 +1209,77 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
           </div>
         </section>
 
-        {/* ===================== [우측: 고객 문자함 (인박스)] ===================== */}
-        <section className="flex-1 flex flex-col md:flex-row min-h-0 bg-slate-50">
-          {/* [우측-1: 전화번호별 대화목록 스레드] */}
-          <div className="w-full md:w-72 lg:w-80 flex flex-col border-r border-slate-200 bg-white">
+        {/* ===================== [우측: 고객 문자 및 은행 입금 인박스] ===================== */}
+        <section className="flex-1 flex flex-col min-h-0 bg-slate-50">
+          {/* 상단 서브 탭 바: 고객 문자함 ↔ 실시간 은행 입금함 */}
+          <div className="flex-shrink-0 bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between gap-3 shadow-2xs z-10">
+            <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setInboxTab('MESSAGES')}
+                className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  inboxTab === 'MESSAGES'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Inbox className="w-3.5 h-3.5 text-cyan-600" />
+                고객 문자 인박스 ({filteredThreads.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setInboxTab('PAYMENTS')}
+                className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 relative ${
+                  inboxTab === 'PAYMENTS'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <CreditCard className="w-3.5 h-3.5 text-brand-600" />
+                실시간 은행 입금 ({payments.length})
+                {unmatchedPayments.length > 0 && (
+                  <span className="bg-amber-500 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full shadow-2xs">
+                    {unmatchedPayments.length}건 미확인
+                  </span>
+                )}
+              </button>
+            </div>
+
+            <div className="hidden sm:flex items-center gap-2 text-xs">
+              {inboxTab === 'MESSAGES' ? (
+                <span className="text-slate-500">
+                  총 수신 문자 <strong className="text-slate-900 font-bold">{messages.length}</strong>건
+                </span>
+              ) : (
+                <span className="text-slate-500">
+                  총 입금액 <strong className="text-brand-700 font-black">{payments.reduce((sum, p) => sum + (p.amount || 0), 0).toLocaleString()}</strong>원
+                </span>
+              )}
+            </div>
+          </div>
+
+          {inboxTab === 'MESSAGES' ? (
+            <div className="flex-1 flex flex-col md:flex-row min-h-0 bg-slate-50 overflow-hidden">
+              {/* [우측-1: 전화번호별 대화목록 스레드] */}
+              <div className="w-full md:w-72 lg:w-80 flex flex-col border-r border-slate-200 bg-white">
             <div className="p-3 border-b border-slate-100 bg-slate-50/70 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
                   <Inbox className="w-3.5 h-3.5 text-cyan-600" />
                   고객 문자 인박스 ({filteredThreads.length})
                 </span>
-                <span className="text-[10px] text-slate-400">전체 수발신</span>
+                {messagesSearch.trim() ? (
+                  <button
+                    type="button"
+                    onClick={() => setMessagesSearch('')}
+                    className="text-[11px] font-bold text-cyan-700 bg-cyan-100 hover:bg-cyan-200 border border-cyan-300 px-2.5 py-0.5 rounded-lg transition-all cursor-pointer shadow-2xs hover:shadow-xs active:scale-95 flex items-center gap-1"
+                    title="전체 수발신 문자 목록 보기"
+                  >
+                    전체 수발신
+                  </button>
+                ) : (
+                  <span className="text-[10px] text-slate-400 font-medium">전체 수발신</span>
+                )}
               </div>
 
               {/* 문자 검색창 */}
@@ -1049,6 +1488,120 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                   </div>
                 </div>
 
+                {/* 실시간 은행 입금 대조 배너 */}
+                {(() => {
+                  const connectedNickname =
+                    activeThread.existingNickname ||
+                    activeThread.newMatchedNickname ||
+                    manualNicknames.get(activeThread.phoneKey) ||
+                    null;
+
+                  const matchingSales = connectedNickname
+                    ? sales.filter(
+                        (s) => s.buyerNickname?.trim().toLowerCase() === connectedNickname.trim().toLowerCase()
+                      )
+                    : [];
+                  const requiredTotal = matchingSales.reduce((sum, s) => sum + (s.amount || 0), 0);
+                  const pSummary = getBuyerPaymentSummary(connectedNickname, requiredTotal);
+
+                  if (connectedNickname) {
+                    if (pSummary.paymentList.length > 0) {
+                      return (
+                        <div
+                          className={`px-3.5 py-2.5 border-b text-xs flex flex-wrap items-center justify-between gap-2 shadow-2xs ${
+                            pSummary.status === 'PAID'
+                              ? 'bg-cyan-50/80 border-cyan-200 text-cyan-900'
+                              : pSummary.status === 'OVERPAID'
+                              ? 'bg-purple-50/80 border-purple-200 text-purple-900'
+                              : 'bg-amber-50/80 border-amber-200 text-amber-900'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <CreditCard className="w-4 h-4 flex-shrink-0" />
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-extrabold text-sm">
+                                은행 입금: {pSummary.totalPaid.toLocaleString()}원
+                              </span>
+                              {pSummary.status === 'PAID' && (
+                                <span className="bg-cyan-600 text-white text-[10px] font-black px-1.5 py-0.2 rounded-md">
+                                  주문 전액 완납 ({requiredTotal.toLocaleString()}원)
+                                </span>
+                              )}
+                              {pSummary.status === 'OVERPAID' && (
+                                <span className="bg-purple-600 text-white text-[10px] font-black px-1.5 py-0.2 rounded-md">
+                                  +{pSummary.diff.toLocaleString()}원 초과입금
+                                </span>
+                              )}
+                              {pSummary.status === 'PARTIAL' && (
+                                <span className="bg-amber-600 text-white text-[10px] font-black px-1.5 py-0.2 rounded-md">
+                                  주문 {requiredTotal.toLocaleString()}원 중 미납 {(requiredTotal - pSummary.totalPaid).toLocaleString()}원
+                                </span>
+                              )}
+                            </div>
+
+                            {/* 입금 상세 배지 목록 */}
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {pSummary.paymentList.map((p) => (
+                                <span
+                                  key={p.id}
+                                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${getBankBadgeStyle(p.bank)}`}
+                                  title={`입금일시: ${formatDateTime(p.paidAt)}`}
+                                >
+                                  {p.bank || '은행'} · {p.payerName} ({p.amount.toLocaleString()}원)
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInboxTab('PAYMENTS');
+                              setPaymentsSearch(connectedNickname);
+                            }}
+                            className="text-[11px] font-bold underline hover:opacity-80 transition-opacity ml-auto"
+                          >
+                            입금함에서 상세 보기
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    // 닉네임은 있지만 입금 내역이 아직 없는 경우
+                    return (
+                      <div className="px-3.5 py-2 bg-slate-100/90 border-b border-slate-200 text-xs flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-3.5 h-3.5 text-slate-500" />
+                          <span className="text-slate-700 font-semibold">
+                            은행 입금 확인 대기 중
+                            {requiredTotal > 0 && ` (주문 금액: ${requiredTotal.toLocaleString()}원)`}
+                          </span>
+                        </div>
+                        {unmatchedPayments.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInboxTab('PAYMENTS');
+                            }}
+                            className="text-[11px] font-bold text-cyan-700 hover:text-cyan-800 bg-white border border-cyan-300 px-2 py-0.5 rounded-lg shadow-2xs hover:shadow-xs transition-all flex items-center gap-1"
+                          >
+                            <Link2 className="w-3 h-3 text-cyan-600" />
+                            미확인 입금({unmatchedPayments.length}건)에서 연결하기
+                          </button>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  // 닉네임이 아직 없는 번호인 경우
+                  return (
+                    <div className="px-3.5 py-1.5 bg-amber-50/50 border-b border-amber-200 text-[11px] text-amber-800 flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                      <span>위 상단에서 고객 닉네임을 연결하시면 실시간 은행 입금 내역과 자동 대조됩니다.</span>
+                    </div>
+                  );
+                })()}
+
                 {/* 말풍선 목록 영역 */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/70">
                   {activeThread.messages.map((msg, index) => {
@@ -1156,6 +1709,60 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                   </p>
                 </div>
               </>
+            ) : selectedSale ? (
+              /* 문자가 없는 판매 건을 선택했을 때의 대화창 안내 화면 */
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-50/50 overflow-y-auto">
+                <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mb-4 shadow-xs">
+                  <MessageSquare className="w-8 h-8 text-amber-500" />
+                </div>
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-200 text-slate-700 text-xs font-bold mb-2">
+                  <span>선택된 판매 내역</span>
+                </div>
+                <h3 className="text-base font-black text-slate-900 mb-1">
+                  '{selectedSale.buyerNickname || '구매자'}' 고객님의 수신된 문자가 없습니다
+                </h3>
+                <p className="text-xs text-slate-500 max-w-sm mb-6 leading-relaxed">
+                  해당 고객이 아직 주문서나 입금/주소 문자를 발송하지 않았거나, 문자에 닉네임이 포함되지 않았습니다.
+                </p>
+
+                {/* 선택된 판매 정보 요약 카드 */}
+                <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 p-4 text-left shadow-xs mb-4">
+                  <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-slate-100">
+                    <span className="text-xs font-bold text-slate-500">구매자 닉네임</span>
+                    <span className="text-sm font-black text-slate-900">{selectedSale.buyerNickname || '-'}</span>
+                  </div>
+                  <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-slate-100">
+                    <span className="text-xs font-bold text-slate-500">주문 상품</span>
+                    <span className="text-xs font-bold text-slate-800">
+                      {selectedSale.productName || '상품명 미지정'} {selectedSale.quantity && selectedSale.quantity > 1 ? `(${selectedSale.quantity}개)` : ''}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-slate-100">
+                    <span className="text-xs font-bold text-slate-500">판매 금액</span>
+                    <span className="text-sm font-black text-brand-700">{(selectedSale.amount || 0).toLocaleString()}원</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-500">주문 시각</span>
+                    <span className="text-xs text-slate-500 font-medium">
+                      {selectedSale.recognizedAt ? formatDateTime(selectedSale.recognizedAt) : '-'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedSaleId(null);
+                      setMessagesSearch('');
+                      setSelectedPhoneKey(null);
+                    }}
+                    className="px-3.5 py-1.5 text-xs font-bold bg-white hover:bg-slate-100 text-slate-700 rounded-xl border border-slate-300 transition-colors shadow-2xs"
+                  >
+                    선택 해제하고 전체 문자 보기
+                  </button>
+                </div>
+              </div>
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400">
                 <MessageSquare className="w-10 h-10 text-slate-300 mb-2" />
@@ -1166,7 +1773,260 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
               </div>
             )}
           </div>
-        </section>
+        </div>
+      ) : (
+        /* ===================== [우측: 은행 입금함 전용 뷰] ===================== */
+        <div className="flex-1 flex flex-col min-h-0 bg-white overflow-hidden">
+          {/* 상단 통계 및 필터/검색 바 */}
+          <div className="p-3 border-b border-slate-200 bg-slate-50/70 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                  <CreditCard className="w-4 h-4 text-cyan-600" />
+                  실시간 은행 입금 내역 ({filteredPayments.length}건)
+                </span>
+
+                {/* 통계 배지 */}
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                  매칭 완료 {payments.length - unmatchedPayments.length}건
+                </span>
+                {unmatchedPayments.length > 0 && (
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 text-amber-600" />
+                    확인 필요 {unmatchedPayments.length}건
+                  </span>
+                )}
+              </div>
+
+              <span className="text-xs font-black text-slate-700">
+                입금 합계: <span className="text-brand-700 font-black">{filteredPayments.reduce((s, p) => s + (p.amount || 0), 0).toLocaleString()}원</span>
+              </span>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              {/* 검색창 */}
+              <div className="relative flex-1">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="입금자명, 은행명, 금액, 매칭된 닉네임 검색..."
+                  value={paymentsSearch}
+                  onChange={(e) => setPaymentsSearch(e.target.value)}
+                  className="w-full pl-8 pr-7 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:border-cyan-500 focus:outline-none"
+                />
+                {paymentsSearch && (
+                  <button
+                    onClick={() => setPaymentsSearch('')}
+                    className="absolute right-2 top-2 p-0.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600"
+                    title="검색어 지우기"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* 필터 버튼들 */}
+              <div className="flex items-center gap-1 text-[11px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => setPaymentStatusFilter('ALL')}
+                  className={`px-2.5 py-1.5 rounded-lg transition-colors whitespace-nowrap ${
+                    paymentStatusFilter === 'ALL'
+                      ? 'bg-slate-800 text-white shadow-2xs'
+                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  전체 ({payments.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentStatusFilter('UNMATCHED')}
+                  className={`px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1 whitespace-nowrap ${
+                    paymentStatusFilter === 'UNMATCHED'
+                      ? 'bg-amber-600 text-white shadow-2xs'
+                      : 'bg-white text-amber-700 hover:bg-amber-50 border border-amber-200'
+                  }`}
+                >
+                  <AlertCircle className="w-3 h-3" />
+                  확인 필요 ({unmatchedPayments.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentStatusFilter('MATCHED')}
+                  className={`px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1 whitespace-nowrap ${
+                    paymentStatusFilter === 'MATCHED'
+                      ? 'bg-emerald-600 text-white shadow-2xs'
+                      : 'bg-white text-emerald-700 hover:bg-emerald-50 border border-emerald-200'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3 h-3" />
+                  매칭 완료 ({payments.length - unmatchedPayments.length})
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 입금 리스트 피드 */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-2.5 bg-slate-50/50">
+            {filteredPayments.length === 0 ? (
+              <div className="py-16 text-center text-slate-400 text-xs">
+                {payments.length === 0
+                  ? '수신된 은행 입금 알림이 아직 없습니다. 스마트폰 voicecapSMS 은행 알림 수신을 확인하세요.'
+                  : '검색 또는 필터 조건에 일치하는 입금 내역이 없습니다.'}
+              </div>
+            ) : (
+              filteredPayments.map((payment) => {
+                const matchedNick = getMatchedNicknameForPayment(payment.id);
+                const isManual = manualPaymentLinks.has(payment.id);
+                const selectedCandidateNick =
+                  selectedSale?.buyerNickname ||
+                  activeThread?.existingNickname ||
+                  activeThread?.newMatchedNickname ||
+                  null;
+
+                return (
+                  <div
+                    key={payment.id}
+                    className={`p-3.5 rounded-2xl border transition-all bg-white shadow-xs ${
+                      matchedNick
+                        ? 'border-slate-200 hover:border-cyan-400'
+                        : 'border-amber-200 bg-amber-50/30 hover:border-amber-400'
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className={`text-xs font-black px-2 py-0.5 rounded-lg border ${getBankBadgeStyle(payment.bank)}`}
+                        >
+                          {payment.bank || '은행'}
+                        </span>
+                        <span className="text-sm font-black text-slate-900">
+                          {payment.payerName || '입금자 미지정'}
+                        </span>
+                        <span className="text-xs text-slate-400 font-medium">
+                          {formatDateTime(payment.paidAt || payment.createdAt)}
+                        </span>
+                      </div>
+
+                      <span className="text-base font-black text-brand-700">
+                        {payment.amount.toLocaleString()}원
+                      </span>
+                    </div>
+
+                    {payment.memo && (
+                      <div className="mt-1.5 text-xs text-slate-500 bg-slate-100/70 px-2 py-1 rounded-md inline-block">
+                        적요/메모: {payment.memo}
+                      </div>
+                    )}
+
+                    <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                      {/* 매칭 상태 표시 */}
+                      <div className="flex items-center gap-1.5">
+                        {matchedNick ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-bold text-cyan-800 bg-cyan-50 px-2.5 py-0.5 rounded-full border border-cyan-200 flex items-center gap-1">
+                              <UserCheck className="w-3.5 h-3.5 text-cyan-600" />
+                              고객 매칭: <strong>{matchedNick}</strong>
+                            </span>
+                            {isManual && (
+                              <button
+                                type="button"
+                                onClick={() => handleUnlinkPayment(payment.id)}
+                                className="text-slate-400 hover:text-red-500 p-0.5 transition-colors"
+                                title="입금 연결 해제"
+                              >
+                                <Unlink className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs font-bold text-amber-700 bg-amber-100/80 px-2.5 py-0.5 rounded-full border border-amber-300 flex items-center gap-1">
+                            <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                            확인 필요 (고객 미매칭)
+                          </span>
+                        )}
+                      </div>
+
+                      {/* 액션 버튼 영역 */}
+                      <div className="flex items-center gap-1.5 ml-auto flex-wrap">
+                        {matchedNick ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInboxTab('MESSAGES');
+                              setMessagesSearch(matchedNick);
+                              handleSelectBuyerFromSales({ buyerNickname: matchedNick } as any);
+                            }}
+                            className="px-2.5 py-1 text-xs font-bold bg-cyan-50 hover:bg-cyan-100 text-cyan-700 rounded-lg border border-cyan-200 transition-colors flex items-center gap-1"
+                          >
+                            <MessageSquare className="w-3 h-3" />
+                            문자 대화 보기
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {selectedCandidateNick && (
+                              <button
+                                type="button"
+                                onClick={() => handleLinkPaymentToBuyer(payment.id, selectedCandidateNick)}
+                                className="px-2.5 py-1 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg shadow-2xs transition-colors flex items-center gap-1"
+                                title={`현재 선택된 '${selectedCandidateNick}' 고객과 연결합니다`}
+                              >
+                                <Link2 className="w-3 h-3" />
+                                '{selectedCandidateNick}'에 즉시 연결
+                              </button>
+                            )}
+
+                            {/* 다른 구매자 닉네임 선택 연결 폼 */}
+                            <form
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                const customNick = paymentLinkInputs[payment.id]?.trim();
+                                if (customNick) {
+                                  handleLinkPaymentToBuyer(payment.id, customNick);
+                                  setPaymentLinkInputs((prev) => ({ ...prev, [payment.id]: '' }));
+                                }
+                              }}
+                              className="flex items-center gap-1"
+                            >
+                              <input
+                                type="text"
+                                list={`buyer-datalist-${payment.id}`}
+                                placeholder="고객 닉네임 선택"
+                                value={paymentLinkInputs[payment.id] || ''}
+                                onChange={(e) =>
+                                  setPaymentLinkInputs((prev) => ({
+                                    ...prev,
+                                    [payment.id]: e.target.value,
+                                  }))
+                                }
+                                className="text-xs px-2 py-1 bg-white border border-slate-300 rounded-lg w-28 sm:w-36 focus:outline-none focus:border-amber-500"
+                              />
+                              <datalist id={`buyer-datalist-${payment.id}`}>
+                                {allBuyerNicknames.map((nick) => (
+                                  <option key={nick} value={nick} />
+                                ))}
+                              </datalist>
+                              <button
+                                type="submit"
+                                disabled={!paymentLinkInputs[payment.id]?.trim()}
+                                className="px-2 py-1 text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white rounded-lg disabled:opacity-40 transition-colors"
+                              >
+                                연결
+                              </button>
+                            </form>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </section>
       </div>
 
       {viewingImages && (
