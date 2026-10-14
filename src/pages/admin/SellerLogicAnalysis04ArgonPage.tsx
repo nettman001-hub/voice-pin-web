@@ -37,6 +37,7 @@ import {
   type ArgonDebugEntry,
   updateActiveProductContext,
   buildArgonPromptWithContext,
+  promoteArgonDecisions,
 } from '../../services/sellerLogic04Argon';
 import { ArgonLiveConsole } from '../../components/admin/ArgonLiveConsole';
 
@@ -162,22 +163,34 @@ export default function SellerLogicAnalysis04ArgonPage() {
   };
 
   const acceptResult = (next: SellerLogicDeepRunResult) => {
-    resultRef.current = next;
-    stateRef.current = next.state;
-    stateSlotRef.current = next.state.slotNumber;
-    const inputSlot = next.state.slotNumber;
+    // 04argon 하이브리드 보강: 구어체 배정 발화(~줄게 등) 감지 시 CONFIRMED로 자동 승격
+    const curProd = activeProductRef.current;
+    const promotedDecisions = promoteArgonDecisions(
+      next.decisions,
+      rowsRef.current.transcripts,
+      rowsRef.current.comments,
+      curProd,
+    );
+    const updatedNext: SellerLogicDeepRunResult = {
+      ...next,
+      decisions: promotedDecisions,
+    };
+
+    resultRef.current = updatedNext;
+    stateRef.current = updatedNext.state;
+    stateSlotRef.current = updatedNext.state.slotNumber;
+    const inputSlot = updatedNext.state.slotNumber;
     resultSlotRef.current = inputSlot;
-    setResult(next);
+    setResult(updatedNext);
     setResultSlot(inputSlot);
     setError(captureFailure.current);
 
-    if (next.warnings && next.warnings.length) {
-      setWarnings(next.warnings);
+    if (updatedNext.warnings && updatedNext.warnings.length) {
+      setWarnings(updatedNext.warnings);
     }
 
     // 04argon 하이브리드 보강: 소수점 원본 가격 및 캡처 지시 메타데이터 결합
-    const curProd = activeProductRef.current;
-    const extDecisions: ArgonExtendedDecision[] = next.decisions.map((d) => {
+    const extDecisions: ArgonExtendedDecision[] = promotedDecisions.map((d) => {
       let rawPrice = curProd?.rawPrice;
       if (d.unitPrice && !rawPrice) {
         rawPrice = (d.unitPrice / 10000).toString();
@@ -191,15 +204,15 @@ export default function SellerLogicAnalysis04ArgonPage() {
     });
     setExtendedDecisions(extDecisions);
 
-    const confirmed = next.decisions.filter((decision) => decision.status === 'CONFIRMED');
-    const pending = next.decisions.filter((decision) => decision.status === 'PENDING' || decision.status === 'REVIEW');
+    const confirmed = promotedDecisions.filter((decision) => decision.status === 'CONFIRMED');
+    const pending = promotedDecisions.filter((decision) => decision.status === 'PENDING' || decision.status === 'REVIEW');
     setStatus(
-      next.stats.segmentCalls
-        ? `다중방식 심층 분석 ${next.stats.segmentCalls}개 시간대 · 확정 ${confirmed.length}명 · 확인 필요 ${pending.length}명`
+      updatedNext.stats.segmentCalls
+        ? `다중방식 심층 분석 ${updatedNext.stats.segmentCalls}개 시간대 · 확정 ${confirmed.length}명 · 확인 필요 ${pending.length}명`
         : '새로 분석할 시간대가 없습니다.',
     );
 
-    const fresh = next.decisions.filter(
+    const fresh = promotedDecisions.filter(
       (decision) =>
         (decision.status === 'CONFIRMED' || decision.status === 'PENDING') &&
         decision.nickname &&
