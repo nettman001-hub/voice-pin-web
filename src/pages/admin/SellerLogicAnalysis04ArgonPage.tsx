@@ -16,6 +16,9 @@ import {
 } from 'lucide-react';
 import { useLive } from '../../context/LiveContext';
 import { useCommentCapture } from '../../context/CommentCaptureContext';
+import { commentStreamService } from '../../services/commentStreamService';
+import { DEFAULT_COMMENT_SERVER_URL, type CommentRecord } from '../../types/comment';
+import { storageService } from '../../services/storageService';
 import { analyzeSellerLogicDeep, getSellerLogicSlots, getSellerLogicDeepHints } from '../../services/sellerLogicDeepApi';
 import { runSellerLogicDeep, type SellerLogicDeepRunResult } from '../../services/sellerLogicDeepEngine';
 import { SellerLogicCapture } from '../../services/sellerLogicCapture';
@@ -352,6 +355,47 @@ export default function SellerLogicAnalysis04ArgonPage() {
     queueRef.current.setAutomatic(true);
     void loadSlots();
 
+    // 초기 댓글 수화: 이미 수집된 댓글이 있으면 기본 표시
+    const initialComments = commentCapture.liveComments?.length
+      ? commentCapture.liveComments
+      : storageService.getCommentRecords().slice(0, 50).reverse();
+    if (initialComments.length > 0 && !rowsRef.current.comments.length) {
+      acceptEvidence({ ...rowsRef.current, comments: initialComments });
+    }
+
+    // 댓글 도우미 연결 보장 (기본: 127.0.0.1:2137)
+    const serverUrl = commentCapture.config.serverUrl || DEFAULT_COMMENT_SERVER_URL;
+    commentStreamService.connect(serverUrl);
+
+    // 데스크톱 댓글 도우미로부터 유입되는 실시간 댓글을 즉시 수신하여 화면에 표시
+    const unsubComment = commentStreamService.onComment((c) => {
+      const newComment: CommentRecord = {
+        id: `${sessionRef.current}:comment:${c.id || `${c.uniqueId || c.nickname}-${c.receivedAt}`}`,
+        platformMessageId: c.id,
+        sessionId: sessionRef.current,
+        nickname: c.nickname,
+        uniqueId: c.uniqueId,
+        platformUserId: c.userId,
+        content: c.content,
+        capturedAt: c.receivedAt || new Date().toISOString(),
+      };
+
+      const rows = rowsRef.current;
+      if (
+        rows.comments.some(
+          (r) =>
+            r.id === newComment.id ||
+            (r.platformMessageId && r.platformMessageId === newComment.platformMessageId) ||
+            (r.nickname === newComment.nickname &&
+              r.content === newComment.content &&
+              Math.abs(Date.parse(r.capturedAt) - Date.parse(newComment.capturedAt)) < 2000),
+        )
+      ) {
+        return;
+      }
+      acceptEvidence({ ...rows, comments: [...rows.comments, newComment] });
+    });
+
     return () => {
       mounted.current = false;
       slotLoadGeneration.current++;
@@ -362,8 +406,36 @@ export default function SellerLogicAnalysis04ArgonPage() {
       queueRef.current?.dispose();
       captureRef.current?.stop();
       captureRef.current = null;
+      unsubComment();
     };
   }, []);
+
+  // 전역 CommentCaptureContext의 liveComments 실시간 동기화
+  useEffect(() => {
+    if (!commentCapture.liveComments || commentCapture.liveComments.length === 0) return;
+    const rows = rowsRef.current;
+    let added = false;
+    const nextComments = [...rows.comments];
+
+    for (const c of commentCapture.liveComments) {
+      const exists = nextComments.some(
+        (r) =>
+          r.id === c.id ||
+          (r.platformMessageId && r.platformMessageId === c.platformMessageId) ||
+          (r.nickname === c.nickname &&
+            r.content === c.content &&
+            Math.abs(Date.parse(r.capturedAt) - Date.parse(c.capturedAt)) < 2000),
+      );
+      if (!exists) {
+        nextComments.push(c);
+        added = true;
+      }
+    }
+
+    if (added) {
+      acceptEvidence({ ...rows, comments: nextComments });
+    }
+  }, [commentCapture.liveComments]);
 
   const submit = (rows = rowsRef.current) => {
     if (!rows.comments.length && !rows.transcripts.length) return;
@@ -452,8 +524,8 @@ export default function SellerLogicAnalysis04ArgonPage() {
 
   const start = async () => {
     if (!slotSettings || loadingSlots || slotSettingsError) return;
-    if (live.isListening || commentCapture.isActive) {
-      setError('기존 청취와 댓글 수집을 종료한 뒤 시작해 주세요.');
+    if (live.isListening) {
+      setError('기존 라이브 음성 청취를 종료한 뒤 시작해 주세요.');
       return;
     }
     if (!username.trim()) {
@@ -484,7 +556,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
     try {
       await service.start({
         username: username.trim().replace(/^@/u, ''),
-        serverUrl: commentCapture.config.serverUrl,
+        serverUrl: commentCapture.config.serverUrl || DEFAULT_COMMENT_SERVER_URL,
         sessionId: sessionRef.current,
         stt: {
           provider: 'SONIOX',
@@ -1119,10 +1191,38 @@ export default function SellerLogicAnalysis04ArgonPage() {
         <section aria-label="실시간 댓글" className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 p-5">
             <div>
-              <h2 className="flex items-center gap-2 font-bold text-slate-900">
-                <MessageSquareText size={18} /> 실시간 댓글
-              </h2>
-              <p className="mt-1 text-xs text-slate-500">수집한 댓글을 바로 표시합니다. 최근 수집한 댓글이 위에 표시됩니다.</p>
+              <div className="flex items-center gap-2">
+                <h2 className="flex items-center gap-2 font-bold text-slate-900">
+                  <MessageSquareText size={18} /> 실시간 댓글
+                </h2>
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold border ${
+                    commentCapture.serverStatus === 'COLLECTING'
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 animate-pulse'
+                      : commentCapture.serverStatus === 'CONNECTED'
+                      ? 'bg-blue-50 text-blue-700 border-blue-200'
+                      : 'bg-slate-100 text-slate-500 border-slate-200'
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      commentCapture.serverStatus === 'COLLECTING'
+                        ? 'bg-emerald-500'
+                        : commentCapture.serverStatus === 'CONNECTED'
+                        ? 'bg-blue-500'
+                        : 'bg-slate-400'
+                    }`}
+                  />
+                  {commentCapture.serverStatus === 'COLLECTING'
+                    ? '수집 중'
+                    : commentCapture.serverStatus === 'CONNECTED'
+                    ? '도우미 연결됨'
+                    : '도우미 미연결'}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                댓글 도우미와 실시간 동기화됩니다. 최근 수집한 댓글이 위에 표시됩니다.
+              </p>
             </div>
             <div className="text-right text-xs text-slate-500">
               <p className="font-semibold text-slate-700">누적 {evidence.comments.length.toLocaleString()}개</p>
