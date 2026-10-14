@@ -481,6 +481,11 @@ export class SellerLogicCapture {
     this.scheduler = null;
     this.audio.stopCapture();
     this.disposers.splice(0).forEach((dispose) => dispose());
+    try {
+      this.comments.stopCollecting();
+    } catch {
+      // ignore
+    }
     this.comments.disconnect();
     if (this.selectingScreen) screenCaptureService.cancelPendingRequest();
     this.selectingScreen = false;

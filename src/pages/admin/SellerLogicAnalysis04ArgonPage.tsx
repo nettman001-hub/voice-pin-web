@@ -364,8 +364,8 @@ export default function SellerLogicAnalysis04ArgonPage() {
   useEffect(() => {
     mounted.current = true;
     queueRef.current = makeQueue();
-    // 청취가 아닌 상태에서도 데이터가 들어오면 바로 분석할 수 있도록 자동 분석 큐 활성화
-    queueRef.current.setAutomatic(true);
+    // 청취 시작 전에는 자동 분석 대기
+    queueRef.current.setAutomatic(false);
     void loadSlots();
 
     // 초기 댓글 수화: 이미 수집된 댓글이 있으면 기본 표시
@@ -380,7 +380,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
     const serverUrl = commentCapture.config.serverUrl || DEFAULT_COMMENT_SERVER_URL;
     commentStreamService.connect(serverUrl);
 
-    // 데스크톱 댓글 도우미로부터 유입되는 실시간 댓글을 즉시 수신하여 화면에 표시
+    // 데스크톱 댓글 도우미로부터 유입되는 실시간 댓글을 수신하여 화면에 표시
     const unsubComment = commentStreamService.onComment((c) => {
       const newComment: CommentRecord = {
         id: `${sessionRef.current}:comment:${c.id || `${c.uniqueId || c.nickname}-${c.receivedAt}`}`,
@@ -419,6 +419,13 @@ export default function SellerLogicAnalysis04ArgonPage() {
       queueRef.current?.dispose();
       captureRef.current?.stop();
       captureRef.current = null;
+      try {
+        commentStreamService.stopCollecting();
+        commentCapture.stopCapture();
+        commentStreamService.disconnect();
+      } catch {
+        // ignore
+      }
       unsubComment();
     };
   }, []);
@@ -463,21 +470,38 @@ export default function SellerLogicAnalysis04ArgonPage() {
   const stop = async () => {
     const currentGeneration = generation.current;
     const service = captureRef.current;
-    if (!service) return;
     captureRef.current = null;
-    setStarting(true);
-    setStatus('청취를 종료하고 남은 음성의 전사를 기다립니다…');
-    await service.stop();
-    if (!mounted.current || currentGeneration !== generation.current) return;
     liveMode.current = false;
+    finalizePending.current = false;
+    setStarting(true);
+    setStatus('청취 및 댓글 수집을 종료하고 AI 분석을 중단합니다…');
+
+    // 1) 댓글 수집 서버(데스크톱 도우미) 및 댓글 스트림 즉시 중단
+    try {
+      commentStreamService.stopCollecting();
+      commentCapture.stopCapture();
+      commentStreamService.disconnect();
+    } catch (e) {
+      console.warn('[SellerLogic04Argon] 댓글 서버 중지 처리 오류:', e);
+    }
+
+    // 2) AI 분석 즉시 중단: 실행 중인 요청 Abort + 자동 분석 스케줄러 비활성화
+    queueRef.current?.setAutomatic(false);
+    if (analysisAbort.current) {
+      analysisAbort.current.abort();
+      analysisAbort.current = null;
+    }
+
+    // 3) STT 및 오디오/화면 캡처 서비스 중단
+    if (service) {
+      await service.stop();
+    }
+
+    if (!mounted.current || currentGeneration !== generation.current) return;
     setCapturing(false);
     setStarting(false);
-    setStatus('청취 종료 · 마지막 대화와 남은 발화를 마감 분석합니다.');
-    submit();
-    if (rowsRef.current.comments.length || rowsRef.current.transcripts.length) {
-      if (runningRef.current) finalizePending.current = true;
-      else queueRef.current?.analyzeNow();
-    }
+    setRunning(false);
+    setStatus('청취 종료 · 댓글 수집과 AI 분석이 완전히 중단되었습니다.');
   };
 
   const acceptEvidence = (rows: SellerLogicEvidence) => {
@@ -487,19 +511,33 @@ export default function SellerLogicAnalysis04ArgonPage() {
     const updatedProd = updateActiveProductContext(activeProductRef.current, rows.transcripts, rows.comments);
     activeProductRef.current = updatedProd;
     setActiveProduct(updatedProd);
-    submit(rows);
+
+    // 실시간 청취 중일 때만 AI 큐에 제출 (청취 종료 후에는 자동 분석 중단)
+    if (liveMode.current && captureRef.current) {
+      submit(rows);
+    }
   };
 
   const reset = () => {
     generation.current++;
     liveMode.current = false;
     finalizePending.current = false;
-    analysisAbort.current?.abort();
+    if (analysisAbort.current) {
+      analysisAbort.current.abort();
+      analysisAbort.current = null;
+    }
     captureRef.current?.stop();
     captureRef.current = null;
+    try {
+      commentStreamService.stopCollecting();
+      commentCapture.stopCapture();
+      commentStreamService.disconnect();
+    } catch {
+      // ignore
+    }
     queueRef.current?.dispose();
     queueRef.current = makeQueue();
-    queueRef.current.setAutomatic(true);
+    queueRef.current.setAutomatic(false);
     sessionRef.current = crypto.randomUUID();
     rowsRef.current = emptyEvidence();
     resultRef.current = null;
@@ -528,8 +566,11 @@ export default function SellerLogicAnalysis04ArgonPage() {
     try {
       parseSellerLogicText(paste, date, 'import');
       reset();
-      acceptEvidence(parseSellerLogicText(paste, date, sessionRef.current));
-      setStatus('대화 자료를 불러왔습니다. 다중 판매방식 AI 심층 분석이 자동으로 진행됩니다.');
+      const parsed = parseSellerLogicText(paste, date, sessionRef.current);
+      acceptEvidence(parsed);
+      submit(parsed);
+      queueRef.current?.analyzeNow();
+      setStatus('대화 자료를 불러왔습니다. 다중 판매방식 AI 심층 분석을 진행합니다.');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -561,10 +602,19 @@ export default function SellerLogicAnalysis04ArgonPage() {
     setCapturing(true);
     setError('');
 
+    // AI 자동 스케줄러 켜기
+    queueRef.current?.setAutomatic(true);
+
+    // 댓글 도우미 서버 연결 및 틱톡 수집 시작
+    const cleanUsername = username.trim().replace(/^@/u, '');
+    const serverUrl = commentCapture.config.serverUrl || DEFAULT_COMMENT_SERVER_URL;
+    commentStreamService.connect(serverUrl);
+    commentStreamService.startCollecting(cleanUsername);
+    commentCapture.startCapture();
+
     const service = new SellerLogicCapture();
     captureRef.current = service;
     const current = () => mounted.current && currentGeneration === generation.current && liveMode.current;
-    queueRef.current?.setAutomatic(true);
 
     try {
       await service.start({
@@ -781,7 +831,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
               onClick={() => void stop()}
             >
               <Square size={16} />
-              {starting ? '연결 처리 중…' : '청취 종료'}
+              {starting ? '종료 처리 중…' : '실시간 청취 종료'}
             </button>
           ) : (
             <button
