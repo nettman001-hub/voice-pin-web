@@ -142,11 +142,21 @@ export class SellerLogicCapture {
         capturedAt: comment.receivedAt,
       });
     }));
+    const startComments = () => {
+      if (this.comments.isConnectedToServer && options.username) {
+        this.comments.startCollecting(options.username.trim().replace(/^@/u, ''));
+      }
+    };
     this.disposers.push(this.comments.onStatus((status, message) => {
-      if (generation === this.generation) this.report(`COMMENTS_${status}`, message || status);
+      if (generation === this.generation) {
+        this.report(`COMMENTS_${status}`, message || status);
+        if (status === 'CONNECTED') {
+          startComments();
+        }
+      }
     }));
     this.comments.connect(options.serverUrl);
-    this.comments.startCollecting(options.username.trim().replace(/^@/u, ''));
+    startComments();
     try {
       this.selectingScreen = true;
       const display = await screenCaptureService.getOrCreateStream(true);

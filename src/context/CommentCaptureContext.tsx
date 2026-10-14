@@ -411,10 +411,6 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     // 연결 주소는 설치형 도우미의 고정 로컬 주소를 사용한다.
     // 과거 버전에서 저장된 사설 IP 주소가 있어도 판매자에게 수동 수정을 요구하지 않는다.
     commentStreamService.connect(DEFAULT_COMMENT_SERVER_URL);
-
-    if (!isActiveRef.current) {
-      commentStreamService.stopCollecting();
-    }
   }, [isActive]);
 
   // 수집 시작 조건 충족 시 틱톡 수집 요청: 토글 ON + 라이브 청취 중 + 서버 소켓 연결됨
@@ -428,10 +424,6 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         return;
       }
       commentStreamService.startCollecting(username);
-    }
-
-    if (!isListening) {
-      commentStreamService.stopCollecting();
     }
   }, [isActive, isListening, serverStatus]);
 

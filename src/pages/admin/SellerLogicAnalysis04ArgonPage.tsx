@@ -98,6 +98,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
   const [showWarnings, setShowWarnings] = useState(true);
   const [resultSlot, setResultSlot] = useState<1 | 2 | null>(null);
   const [filter, setFilter] = useState('ALL');
+  const [streamStatus, setStreamStatus] = useState<string>(commentCapture.serverStatus);
 
   // 실시간 AI 호출 프롬프트 & 응답 로그
   const [debugLog, setDebugLog] = useState<ArgonDebugEntry[]>([]);
@@ -380,7 +381,12 @@ export default function SellerLogicAnalysis04ArgonPage() {
     const serverUrl = commentCapture.config.serverUrl || DEFAULT_COMMENT_SERVER_URL;
     commentStreamService.connect(serverUrl);
 
-    // 데스크톱 댓글 도우미로부터 유입되는 실시간 댓글을 수신하여 화면에 표시
+    // 댓글 도우미 소켓 상태 실시간 구독
+    const unsubStatus = commentStreamService.onStatus((status) => {
+      setStreamStatus(status);
+    });
+
+    // 데스크톱 댓글 도우미로부터 유입되는 실시간 댓글을 수신하여 화면에 즉각 표시
     const unsubComment = commentStreamService.onComment((c) => {
       const newComment: CommentRecord = {
         id: `${sessionRef.current}:comment:${c.id || `${c.uniqueId || c.nickname}-${c.receivedAt}`}`,
@@ -393,20 +399,29 @@ export default function SellerLogicAnalysis04ArgonPage() {
         capturedAt: c.receivedAt || new Date().toISOString(),
       };
 
-      const rows = rowsRef.current;
-      if (
-        rows.comments.some(
-          (r) =>
-            r.id === newComment.id ||
-            (r.platformMessageId && r.platformMessageId === newComment.platformMessageId) ||
-            (r.nickname === newComment.nickname &&
-              r.content === newComment.content &&
-              Math.abs(Date.parse(r.capturedAt) - Date.parse(newComment.capturedAt)) < 2000),
-        )
-      ) {
-        return;
-      }
-      acceptEvidence({ ...rows, comments: [...rows.comments, newComment] });
+      setEvidence((prev) => {
+        if (
+          prev.comments.some(
+            (r) =>
+              r.id === newComment.id ||
+              (r.platformMessageId && r.platformMessageId === newComment.platformMessageId) ||
+              (r.nickname === newComment.nickname &&
+                r.content === newComment.content &&
+                Math.abs(Date.parse(r.capturedAt) - Date.parse(newComment.capturedAt)) < 2000),
+          )
+        ) {
+          return prev;
+        }
+        const updated = { ...prev, comments: [...prev.comments, newComment] };
+        rowsRef.current = updated;
+        const updatedProd = updateActiveProductContext(activeProductRef.current, updated.transcripts, updated.comments);
+        activeProductRef.current = updatedProd;
+        setActiveProduct(updatedProd);
+        if (liveMode.current && captureRef.current) {
+          submit(updated);
+        }
+        return updated;
+      });
     });
 
     return () => {
@@ -426,6 +441,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
       } catch {
         // ignore
       }
+      unsubStatus();
       unsubComment();
     };
   }, []);
@@ -465,6 +481,22 @@ export default function SellerLogicAnalysis04ArgonPage() {
       comments: rows.comments,
       transcripts: rows.transcripts,
     });
+  };
+
+  const startCommentCollection = () => {
+    const clean = username.trim().replace(/^@/u, '');
+    if (!clean) {
+      setError('방송 TikTok 아이디를 먼저 입력해 주세요.');
+      return;
+    }
+    setError('');
+    const serverUrl = commentCapture.config.serverUrl || DEFAULT_COMMENT_SERVER_URL;
+    commentStreamService.connect(serverUrl);
+    commentStreamService.startCollecting(clean);
+  };
+
+  const stopCommentCollection = () => {
+    commentStreamService.stopCollecting();
   };
 
   const stop = async () => {
@@ -1258,30 +1290,52 @@ export default function SellerLogicAnalysis04ArgonPage() {
                 <h2 className="flex items-center gap-2 font-bold text-slate-900">
                   <MessageSquareText size={18} /> 실시간 댓글
                 </h2>
-                <span
-                  className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold border ${
-                    commentCapture.serverStatus === 'COLLECTING'
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 animate-pulse'
-                      : commentCapture.serverStatus === 'CONNECTED'
-                      ? 'bg-blue-50 text-blue-700 border-blue-200'
-                      : 'bg-slate-100 text-slate-500 border-slate-200'
-                  }`}
-                >
-                  <span
-                    className={`h-1.5 w-1.5 rounded-full ${
-                      commentCapture.serverStatus === 'COLLECTING'
-                        ? 'bg-emerald-500'
-                        : commentCapture.serverStatus === 'CONNECTED'
-                        ? 'bg-blue-500'
-                        : 'bg-slate-400'
-                    }`}
-                  />
-                  {commentCapture.serverStatus === 'COLLECTING'
-                    ? '수집 중'
-                    : commentCapture.serverStatus === 'CONNECTED'
-                    ? '도우미 연결됨'
-                    : '도우미 미연결'}
-                </span>
+                {(() => {
+                  const effectiveStatus = streamStatus !== 'DISCONNECTED' ? streamStatus : commentCapture.serverStatus;
+                  const isCollecting = effectiveStatus === 'COLLECTING';
+                  const isConnected = effectiveStatus === 'CONNECTED' || isCollecting;
+                  return (
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold border ${
+                          isCollecting
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200 animate-pulse'
+                            : isConnected
+                            ? 'bg-blue-50 text-blue-700 border-blue-200'
+                            : 'bg-slate-100 text-slate-500 border-slate-200'
+                        }`}
+                      >
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            isCollecting
+                              ? 'bg-emerald-500'
+                              : isConnected
+                              ? 'bg-blue-500'
+                              : 'bg-slate-400'
+                          }`}
+                        />
+                        {isCollecting ? '수집 중' : isConnected ? '도우미 연결됨' : '도우미 미연결'}
+                      </span>
+                      {isCollecting ? (
+                        <button
+                          type="button"
+                          onClick={stopCommentCollection}
+                          className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700 hover:bg-rose-100"
+                        >
+                          수집 중지
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={startCommentCollection}
+                          className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
+                        >
+                          댓글 수집 시작
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
               <p className="mt-1 text-xs text-slate-500">
                 댓글 도우미와 실시간 동기화됩니다. 최근 수집한 댓글이 위에 표시됩니다.

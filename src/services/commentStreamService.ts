@@ -81,6 +81,7 @@ export class CommentStreamService {
   private socketConnected = false;
   private lastServerState: StreamStatsPayload['state'] = 'idle';
   private lastMessage = '';
+  private targetUsername: string | null = null;
   private statusListeners = new Set<StatusListener>();
   private commentListeners = new Set<CommentListener>();
 
@@ -112,6 +113,9 @@ export class CommentStreamService {
     this.socket.on('connect', () => {
       this.socketConnected = true;
       this.emitStatus(mapServerState(this.lastServerState), this.lastMessage || 'VoiceCAP 댓글 도우미 연결됨');
+      if (this.targetUsername) {
+        this.socket?.emit('collect:start', { username: this.targetUsername });
+      }
     });
 
     this.socket.on('disconnect', () => {
@@ -144,11 +148,18 @@ export class CommentStreamService {
   }
 
   public startCollecting(username: string): void {
-    this.socket?.emit('collect:start', { username });
+    const clean = username.trim().replace(/^@/u, '');
+    this.targetUsername = clean;
+    if (this.socket && this.socketConnected && clean) {
+      this.socket.emit('collect:start', { username: clean });
+    }
   }
 
   public stopCollecting(): void {
-    this.socket?.emit('collect:stop');
+    this.targetUsername = null;
+    if (this.socket && this.socketConnected) {
+      this.socket.emit('collect:stop');
+    }
   }
 
   /**
