@@ -1,10 +1,61 @@
 import React, { useState, useEffect } from 'react';
-import { Terminal, Copy, Trash2, Download, Check, AlertCircle, ArrowUpRight, Clock, Cpu } from 'lucide-react';
+import {
+  Terminal,
+  Copy,
+  Trash2,
+  Download,
+  Check,
+  AlertCircle,
+  Clock,
+  Cpu,
+  Hash,
+  CheckCircle2,
+  Radio,
+  BookOpen,
+} from 'lucide-react';
 import type { ArgonDebugEntry } from '../../services/sellerLogic04Argon';
 
 interface ArgonLiveConsoleProps {
   entries: ArgonDebugEntry[];
   onClear: () => void;
+}
+
+interface ResponseCounts {
+  total: number;
+  decisionsCount: number;
+  confirmedCount: number;
+  pendingCount: number;
+  signalsCount: number;
+  contextCount: number;
+  summary?: string;
+}
+
+function parseCounts(response: unknown): ResponseCounts | null {
+  if (!response || typeof response !== 'object') return null;
+  const res = response as Record<string, unknown>;
+  const decisions = Array.isArray(res.decisions) ? res.decisions : [];
+  const signals = Array.isArray(res.signals) ? res.signals : [];
+  const context = Array.isArray(res.context) ? res.context : [];
+  const total = decisions.length + signals.length + context.length;
+  const confirmed = decisions.filter(
+    (d) => d && typeof d === 'object' && (d as { status?: string }).status === 'CONFIRMED',
+  ).length;
+  const pending = decisions.filter(
+    (d) =>
+      d &&
+      typeof d === 'object' &&
+      ((d as { status?: string }).status === 'PENDING' || (d as { status?: string }).status === 'REVIEW'),
+  ).length;
+
+  return {
+    total,
+    decisionsCount: decisions.length,
+    confirmedCount: confirmed,
+    pendingCount: pending,
+    signalsCount: signals.length,
+    contextCount: context.length,
+    summary: typeof res.summary === 'string' ? res.summary : undefined,
+  };
 }
 
 export const ArgonLiveConsole: React.FC<ArgonLiveConsoleProps> = ({ entries, onClear }) => {
@@ -20,6 +71,8 @@ export const ArgonLiveConsole: React.FC<ArgonLiveConsoleProps> = ({ entries, onC
   }, [entries, selectedId]);
 
   const currentEntry = entries.find((e) => e.id === selectedId) || entries[0] || null;
+  const currentCounts = currentEntry ? parseCounts(currentEntry.rawResponse || currentEntry.parsedResponse) : null;
+  const totalResponseEntries = entries.filter((e) => e.status === 'RESPONSE').length;
 
   const handleCopy = async () => {
     if (!currentEntry) return;
@@ -29,7 +82,7 @@ ${currentEntry.systemPrompt}
 === [2] 전달한 내용 (User Prompt & Input Payload) ===
 ${typeof currentEntry.inputPayload === 'string' ? currentEntry.inputPayload : JSON.stringify(currentEntry.inputPayload, null, 2)}
 
-=== [3] 응답받은 내용 (AI Response) ===
+=== [3] 응답받은 내용 (AI Response) - 총 ${currentCounts?.total ?? 0}건 수신 (판정 ${currentCounts?.decisionsCount ?? 0}건, 신호 ${currentCounts?.signalsCount ?? 0}건, 문맥 ${currentCounts?.contextCount ?? 0}건) ===
 ${currentEntry.rawResponse ? (typeof currentEntry.rawResponse === 'string' ? currentEntry.rawResponse : JSON.stringify(currentEntry.rawResponse, null, 2)) : (currentEntry.error ? `오류: ${currentEntry.error}` : '응답 대기 중...')}`;
 
     try {
@@ -55,8 +108,11 @@ ${currentEntry.rawResponse ? (typeof currentEntry.rawResponse === 'string' ? cur
   const formatTime = (iso: string) => {
     try {
       const d = new Date(iso);
-      return d.toLocaleTimeString('ko-KR', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
-        '.' + String(d.getMilliseconds()).padStart(3, '0');
+      return (
+        d.toLocaleTimeString('ko-KR', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
+        '.' +
+        String(d.getMilliseconds()).padStart(3, '0')
+      );
     } catch {
       return iso;
     }
@@ -77,6 +133,11 @@ ${currentEntry.rawResponse ? (typeof currentEntry.rawResponse === 'string' ? cur
           <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-slate-400 border border-slate-700">
             LIVE TERMINAL
           </span>
+          {entries.length > 0 && (
+            <span className="rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 px-2 py-0.5 text-[10px] font-bold">
+              총 {entries.length}회 호출 (응답 완료 {totalResponseEntries}건)
+            </span>
+          )}
           {currentEntry && (
             <div className="hidden sm:flex items-center gap-2 text-[11px] text-slate-400">
               <span className="text-slate-600">|</span>
@@ -107,6 +168,11 @@ ${currentEntry.rawResponse ? (typeof currentEntry.rawResponse === 'string' ? cur
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                   RESPONSE 응답완료
                   {currentEntry.durationMs !== undefined && ` (${currentEntry.durationMs}ms)`}
+                  {currentCounts && (
+                    <span className="ml-1 rounded bg-emerald-900/90 px-1.5 py-0.2 text-[10px] font-bold text-emerald-200">
+                      응답 {currentCounts.total}건 수신 (판정 {currentCounts.decisionsCount}건, 신호 {currentCounts.signalsCount}건)
+                    </span>
+                  )}
                 </span>
               )}
               {currentEntry.status === 'ERROR' && (
@@ -162,6 +228,7 @@ ${currentEntry.rawResponse ? (typeof currentEntry.rawResponse === 'string' ? cur
           </span>
           {entries.map((entry) => {
             const isSelected = entry.id === (currentEntry?.id || '');
+            const counts = parseCounts(entry.rawResponse || entry.parsedResponse);
             const badgeColor =
               entry.status === 'RESPONSE'
                 ? isSelected
@@ -184,6 +251,11 @@ ${currentEntry.rawResponse ? (typeof currentEntry.rawResponse === 'string' ? cur
               >
                 <span>{formatTime(entry.at)}</span>
                 <span className="text-[10px] opacity-75">#{entry.segmentId.slice(-4)}</span>
+                {entry.status === 'RESPONSE' && counts && (
+                  <span className="rounded bg-emerald-800/60 px-1 text-[10px] font-bold text-emerald-200">
+                    응답 {counts.total}개
+                  </span>
+                )}
                 {entry.durationMs !== undefined && (
                   <span className="text-[9px] opacity-60">{entry.durationMs}ms</span>
                 )}
@@ -235,7 +307,7 @@ ${currentEntry.rawResponse ? (typeof currentEntry.rawResponse === 'string' ? cur
             <button
               type="button"
               onClick={() => setActiveTab('RESPONSE')}
-              className={`flex items-center gap-1.5 border-b-2 px-3 py-2.5 transition ${
+              className={`flex items-center gap-2 border-b-2 px-3 py-2.5 transition ${
                 activeTab === 'RESPONSE'
                   ? 'border-emerald-500 text-emerald-400 bg-slate-800/40'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -243,6 +315,11 @@ ${currentEntry.rawResponse ? (typeof currentEntry.rawResponse === 'string' ? cur
             >
               <span>[3] 응답받은 내용</span>
               <span className="text-[10px] opacity-70">(AI Response)</span>
+              {currentCounts && (
+                <span className="rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 px-2 py-0.5 text-[10px] font-bold">
+                  총 {currentCounts.total}개 응답
+                </span>
+              )}
               {currentEntry.status === 'RESPONSE' && (
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
               )}
@@ -300,15 +377,76 @@ ${currentEntry.rawResponse ? (typeof currentEntry.rawResponse === 'string' ? cur
                   </div>
                 )}
 
+                {/* 응답 갯수 요약 대시보드 바 */}
+                {currentCounts && (
+                  <div className="rounded-xl border border-emerald-900/60 bg-emerald-950/30 p-3">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-emerald-900/40 pb-2">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 size={15} className="text-emerald-400" />
+                        <span className="font-bold text-emerald-200 text-xs">
+                          AI 응답 결과 요약 (총 {currentCounts.total}개 항목 수신)
+                        </span>
+                      </div>
+                      {currentEntry.durationMs !== undefined && (
+                        <span className="text-[10px] text-slate-400">
+                          응답 소요: <strong className="text-emerald-300">{currentEntry.durationMs}ms</strong>
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-[11px]">
+                      <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-2">
+                        <div className="text-slate-400 text-[10px]">총 응답 갯수</div>
+                        <div className="mt-0.5 text-base font-bold text-emerald-400">
+                          {currentCounts.total}
+                          <span className="text-xs font-normal text-slate-400 ml-0.5">건</span>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-2">
+                        <div className="text-slate-400 text-[10px]">거래 판정 (Decisions)</div>
+                        <div className="mt-0.5 text-base font-bold text-slate-200">
+                          {currentCounts.decisionsCount}
+                          <span className="text-xs font-normal text-slate-400 ml-0.5">건</span>
+                          <span className="ml-1 text-[10px] font-normal text-emerald-400">
+                            (확정 {currentCounts.confirmedCount} / 대기 {currentCounts.pendingCount})
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-2">
+                        <div className="text-slate-400 text-[10px]">감지 신호 (Signals)</div>
+                        <div className="mt-0.5 text-base font-bold text-cyan-300">
+                          {currentCounts.signalsCount}
+                          <span className="text-xs font-normal text-slate-400 ml-0.5">건</span>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-2">
+                        <div className="text-slate-400 text-[10px]">다음 문맥 (Context)</div>
+                        <div className="mt-0.5 text-base font-bold text-amber-300">
+                          {currentCounts.contextCount}
+                          <span className="text-xs font-normal text-slate-400 ml-0.5">건</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {currentCounts.summary && (
+                      <p className="mt-2.5 rounded-lg bg-slate-900/80 border border-slate-800 p-2 text-[11px] leading-relaxed text-slate-300">
+                        <strong className="text-brand-300">AI 요약:</strong> {currentCounts.summary}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {currentEntry.rawResponse !== undefined && (
                   <div>
                     <div className="flex items-center justify-between text-[11px] text-slate-400 pb-1 border-b border-slate-900 mb-2">
-                      <span className="text-emerald-400 font-semibold">AI 원본 응답 JSON</span>
-                      {currentEntry.durationMs !== undefined && (
-                        <span className="text-slate-500 font-mono">응답 소요: {currentEntry.durationMs}ms</span>
-                      )}
+                      <span className="text-emerald-400 font-semibold">
+                        AI 원본 응답 JSON {currentCounts && `(총 ${currentCounts.total}개)`}
+                      </span>
                     </div>
-                    <pre className="whitespace-pre-wrap break-words font-mono text-[11px] text-emerald-200/90">
+                    <pre className="whitespace-pre-wrap break-words font-mono text-[11px] text-emerald-200/90 max-h-64 overflow-y-auto">
                       {typeof currentEntry.rawResponse === 'string'
                         ? currentEntry.rawResponse
                         : JSON.stringify(currentEntry.rawResponse, null, 2)}
