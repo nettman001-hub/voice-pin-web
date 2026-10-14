@@ -636,9 +636,13 @@ export default function SellerLogicAnalysis04ArgonPage() {
       setError('회원 관리 & STT에서 Soniox API 키를 설정해 주세요.');
       return;
     }
-    if (rowsRef.current.comments.length || rowsRef.current.transcripts.length) {
-      setError('새 방송을 청취하려면 현재 결과를 내려받은 뒤 새 분석을 눌러 주세요.');
-      return;
+    // 기존 전사 데이터가 남아있다면 새 음성 청취 세션을 위해 이전 전사 초기화
+    if (rowsRef.current.transcripts.length > 0) {
+      rowsRef.current = { ...rowsRef.current, transcripts: [] };
+      setEvidence(rowsRef.current);
+      setExtendedDecisions([]);
+      setResult(null);
+      setResultSlot(null);
     }
 
     const currentGeneration = ++generation.current;
@@ -882,7 +886,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
           ) : (
             <button
               className={`${button} bg-brand-600 text-white`}
-              disabled={starting || running || Boolean(count) || loadingSlots || !slotSettings || Boolean(slotSettingsError)}
+              disabled={starting || running || loadingSlots || !slotSettings || Boolean(slotSettingsError)}
               onClick={() => void start()}
             >
               <Radio size={16} /> 실시간 청취 시작
