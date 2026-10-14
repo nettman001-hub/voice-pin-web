@@ -44,6 +44,8 @@ export interface ArgonDebugEntry {
   rawResponse?: unknown;
   parsedResponse?: unknown;
   error?: string;
+  callSequence?: number;
+  responseSequence?: number;
 }
 
 const KOREAN_NUM_MAP: Record<string, number> = {

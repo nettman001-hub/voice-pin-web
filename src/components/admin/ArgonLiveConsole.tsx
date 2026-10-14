@@ -17,6 +17,8 @@ import type { ArgonDebugEntry } from '../../services/sellerLogic04Argon';
 
 interface ArgonLiveConsoleProps {
   entries: ArgonDebugEntry[];
+  totalResponsesCount?: number;
+  totalCallsCount?: number;
   onClear: () => void;
 }
 
@@ -58,7 +60,12 @@ function parseCounts(response: unknown): ResponseCounts | null {
   };
 }
 
-export const ArgonLiveConsole: React.FC<ArgonLiveConsoleProps> = ({ entries, onClear }) => {
+export const ArgonLiveConsole: React.FC<ArgonLiveConsoleProps> = ({
+  entries,
+  totalResponsesCount,
+  totalCallsCount,
+  onClear,
+}) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'SYSTEM' | 'INPUT' | 'RESPONSE'>('RESPONSE');
   const [copied, setCopied] = useState(false);
@@ -72,7 +79,8 @@ export const ArgonLiveConsole: React.FC<ArgonLiveConsoleProps> = ({ entries, onC
 
   const currentEntry = entries.find((e) => e.id === selectedId) || entries[0] || null;
   const currentCounts = currentEntry ? parseCounts(currentEntry.rawResponse || currentEntry.parsedResponse) : null;
-  const totalResponseEntries = entries.filter((e) => e.status === 'RESPONSE').length;
+  const actualResponsesCount = totalResponsesCount ?? entries.filter((e) => e.status === 'RESPONSE').length;
+  const actualCallsCount = totalCallsCount ?? entries.length;
 
   const handleCopy = async () => {
     if (!currentEntry) return;
@@ -124,8 +132,8 @@ ${currentEntry.rawResponse ? (typeof currentEntry.rawResponse === 'string' ? cur
       className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 text-slate-100 shadow-2xl font-mono text-xs"
     >
       {/* 1. 최상단 콘솔 툴바 */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 bg-slate-900/90 px-4 py-3">
-        <div className="flex items-center gap-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 bg-slate-900/95 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <Terminal size={16} className="text-emerald-400" />
           <span className="font-bold tracking-tight text-slate-100">
             실시간 AI 호출 프롬프트 & 응답 라이브 콘솔
@@ -133,9 +141,14 @@ ${currentEntry.rawResponse ? (typeof currentEntry.rawResponse === 'string' ? cur
           <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-slate-400 border border-slate-700">
             LIVE TERMINAL
           </span>
-          {entries.length > 0 && (
-            <span className="rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 px-2 py-0.5 text-[10px] font-bold">
-              총 {entries.length}회 호출 (응답 완료 {totalResponseEntries}건)
+          {/* 총 응답이력 누적 갯수 뱃지 (상시 노출) */}
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 px-2.5 py-1 text-xs font-black shadow-sm">
+            <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+            총 응답이력 누적: {actualResponsesCount.toLocaleString()}건
+          </span>
+          {actualCallsCount > 0 && (
+            <span className="rounded-md bg-slate-800/90 text-slate-300 border border-slate-700/80 px-2 py-0.5 text-[10px] font-semibold">
+              총 {actualCallsCount}회 호출 (응답완료 {actualResponsesCount}건 / 실패 {entries.filter((e) => e.status === 'ERROR').length}건)
             </span>
           )}
           {currentEntry && (
@@ -223,9 +236,14 @@ ${currentEntry.rawResponse ? (typeof currentEntry.rawResponse === 'string' ? cur
       {/* 2. 호출 히스토리 타임라인 바 */}
       {entries.length > 0 && (
         <div className="flex items-center gap-2 overflow-x-auto border-b border-slate-800/80 bg-slate-900/40 px-4 py-2 scrollbar-thin scrollbar-thumb-slate-700">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider shrink-0">
-            호출 이력 ({entries.length}건):
-          </span>
+          <div className="flex items-center gap-1.5 shrink-0 pr-1.5 border-r border-slate-800">
+            <span className="text-[11px] font-black text-emerald-300 bg-emerald-950/80 border border-emerald-800 px-2 py-0.5 rounded shadow-sm">
+              총 응답 누적 {actualResponsesCount}건
+            </span>
+            <span className="text-[10px] text-slate-500 font-semibold">
+              (최근 {entries.length}건 보관):
+            </span>
+          </div>
           {entries.map((entry) => {
             const isSelected = entry.id === (currentEntry?.id || '');
             const counts = parseCounts(entry.rawResponse || entry.parsedResponse);
@@ -242,6 +260,12 @@ ${currentEntry.rawResponse ? (typeof currentEntry.rawResponse === 'string' ? cur
                 ? 'bg-amber-900/80 text-amber-200 border-amber-500 animate-pulse'
                 : 'bg-amber-950/40 text-amber-400 border-amber-900/60 hover:bg-amber-900/40';
 
+            const seqLabel = entry.responseSequence
+              ? `#${entry.responseSequence}회 응답`
+              : entry.callSequence
+              ? `#${entry.callSequence}회 호출`
+              : `#${entry.segmentId.slice(-4)}`;
+
             return (
               <button
                 key={entry.id}
@@ -249,11 +273,11 @@ ${currentEntry.rawResponse ? (typeof currentEntry.rawResponse === 'string' ? cur
                 onClick={() => setSelectedId(entry.id)}
                 className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-medium transition border flex items-center gap-1.5 ${badgeColor}`}
               >
-                <span>{formatTime(entry.at)}</span>
-                <span className="text-[10px] opacity-75">#{entry.segmentId.slice(-4)}</span>
+                <span className="font-bold text-slate-100">{seqLabel}</span>
+                <span className="opacity-75">{formatTime(entry.at)}</span>
                 {entry.status === 'RESPONSE' && counts && (
                   <span className="rounded bg-emerald-800/60 px-1 text-[10px] font-bold text-emerald-200">
-                    응답 {counts.total}개
+                    판정 {counts.decisionsCount}건
                   </span>
                 )}
                 {entry.durationMs !== undefined && (
@@ -315,9 +339,14 @@ ${currentEntry.rawResponse ? (typeof currentEntry.rawResponse === 'string' ? cur
             >
               <span>[3] 응답받은 내용</span>
               <span className="text-[10px] opacity-70">(AI Response)</span>
+              {currentEntry.responseSequence && (
+                <span className="rounded bg-emerald-950 text-emerald-300 border border-emerald-700/60 px-1.5 py-0.5 text-[10px] font-bold">
+                  제 {currentEntry.responseSequence}회 응답 (총 {actualResponsesCount}건 누적 중)
+                </span>
+              )}
               {currentCounts && (
                 <span className="rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 px-2 py-0.5 text-[10px] font-bold">
-                  총 {currentCounts.total}개 응답
+                  판정 {currentCounts.decisionsCount}건 · 신호 {currentCounts.signalsCount}건
                 </span>
               )}
               {currentEntry.status === 'RESPONSE' && (

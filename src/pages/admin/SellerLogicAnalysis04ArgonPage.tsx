@@ -103,6 +103,10 @@ export default function SellerLogicAnalysis04ArgonPage() {
   // 실시간 AI 호출 프롬프트 & 응답 로그
   const [debugLog, setDebugLog] = useState<ArgonDebugEntry[]>([]);
   const debugSeq = useRef(0);
+  const totalCallsCountRef = useRef(0);
+  const totalResponsesCountRef = useRef(0);
+  const [totalCallsCount, setTotalCallsCount] = useState(0);
+  const [totalResponsesCount, setTotalResponsesCount] = useState(0);
 
   const rowsRef = useRef(evidence);
   const resultRef = useRef<SellerLogicDeepRunResult | null>(null);
@@ -259,6 +263,8 @@ export default function SellerLogicAnalysis04ArgonPage() {
             const exchangeId = `${Date.now()}-${++debugSeq.current}`;
             const at = new Date().toISOString();
             const startTime = Date.now();
+            const currentCallSeq = ++totalCallsCountRef.current;
+            setTotalCallsCount(currentCallSeq);
 
             // 04argon 전용 프롬프트 및 시스템 프롬프트 확장 주입
             const promptBundle = buildArgonPromptWithContext(packet, activeProductRef.current);
@@ -275,6 +281,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
               systemPrompt: promptBundle.systemPrompt,
               userPrompt: promptBundle.userPrompt,
               inputPayload: JSON.parse(promptBundle.userPrompt),
+              callSequence: currentCallSeq,
             };
 
             setDebugLog((prev) => [newEntry, ...prev].slice(0, 50));
@@ -282,6 +289,8 @@ export default function SellerLogicAnalysis04ArgonPage() {
             return analyzeSellerLogicDeep(packet, { signal: controller.signal }).then(
               (response) => {
                 const durationMs = Date.now() - startTime;
+                const currentRespSeq = ++totalResponsesCountRef.current;
+                setTotalResponsesCount(currentRespSeq);
                 setDebugLog((prev) =>
                   prev.map((row) =>
                     row.id === exchangeId
@@ -291,6 +300,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
                           durationMs,
                           rawResponse: response,
                           parsedResponse: response,
+                          responseSequence: currentRespSeq,
                         }
                       : row,
                   ),
@@ -592,6 +602,10 @@ export default function SellerLogicAnalysis04ArgonPage() {
     setActiveKeyterms([]);
     setFilter('ALL');
     setDebugLog([]);
+    totalCallsCountRef.current = 0;
+    totalResponsesCountRef.current = 0;
+    setTotalCallsCount(0);
+    setTotalResponsesCount(0);
   };
 
   const loadText = () => {
@@ -1456,7 +1470,15 @@ export default function SellerLogicAnalysis04ArgonPage() {
       {/* 8. 화면 최하단: 실시간 AI 호출 프롬프트 & 응답 라이브 콘솔창 (상시 노출) */}
       <ArgonLiveConsole
         entries={debugLog}
-        onClear={() => setDebugLog([])}
+        totalResponsesCount={totalResponsesCount}
+        totalCallsCount={totalCallsCount}
+        onClear={() => {
+          setDebugLog([]);
+          totalCallsCountRef.current = 0;
+          totalResponsesCountRef.current = 0;
+          setTotalCallsCount(0);
+          setTotalResponsesCount(0);
+        }}
       />
     </div>
   );
