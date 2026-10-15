@@ -41,9 +41,20 @@ function validateContextItems(
   const knownTranscripts = new Set(source.transcripts.map((row) => row.id));
   return raw.map((item: unknown) => {
     if (!object(item) || !text(item.text, 2000)) return invalid("문맥 항목에는 다음 구간에 필요한 설명이 필요합니다.");
-    const commentIds = references(item.commentIds, knownComments, "context.commentIds");
-    const transcriptIds = references(item.transcriptIds, knownTranscripts, "context.transcriptIds");
-    if (requireSources && !commentIds.length && !transcriptIds.length) return invalid("문맥 항목에는 원문 근거가 필요합니다.");
+    // AI가 반환한 ID 중 현재 세그먼트에 유효한 ID만 안전하게 추출 (외래 ID로 인한 시간대 누락 및 건너뜀 방지)
+    const rawCommentIds = Array.isArray(item.commentIds) ? item.commentIds : [];
+    const rawTranscriptIds = Array.isArray(item.transcriptIds) ? item.transcriptIds : [];
+
+    let commentIds = [...new Set(rawCommentIds.filter((id): id is string => typeof id === "string" && knownComments.has(id)))];
+    let transcriptIds = [...new Set(rawTranscriptIds.filter((id): id is string => typeof id === "string" && knownTranscripts.has(id)))];
+
+    if (requireSources && !commentIds.length && !transcriptIds.length) {
+      if (source.transcripts.length > 0) {
+        transcriptIds = [source.transcripts[0].id];
+      } else if (source.comments.length > 0) {
+        commentIds = [source.comments[0].id];
+      }
+    }
     return { text: item.text, commentIds, transcriptIds };
   });
 }

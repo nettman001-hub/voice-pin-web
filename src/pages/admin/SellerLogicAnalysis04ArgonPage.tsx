@@ -13,12 +13,17 @@ import {
   AlertTriangle,
   Camera,
   Layers,
+  FileText,
+  Calendar,
 } from 'lucide-react';
 import { useLive } from '../../context/LiveContext';
 import { useCommentCapture } from '../../context/CommentCaptureContext';
 import { commentStreamService } from '../../services/commentStreamService';
 import { DEFAULT_COMMENT_SERVER_URL, type CommentRecord } from '../../types/comment';
 import { storageService } from '../../services/storageService';
+import { productSalesApi } from '../../services/productSalesApi';
+import type { LiveSession } from '../../types/productSales';
+import { formatSessionDisplay } from '../../utils/sessionFormatter';
 import { analyzeSellerLogicDeep, getSellerLogicSlots, getSellerLogicDeepHints } from '../../services/sellerLogicDeepApi';
 import { runSellerLogicDeep, type SellerLogicDeepRunResult } from '../../services/sellerLogicDeepEngine';
 import { SellerLogicCapture } from '../../services/sellerLogicCapture';
@@ -116,7 +121,10 @@ export default function SellerLogicAnalysis04ArgonPage() {
   const analysisAbort = useRef<AbortController | null>(null);
   const captureFailure = useRef('');
   const prioritizedCommentIds = useRef(new Set<string>());
-  const sessionRef = useRef(crypto.randomUUID());
+  const sessionRef = useRef<string>(crypto.randomUUID());
+  const [currentSessionId, setCurrentSessionId] = useState<string>(sessionRef.current);
+  const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
+  const [customSessionName, setCustomSessionName] = useState('');
   const slotRef = useRef(slot);
   const selectedSlotExplicitly = useRef(false);
   const slotLoadGeneration = useRef(0);
@@ -378,6 +386,9 @@ export default function SellerLogicAnalysis04ArgonPage() {
     // 청취 시작 전에는 자동 분석 대기
     queueRef.current.setAutomatic(false);
     void loadSlots();
+    productSalesApi.listSessions()
+      .then((data) => setCloudSessions(data.sessions))
+      .catch((err) => console.warn('[SellerLogic04Argon] 세션 목록 로드 실패:', err));
 
     // 초기 댓글 수화: 이미 수집된 댓글이 있으면 기본 표시
     const initialComments = commentCapture.liveComments?.length
@@ -581,6 +592,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
     queueRef.current = makeQueue();
     queueRef.current.setAutomatic(false);
     sessionRef.current = crypto.randomUUID();
+    setCurrentSessionId(sessionRef.current);
     rowsRef.current = emptyEvidence();
     resultRef.current = null;
     stateRef.current = null;
@@ -731,7 +743,35 @@ export default function SellerLogicAnalysis04ArgonPage() {
     }
   };
 
+  const getSessionDisplayText = () => {
+    if (customSessionName.trim()) return customSessionName.trim();
+    return formatSessionDisplay(sessionRef.current, { sessions: cloudSessions });
+  };
+
+  const handleStartNewSession = (newCustomName?: string) => {
+    reset();
+    const newId = crypto.randomUUID();
+    sessionRef.current = newId;
+    setCurrentSessionId(newId);
+    if (newCustomName !== undefined) {
+      setCustomSessionName(newCustomName);
+    }
+    setStatus('새 방송 회차가 시작되었습니다.');
+  };
+
+  const handleSelectSession = (selectedId: string) => {
+    if (!selectedId) return;
+    sessionRef.current = selectedId;
+    setCurrentSessionId(selectedId);
+    const found = cloudSessions.find((s) => s.id === selectedId);
+    if (found?.displayCode) {
+      setCustomSessionName(found.displayCode);
+    }
+    setStatus(`방송 회차가 '${formatSessionDisplay(selectedId, { sessions: cloudSessions })}'(으)로 전환되었습니다.`);
+  };
+
   const download = () => {
+    const sessionText = getSessionDisplayText();
     const url = URL.createObjectURL(
       new Blob(
         [
@@ -740,6 +780,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
               schemaVersion: 1,
               engine: '04argon',
               sessionId: sessionRef.current,
+              sessionDisplay: sessionText,
               exportedAt: new Date().toISOString(),
               slotNumber: resultSlot,
               activeProduct,
@@ -756,7 +797,85 @@ export default function SellerLogicAnalysis04ArgonPage() {
     );
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `판매자-로직분석04argon-${sessionRef.current}.json`;
+    anchor.download = `판매자-로직분석04argon-${sessionText.replace(/[\s/\\:]+/g, '_')}-${sessionRef.current.slice(0, 8)}.json`;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const downloadTranscriptsTxt = () => {
+    const sessionText = getSessionDisplayText();
+    const now = new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+    let content = `==================================================\n`;
+    content += `[VoiceCAP] 판매자 음성 전사 (판매멘트) 기록\n`;
+    content += `방송 회차: ${sessionText}\n`;
+    content += `세션 ID: ${sessionRef.current}\n`;
+    content += `추출 일시: ${now}\n`;
+    content += `총 멘트 수: ${evidence.transcripts.length}건\n`;
+    content += `==================================================\n\n`;
+
+    evidence.transcripts.forEach((t) => {
+      const tTime = new Date(t.recognizedAt).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });
+      content += `[${tTime}] 판매자: ${t.text}\n`;
+    });
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `판매멘트전사-${sessionText.replace(/[\s/\\:]+/g, '_')}-${sessionRef.current.slice(0, 8)}.txt`;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const downloadCommentsTxt = () => {
+    const sessionText = getSessionDisplayText();
+    const now = new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+    let content = `==================================================\n`;
+    content += `[VoiceCAP] 실시간 구매자 댓글 기록\n`;
+    content += `방송 회차: ${sessionText}\n`;
+    content += `세션 ID: ${sessionRef.current}\n`;
+    content += `추출 일시: ${now}\n`;
+    content += `총 댓글 수: ${evidence.comments.length}건\n`;
+    content += `==================================================\n\n`;
+
+    evidence.comments.forEach((c) => {
+      const cTime = new Date(c.capturedAt).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });
+      content += `[${cTime}] ${c.nickname}: ${c.content}\n`;
+    });
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `실시간댓글-${sessionText.replace(/[\s/\\:]+/g, '_')}-${sessionRef.current.slice(0, 8)}.txt`;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const downloadTimelineTxt = () => {
+    const sessionText = getSessionDisplayText();
+    const now = new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+    let content = `==================================================\n`;
+    content += `[VoiceCAP] 실시간 통합 대화 타임라인 (전사 + 댓글)\n`;
+    content += `방송 회차: ${sessionText}\n`;
+    content += `세션 ID: ${sessionRef.current}\n`;
+    content += `추출 일시: ${now}\n`;
+    content += `총 전사: ${evidence.transcripts.length}건 | 총 댓글: ${evidence.comments.length}건\n`;
+    content += `==================================================\n\n`;
+
+    // 시간 오름차순 (과거 -> 최신) 정렬
+    const sorted = [...timeline].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    sorted.forEach((row) => {
+      const rTime = new Date(row.at).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });
+      const role = row.kind === 'speech' ? '판매자' : `댓글 | ${row.author}`;
+      content += `[${rTime}] [${role}] ${row.text}\n`;
+    });
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `통합대화록-${sessionText.replace(/[\s/\\:]+/g, '_')}-${sessionRef.current.slice(0, 8)}.txt`;
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
@@ -805,12 +924,25 @@ export default function SellerLogicAnalysis04ArgonPage() {
           <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-brand-600">
             <Bot size={16} /> AI DEEP TIME-BUCKET ANALYSIS
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">판매자 로직분석04argon</h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">판매자 로직분석04argon</h1>
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">
+              <Calendar size={13} /> {getSessionDisplayText()}
+            </span>
+          </div>
           <p className="mt-2 text-sm text-slate-500">
             AI가 시간대별로 구매 의사·판매자 확정·숫자 역할·캡처 지시를 심층 판단해 판매 확정 구매자와 가격을 선정합니다.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className={`${button} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}
+            disabled={!count}
+            onClick={downloadTimelineTxt}
+            title="판매자 멘트와 구매자 댓글을 시간 순으로 정렬한 텍스트 파일 다운로드"
+          >
+            <FileText size={16} /> 대화록 TXT
+          </button>
           <button className={`${button} border border-slate-200 bg-white`} disabled={!count} onClick={download}>
             <Download size={16} /> 결과 내려받기
           </button>
@@ -828,7 +960,56 @@ export default function SellerLogicAnalysis04ArgonPage() {
       </header>
 
       {/* 2. 상단 설정 카드 */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+        {/* 방송 회차 (Session) 관리 컨트롤 바 */}
+        <div className="rounded-xl border border-indigo-100 bg-gradient-to-r from-indigo-50/60 via-purple-50/40 to-slate-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-2.5">
+            <div className="flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-indigo-600 text-white text-xs">
+                <Calendar size={13} />
+              </span>
+              <span className="text-sm font-bold text-indigo-950">방송 회차 (Session) 관리</span>
+              <span className="text-xs text-indigo-600/80 font-mono">ID: {sessionRef.current.slice(0, 8)}...</span>
+            </div>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-bold text-indigo-700 shadow-sm hover:bg-indigo-50 disabled:opacity-50"
+              disabled={capturing || running}
+              onClick={() => handleStartNewSession()}
+            >
+              <RotateCcw size={13} /> + 새 방송 회차 시작
+            </button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-semibold text-slate-700">
+              방송 회차 명칭 (결과 파일명에 반영)
+              <input
+                className={`${field} mt-1`}
+                value={customSessionName}
+                placeholder={formatSessionDisplay(sessionRef.current, { sessions: cloudSessions })}
+                onChange={(e) => setCustomSessionName(e.target.value)}
+                disabled={capturing || running}
+              />
+            </label>
+            <label className="text-xs font-semibold text-slate-700">
+              기존 회차 불러오기 (클라우드 세션 목록)
+              <select
+                className={`${field} mt-1`}
+                value={cloudSessions.some((s) => s.id === currentSessionId) ? currentSessionId : ''}
+                disabled={capturing || running}
+                onChange={(e) => handleSelectSession(e.target.value)}
+              >
+                <option value="">[현재 신규 회차: {formatSessionDisplay(sessionRef.current)}]</option>
+                {cloudSessions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {formatSessionDisplay(s.id, { sessions: cloudSessions })} ({s.status === 'ACTIVE' ? '진행중' : '종료'})
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+
         <div className="grid items-end gap-4 md:grid-cols-[1fr_1fr_auto]">
           <label className="space-y-2 text-sm font-semibold">
             방송 TikTok 아이디
@@ -1273,11 +1454,22 @@ export default function SellerLogicAnalysis04ArgonPage() {
       {/* 6. 중하단 좌우 2단 영역: 판매멘트 전사 & 실시간 댓글 */}
       <div className="grid items-start gap-6 xl:grid-cols-2">
         <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 p-5">
-            <h2 className="flex items-center gap-2 font-bold text-slate-900">
-              <MessageSquareText size={18} /> 판매멘트 전사
-            </h2>
-            <p className="mt-1 text-xs text-slate-500">판매자 멘트 {evidence.transcripts.length}개 · 최신순 · 한국 시각</p>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
+            <div>
+              <h2 className="flex items-center gap-2 font-bold text-slate-900">
+                <MessageSquareText size={18} /> 판매멘트 전사
+              </h2>
+              <p className="mt-1 text-xs text-slate-500">판매자 멘트 {evidence.transcripts.length}개 · 최신순 · 한국 시각</p>
+            </div>
+            <button
+              type="button"
+              onClick={downloadTranscriptsTxt}
+              disabled={!evidence.transcripts.length}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+              title="판매자 멘트 전사 기록을 텍스트(.txt) 파일로 다운로드합니다"
+            >
+              <FileText size={14} className="text-brand-600" /> 전사 TXT
+            </button>
           </div>
           <div className="max-h-[520px] overflow-auto p-4">
             {!sellerTranscripts.length ? (
@@ -1359,11 +1551,22 @@ export default function SellerLogicAnalysis04ArgonPage() {
                 댓글 도우미와 실시간 동기화됩니다. 최근 수집한 댓글이 위에 표시됩니다.
               </p>
             </div>
-            <div className="text-right text-xs text-slate-500">
-              <p className="font-semibold text-slate-700">누적 {evidence.comments.length.toLocaleString()}개</p>
-              <p className="mt-1">
-                최근 {recentComments.length}개 표시 · 최대 {visibleCommentLimit}개 · 한국 시각
-              </p>
+            <div className="flex flex-col items-end gap-1.5">
+              <button
+                type="button"
+                onClick={downloadCommentsTxt}
+                disabled={!evidence.comments.length}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+                title="실시간 구매자 댓글 기록을 텍스트(.txt) 파일로 다운로드합니다"
+              >
+                <FileText size={14} className="text-blue-600" /> 댓글 TXT
+              </button>
+              <div className="text-right text-xs text-slate-500">
+                <p className="font-semibold text-slate-700">누적 {evidence.comments.length.toLocaleString()}개</p>
+                <p className="mt-0.5 text-[11px]">
+                  최근 {recentComments.length}개 표시 · 최대 {visibleCommentLimit}개 · 한국 시각
+                </p>
+              </div>
             </div>
           </div>
           {!recentComments.length ? (
