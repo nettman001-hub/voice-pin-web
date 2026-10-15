@@ -101,6 +101,8 @@ export default function SellerLogicAnalysis04ArgonPage() {
   const [error, setError] = useState('');
   const [warnings, setWarnings] = useState<SellerLogicDeepWarning[]>([]);
   const [showWarnings, setShowWarnings] = useState(true);
+  const clearedWarningIdsRef = useRef<Set<string>>(new Set());
+  const warningsClearedAtRef = useRef<number>(0);
   const [resultSlot, setResultSlot] = useState<1 | 2 | null>(null);
   const [filter, setFilter] = useState('ALL');
   const [streamStatus, setStreamStatus] = useState<string>(commentCapture.serverStatus);
@@ -175,6 +177,18 @@ export default function SellerLogicAnalysis04ArgonPage() {
     }
   };
 
+  const handleClearWarnings = () => {
+    warningsClearedAtRef.current = Date.now();
+    warnings.forEach((w) => clearedWarningIdsRef.current.add(w.id));
+    if (resultRef.current) {
+      resultRef.current.warnings = [];
+    }
+    if (stateRef.current) {
+      stateRef.current.warnings = [];
+    }
+    setWarnings([]);
+  };
+
   const acceptResult = (next: SellerLogicDeepRunResult) => {
     // 04argon 하이브리드 보강: 구어체 배정 발화(~줄게 등) 감지 시 CONFIRMED로 자동 승격
     const curProd = activeProductRef.current;
@@ -189,6 +203,18 @@ export default function SellerLogicAnalysis04ArgonPage() {
       decisions: promotedDecisions,
     };
 
+    // 경고 필터링: 이미 삭제 처리된 경고는 다시 노출되지 않도록 필터링
+    const rawWarnings = updatedNext.warnings || [];
+    const filteredWarnings = rawWarnings.filter((w) => {
+      if (clearedWarningIdsRef.current.has(w.id)) return false;
+      if (warningsClearedAtRef.current > 0 && Date.parse(w.at) <= warningsClearedAtRef.current) return false;
+      return true;
+    });
+    updatedNext.warnings = filteredWarnings;
+    if (updatedNext.state) {
+      updatedNext.state.warnings = filteredWarnings;
+    }
+
     resultRef.current = updatedNext;
     stateRef.current = updatedNext.state;
     stateSlotRef.current = updatedNext.state.slotNumber;
@@ -197,10 +223,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
     setResult(updatedNext);
     setResultSlot(inputSlot);
     setError(captureFailure.current);
-
-    if (updatedNext.warnings && updatedNext.warnings.length) {
-      setWarnings(updatedNext.warnings);
-    }
+    setWarnings(filteredWarnings);
 
     // 04argon 하이브리드 보강: 소수점 원본 가격 및 캡처 지시 메타데이터 결합
     const extDecisions: ArgonExtendedDecision[] = promotedDecisions.map((d) => {
@@ -603,6 +626,8 @@ export default function SellerLogicAnalysis04ArgonPage() {
     activeProductRef.current = null;
     setActiveProduct(null);
     setExtendedDecisions([]);
+    clearedWarningIdsRef.current.clear();
+    warningsClearedAtRef.current = 0;
     setWarnings([]);
     setEvidence(rowsRef.current);
     setResult(null);
@@ -1193,7 +1218,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
               <button
                 type="button"
                 className="text-xs font-semibold text-slate-500 hover:text-slate-800 hover:underline"
-                onClick={() => setWarnings([])}
+                onClick={handleClearWarnings}
               >
                 경고 지우기
               </button>
