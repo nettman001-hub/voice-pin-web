@@ -345,9 +345,14 @@ export function updateActiveProductContext(
 }
 
 /**
- * AI가 PENDING으로 판정했거나 아직 미확정 상태인 건 중,
+ * AI가 PENDING/REVIEW로 판정했거나 아직 미확정 상태인 건 중,
  * 판매자의 구어체 배정 멘트("보석 언니 줄게", "~꺼", "~준다" 등)가 존재하고
  * 구매자의 신청 댓글과 가격이 확인된 경우 CONFIRMED로 자동 승격 보정합니다.
+ * 
+ * 단, 다음 안전장치가 엄격히 적용됩니다:
+ * 1. AI가 명시적으로 '재고 초과', '한 장 한정', '다른 구매자에게 배정', '탈락' 등으로 판정한 경우 강제 승격 금지
+ * 2. 신청 댓글 시점과 판매자 배정 발화 시점이 반드시 90초 이내여야 함 (과거 몇 분 전 발화 절대 오인 매칭 금지)
+ * 3. 댓글 시간과 가장 가까운 발화를 우선 매칭
  */
 export function promoteArgonDecisions(
   decisions: SellerLogicDeepDecision[],
@@ -364,14 +369,47 @@ export function promoteArgonDecisions(
     const nickname = d.nickname;
     if (!nickname) return d;
 
+    // 안전장치 1: AI가 명시적으로 재고 초과/다른 고객 배정 등으로 판정한 건은 억지로 승격하지 않음
+    const reasonText = d.reason || "";
+    const isExplicitlyDeniedOrStockOut =
+      /재고\s*(?:초과|부족|소진|없음)|한\s*장\s*한정|품절|마감|선착순\s*마감|다른\s*(?:고객|구매자)|배정되어|탈락|취소|미선정/iu.test(
+        reasonText,
+      );
+    if (isExplicitlyDeniedOrStockOut) {
+      return d;
+    }
+
+    // 신청 댓글 시간 파악
+    const relatedComments = comments.filter((c) => d.commentIds.includes(c.id));
+    const commentTime = relatedComments.length > 0
+      ? Math.max(...relatedComments.map((c) => Date.parse(c.capturedAt) || 0))
+      : Date.parse(d.decidedAt) || 0;
+
+    // 안전장치 2: 시간 윈도우 필터링 (댓글 시점 기준 -30초 ~ +90초 이내 발화만 허용)
+    // 10분 전 등 과거 이전 상품의 멘트가 잘못 매칭되는 것을 완벽 방지
+    const candidateTranscripts = transcripts
+      .map((t) => {
+        const tTime = Date.parse(t.recognizedAt || t.startedAt || "") || 0;
+        const diff = tTime - commentTime;
+        return { t, tTime, diff, absDiff: Math.abs(diff) };
+      })
+      .filter(({ tTime, diff }) => {
+        if (commentTime > 0 && tTime > 0) {
+          // 판매자가 먼저 호명하고 댓글을 유도한 경우(-30초)부터 댓글 작성 후 배정(+90초)까지 허용
+          return diff >= -30 * 1000 && diff <= 90 * 1000;
+        }
+        return false;
+      })
+      .sort((a, b) => a.absDiff - b.absDiff); // 시간차가 가장 적은 발화 우선
+
     // 해당 닉네임에 대한 판매자 배정 발화 검색
     let matchedAllocation: string | undefined;
     let matchedTranscriptId: string | undefined;
-    for (const t of transcripts) {
-      const check = detectAllocationSpeech(t.text, nickname);
+    for (const item of candidateTranscripts) {
+      const check = detectAllocationSpeech(item.t.text, nickname);
       if (check.allocated) {
-        matchedAllocation = check.matchedPhrase || t.text;
-        matchedTranscriptId = t.id;
+        matchedAllocation = check.matchedPhrase || item.t.text;
+        matchedTranscriptId = item.t.id;
         break;
       }
     }
@@ -406,7 +444,11 @@ export function promoteArgonDecisions(
 
   // AI가 decisions 배열에서 완전히 누락시킨 경우 대비:
   // 판매자 발화에서 호명된 닉네임 중 신청 댓글이 있고 미등록된 구매자가 있다면 추가
+  // (단, 판매자 발화 시간과 댓글 시간이 60초 이내여야 함)
   for (const t of transcripts) {
+    const tTime = Date.parse(t.recognizedAt || t.startedAt || "") || 0;
+    if (!tTime) continue;
+
     const spokenNames = extractSpokenNicknames(t.text);
     for (const spokenName of spokenNames) {
       const check = detectAllocationSpeech(t.text, spokenName);
@@ -418,8 +460,12 @@ export function promoteArgonDecisions(
       );
       if (alreadyIn) continue;
 
-      // 신청 댓글이 있는지 확인
-      const userComment = comments.find((c) => c.nickname === spokenName);
+      // 발화 시간 기준 ±60초 이내에 신청 댓글이 있는지 확인
+      const userComment = comments.find((c) => {
+        if (c.nickname !== spokenName) return false;
+        const cTime = Date.parse(c.capturedAt) || 0;
+        return cTime > 0 && Math.abs(cTime - tTime) <= 60 * 1000;
+      });
       if (!userComment) continue;
 
       // 신규 확정 등록
@@ -473,6 +519,11 @@ export function buildArgonPromptWithContext(
    - 판매자가 "아, 보석 언니 줄게", "보석 언니 줄게요", "보석 언니 꺼", "보석 언니 준다", "보석 언니 갈게요", "보석 언니 드려", "보석 언니 하나 가져가"처럼 친근한 구어체나 반말로 배정한 것은 정형화된 "드릴게요", "확정입니다"와 동일한 100% 명확한 판매자 배정 확정(SELLER_ALLOCATE)입니다!
    - 고객이 해당 상품 주문 댓글("0", "0번", "1", "저요" 등)을 작성했고 판매자가 해당 닉네임과 함께 "~줄게", "~꺼", "~준다" 등의 배정 발화를 한 경우, 절대로 PENDING으로 보류하지 말고 반드시 CONFIRMED(판매 확정)로 판정하세요.
    - 판매자가 "0번", "0번입니다", "10,000원, 0번"이라고 안내했을 때 고객의 댓글 "0", "0번", "공", "영"은 0번 상품에 대한 정당한 구매 신청(BUYER_INTENT)입니다.
+
+6. [과거 시간대/이전 상품 발화 오인 연결 및 재고 초과 건 확정 절대 금지]:
+   - 현재 진행 중인 상품 번호 및 신청 댓글과, 수 분 전(예: 3~10분 전) 이전 상품을 판매할 때 나온 과거 판매자 발화를 절대로 엮어서 확정하지 마세요.
+   - 판매자 호명 배정("XXX님 드릴게요", "~줄게")은 반드시 해당 상품 안내 및 댓글 신청과 동일한 시간대(수십 초 이내)에서 나온 발화여야만 유효합니다.
+   - 한정 수량(예: 1장 한정) 상품에서 이미 다른 고객에게 배정 완료된 경우, 이후에 주문 댓글을 작성한 고객은 절대로 CONFIRMED로 확정하지 말고 재고 초과(PENDING 또는 REVIEW)로 판정하세요.
 
 현재 실시간 감지된 활성 상품 슬롯 정보:
 ${
