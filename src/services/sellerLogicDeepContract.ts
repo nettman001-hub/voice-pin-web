@@ -365,6 +365,14 @@ export async function parseSellerLogicDeepResult(
   let raw: unknown;
   try { raw = JSON.parse(content.replace(/^\s*```(?:json)?/u, "").replace(/```\s*$/u, "")); }
   catch { return invalid("심층 AI 응답은 완전한 JSON 객체여야 합니다."); }
+  if (object(raw)) {
+    if (typeof raw.summary === "string" && raw.summary.trim() === "") {
+      raw.summary = "-";
+    }
+    if (!Array.isArray(raw.signals)) {
+      raw.signals = [];
+    }
+  }
   if (!object(raw) || !text(raw.summary, 3000) || !Array.isArray(raw.signals) || raw.signals.length > SELLER_LOGIC_DEEP_LIMITS.signals ||
       !Array.isArray(raw.decisions) || raw.decisions.length > SELLER_LOGIC_DEEP_LIMITS.decisions || !Array.isArray(raw.context)) {
     return invalid("심층 AI 응답의 summary, signals, decisions, context 형식을 확인해 주세요.");
