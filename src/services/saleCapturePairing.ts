@@ -24,9 +24,9 @@ export interface PairableSale {
   captureImageUrls?: string[];
 }
 
-// "캡처하세요", "캡쳐해 주세요", "화면 캡처" 같은 캡처 지시. "캡처할까요?", "캡처하지 마세요"는 제외한다.
+// "캡처하세요", "캡처해주세요", "캡처요", "화면 캡처" 같은 캡처 지시. "캡처할까요?", "캡처하지 마세요"는 제외한다.
 const CAPTURE_INSTRUCTION_PATTERN =
-  /캡[처쳐]\s*(?:하세요|해\s*주세요|해\s*줘요|해요|할게요|합니다)(?![가-힣]*\?)|화면\s*캡[처쳐]/u;
+  /캡[처쳐]\s*(?:하세요|해\s*주세요|해\s*줘요|요|부탁(?:드려요|해요)|해\s*줘|해요|할게요|합니다)(?![가-힣]*\?)|화면\s*캡[처쳐]/u;
 
 export function hasCaptureInstructionText(text: string): boolean {
   return CAPTURE_INSTRUCTION_PATTERN.test(text) && !/캡[처쳐]\s*하지\s*마/u.test(text);

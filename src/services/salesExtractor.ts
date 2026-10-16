@@ -183,8 +183,8 @@ export function getBuyerNicknameCandidates(text: string): string[] {
     .map((match) => match[1]));
   if (p2.length) return p2;
 
-  // 패턴 3: "닉네임 [xxx]"
-  const p3 = distinctBuyerNames([...text.matchAll(/닉네임(?:은)?\s*([가-힣a-zA-Z0-9_]{2,12})/gu)]
+  // 패턴 3: "닉네임 [xxx]" (예: "닉네임 러블리", "닉네임은 민트초코")
+  const p3 = distinctBuyerNames([...text.matchAll(/닉네임(?:은)?\s*([가-힣a-zA-Z0-9_]{1,16})(?=\s|[,.!?]|이거|요거|드릴|확정|$)/gu)]
     .map((match) => match[1].replace(/(?:언니|님|씨)(?:께|에게|한테)?$/u, '')));
   return p3;
 }
@@ -207,6 +207,70 @@ export interface ExtractedSaleResult {
   allocationTranscript?: string;
   /** buyerNickname with the words spoken right before it ("성훈 맘"). */
   buyerNicknamePhrase?: string;
+  /** 판매자 4단 멘트(고객 닉네임 + 확정멘트 + 소수점/일반가격 + 캡처멘트) 완전 일치 여부 */
+  isFourPointConfirmed?: boolean;
+}
+
+/**
+ * 4대 필수 멘트 패턴 정의:
+ * 1. 확정 멘트: 드릴게요, 드릴께요, 이거 드릴게요, 이거 드릴께요, 확정이요, 확정이에요, 확정입니다, 가져가세요, 낙찰
+ * 2. 캡처 멘트: 캡처하세요, 캡처해주세요, 캡처요, 캡쳐하세요, 캡쳐해주세요, 캡쳐요, 화면 캡처
+ */
+export const FOUR_POINT_CONFIRMATION_PATTERN =
+  /(?:이거\s*|요거\s*|상품\s*)?(?:드릴[게께]요|드리겠습니다|확정(?:이[요야]|입니다)?|가져가세요|낙찰(?:이[요야]|입니다)?)/u;
+
+export const FOUR_POINT_CAPTURE_PATTERN =
+  /캡[처쳐]\s*(?:하세요|해\s*주세요|해\s*줘요|요|부탁(?:드려요|해요)|해\s*줘|해요|할게요|합니다)|화면\s*캡[처쳐]/u;
+
+export interface FourPointSaleCheck {
+  isFourPointSale: boolean;
+  buyerNickname: string | null;
+  amount: number | null;
+  hasNickname: boolean;
+  hasConfirmation: boolean;
+  hasPrice: boolean;
+  hasCapture: boolean;
+}
+
+export function checkFourPointSaleCriteria(text: string): FourPointSaleCheck {
+  if (!text || text.trim().length < 3) {
+    return {
+      isFourPointSale: false,
+      buyerNickname: null,
+      amount: null,
+      hasNickname: false,
+      hasConfirmation: false,
+      hasPrice: false,
+      hasCapture: false,
+    };
+  }
+
+  // 1. 고객 닉네임: xxx님, 닉네임 xxx, xxx언니 등
+  const buyerNickname = parseBuyerNickname(text);
+  const hasNickname = Boolean(buyerNickname && buyerNickname.trim().length >= 1);
+
+  // 2. 확정 멘트
+  const hasConfirmation = FOUR_POINT_CONFIRMATION_PATTERN.test(text);
+
+  // 3. 가격 (소수점 1.5 -> 15,000원 및 일반 금액)
+  const speechPrice = extractSpeechPrice(text);
+  const amount = speechPrice ? speechPrice.amount : parseKoreanAmount(text);
+  const hasPrice = Boolean(amount && amount > 0);
+
+  // 4. 캡처 멘트
+  const hasCapture = FOUR_POINT_CAPTURE_PATTERN.test(text) && !/캡[처쳐]\s*하지\s*마/u.test(text);
+
+  const isFourPointSale = hasNickname && hasConfirmation && hasPrice && hasCapture;
+
+  return {
+    isFourPointSale,
+    buyerNickname,
+    amount,
+    hasNickname,
+    hasConfirmation,
+    hasPrice,
+    hasCapture,
+  };
 }
 
 const ALLOCATION_ACTION = /(?:드리겠습니다|드릴게요|드릴께요|챙겨\s*드릴게요|챙겨\s*드리겠습니다|챙겨\s*줄(?:게|께)(?:요)?(?=\s|[,.!?]|$)|(?:넣어|담아|배정해)\s*드(?:릴(?:게|께)요|렸(?:어요|습니다))|구매\s*확정(?:입니다|할게요)?|낙찰(?:입니다)?|판매\s*완료|주문\s*확정|결제\s*완료|캡처(?:해주세요|해\s*주시고|하세요|부탁)?|먼저\s*(?:하셨네요|하셨어요|하셨|잡으셨|가져가셨)|가져가(?:세요|실게요|셨어요)|가실게요)/u;
@@ -335,6 +399,31 @@ export function extractSaleFromTranscript(transcript: string, activeKeywords: st
     matchedKeywords.push('소수점가격');
   }
 
+  // 4대 필수 멘트(고객 닉네임 + 확정멘트 + 가격 + 캡처멘트) 완벽 일치 우선 검사
+  const fourPoint = checkFourPointSaleCriteria(text);
+  if (fourPoint.isFourPointSale && fourPoint.buyerNickname && fourPoint.amount && fourPoint.amount > 0) {
+    const matchedKeywords: string[] = ['4단확정'];
+    [...saleTriggers, '닉네임', '금액', '가격', '원', '캡처', '확정', '드릴게요', ...activeKeywords].forEach(kw => {
+      if (text.includes(kw) && !matchedKeywords.includes(kw)) {
+        matchedKeywords.push(kw);
+      }
+    });
+
+    return {
+      isSaleMent: true,
+      buyerNickname: fourPoint.buyerNickname,
+      amount: fourPoint.amount,
+      status: '확정',
+      rawTranscript: transcript.trim(),
+      isPending: false,
+      matchedKeywords,
+      intent: 'ALLOCATION',
+      allocationTranscript: allocationTranscript || text,
+      buyerNicknamePhrase: getBuyerNicknamePhrase(text, fourPoint.buyerNickname) || undefined,
+      isFourPointConfirmed: true,
+    };
+  }
+
   // 타 구문/타인 가격 오염 방지: 반드시 evidenceText에서만 가격 추출
   const amount = extractSpeechPrice(evidenceText)?.amount || null;
 
@@ -354,6 +443,7 @@ export function extractSaleFromTranscript(transcript: string, activeKeywords: st
     allocationTranscript: allocationTranscript || undefined,
     buyerNicknamePhrase: nickname
       ? getBuyerNicknamePhrase(evidenceText, nickname) || undefined : undefined,
+    isFourPointConfirmed: false,
   };
 }
 

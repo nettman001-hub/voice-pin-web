@@ -1186,6 +1186,18 @@ export const LiveHomePage: React.FC = () => {
             </div>
             <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar pb-0.5">
               <button
+                onClick={() => injectTestMent('러블리언니 이거 드릴게요 1.5 캡처하세요.')}
+                className="px-2.5 py-1 rounded-lg bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-300 text-xs font-bold whitespace-nowrap active:scale-95 transition"
+              >
+                🎯 "러블리언니 드릴게요 1.5 캡처"
+              </button>
+              <button
+                onClick={() => injectTestMent('닉네임 민트초코 확정이요 2.3 캡처해주세요.')}
+                className="px-2.5 py-1 rounded-lg bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-300 text-xs font-bold whitespace-nowrap active:scale-95 transition"
+              >
+                🎯 "닉네임 민트초코 2.3 캡처"
+              </button>
+              <button
                 onClick={() => injectTestMent('구매확정 됐습니다! 구매하신 분은 러블리님 이시구요 금액은 3만5천원입니다.')}
                 className="px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold whitespace-nowrap active:scale-95 transition"
               >

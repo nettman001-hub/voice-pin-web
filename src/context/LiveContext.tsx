@@ -852,15 +852,20 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (saleResult.intent === 'UNCERTAIN' && !getVoiceReviewRequests({
       sessionId: sessionSnapshot, recognizedAt, rawTranscript: fullText,
     }, cloudComments).length) return;
-    const buyerNickname = request?.nickname
+    const isFourPoint = Boolean(saleResult.isFourPointConfirmed);
+    const commentNickname = request?.nickname
       || resolveSpokenNicknameWithoutRequest(spokenBuyer, cloudComments.map((comment) => comment.nickname));
+    // 판매 확정 시 고객 댓글에 있는 닉네임을 최우선으로 저장하고,
+    // 고객 댓글에 닉네임이 없는 예외 상황에서만 판매자가 발화한 닉네임을 사용한다.
+    const buyerNickname = commentNickname || saleResult.buyerNickname || spokenBuyer;
     // The registered product price is only a fallback when the seller said no
     // price at all; a spoken price we could not link must stay for review.
     const effectiveAmount = saleResult.amount > 0 ? saleResult.amount
       : extractSpeechPrice(fullText) ? 0 : (activeProductSnapshot?.unitPrice ?? 0);
-    // A spoken name alone never confirms a sale: unless it matches a buyer's
-    // purchase comment nickname, the sale is held until that comment links.
-    const status = request && effectiveAmount > 0 && saleResult.intent === 'ALLOCATION' ? '자동저장' : '보류';
+    // 고객이 댓글로 구매의사를 밝히지 않았더라도 판매자의 4단 멘트(닉네임 + 확정멘트 + 소수점/일반가격 + 캡처멘트)가 일치한 경우 '확정'으로 등록하여 전표를 출력한다.
+    const status = isFourPoint
+      ? '확정'
+      : (request && effectiveAmount > 0 && saleResult.intent === 'ALLOCATION' ? '자동저장' : '보류');
     // Repeated allocation/price phrases for one purchase comment refine the
     // same pending sale rather than creating another transaction.
     const existingPending = request ? sales.find((sale) => sale.sessionId === sessionSnapshot
@@ -1626,16 +1631,23 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
               ));
 
           if (saleResult) {
-            actionTriggered = 'SALE_PENDING';
-            if (hasCaptureInstruction) {
-              ruleActionName = '🛍️ 판매 후보 확인 중 + 📸 캡처 연동';
+            const isFourPoint = Boolean(saleResult.isFourPointConfirmed);
+            if (isFourPoint) {
+              actionTriggered = 'SALE_SAVED';
+              ruleActionName = '🛍️ [판매확정] 4단 멘트 감지 + 🖨️ 전표 출력 + 📸 캡처';
+              playBeep(1200, 200);
             } else {
-              ruleActionName = '🛍️ 구매 댓글·음성 가격 확인 중';
+              actionTriggered = 'SALE_PENDING';
+              if (hasCaptureInstruction) {
+                ruleActionName = '🛍️ 판매 후보 확인 중 + 📸 캡처 연동';
+              } else {
+                ruleActionName = '🛍️ 구매 댓글·음성 가격 확인 중';
+              }
             }
             void persistVoiceSale(
               saleResult,
               saleResult.rawTranscript,
-              hasCaptureInstruction,
+              hasCaptureInstruction || isFourPoint,
               requiredListeningGeneration
             );
           } else if (
