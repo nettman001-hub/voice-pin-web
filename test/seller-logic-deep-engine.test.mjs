@@ -115,4 +115,54 @@ test('skips failing segment, logs warning, and continues analyzing remaining seg
   assert.equal(Object.keys(result.state.processedSegments).length, 2);
 });
 
+test('runSellerLogicDeep auto-merges duplicate decisions from different segments into single decision', async () => {
+  const input = archive([
+    speech('s1', 19, '웅이맘한테 얘기 캡처!'),
+    speech('s2', 75, '우리가 24,000원에 2개가 가는 거야'),
+  ]);
+  input.comments[0].nickname = '웅이맘';
+
+  const multiCall = async (packet) => {
+    if (packet.segment.index === 0) {
+      return {
+        decisions: [{
+          id: 'sld:segment0-woong',
+          status: 'CONFIRMED',
+          nickname: '웅이맘',
+          unitPrice: 24000,
+          quantity: 1,
+          reason: '웅이맘 구매 의사 및 배정 확정',
+          commentIds: ['c1'],
+          transcriptIds: ['s1'],
+          decidedAt: new Date(epoch + 19000).toISOString(),
+        }],
+        signals: [], context: [], summary: '1구간', provider: 'TEST', model: 'test', appliedVersion: 1,
+      };
+    } else {
+      // 2구간에서 다른 ID로 동일 웅이맘 거래가 보고됨
+      return {
+        decisions: [{
+          id: 'sld:segment1-woong-new-id',
+          status: 'CONFIRMED',
+          nickname: '웅이맘',
+          unitPrice: 24000,
+          quantity: 1,
+          reason: '웅이맘 구매 의사 및 배정 확정',
+          commentIds: ['c1'],
+          transcriptIds: ['s1', 's2'],
+          decidedAt: new Date(epoch + 75000).toISOString(),
+        }],
+        signals: [], context: [], summary: '2구간', provider: 'TEST', model: 'test', appliedVersion: 1,
+      };
+    }
+  };
+
+  const result = await runSellerLogicDeep(input, multiCall, { now: epoch + 600_000 });
+  assert.equal(result.decisions.length, 1, 'must merge duplicate decisions across segments into exactly 1 decision');
+  assert.equal(result.decisions[0].nickname, '웅이맘');
+  assert.equal(result.decisions[0].unitPrice, 24000);
+  assert.deepEqual(result.decisions[0].transcriptIds.sort(), ['s1', 's2'].sort(), 'all evidence merged');
+});
+
+
 

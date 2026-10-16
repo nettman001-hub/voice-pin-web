@@ -175,6 +175,35 @@ function validateDeepDecision(raw: unknown, source: Pick<SellerLogicDeepInput, "
       status = "REVIEW";
       reason = `[확인 필요: 고객 댓글이 단순 문의/질문이며 명시적 구매 의사(저요, 주세요 등) 없음] ${reason}`.slice(0, 4000);
     }
+
+    // 고객 댓글이 오직 단순 대답/호응("네", "예", "응", "넵", "넹", "네네" 등)인 경우:
+    // 판매자의 명시적인 해당 고객 호명 배정/확정 멘트("A언니 드릴게요", "A언니 캡처하세요" 등)가 있어야만 확정 인정
+    const isPureAck = citedComments.length > 0 && citedComments.every((c) =>
+      /^(?:네|예|응|넵|넹|네네|예예|넵넵|넹넹|ㅇㅇ|ok|오케이|알겠어요|알겠습니다)[.!?~^]*$/i.test(c.content.trim())
+    );
+    if (isPureAck) {
+      const hasConfirm = nickname && citedTranscripts.some((t) => {
+        const text = t.text;
+        const escapedNick = nickname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const allocMatch = new RegExp(
+          `${escapedNick}(?:\\s*(?:님|언니|고객님|분))?[^.!?\\n]{0,12}(?:드릴|줄게|줄게요|준다|꺼|것|갈게|갈게요|가요|드려|드림|가져가|빼놔|빼드|낙찰|확정)`,
+          "u"
+        ).test(text);
+        const capMatch = new RegExp(
+          `${escapedNick}(?:\\s*(?:님|언니|고객님|분|한테))?[^.!?\\n]{0,12}(?:캡처|캡쳐)`,
+          "u"
+        ).test(text);
+        const reverseAllocMatch = new RegExp(
+          `(?:드릴|줄게|줄게요|준다|드려요)\\s*${escapedNick}`,
+          "u"
+        ).test(text);
+        return allocMatch || capMatch || reverseAllocMatch;
+      });
+      if (!hasConfirm) {
+        status = "REVIEW";
+        reason = `[확인 필요: 단순 호응/대답("${citedComments.map((c) => c.content).join(", ")}") 댓글이며 판매자의 호명 확정/배정/캡처 멘트 없음] ${reason}`.slice(0, 4000);
+      }
+    }
   }
   if (status === "CONFIRMED") {
     const buyerComments = citedComments.filter((row) => row.nickname === nickname);
@@ -333,11 +362,12 @@ timeline은 이번 분석 시간대의 원문입니다. role="new"는 이번에 
 1. [구매 의사(BUYER_INTENT) 필수]: 구매 의사는 "ㅈㅇ", "저요", "저여", "제가 살게요", "저주세요", "저 깔", "저용", "[색상/사이즈] 주세요"(예: "그레이 주세요", "블랙 저요")처럼 명백한 구매 신청 의사여야 합니다. 판매자가 상품 주문번호를 안내한 경우(예: "0번", "0번입니다", "1번", "7번" 등)에 한해 "0", "0번", "공", "영", "1", "7" 같은 숫자 댓글은 해당 상품의 정당한 구매 신청(BUYER_INTENT)으로 즉시 연결하세요. 소수 가격(0.9=9,000원, 1.5=15,000원, 3.9=39,000원)을 주문번호로 읽지 마세요. ".", 이모지, 인사, 잡담은 구매가 아닙니다.
 2. [절대 금지: 단순 문의/스펙 질문은 구매 의사가 아님]: 고객의 사이즈 문의(예: "55반인데", "66 맞나요?"), 원단·디테일 질문(예: "허리가 밴딩", "기장 얼마예요?", "비침 있나요?"), 가격 질문("얼마예요?")은 단순 문의(INQUIRY)일 뿐, 절대로 구매 신청(BUYER_INTENT)이 아닙니다! 고객이 "저요", "주세요" 같은 구매 신청을 명시적으로 밝히지 않은 단순 질문 댓글을 두고 "구매 의사를 확인했다"고 날조하거나 임의로 거래를 만들지 마세요.
 3. [절대 금지: 판매자의 질문 답변은 배정 확정이 아님]: 고객의 질문에 판매자가 답변해준 발화(예: "5반 될 것 같은데 언니", "자, 허리 밴딩이에요", "기장 100 나와요", ", 3.9 드립니다")는 상품 설명 및 가격 안내일 뿐, 판매자 배정(SELLER_ALLOCATE)이 아닙니다! 판매자가 질문에 대답했다고 해서 구매 확정으로 판단하지 마세요.
+4. [단순 대답/호응("네", "예", "응", "넵" 등) 거래 취급 규칙]: 고객 댓글이 "네", "예", "응", "넵", "넹", "네네" 등 단순 대답·맞장구인 경우 원칙적으로 구매 의사(BUYER_INTENT)가 아닙니다. 예외적으로 판매자가 특정 상품 구매를 권유하고 고객이 "네"라고 답한 맥락이라 하더라도, 반드시 뒤이어 판매자가 해당 고객을 직접 호명하며 확정·배정·캡처 멘트(예: "A언니 드릴게요", "A언니 줄게", "A언니 캡처하세요", "A언니 꺼")를 명확히 발화한 경우에만 판매 확정(CONFIRMED)으로 인정합니다. 판매자의 구체적인 호명 확정/배정/캡처 멘트가 없다면 단순 "네" 댓글을 구매 의사로 판단하여 PENDING이나 REVIEW 거래를 생성하지 마세요(decisions: []).
 확정 규칙 및 금액 계산:
 1. [소수점 가격 계산]: 판매 가격 또는 금액은 만원 단위 소수점으로 말할 수 있습니다. 소수점에 10,000원을 곱해 원 단위 정수로 환산하세요 (예: 0.8 -> 8,000원, 1.5 -> 15,000원, 3.9 -> 39,000원, '풀이 3.9' -> 39,000원). unitPrice 필드에는 반드시 15000, 39000처럼 계산된 정수 금액을 기록하세요. 0원은 쓰지 마세요. 가격은 그 거래의 확정 발화 가격 → 같은 거래의 후속 가격 발화 → 같은 상품 구간에서 앞서 안내한 가격 순으로 확보하세요. 가격 근거가 없으면 unitPrice는 null로 두고 REVIEW입니다.
 2. [최종 구매 확정(CONFIRMED) 기준 및 구어체 배정 멘트]: 라이브 방송 특성상 판매자는 격식체("드릴게요", "확정입니다") 외에도 친근한 구어체/반말로 배정 확정을 자주 사용합니다. [고객 호칭/닉네임] 뒤에 붙는 "~줄게"(예: "아, 보석 언니 줄게", "보석 언니 줄게요"), "~준다", "~꺼"(예: "보석 언니 꺼"), "~갈게"(예: "보석 언니 갈게요"), "~드려", "~가져가", "~빼놔", "~낙찰" 또는 [고객 호칭 + 색상/사이즈/옵션](예: "우리 샤넬 언니 그레이")은 모두 100% 명백한 판매자 배정 확정(SELLER_ALLOCATE)입니다! 판매자가 "줄게", "드릴게요", "언니 꺼" 등으로 배정 호명했고 고객의 해당 상품 신청 댓글("0", "1", "저요", "그레이 주세요" 등)과 가격이 확인되면 절대로 PENDING으로 보류하지 말고 즉시 CONFIRMED로 확정 판정하세요. 단, 질문 답변에 불과한 멘트는 배정이 아니므로 decisions: []입니다.
 상태: CONFIRMED(판매자 배정+구매자 신청 둘 다 필수), PENDING(대화 진행 중, 후속 발화 대기), REVIEW(닉네임·가격·상품·옵션·재고 확인 필요), CANCELLED(취소·번복·부정). 질문("얼마예요?", "66 가능?", "55반인데", "허리가 밴딩"), 조건("있으면 살게요"), 과거 언급, 농담, 사이즈 문의는 확정이 아니며 거래 대상이 아닙니다. 판매자가 안내한 재고·품절 수량을 넘는 배정은 REVIEW로 남기세요.
-이전 판단 갱신: previousDecisions의 거래를 바꿀 때는 같은 D별칭 id를 유지하고 그 거래의 기존 근거를 하나 이상 함께 인용하세요. 새 거래는 id null입니다. previousDecisions의 reason은 전송 시 축약될 수 있으므로 갱신 판단은 요약 문장이 아니라 구조화된 근거와 timeline 원문을 기준으로 하세요. 응답에는 이번에 판단한 거래만 넣어도 되며, 변경하지 않은 거래는 코드가 유지합니다. 같은 거래의 가격 협상 단계를 별도 거래로 중복 출력하지 말고 마지막 상태 하나로 합치세요. 한 발화에서 여러 구매자가 확정되면 구매자별로 별도 거래 줄을 만드세요. 여러 상품·옵션은 lineKey로 구분하세요.
+이전 판단 갱신: previousDecisions의 거래를 바꿀 때는 같은 D별칭 id를 유지하고 그 거래의 기존 근거를 하나 이상 함께 인용하세요. 새 거래는 id null입니다. 이미 확정된 거래(previousDecisions)와 동일한 주문 건을 다시 반환할 때는 절대로 id: null로 새 거래를 중복 발행하지 말고 반드시 기존 D별칭을 명시하여 갱신하세요. 변경 없는 기존 거래는 decisions에서 생략해도 코드가 유지합니다. previousDecisions의 reason은 전송 시 축약될 수 있으므로 갱신 판단은 요약 문장이 아니라 구조화된 근거와 timeline 원문을 기준으로 하세요. 응답에는 이번에 판단한 거래만 넣어도 되며, 변경하지 않은 거래는 코드가 유지합니다. 같은 거래의 가격 협상 단계를 별도 거래로 중복 출력하지 말고 마지막 상태 하나로 합치세요. 한 발화에서 여러 구매자가 확정되면 구매자별로 별도 거래 줄을 만드세요. 여러 상품·옵션은 lineKey로 구분하세요.
 context: 다음 시간대에 필요한 현재 상품·주문번호·가격·미해결 후보·구매 요청만 남겨 전체 배열로 반환하세요. 해소된 항목은 빼세요. 각 항목은 실제 원문 ID 근거를 1개 이상 포함해야 하며, 근거 ID가 없는 문맥은 항목을 만들지 말고 생략하세요.
 signals: 이번 시간대 신호를 kind(BUYER_INTENT/SELLER_ALLOCATE/PRODUCT_ANNOUNCE/PRICE_QUOTE/PRICE_CORRECTION/STOCK/CANCEL/INQUIRY/NOISE)와 함께 기록하세요.
 출력은 JSON 하나입니다. 필수: {"summary":"이번 시간대 요약","signals":[{"kind":"BUYER_INTENT","summary":"신호 요약","commentIds":["C0"],"transcriptIds":[]}],"decisions":[{"id":null,"status":"CONFIRMED","nickname":"인용 댓글의 정확한 닉네임 또는 null","unitPrice":15000,"quantity":1,"reason":"선정 또는 보류 이유","commentIds":["C0"],"transcriptIds":["S1"],"productName":"상품명(선택)","orderCode":"상품번호(선택)","spokenNickname":"STT 호칭(선택)","lineKey":"상품-옵션 구분(선택)"}],"context":[{"text":"다음 시간대에 필요한 문맥","commentIds":[],"transcriptIds":["S1"]}]}. 모르는 nickname·unitPrice는 문자열 "null"이 아닌 JSON null입니다. 판단할 거래가 없으면 decisions:[]입니다. 공급자 정보·시간·근거 ID를 만들어 넣지 마세요.`,
@@ -447,6 +477,22 @@ export async function parseSellerLogicDeepResult(
         }
       }
     }
+    if (!prior && decisionId === null && previous.size > 0) {
+      // AI가 id: null로 반환했으나 previousDecisions에 이미 동일 구매자 + 동일 상품/댓글 근거를 공유하는 기존 거래가 있는 경우 자동 매핑
+      const matchingPrior = [...previous.values()].find((p) => {
+        if (!isSameTransactionCandidate(p, decision as Record<string, unknown>)) return false;
+        const sharesComment = decoded.commentIds.some((cid) => p.commentIds.includes(cid));
+        const sameProduct = (p.lineKey && (decision as Record<string, unknown>).lineKey && p.lineKey === (decision as Record<string, unknown>).lineKey) ||
+          (p.orderCode && (decision as Record<string, unknown>).orderCode && p.orderCode === (decision as Record<string, unknown>).orderCode) ||
+          (!p.lineKey && !(decision as Record<string, unknown>).lineKey && !p.orderCode && !(decision as Record<string, unknown>).orderCode);
+        return sharesComment || sameProduct;
+      });
+      if (matchingPrior) {
+        prior = matchingPrior;
+        decoded.commentIds = [...new Set([...prior.commentIds, ...decoded.commentIds])];
+        decoded.transcriptIds = [...new Set([...prior.transcriptIds, ...decoded.transcriptIds])];
+      }
+    }
     const validated = validateDeepDecision(decoded, input);
     let id: string;
     if (prior) {
@@ -460,6 +506,37 @@ export async function parseSellerLogicDeepResult(
     ids.add(id);
     return { ...validated, id };
   });
+
+  // 단순 대답("네", "예" 등) 댓글이면서 판매자의 명확한 호명 확정/배정/캡처 멘트가 없는 거래는 제외
+  const filteredDecisions = decisions.filter((d) => {
+    const citedComments = input.comments.filter((c) => d.commentIds.includes(c.id));
+    const isPureAck = citedComments.length > 0 && citedComments.every((c) =>
+      /^(?:네|예|응|넵|넹|네네|예예|넵넵|넹넹|ㅇㅇ|ok|오케이|알겠어요|알겠습니다)[.!?~^]*$/i.test(c.content.trim())
+    );
+    if (isPureAck) {
+      const citedTranscripts = input.transcripts.filter((t) => d.transcriptIds.includes(t.id));
+      const hasConfirm = d.nickname && citedTranscripts.some((t) => {
+        const text = t.text;
+        const escapedNick = d.nickname!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const allocMatch = new RegExp(
+          `${escapedNick}(?:\\s*(?:님|언니|고객님|분))?[^.!?\\n]{0,12}(?:드릴|줄게|줄게요|준다|꺼|것|갈게|갈게요|가요|드려|드림|가져가|빼놔|빼드|낙찰|확정)`,
+          "u"
+        ).test(text);
+        const capMatch = new RegExp(
+          `${escapedNick}(?:\\s*(?:님|언니|고객님|분|한테))?[^.!?\\n]{0,12}(?:캡처|캡쳐)`,
+          "u"
+        ).test(text);
+        const reverseAllocMatch = new RegExp(
+          `(?:드릴|줄게|줄게요|준다|드려요)\\s*${escapedNick}`,
+          "u"
+        ).test(text);
+        return allocMatch || capMatch || reverseAllocMatch;
+      });
+      if (!hasConfirm) return false;
+    }
+    return true;
+  });
+
   // Auxiliary payload (signals, carry) must never halt a paid analysis. Recover
   // swapped alias arrays and ignore unresolvable aliases; decisions stay strict.
   const decodeRefsLenient = (commentValues: unknown, transcriptValues: unknown) => {
@@ -495,5 +572,5 @@ export async function parseSellerLogicDeepResult(
       ? { text: item.text, commentIds, transcriptIds }
       : { text: item.text, commentIds, transcriptIds, sourcesMissing: true });
   }
-  return { decisions, signals, context, summary: raw.summary };
+  return { decisions: filteredDecisions, signals, context, summary: raw.summary };
 }

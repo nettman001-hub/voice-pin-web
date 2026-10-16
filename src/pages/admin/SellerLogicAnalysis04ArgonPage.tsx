@@ -34,7 +34,7 @@ import {
   type SellerLogicEvidence,
 } from '../../services/sellerLogicInput';
 import { SellerLogicScheduler } from '../../services/sellerLogicScheduler';
-import type { SellerLogicDeepWarning } from '../../types/sellerLogicDeep';
+import type { SellerLogicDeepDecision, SellerLogicDeepWarning } from '../../types/sellerLogicDeep';
 import type { SellerLogicSlots } from '../../types/sellerLogicAnalysis';
 import {
   type ActiveProductSlot,
@@ -198,9 +198,38 @@ export default function SellerLogicAnalysis04ArgonPage() {
       rowsRef.current.comments,
       curProd,
     );
+
+    // 동일 고객 + 동일 상품/댓글 근거 공유에 대한 중복 거래 최종 통합
+    const dedupedDecisions: SellerLogicDeepDecision[] = [];
+    for (const d of promotedDecisions) {
+      const existingIdx = dedupedDecisions.findIndex((ex) => {
+        if (ex.id === d.id) return true;
+        const sameBuyer = ex.nickname && d.nickname && ex.nickname.trim().toLowerCase() === d.nickname.trim().toLowerCase();
+        if (!sameBuyer) return false;
+        const sharesComment = d.commentIds.some((cid) => ex.commentIds.includes(cid));
+        const sameProduct = (ex.lineKey && d.lineKey && ex.lineKey === d.lineKey) ||
+          (ex.orderCode && d.orderCode && ex.orderCode === d.orderCode) ||
+          (!ex.lineKey && !d.lineKey && !ex.orderCode && !d.orderCode);
+        const sameAmount = ex.unitPrice === d.unitPrice && ex.quantity === d.quantity;
+        return sharesComment || (sameProduct && sameAmount);
+      });
+
+      if (existingIdx >= 0) {
+        const ex = dedupedDecisions[existingIdx];
+        dedupedDecisions[existingIdx] = {
+          ...d,
+          id: ex.id,
+          commentIds: [...new Set([...ex.commentIds, ...d.commentIds])],
+          transcriptIds: [...new Set([...ex.transcriptIds, ...d.transcriptIds])],
+        };
+      } else {
+        dedupedDecisions.push(d);
+      }
+    }
+
     const updatedNext: SellerLogicDeepRunResult = {
       ...next,
-      decisions: promotedDecisions,
+      decisions: dedupedDecisions,
     };
 
     // 경고 필터링: 이미 삭제 처리된 경고는 다시 노출되지 않도록 필터링

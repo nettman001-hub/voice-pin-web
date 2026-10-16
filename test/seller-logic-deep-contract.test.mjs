@@ -302,6 +302,123 @@ test('handles decision with string "null" or arbitrary id as new decision withou
   assert.ok(parsed2.decisions[0].id.startsWith('sld:'), 'derived new sld: id for arbitrary id');
 });
 
+test('pure acknowledgment comment (e.g. 네) without seller allocation speech is filtered out from decisions', async () => {
+  const base = payload();
+  base.comments = [
+    { id: 'c_woong_1', sessionId: 'deep-contract', nickname: '웅이맘', content: '네', capturedAt: at(6) },
+  ];
+  base.transcripts = [
+    { id: 's_woong_1', text: '이거 마지막 한 장 남았어.', recognizedAt: at(3), isFinal: true },
+    { id: 's_woong_2', text: '어, 오케이. 이거 마지막 한 장. 얼른 가져가세요, 언니.', recognizedAt: at(15), isFinal: true },
+  ];
+  base.segment = {
+    id: 'dseg:0:woong', index: 0,
+    startedAt: at(0), endedAt: at(30), closed: true,
+    commentIds: ['c_woong_1'],
+    transcriptIds: ['s_woong_1', 's_woong_2'],
+  };
+  const input = normalizeSellerLogicDeepInput(base);
+  const erroneousAiAnswer = answer();
+  // AI erroneously created PENDING decision on "네"
+  erroneousAiAnswer.decisions = [{
+    id: null,
+    status: 'PENDING',
+    nickname: '웅이맘',
+    unitPrice: 24000,
+    quantity: 1,
+    reason: "고객 '웅이맘'의 구매 의사(C0)가 있었으나 배정 멘트가 없어 PENDING으로 보류함",
+    commentIds: ['C0'],
+    transcriptIds: ['S0', 'S1'],
+  }];
+
+  const parsed = await parse(erroneousAiAnswer, input);
+  assert.equal(parsed.decisions.length, 0, 'pure "네" without seller allocation speech must be excluded from decisions');
+});
+
+test('pure acknowledgment comment (e.g. 네) WITH seller allocation speech (e.g. 웅이맘 언니 드릴게요 / 캡처) is confirmed', async () => {
+  const base = payload();
+  base.comments = [
+    { id: 'c_woong_1', sessionId: 'deep-contract', nickname: '웅이맘', content: '네', capturedAt: at(6) },
+  ];
+  base.transcripts = [
+    { id: 's_woong_1', text: '이거 마지막 한 장 남았어.', recognizedAt: at(3), isFinal: true },
+    { id: 's_woong_2', text: '웅이맘 언니 드릴게요. 캡처하세요!', recognizedAt: at(15), isFinal: true },
+  ];
+  base.segment = {
+    id: 'dseg:0:woong_confirm', index: 0,
+    startedAt: at(0), endedAt: at(30), closed: true,
+    commentIds: ['c_woong_1'],
+    transcriptIds: ['s_woong_1', 's_woong_2'],
+  };
+  const input = normalizeSellerLogicDeepInput(base);
+  const aiAnswer = answer();
+  aiAnswer.decisions = [{
+    id: null,
+    status: 'CONFIRMED',
+    nickname: '웅이맘',
+    unitPrice: 24000,
+    quantity: 1,
+    reason: "고객 '웅이맘'의 구매 의사(C0)와 판매자의 배정 확정 및 캡처 지시(S1)로 확정",
+    commentIds: ['C0'],
+    transcriptIds: ['S0', 'S1'],
+  }];
+
+  const parsed = await parse(aiAnswer, input);
+  assert.equal(parsed.decisions.length, 1);
+  assert.equal(parsed.decisions[0].status, 'CONFIRMED');
+  assert.equal(parsed.decisions[0].nickname, '웅이맘');
+});
+
+test('auto-merges duplicate decision to existing prior ID when AI returns id null on next segment', async () => {
+  const base = payload();
+  base.comments = [
+    { id: 'c_woong_1', sessionId: 'deep-contract', nickname: '웅이맘', content: '저요', capturedAt: at(6) },
+  ];
+  base.transcripts = [
+    { id: 's_woong_1', text: '웅이맘한테 얘기 캡처!', recognizedAt: at(19), isFinal: true },
+    { id: 's_woong_2', text: '우리가 24,000원에 2개가 가는 거야.', recognizedAt: at(34), isFinal: true },
+  ];
+  const priorDecision = {
+    id: 'sld:prior-woong-1',
+    status: 'CONFIRMED',
+    nickname: '웅이맘',
+    unitPrice: 24000,
+    quantity: 1,
+    reason: '고객 웅이맘 구매 의사 및 배정 확정',
+    commentIds: ['c_woong_1'],
+    transcriptIds: ['s_woong_1'],
+    decidedAt: at(19),
+  };
+  base.previousDecisions = [priorDecision];
+  base.segment = {
+    id: 'dseg:1:woong', index: 1,
+    startedAt: at(20), endedAt: at(40), closed: true,
+    commentIds: ['c_woong_1'],
+    transcriptIds: ['s_woong_1', 's_woong_2'],
+  };
+
+  const input = normalizeSellerLogicDeepInput(base);
+  const aiAnswer = answer();
+  // AI returned id: null instead of 'D0', but it is the same buyer and comment C0
+  aiAnswer.decisions = [{
+    id: null,
+    status: 'CONFIRMED',
+    nickname: '웅이맘',
+    unitPrice: 24000,
+    quantity: 1,
+    reason: '고객 웅이맘 구매 의사 및 배정 확정',
+    commentIds: ['C0'],
+    transcriptIds: ['S0', 'S1'],
+  }];
+
+  const parsed = await parse(aiAnswer, input);
+  assert.equal(parsed.decisions.length, 1);
+  assert.equal(parsed.decisions[0].id, priorDecision.id, 'auto-mapped to prior ID instead of creating duplicate');
+  assert.deepEqual(parsed.decisions[0].transcriptIds.sort(), ['s_woong_1', 's_woong_2'].sort(), 'merged all transcripts');
+});
+
+
+
 
 
 

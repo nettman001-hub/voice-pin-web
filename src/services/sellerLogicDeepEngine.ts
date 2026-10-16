@@ -285,8 +285,44 @@ export async function runSellerLogicDeep(
     }
     checkAbort();
     state.stats.segmentMs += Date.now() - started;
-    for (const decision of result.decisions) decisions.set(decision.id, decision);
-    state.context = result.context;
+    for (const decision of result.decisions) {
+      // 동일 구매자의 동일 주문 건(중복 거래) 탐색 및 병합
+      let existingKey: string | undefined;
+      for (const [key, existing] of decisions.entries()) {
+        if (key === decision.id) {
+          existingKey = key;
+          break;
+        }
+        const sameBuyer = existing.nickname && decision.nickname &&
+          existing.nickname.trim().toLowerCase() === decision.nickname.trim().toLowerCase();
+        if (!sameBuyer) continue;
+
+        const sharesComment = decision.commentIds.some((cid) => existing.commentIds.includes(cid));
+        const sameProduct = (existing.lineKey && decision.lineKey && existing.lineKey === decision.lineKey) ||
+          (existing.orderCode && decision.orderCode && existing.orderCode === decision.orderCode) ||
+          (!existing.lineKey && !decision.lineKey && !existing.orderCode && !decision.orderCode);
+        const sameAmount = existing.unitPrice === decision.unitPrice && existing.quantity === decision.quantity;
+
+        if (sharesComment || (sameProduct && sameAmount)) {
+          existingKey = key;
+          break;
+        }
+      }
+
+      if (existingKey && existingKey !== decision.id) {
+        const old = decisions.get(existingKey)!;
+        decisions.delete(existingKey);
+        const merged: SellerLogicDeepDecision = {
+          ...decision,
+          id: existingKey,
+          commentIds: [...new Set([...old.commentIds, ...decision.commentIds])],
+          transcriptIds: [...new Set([...old.transcriptIds, ...decision.transcriptIds])],
+        };
+        decisions.set(existingKey, merged);
+      } else {
+        decisions.set(decision.id, decision);
+      }
+    }
     const unreviewed = new Map(state.unreviewedContext.map((item) => [item.text, item]));
     for (const item of result.context) {
       if (!item.commentIds.length && !item.transcriptIds.length) unreviewed.set(item.text, { ...item, sourcesMissing: true });
