@@ -164,5 +164,46 @@ test('runSellerLogicDeep auto-merges duplicate decisions from different segments
   assert.deepEqual(result.decisions[0].transcriptIds.sort(), ['s1', 's2'].sort(), 'all evidence merged');
 });
 
+test('a product announcement without a decision carries its evidence to the next bucket', async () => {
+  const input = {
+    sessionId: 'deep-engine', slotNumber: 1,
+    comments: [comment('c1', 70, '저요')],
+    transcripts: [speech('s1', 0, '티셔츠 15000원'), speech('s2', 71, '루비 언니 드릴게요')],
+  };
+  const calls = [];
+  const carry = { text: '티셔츠 15000원', commentIds: [], transcriptIds: ['s1'] };
+  const result = await runSellerLogicDeep(input, async (packet) => {
+    calls.push(packet);
+    return { decisions: [], signals: [], context: packet.segment.index === 0 ? [carry] : [], summary: '-', provider: 'TEST', model: 'test', appliedVersion: 1 };
+  }, { now: epoch + 600_000 });
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].context, [carry]);
+  assert.ok(calls[1].transcripts.some((row) => row.id === 's1'));
+  assert.deepEqual(result.state.context, [], 'resolved carry is cleared by the next response');
+});
+
+test('independent same-price purchases by one buyer survive across buckets', async () => {
+  const input = archive([speech('s1', 2, '루비 티셔츠 드릴게요'), speech('s2', 75, '루비 바지 드릴게요')]);
+  for (const fields of [{}, { orderCode: '1' }]) {
+    const first = { ...decisionA, ...fields };
+    const second = { ...decisionB, ...fields, unitPrice: first.unitPrice };
+    const result = await runSellerLogicDeep(input, async (packet) => ({
+      decisions: [packet.segment.index === 0 ? first : second], signals: [], context: [], summary: '-',
+      provider: 'TEST', model: 'test', appliedVersion: 1,
+    }), { now: epoch + 600_000 });
+    assert.deepEqual(result.decisions.map((row) => row.id), ['sld:a', 'sld:b']);
+    assert.deepEqual(result.decisions.map((row) => row.commentIds), [['c1'], ['c2']]);
+  }
+});
+
+test('different product lines remain separate even when they share a request comment', async () => {
+  const input = { sessionId: 'deep-engine', slotNumber: 1, comments: [comment('c1', 0, '티셔츠랑 바지 저요')], transcripts: [speech('s1', 2, '루비 두 개 드릴게요')] };
+  const result = await runSellerLogicDeep(input, async () => ({
+    decisions: [{ ...decisionA, productName: '티셔츠' }, { ...decisionA, id: 'sld:b', productName: '바지' }],
+    signals: [], context: [], summary: '-', provider: 'TEST', model: 'test', appliedVersion: 1,
+  }), { now: epoch + 600_000 });
+  assert.deepEqual(result.decisions.map((row) => row.id), ['sld:a', 'sld:b']);
+});
+
 
 

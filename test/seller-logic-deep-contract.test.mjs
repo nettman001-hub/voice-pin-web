@@ -417,6 +417,86 @@ test('auto-merges duplicate decision to existing prior ID when AI returns id nul
   assert.deepEqual(parsed.decisions[0].transcriptIds.sort(), ['s_woong_1', 's_woong_2'].sort(), 'merged all transcripts');
 });
 
+test('a new purchase is not rewritten to a prior ID just because the buyer or order code matches', async () => {
+  for (const fields of [{}, { orderCode: '1' }, { productName: '티셔츠' }]) {
+    const base = payload();
+    base.comments[1] = { ...base.comments[1], nickname: 'xou.3z', content: '바지 저요' };
+    const prior = {
+      id: 'sld:old-purchase', status: 'CONFIRMED', nickname: 'xou.3z', unitPrice: 18000, quantity: 1,
+      reason: '먼저 구매한 상품', commentIds: ['c1'], transcriptIds: ['s1', 's2'], decidedAt: at(5), ...fields,
+    };
+    const input = normalizeSellerLogicDeepInput({ ...base, previousDecisions: [prior] });
+    const next = answer();
+    next.decisions[0] = { ...next.decisions[0], ...fields, commentIds: ['C1'], transcriptIds: ['S2'] };
+    const parsed = await parse(next, input);
+    assert.notEqual(parsed.decisions[0].id, prior.id, JSON.stringify(fields));
+    assert.deepEqual(parsed.decisions[0].commentIds, ['c2']);
+    assert.deepEqual(parsed.decisions[0].transcriptIds, ['s3']);
+  }
+});
+
+test('separate product lines sharing one buyer comment remain separate purchases', async () => {
+  const base = payload();
+  const prior = {
+    id: 'sld:first-line', status: 'CONFIRMED', nickname: 'xou.3z', unitPrice: 18000, quantity: 1,
+    reason: '티셔츠 확정', productName: '티셔츠', lineKey: 'shirt', commentIds: ['c1'], transcriptIds: ['s1'], decidedAt: at(3),
+  };
+  const input = normalizeSellerLogicDeepInput({ ...base, previousDecisions: [prior] });
+  const next = answer();
+  next.decisions[0] = { ...next.decisions[0], productName: '바지', lineKey: 'pants' };
+  const parsed = await parse(next, input);
+  assert.notEqual(parsed.decisions[0].id, prior.id);
+  assert.equal(parsed.decisions[0].productName, '바지');
+});
+
+test('acknowledgments retain explicit allocations with decorated nicknames and split final speech', async () => {
+  const cases = [
+    { nickname: '도로시💕', speeches: ['도로시 언니 15000원 드릴게요'] },
+    { nickname: '루비', speeches: ['루비 언니.', '15000원 드릴게요'] },
+    { nickname: '루비', speeches: ['루비 언니', '1.5에 드릴게요'] },
+    { nickname: '도로시💕', speeches: ['도로시 언니', '캡처하세요'] },
+    { nickname: 'xou.3z', spokenNickname: '엑소', speeches: ['엑소 언니 드릴게요'] },
+  ];
+  for (const fixture of cases) {
+    const base = payload();
+    base.comments = [{ ...base.comments[0], nickname: fixture.nickname, content: '네' }];
+    base.transcripts = fixture.speeches.map((text, index) => ({ id: `s${index}`, text, recognizedAt: at(5 + index), isFinal: true }));
+    base.segment.commentIds = ['c1'];
+    base.segment.transcriptIds = base.transcripts.map((row) => row.id);
+    const next = answer();
+    next.decisions[0] = {
+      ...next.decisions[0], nickname: fixture.nickname, spokenNickname: fixture.spokenNickname,
+      transcriptIds: base.transcripts.map((_, index) => `S${index}`),
+    };
+    const parsed = await parse(next, normalizeSellerLogicDeepInput(base));
+    assert.equal(parsed.decisions.length, 1, JSON.stringify(fixture));
+    assert.equal(parsed.decisions[0].status, 'CONFIRMED');
+    assert.equal(parsed.decisions[0].nickname, fixture.nickname);
+  }
+});
+
+test('acknowledgments do not connect a remote name or another buyer to an allocation', async () => {
+  for (const speeches of [
+    [{ text: '루비 언니', at: 1 }, { text: '15000원 드릴게요', at: 90 }],
+    [{ text: '도로시 언니 15000원 드릴게요', at: 5 }],
+    [{ text: '루비 언니 드릴까요?', at: 5 }],
+    [{ text: '루비 언니 드릴게요?', at: 5 }],
+    [{ text: '루비 언니 안 드릴게요', at: 5 }],
+    [{ text: '루비 언니', at: 5 }, { text: '도로시 언니 드릴게요', at: 6 }],
+    [{ text: '루비 언니?', at: 5 }, { text: '드릴게요', at: 6 }],
+    [{ text: '루비 언니', at: 5 }, { text: '도로시 언니', at: 6, omitCitation: true }, { text: '드릴게요', at: 7 }],
+  ]) {
+    const base = payload();
+    base.comments = [{ ...base.comments[0], nickname: '루비', content: '네' }];
+    base.transcripts = speeches.map((row, index) => ({ id: `s${index}`, text: row.text, recognizedAt: at(row.at), isFinal: true }));
+    base.segment.commentIds = ['c1'];
+    base.segment.transcriptIds = base.transcripts.map((row) => row.id);
+    const next = answer();
+    next.decisions[0] = { ...next.decisions[0], nickname: '루비', transcriptIds: speeches.flatMap((row, index) => row.omitCitation ? [] : [`S${index}`]) };
+    assert.deepEqual((await parse(next, normalizeSellerLogicDeepInput(base))).decisions, []);
+  }
+});
+
 
 
 

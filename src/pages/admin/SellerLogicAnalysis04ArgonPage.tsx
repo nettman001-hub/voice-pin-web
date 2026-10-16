@@ -34,6 +34,7 @@ import {
   type SellerLogicEvidence,
 } from '../../services/sellerLogicInput';
 import { SellerLogicScheduler } from '../../services/sellerLogicScheduler';
+import { canMergeSellerLogicDeepTransactions } from '../../services/sellerLogicDeepTransactions';
 import type { SellerLogicDeepDecision, SellerLogicDeepWarning } from '../../types/sellerLogicDeep';
 import type { SellerLogicSlots } from '../../types/sellerLogicAnalysis';
 import {
@@ -124,6 +125,9 @@ export default function SellerLogicAnalysis04ArgonPage() {
   const captureFailure = useRef('');
   const prioritizedCommentIds = useRef(new Set<string>());
   const sessionRef = useRef<string>(crypto.randomUUID());
+  const sessionChangedRef = useRef(false);
+  const acceptingStreamCommentsRef = useRef(true);
+  const sessionChangedAtRef = useRef(0);
   const [currentSessionId, setCurrentSessionId] = useState<string>(sessionRef.current);
   const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
   const [customSessionName, setCustomSessionName] = useState('');
@@ -202,17 +206,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
     // 동일 고객 + 동일 상품/댓글 근거 공유에 대한 중복 거래 최종 통합
     const dedupedDecisions: SellerLogicDeepDecision[] = [];
     for (const d of promotedDecisions) {
-      const existingIdx = dedupedDecisions.findIndex((ex) => {
-        if (ex.id === d.id) return true;
-        const sameBuyer = ex.nickname && d.nickname && ex.nickname.trim().toLowerCase() === d.nickname.trim().toLowerCase();
-        if (!sameBuyer) return false;
-        const sharesComment = d.commentIds.some((cid) => ex.commentIds.includes(cid));
-        const sameProduct = (ex.lineKey && d.lineKey && ex.lineKey === d.lineKey) ||
-          (ex.orderCode && d.orderCode && ex.orderCode === d.orderCode) ||
-          (!ex.lineKey && !d.lineKey && !ex.orderCode && !d.orderCode);
-        const sameAmount = ex.unitPrice === d.unitPrice && ex.quantity === d.quantity;
-        return sharesComment || (sameProduct && sameAmount);
-      });
+      const existingIdx = dedupedDecisions.findIndex((ex) => ex.id === d.id || canMergeSellerLogicDeepTransactions(ex, d));
 
       if (existingIdx >= 0) {
         const ex = dedupedDecisions[existingIdx];
@@ -255,7 +249,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
     setWarnings(filteredWarnings);
 
     // 04argon 하이브리드 보강: 소수점 원본 가격 및 캡처 지시 메타데이터 결합
-    const extDecisions: ArgonExtendedDecision[] = promotedDecisions.map((d) => {
+    const extDecisions: ArgonExtendedDecision[] = dedupedDecisions.map((d) => {
       let rawPrice = curProd?.rawPrice;
       if (d.unitPrice && !rawPrice) {
         rawPrice = (d.unitPrice / 10000).toString();
@@ -269,15 +263,15 @@ export default function SellerLogicAnalysis04ArgonPage() {
     });
     setExtendedDecisions(extDecisions);
 
-    const confirmed = promotedDecisions.filter((decision) => decision.status === 'CONFIRMED');
-    const pending = promotedDecisions.filter((decision) => decision.status === 'PENDING' || decision.status === 'REVIEW');
+    const confirmed = dedupedDecisions.filter((decision) => decision.status === 'CONFIRMED');
+    const pending = dedupedDecisions.filter((decision) => decision.status === 'PENDING' || decision.status === 'REVIEW');
     setStatus(
       updatedNext.stats.segmentCalls
         ? `다중방식 심층 분석 ${updatedNext.stats.segmentCalls}개 시간대 · 확정 ${confirmed.length}명 · 확인 필요 ${pending.length}명`
         : '새로 분석할 시간대가 없습니다.',
     );
 
-    const fresh = promotedDecisions.filter(
+    const fresh = dedupedDecisions.filter(
       (decision) =>
         (decision.status === 'CONFIRMED' || decision.status === 'PENDING') &&
         decision.nickname &&
@@ -291,14 +285,18 @@ export default function SellerLogicAnalysis04ArgonPage() {
     if (names.length) captureRef.current?.prioritizeNicknames(names);
   };
 
-  const makeQueue = () =>
-    new SellerLogicScheduler<QueuedAnalysis, SellerLogicDeepRunResult>({
+  const makeQueue = () => {
+    let activeRun: { generation: number; sessionId: string; controller: AbortController } | null = null;
+    const isCurrentRun = () => mounted.current && queueRef.current === queue
+      && activeRun?.generation === generation.current && activeRun.sessionId === sessionRef.current;
+    const queue = new SellerLogicScheduler<QueuedAnalysis, SellerLogicDeepRunResult>({
       intervalMs: 5000, // 기본 5초 주기 자동 분석
       keepAutomaticOnError: true,
       execute: (input) => {
         const controller = new AbortController();
         analysisAbort.current = controller;
         const currentGeneration = generation.current;
+        activeRun = { generation: currentGeneration, sessionId: input.sessionId, controller };
         const state =
           stateSlotRef.current === input.slotNumber && stateRef.current ? stateRef.current : undefined;
 
@@ -348,6 +346,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
 
             return analyzeSellerLogicDeep(packet, { signal: controller.signal }).then(
               (response) => {
+                if (!isCurrentRun() || controller.signal.aborted) return response;
                 const durationMs = Date.now() - startTime;
                 const currentRespSeq = ++totalResponsesCountRef.current;
                 setTotalResponsesCount(currentRespSeq);
@@ -368,6 +367,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
                 return response;
               },
               (err) => {
+                if (!isCurrentRun() || controller.signal.aborted) throw err;
                 const durationMs = Date.now() - startTime;
                 const errMsg = err instanceof Error ? err.message : String(err);
                 setDebugLog((prev) =>
@@ -389,7 +389,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
           {
             signal: controller.signal,
             onProgress: (partial) => {
-              if (mounted.current && generation.current === currentGeneration && !controller.signal.aborted) {
+              if (isCurrentRun() && !controller.signal.aborted) {
                 acceptResult(partial);
               }
             },
@@ -397,9 +397,10 @@ export default function SellerLogicAnalysis04ArgonPage() {
         );
       },
       result: (next) => {
-        if (mounted.current && !analysisAbort.current?.signal.aborted) acceptResult(next);
+        if (isCurrentRun() && !activeRun?.controller.signal.aborted) acceptResult(next);
       },
       error: (e) => {
+        if (!isCurrentRun()) return;
         finalizePending.current = false;
         if (e && typeof e === 'object' && 'name' in e && e.name === 'AbortError') {
           setError('');
@@ -423,6 +424,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
         }
       },
       state: ({ running: busy }) => {
+        if (!mounted.current || queueRef.current !== queue) return;
         runningRef.current = busy;
         setRunning(busy);
         if (!busy && finalizePending.current) {
@@ -431,6 +433,8 @@ export default function SellerLogicAnalysis04ArgonPage() {
         }
       },
     });
+    return queue;
+  };
 
   useEffect(() => {
     mounted.current = true;
@@ -461,6 +465,8 @@ export default function SellerLogicAnalysis04ArgonPage() {
 
     // 데스크톱 댓글 도우미로부터 유입되는 실시간 댓글을 수신하여 화면에 즉각 표시
     const unsubComment = commentStreamService.onComment((c) => {
+      if (!acceptingStreamCommentsRef.current
+        || (c.receivedAt && Date.parse(c.receivedAt) < sessionChangedAtRef.current)) return;
       const newComment: CommentRecord = {
         id: `${sessionRef.current}:comment:${c.id || `${c.uniqueId || c.nickname}-${c.receivedAt}`}`,
         platformMessageId: c.id,
@@ -473,6 +479,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
       };
 
       setEvidence((prev) => {
+        if (newComment.sessionId !== sessionRef.current || !acceptingStreamCommentsRef.current) return prev;
         if (
           prev.comments.some(
             (r) =>
@@ -527,6 +534,8 @@ export default function SellerLogicAnalysis04ArgonPage() {
     const nextComments = [...rows.comments];
 
     for (const c of commentCapture.liveComments) {
+      // The global helper may still publish the previous broadcast's buffer.
+      if (sessionChangedRef.current && c.sessionId !== sessionRef.current) continue;
       const exists = nextComments.some(
         (r) =>
           r.id === c.id ||
@@ -544,7 +553,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
     if (added) {
       acceptEvidence({ ...rows, comments: nextComments });
     }
-  }, [commentCapture.liveComments]);
+  }, [commentCapture.liveComments, currentSessionId]);
 
   const submit = (rows = rowsRef.current) => {
     if (!rows.comments.length && !rows.transcripts.length) return;
@@ -563,12 +572,14 @@ export default function SellerLogicAnalysis04ArgonPage() {
       return;
     }
     setError('');
+    acceptingStreamCommentsRef.current = true;
     const serverUrl = commentCapture.config.serverUrl || DEFAULT_COMMENT_SERVER_URL;
     commentStreamService.connect(serverUrl);
     commentStreamService.startCollecting(clean);
   };
 
   const stopCommentCollection = () => {
+    acceptingStreamCommentsRef.current = false;
     commentStreamService.stopCollecting();
   };
 
@@ -576,6 +587,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
     const currentGeneration = generation.current;
     const service = captureRef.current;
     captureRef.current = null;
+    acceptingStreamCommentsRef.current = false;
     liveMode.current = false;
     finalizePending.current = false;
     setStarting(true);
@@ -623,8 +635,11 @@ export default function SellerLogicAnalysis04ArgonPage() {
     }
   };
 
-  const reset = () => {
+  const reset = (nextSessionId: string = crypto.randomUUID()) => {
     generation.current++;
+    sessionChangedRef.current = true;
+    sessionChangedAtRef.current = Date.now();
+    acceptingStreamCommentsRef.current = false;
     liveMode.current = false;
     finalizePending.current = false;
     if (analysisAbort.current) {
@@ -643,8 +658,9 @@ export default function SellerLogicAnalysis04ArgonPage() {
     queueRef.current?.dispose();
     queueRef.current = makeQueue();
     queueRef.current.setAutomatic(false);
-    sessionRef.current = crypto.randomUUID();
+    sessionRef.current = nextSessionId;
     setCurrentSessionId(sessionRef.current);
+    setCustomSessionName('');
     rowsRef.current = emptyEvidence();
     resultRef.current = null;
     stateRef.current = null;
@@ -665,6 +681,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
     setCapturing(false);
     setStarting(false);
     setRunning(false);
+    runningRef.current = false;
     setActiveKeyterms([]);
     setFilter('ALL');
     setDebugLog([]);
@@ -714,6 +731,7 @@ export default function SellerLogicAnalysis04ArgonPage() {
     const currentGeneration = ++generation.current;
     captureFailure.current = '';
     liveMode.current = true;
+    acceptingStreamCommentsRef.current = true;
     setStarting(true);
     setCapturing(true);
     setError('');
@@ -804,9 +822,6 @@ export default function SellerLogicAnalysis04ArgonPage() {
 
   const handleStartNewSession = (newCustomName?: string) => {
     reset();
-    const newId = crypto.randomUUID();
-    sessionRef.current = newId;
-    setCurrentSessionId(newId);
     if (newCustomName !== undefined) {
       setCustomSessionName(newCustomName);
     }
@@ -814,13 +829,10 @@ export default function SellerLogicAnalysis04ArgonPage() {
   };
 
   const handleSelectSession = (selectedId: string) => {
-    if (!selectedId) return;
-    sessionRef.current = selectedId;
-    setCurrentSessionId(selectedId);
+    if (!selectedId || selectedId === sessionRef.current) return;
+    reset(selectedId);
     const found = cloudSessions.find((s) => s.id === selectedId);
-    if (found?.displayCode) {
-      setCustomSessionName(found.displayCode);
-    }
+    setCustomSessionName(found?.displayCode || '');
     setStatus(`방송 회차가 '${formatSessionDisplay(selectedId, { sessions: cloudSessions })}'(으)로 전환되었습니다.`);
   };
 
@@ -1046,8 +1058,9 @@ export default function SellerLogicAnalysis04ArgonPage() {
               />
             </label>
             <label className="text-xs font-semibold text-slate-700">
-              기존 회차 불러오기 (클라우드 세션 목록)
+              기존 회차 선택 (현재 분석 초기화)
               <select
+                aria-label="방송 회차 선택"
                 className={`${field} mt-1`}
                 value={cloudSessions.some((s) => s.id === currentSessionId) ? currentSessionId : ''}
                 disabled={capturing || running}

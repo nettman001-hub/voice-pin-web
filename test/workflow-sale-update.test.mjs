@@ -50,11 +50,14 @@ function fixture(previous = pending) {
     module,
     salesRef: { current: [previous] },
     setSyncError: (e) => state.errors.push(e),
-    replaceSale: (s) => state.saved.push(s),
+    replaceSale: (s) => { state.saved.push(s); return s; },
     isPrintableSale: (s) => s.status !== "보류" && s.amount > 0,
     hasSellerEditChanged: () => true,
-    queueSalePrint: (s, r) =>
-      state.saved.push({ ...s, printRevision: r, printStatus: "QUEUED" }),
+    queueSalePrint: (s, r) => {
+      const saved = { ...s, printRevision: r, printStatus: "QUEUED" };
+      state.saved.push(saved);
+      return saved;
+    },
   });
   return { ...state, update: module.exports };
 }
@@ -103,4 +106,42 @@ test("legacy unsynced voice rows retain their price edit protection", () => {
   ctx.update({ ...previous, amount: 8000 });
   assert.equal(ctx.saved.length, 0);
   assert.equal(ctx.errors.length, 1);
+});
+
+const voicePending = { ...pending, workflowEvidence: undefined, sourceCommentIds: ['comment'],
+  productCode: '001', productName: '001-20261002-1' };
+const fourPointContinuation = { ...voicePending, status: '확정', amount: 15000, unitPrice: 15000,
+  purchaseRequestId: 'session:comment', rawTranscript: '햇살님 드릴게요 1.5. 캡처하세요.',
+  recognizedAt: '2026-10-02T00:00:01Z' };
+
+test('a same-comment voice confirmation can complete an uploading pending sale and queue one receipt', () => {
+  const ctx = fixture(voicePending);
+  const saved = ctx.update(fourPointContinuation, { voiceAllocationContinuation: true });
+  assert.equal(ctx.errors.length, 0);
+  assert.equal(ctx.saved.length, 1);
+  assert.equal(saved.id, voicePending.id);
+  assert.equal(saved.status, '확정');
+  assert.equal(saved.amount, 15000);
+  assert.equal(saved.printRevision, 1);
+  assert.equal(saved.printStatus, 'QUEUED');
+});
+
+test('voice continuation does not permit a different purchase, product, session, or a manual price edit', () => {
+  for (const patch of [
+    { sourceCommentIds: ['another-comment'], purchaseRequestId: 'session:another-comment' },
+    { sessionId: 'another-session' }, { productCode: '002' }, { amount: 0 },
+  ]) {
+    const ctx = fixture(voicePending);
+    assert.equal(ctx.update({ ...fourPointContinuation, ...patch }, { voiceAllocationContinuation: true }), undefined);
+    assert.equal(ctx.saved.length, 0);
+    assert.equal(ctx.errors.length, 1);
+  }
+  const manual = fixture(voicePending);
+  manual.update(fourPointContinuation);
+  assert.equal(manual.saved.length, 0);
+  assert.equal(manual.errors.length, 1);
+
+  const final = fixture({ ...fourPointContinuation, syncStatus: 'PENDING' });
+  final.update({ ...fourPointContinuation, amount: 20000 }, { voiceAllocationContinuation: true });
+  assert.equal(final.saved.length, 0);
 });

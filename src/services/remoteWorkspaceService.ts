@@ -624,10 +624,10 @@ export const remoteWorkspaceService = {
     let canonicalSale = sale;
     if (sale.source === 'WEB_VOICE' && sale.purchaseRequestId && (sale.revision || 1) > 1) {
       const { data: confirmed, error: readError } = await ensureEnabled().from('sales').select(
-        'buyer_id, product_id, source_comment_ids, buyer_nickname, product_code_snapshot, product_name_snapshot')
+        'status, buyer_id, product_id, source_comment_ids, buyer_nickname, product_code_snapshot, product_name_snapshot')
         .eq('workspace_id', workspaceId).eq('id', sale.id).maybeSingle();
       if (readError) throw readError;
-      if (confirmed) canonicalSale = {
+      if (confirmed && confirmed.status !== '보류') canonicalSale = {
         ...sale,
         buyerId: confirmed.buyer_id || sale.buyerId,
         buyerNickname: confirmed.buyer_nickname || sale.buyerNickname,

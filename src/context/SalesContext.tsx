@@ -24,7 +24,7 @@ interface SalesContextType {
   setPromiseDefault: (buyerKey: string, buyerNickname: string, sessionId: string,
     status: PromiseDefaultRecord['status']) => Promise<void>;
   addSale: (sale: Omit<SaleRecord, 'id'>) => SaleRecord;
-  updateSale: (sale: SaleRecord) => void;
+  updateSale: (sale: SaleRecord, options?: { voiceAllocationContinuation?: boolean }) => SaleRecord | undefined;
   retrySalePrint: (id: string) => void;
   deleteSale: (id: string) => void;
   confirmBatchSales: (saleIds: string[]) => BatchConfirmResult;
@@ -357,7 +357,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return persisted;
   };
 
-  const updateSale = (updated: SaleRecord) => {
+  const updateSale = (updated: SaleRecord, options?: { voiceAllocationContinuation?: boolean }) => {
     const previous = salesRef.current.find((sale) => sale.id === updated.id);
     if (previous?.source === 'WEB_VOICE' && previous.syncStatus === 'PENDING') {
       const sameEvidence = previous.sessionId === updated.sessionId
@@ -375,23 +375,33 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         && previous.workflowEvidence?.profileId === updated.workflowEvidence?.profileId
         && previous.workflowEvidence?.profileVersion === updated.workflowEvidence?.profileVersion
         && (updated.status === '보류' || (updated.status === '자동저장' && Boolean(updated.purchaseRequestId)));
-      if (!metadataOnly && !lateCommentLinked && !workflowContinuation) {
+      // A subsequent seller allocation may complete the same purchase while
+      // its pending row is still uploading. The sync controller serializes
+      // those writes; ordinary edits must retain the pending-write guard.
+      const voiceAllocationContinuation = options?.voiceAllocationContinuation === true
+        && previous.status === '보류' && updated.source === 'WEB_VOICE'
+        && previous.sessionId === updated.sessionId
+        && previous.productId === updated.productId && previous.productCode === updated.productCode
+        && previous.productName === updated.productName
+        && Boolean(updated.purchaseRequestId)
+        && (!previous.purchaseRequestId || previous.purchaseRequestId === updated.purchaseRequestId)
+        && Boolean(previous.sourceCommentIds?.some((id) => updated.sourceCommentIds?.includes(id)))
+        && (updated.status === '자동저장' || updated.status === '확정') && updated.amount > 0;
+      if (!metadataOnly && !lateCommentLinked && !workflowContinuation && !voiceAllocationContinuation) {
         setSyncError('음성 판매의 서버 저장 확인 전에는 구매자·가격을 수정할 수 없습니다.');
         return;
       }
       if (metadataOnly) {
-        replaceSale(updated);
-        return;
+        return replaceSale(updated);
       }
     }
     const shouldPrint = previous
       ? isPrintableSale(updated) && (!isPrintableSale(previous) || hasSellerEditChanged(previous, updated))
       : false;
     if (shouldPrint) {
-      queueSalePrint(updated, Math.max(previous?.printRevision || 0, updated.printRevision || 0) + 1);
-      return;
+      return queueSalePrint(updated, Math.max(previous?.printRevision || 0, updated.printRevision || 0) + 1);
     }
-    replaceSale(updated);
+    return replaceSale(updated);
   };
 
   const retrySalePrint = (id: string) => {

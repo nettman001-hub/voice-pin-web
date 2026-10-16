@@ -76,6 +76,9 @@ function pageFixture() {
     '../../services/salesExtractor': { formatMultiSaleAmount: () => ({ isMulti: false }) },
     '../../services/nicknameMatcher': { areNicknamesSimilar: (a, b) => a === b },
     '../../services/salesDemoService': { salesDemoService: { stop() {} } },
+    '../../services/customerKeepingService': { customerKeepingService: {
+      getBuyerSummary: () => ({ hasActiveKeeping: false }),
+    } },
     '../../utils/sessionFormatter': { formatSessionDisplay: (value) => value },
     '../../types/comment': { COMMENT_HELPER_DOWNLOAD_URL: '' },
   };
@@ -87,6 +90,7 @@ function pageFixture() {
     ['ImageViewerModal', '../../components/common/ImageViewerModal'],
     ['CommentHelperModal', '../../components/helper/CommentHelperModal'],
     ['SellerSettingsModal', '../../components/seller/SellerSettingsModal'],
+    ['KeepingBadge', '../../components/shipping/KeepingBadge'],
   ]) dependencies[path] = { [name]: name };
   const source = fs.readFileSync(new URL('../src/pages/seller/LiveHomePage.tsx', import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, {

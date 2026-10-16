@@ -102,6 +102,36 @@ function remoteService(client) {
   }).remoteWorkspaceService;
 }
 
+for (const previousStatus of ['보류', '확정']) {
+  test(`four-point promotion preserves fresh evidence when the existing server sale is ${previousStatus}`, async () => {
+    const writes = [];
+    const previous = { status: previousStatus, buyer_id: 'server-buyer', buyer_nickname: 'server-nickname',
+      product_id: null, source_comment_ids: ['server-comment'], product_code_snapshot: '001',
+      product_name_snapshot: '001-20261016-1' };
+    const client = { from(table) {
+      assert.equal(table, 'sales');
+      return {
+        select() { return this; }, eq() { return this; },
+        maybeSingle: async () => ({ data: previous, error: null }),
+        upsert: async (row) => { writes.push(row); return { error: null }; },
+      };
+    } };
+    await remoteService(client).saveSale('workspace-1', {
+      id: 'sale-1', sessionId: 'session-1', source: 'WEB_VOICE', status: '확정', revision: 2,
+      buyerId: 'matched-buyer', buyerNickname: '러블리💕', purchaseRequestId: 'session-1:comment',
+      sourceCommentIds: ['matched-comment'], amount: 15000, unitPrice: 15000,
+      rawTranscript: '러블리님 드릴게요 1.5. 캡처하세요.', recognizedAt: timestamp,
+      productCode: '001', productName: '001-20261016-1', printStatus: 'QUEUED', printRevision: 1,
+    });
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].status, '확정');
+    assert.equal(writes[0].amount, 15000);
+    assert.equal(writes[0].buyer_nickname, previousStatus === '보류' ? '러블리💕' : 'server-nickname');
+    assert.equal(writes[0].buyer_id, previousStatus === '보류' ? 'matched-buyer' : 'server-buyer');
+    assert.deepEqual(writes[0].source_comment_ids, previousStatus === '보류' ? ['matched-comment'] : ['server-comment']);
+  });
+}
+
 test('unchanged and reconstructed commerce data produce zero Supabase requests', async () => {
   const previous = populatedState();
   const next = JSON.parse(JSON.stringify(previous));

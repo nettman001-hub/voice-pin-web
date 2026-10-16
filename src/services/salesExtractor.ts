@@ -230,6 +230,8 @@ export interface FourPointSaleCheck {
   hasConfirmation: boolean;
   hasPrice: boolean;
   hasCapture: boolean;
+  /** Buyer/allocation/price evidence for this transaction, excluding later sales. */
+  allocationTranscript?: string;
 }
 
 export function checkFourPointSaleCriteria(text: string): FourPointSaleCheck {
@@ -245,20 +247,25 @@ export function checkFourPointSaleCriteria(text: string): FourPointSaleCheck {
     };
   }
 
-  // 1. 고객 닉네임: xxx님, 닉네임 xxx, xxx언니 등
-  const buyerNickname = parseBuyerNickname(text);
+  const evidence = findFourPointEvidence(text);
+  // Keep price evidence separate from the connected capture clauses: an
+  // explicit price clause may also contain measurements or a capture request.
+  const buyerNickname = parseBuyerNickname(evidence.allocationTranscript);
   const hasNickname = Boolean(buyerNickname && buyerNickname.trim().length >= 1);
 
   // 2. 확정 멘트
-  const hasConfirmation = FOUR_POINT_CONFIRMATION_PATTERN.test(text);
+  const hasConfirmation = evidence.validAllocation
+    && FOUR_POINT_CONFIRMATION_PATTERN.test(evidence.allocationTranscript);
 
   // 3. 가격 (소수점 1.5 -> 15,000원 및 일반 금액)
-  const speechPrice = extractSpeechPrice(text);
-  const amount = speechPrice ? speechPrice.amount : parseKoreanAmount(text);
+  const speechPrice = extractSpeechPrice(evidence.allocationTranscript);
+  // The permissive display parser also reads bare IDs/counts. Confirmation
+  // requires a quoted decimal or currency amount from this transaction.
+  const amount = speechPrice?.amount ?? null;
   const hasPrice = Boolean(amount && amount > 0);
 
   // 4. 캡처 멘트
-  const hasCapture = FOUR_POINT_CAPTURE_PATTERN.test(text) && !/캡[처쳐]\s*하지\s*마/u.test(text);
+  const hasCapture = evidence.hasCapture;
 
   const isFourPointSale = hasNickname && hasConfirmation && hasPrice && hasCapture;
 
@@ -270,6 +277,7 @@ export function checkFourPointSaleCriteria(text: string): FourPointSaleCheck {
     hasConfirmation,
     hasPrice,
     hasCapture,
+    allocationTranscript: evidence.allocationTranscript,
   };
 }
 
@@ -300,49 +308,159 @@ export function findExplicitPriceTranscript(text: string): string | null {
   return `${prefix[0]}${price.quote}`;
 }
 
-/** Judge the verb and its own clause, rather than joining an unrelated name,
- * price and polite "드릴게요" from anywhere in the STT buffer. */
-export function findAllocationTranscript(text: string): string | null {
-  const clauses = splitTranscriptClauses(text)
+const ALLOCATION_FILLER = /^(?:네|넵|예|자|아|어|음|이거|요거)(?:[,，\s]*(?:네|넵|예|자|아|어|음|이거|요거))*$/u;
+const PRODUCT_TRANSITION = /(?:다음|새|다른)\s*(?:상품|물건|옷|거(?=[는은\s,.!?]|$))/u;
+const TRANSACTION_INTERRUPTION = /(?:취소|정정|수정|변경|말고|아니|이면|라면|다면|하시면|하지\s*마)/u;
+
+function allocationClauses(text: string): string[] {
+  return splitTranscriptClauses(text)
     .map((part) => part.replace(/[.!。\s]+$/u, '').trim()).filter(Boolean);
+}
+
+function beforeProductChange(text: string, allowLeadingAnnouncement = false): string {
+  for (const match of text.matchAll(new RegExp(PRODUCT_TRANSITION.source, 'gu'))) {
+    const prefix = text.slice(0, match.index).trim();
+    // An introduction before any buyer/allocation/price belongs to the new
+    // sale, including "네, 다음 상품은 햇살님 ...".
+    if (allowLeadingAnnouncement && !getBuyerNicknameCandidates(prefix).length
+      && !ALLOCATION_ACTION.test(prefix) && !FOUR_POINT_CONFIRMATION_PATTERN.test(prefix)
+      && !extractSpeechPrice(prefix)) continue;
+    return prefix;
+  }
+  return text;
+}
+
+function hasTransactionInterruption(text: string): boolean {
+  // A buyer called "수정" or "아니카" is not a correction/negative command.
+  let speech = text;
+  for (const name of getBuyerNicknameCandidates(text)) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+    speech = speech.replace(new RegExp(`${escaped}(?=\\s*(?:님|언니|씨))`, 'gu'), '')
+      .replace(new RegExp(`닉네임(?:은)?\\s*${escaped}(?=\\s|[,.!?]|$)`, 'gu'), '');
+  }
+  return TRANSACTION_INTERRUPTION.test(speech);
+}
+
+function isSafeFourPointClause(text: string): boolean {
+  return !isQuestionUtterance(text) && !NON_ALLOCATION.test(text) && !hasTransactionInterruption(text);
+}
+
+interface AllocationClause {
+  text: string;
+  index: number;
+  start: number;
+}
+
+/** Select the first allocation once; both sale paths keep the single-sale contract. */
+function findAllocationClause(clauses: string[], includeFourPoint = false): AllocationClause | null {
   for (let i = 0; i < clauses.length; i++) {
     const clause = clauses[i];
-    if (isQuestionUtterance(clause) || !ALLOCATION_ACTION.test(clause) || NON_ALLOCATION.test(clause)) continue;
-    const withFollowingPrice = (allocation: string): string => {
-      if (extractSpeechPrice(allocation)) return allocation;
-      // Sellers often repeat the allocation or add a filler before the price:
-      // "햇반님 드릴게요. 햇반님 드릴게요. 가격은 1.2". Skip only those, never
-      // another buyer, product or unrelated sentence.
-      const names = new Set(getBuyerNicknameCandidates(allocation).map((name) => name.replace(/\s+/gu, '')));
-      for (let j = i + 1; j < Math.min(clauses.length, i + 4); j++) {
-        const next = clauses[j];
-        const priceClause = findExplicitPriceTranscript(next);
-        if (priceClause) return `${allocation}. ${priceClause}`;
-        const nextNames = getBuyerNicknameCandidates(next).map((name) => name.replace(/\s+/gu, ''));
-        const repeatsAllocation = ALLOCATION_ACTION.test(next) && !NON_ALLOCATION.test(next) && !isQuestionUtterance(next)
-          && !extractSpeechPrice(next) && nextNames.every((name) => names.has(name));
-        const isFiller = /^(?:네|넵|예|자|아|어|음|이거|요거)(?:[,，\s]*(?:네|넵|예|자|아|어|음|이거|요거))*$/u.test(next);
-        if (!repeatsAllocation && !isFiller) break;
-      }
-      return allocation;
-    };
+    const hasAction = ALLOCATION_ACTION.test(clause) || (includeFourPoint && FOUR_POINT_CONFIRMATION_PATTERN.test(clause));
+    if (isQuestionUtterance(clause) || !hasAction || NON_ALLOCATION.test(clause)) continue;
     // A clear allocation with several possible names must stay visible for
     // review, even without a price; never promote one of those names by order.
-    if (getBuyerNicknameCandidates(clause).length > 0) return withFollowingPrice(clause);
+    if (getBuyerNicknameCandidates(clause).length > 0) return { text: clause, index: i, start: i };
     const previous = clauses[i - 1];
     // A short, stand-alone vocative can be a separate STT sentence.
     if (previous && /^(?:네[,，]?\s*)?[가-힣a-zA-Z0-9_]{2,20}\s*(?:언니|님|씨)(?:께|에게|한테)?$/u.test(previous)
-      && parseBuyerNickname(previous)) return withFollowingPrice(`${previous}. ${clause}`);
-    if (/구매\s*확정|낙찰|판매\s*완료|주문\s*확정|결제\s*완료|(?:넣어|담아|배정해)\s*드/u.test(clause)) return withFollowingPrice(clause);
+      && parseBuyerNickname(previous)) return { text: `${previous}. ${clause}`, index: i, start: i - 1 };
+    if (/구매\s*확정|낙찰|판매\s*완료|주문\s*확정|결제\s*완료|(?:넣어|담아|배정해)\s*드/u.test(clause)) return { text: clause, index: i, start: i };
     if (/캡처/u.test(clause)) {
-      const preceding = clauses.slice(Math.max(0, i - 2), i).join('. ');
-      if (getBuyerNicknameCandidates(preceding).length > 0) return withFollowingPrice(`${preceding}. ${clause}`);
+      const precedingClauses = clauses.slice(Math.max(0, i - 2), i);
+      const preceding = precedingClauses.join('. ');
+      if (getBuyerNicknameCandidates(preceding).length > 0
+        && precedingClauses.every((part) => isSafeFourPointClause(part) && !PRODUCT_TRANSITION.test(part))) {
+        return { text: `${preceding}. ${clause}`, index: i, start: Math.max(0, i - 2) };
+      }
     }
     // Keep a priced allocation as pending when STT loses the buyer's name.
     // Must be an active allocation action like 챙겨/넣어/담아/배정, not a general host price offer (드릴게요/해드릴게요).
-    if (/(?:챙겨|넣어|담아|배정해)\s*드|챙겨\s*줄/u.test(clause) && extractSpeechPrice(clause)) return clause;
+    if (/(?:챙겨|넣어|담아|배정해)\s*드|챙겨\s*줄/u.test(clause) && extractSpeechPrice(clause)) return { text: clause, index: i, start: i };
   }
   return null;
+}
+
+/** Judge the verb and its own clause, rather than joining unrelated speech. */
+export function findAllocationTranscript(text: string): string | null {
+  const clauses = allocationClauses(text);
+  const allocation = findAllocationClause(clauses);
+  if (!allocation) return null;
+  const initial = beforeProductChange(allocation.text, true);
+  if (initial !== allocation.text) return initial;
+  if (extractSpeechPrice(allocation.text)) return allocation.text;
+  const names = new Set(getBuyerNicknameCandidates(allocation.text).map((name) => name.replace(/\s+/gu, '')));
+  // Preserve the existing bounded follow-up price rules for ordinary sales.
+  for (let j = allocation.index + 1; j < Math.min(clauses.length, allocation.index + 4); j++) {
+    const next = clauses[j];
+    if (PRODUCT_TRANSITION.test(next)) break;
+    const priceClause = findExplicitPriceTranscript(next);
+    if (priceClause) return `${allocation.text}. ${priceClause}`;
+    const nextNames = getBuyerNicknameCandidates(next).map((name) => name.replace(/\s+/gu, ''));
+    const repeatsAllocation = ALLOCATION_ACTION.test(next) && !NON_ALLOCATION.test(next) && !isQuestionUtterance(next)
+      && !extractSpeechPrice(next) && nextNames.every((name) => names.has(name));
+    if (!repeatsAllocation && !ALLOCATION_FILLER.test(next)) break;
+  }
+  return allocation.text;
+}
+
+function findFourPointEvidence(text: string): {
+  allocationTranscript: string;
+  validAllocation: boolean;
+  hasCapture: boolean;
+} {
+  const clauses = allocationClauses(text);
+  const allocation = findAllocationClause(clauses, true);
+  if (!allocation) return { allocationTranscript: clauses[0] || '', validAllocation: false, hasCapture: false };
+
+  // A product change can occur inside one STT sentence, without punctuation.
+  const initial = beforeProductChange(allocation.text, true);
+  const validAllocation = allocationClauses(initial).every(isSafeFourPointClause);
+  const evidence = { allocationTranscript: initial, validAllocation, hasCapture: false };
+  if (!validAllocation) return evidence;
+  evidence.hasCapture = FOUR_POINT_CAPTURE_PATTERN.test(initial);
+
+  const names = new Set(getBuyerNicknameCandidates(initial).map((name) => name.replace(/\s+/gu, '').toLowerCase()));
+  let price = extractSpeechPrice(initial);
+  // Capture may precede the first allocation, but never borrow a capture from
+  // an earlier buyer/allocation. Only an initial standalone instruction qualifies.
+  if (allocation.start === 1 && FOUR_POINT_CAPTURE_PATTERN.test(clauses[0])
+    && isSafeFourPointClause(clauses[0]) && !PRODUCT_TRANSITION.test(clauses[0])
+    && getBuyerNicknameCandidates(clauses[0]).length === 0 && !extractSpeechPrice(clauses[0])) {
+    evidence.hasCapture = true;
+  }
+  if (initial !== allocation.text) return evidence;
+  for (let j = allocation.index + 1; j < Math.min(clauses.length, allocation.index + 4); j++) {
+    const next = beforeProductChange(clauses[j]);
+    if (!next) break;
+    const nextNames = getBuyerNicknameCandidates(next).map((name) => name.replace(/\s+/gu, '').toLowerCase());
+    if (nextNames.some((name) => !names.has(name))) break;
+    if (/캡[처쳐]\s*하지\s*마/u.test(next)) {
+      evidence.hasCapture = false;
+      break;
+    }
+    if (!isSafeFourPointClause(next)) break;
+    const priceClause = findExplicitPriceTranscript(next);
+    const nextPrice = extractSpeechPrice(priceClause || next);
+    // Preserve the existing rejection of an ambiguous first price declaration
+    // that also introduces another product in the same clause.
+    if (!price && nextPrice && next !== clauses[j]) break;
+    // A second, different price is not a continuation of the selected sale.
+    if (price && nextPrice && price.amount !== nextPrice.amount) break;
+    const capture = FOUR_POINT_CAPTURE_PATTERN.test(next);
+    const repeatsAllocation = (ALLOCATION_ACTION.test(next) || FOUR_POINT_CONFIRMATION_PATTERN.test(next))
+      && (!nextPrice || nextNames.length === 1);
+    if (!priceClause && !repeatsAllocation && !(capture && !nextPrice) && !ALLOCATION_FILLER.test(next)) break;
+    if (!price && (priceClause || (repeatsAllocation && nextPrice))) {
+      evidence.allocationTranscript += `. ${priceClause || next}`;
+      price = nextPrice;
+    } else if (repeatsAllocation && FOUR_POINT_CONFIRMATION_PATTERN.test(next)
+      && !FOUR_POINT_CONFIRMATION_PATTERN.test(evidence.allocationTranscript)) {
+      evidence.allocationTranscript += `. ${next}`;
+    }
+    evidence.hasCapture ||= capture;
+    if (next !== clauses[j]) break;
+  }
+  return evidence;
 }
 
 /**
@@ -360,7 +478,9 @@ export function extractSaleFromTranscript(transcript: string, activeKeywords: st
     /([영공일이삼사오육칠팔구십]+)\s*(?:[.]|점)\s*([영공일이삼사오육칠팔구]+)/u.test(text);
 
   // Keep intervening questions as boundaries when linking a following price.
-  const allocationTranscript = findAllocationTranscript(transcript);
+  const fourPoint = checkFourPointSaleCriteria(transcript);
+  const allocationTranscript = fourPoint.hasConfirmation && fourPoint.hasNickname
+    ? fourPoint.allocationTranscript || null : findAllocationTranscript(transcript);
   const explicitConfirmation = /(?:구매\s*확정|낙찰|판매\s*완료|주문\s*확정|결제\s*완료)/u.test(text);
   const hasTrigger = Boolean(allocationTranscript) ||
     (text.includes('닉네임') && (hasDecimal || text.includes('원') || text.includes('금액') || text.includes('가격'))) ||
@@ -400,7 +520,6 @@ export function extractSaleFromTranscript(transcript: string, activeKeywords: st
   }
 
   // 4대 필수 멘트(고객 닉네임 + 확정멘트 + 가격 + 캡처멘트) 완벽 일치 우선 검사
-  const fourPoint = checkFourPointSaleCriteria(text);
   if (fourPoint.isFourPointSale && fourPoint.buyerNickname && fourPoint.amount && fourPoint.amount > 0) {
     const matchedKeywords: string[] = ['4단확정'];
     [...saleTriggers, '닉네임', '금액', '가격', '원', '캡처', '확정', '드릴게요', ...activeKeywords].forEach(kw => {
@@ -418,8 +537,8 @@ export function extractSaleFromTranscript(transcript: string, activeKeywords: st
       isPending: false,
       matchedKeywords,
       intent: 'ALLOCATION',
-      allocationTranscript: allocationTranscript || text,
-      buyerNicknamePhrase: getBuyerNicknamePhrase(text, fourPoint.buyerNickname) || undefined,
+      allocationTranscript: fourPoint.allocationTranscript,
+      buyerNicknamePhrase: getBuyerNicknamePhrase(fourPoint.allocationTranscript || '', fourPoint.buyerNickname) || undefined,
       isFourPointConfirmed: true,
     };
   }

@@ -17,6 +17,8 @@ export function extractSpeechPrice(text: string): SpeechPriceEvidence | null {
       found.push({ quote, amount, notation, offset });
     }
   };
+  const isInsideRecordedPrice = (offset: number) => found.some((item) =>
+    offset >= item.offset && offset < item.offset + item.quote.length);
 
   for (const match of text.matchAll(/(?<![\d.])(\d{1,3})\s*(?:\.|점)\s*(\d{1,2})(?!\d)(?!\.\d)/gu)) {
     const offset = match.index;
@@ -37,13 +39,21 @@ export function extractSpeechPrice(text: string): SpeechPriceEvidence | null {
     const amount = KOREAN_DIGITS[match[1]] * 10_000 + KOREAN_DIGITS[match[2]] * 1000;
     add(match[0], amount, 'DECIMAL_MAN', match.index);
   }
+  // Explicit units remain price evidence without allowing a bare nickname or
+  // product ID. Read the complete amount before considering shorter tails.
+  for (const match of text.matchAll(/(?<![\d,.])(?:(\d{1,4})\s*만\s*)?(?:(\d{1,4})\s*천\s*)?(?:(\d{1,4})\s*백\s*)?(?:(\d{1,4})\s*)?원/gu)) {
+    if ((!match[1] && !match[2] && !match[3]) || isInsideRecordedPrice(match.index)) continue;
+    const amount = Number(match[1] || 0) * 10_000 + Number(match[2] || 0) * 1000
+      + Number(match[3] || 0) * 100 + Number(match[4] || 0);
+    add(match[0], amount, match[1] ? 'EXPLICIT_MAN' : 'EXPLICIT_WON', match.index);
+  }
   for (const match of text.matchAll(/(\d{1,2})\s*만\s*(?:(\d{1,2})\s*천)?\s*원?/gu)) {
-    if (found.some((item) => item.notation === 'DECIMAL_MAN'
-      && match.index > item.offset && match.index < item.offset + item.quote.length)) continue;
+    if (isInsideRecordedPrice(match.index)) continue;
     const amount = Number(match[1]) * 10_000 + Number(match[2] || 0) * 1000;
     add(match[0].trim(), amount, 'EXPLICIT_MAN', match.index);
   }
-  for (const match of text.matchAll(/(\d[\d,]{2,8})\s*원/gu)) {
+  for (const match of text.matchAll(/(\d[\d,]{0,8})\s*원/gu)) {
+    if (isInsideRecordedPrice(match.index)) continue;
     add(match[0], Number(match[1].replace(/,/g, '')), 'EXPLICIT_WON', match.index);
   }
   // "2만원"·"3만5천원"의 꼬리("만원", "천원")를 한글 금액으로 다시 읽지 않도록 숫자 바로 뒤는 건너뛴다.

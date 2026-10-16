@@ -872,16 +872,26 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       && sale.source === 'WEB_VOICE' && sale.status === '보류'
       && (sale.purchaseRequestId === request.id || sale.sourceCommentIds?.includes(request.commentId))) : undefined;
     if (existingPending) {
-      if (status === '자동저장' && existingPending.syncStatus !== 'PENDING') {
-        updateSale({ ...existingPending, buyerNickname: request!.nickname, buyerId: request!.buyerId || undefined,
+      if (status === '자동저장' || status === '확정') {
+        const updated: SaleRecord = { ...existingPending, buyerNickname: request!.nickname, buyerId: request!.buyerId || undefined,
           purchaseRequestId: request!.id, sourceCommentIds: [request!.commentId], amount: effectiveAmount,
           unitPrice: effectiveAmount, rawTranscript: fullText, recognizedAt, status, pendingReasons: [],
-          aiVerification: undefined, note: '같은 구매 댓글의 후속 판매 배정·가격 확인' });
+          aiVerification: undefined, note: '같은 구매 댓글의 후속 판매 배정·가격 확인' };
+        updated.evidenceSnapshot = buildEvidenceSnapshot(updated, {
+          relevantCommentIds: [request!.commentId],
+          snapshotVersion: (existingPending.evidenceSnapshot?.snapshotVersion || 0) + 1,
+        });
+        const saved = updateSale(updated, { voiceAllocationContinuation: true });
+        if (!saved) return;
         reservedPurchaseRequestsRef.current.add(request!.id);
+        lastSavedSaleRef.current = saved;
+        if (hasCaptureInstruction) {
+          await captureCurrentScreen(undefined, '캡처하세요 (판매 자동 연동)', requiredListeningGeneration, saved.id);
+        }
       }
       return;
     }
-    if (request && status === '자동저장') reservedPurchaseRequestsRef.current.add(request.id);
+    if (request && (status === '자동저장' || status === '확정')) reservedPurchaseRequestsRef.current.add(request.id);
 
     // A missing registered product is promoted inside the atomic server commit.
     // The seller never needs to pre-register a price for this flow.
@@ -947,7 +957,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sessionId,
       buyerNickname,
       buyerId: request?.buyerId || undefined,
-      purchaseRequestId: status === '자동저장' ? request?.id : undefined,
+      purchaseRequestId: status === '자동저장' || status === '확정' ? request?.id : undefined,
       sourceCommentIds: request ? [request.commentId] : [],
       amount: effectiveAmount,
       recognizedAt,

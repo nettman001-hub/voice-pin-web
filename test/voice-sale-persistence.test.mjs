@@ -39,6 +39,7 @@ function comment(nickname = '가윤♡예준맘', id = 'purchase-comment', buyer
 function fixture(comments, activeProduct = undefined, captures = []) {
   const stored = [];
   const reserved = new Set();
+  const captureRequests = [];
   const globals = {
     extractSaleFromTranscript, extractSpeechPrice, getPurchaseRequests, matchPurchaseRequest, resolveSpokenNicknameWithoutRequest,
     buildPendingReasons, buildEvidenceSnapshot, getVoiceReviewRequests, generateSequentialProductName, findCaptureForSale,
@@ -51,17 +52,17 @@ function fixture(comments, activeProduct = undefined, captures = []) {
       linkCaptureToSale: (captureId, saleId) => { captures.find((entry) => entry.id === captureId).saleId = saleId; } },
     setRecentCaptures() {},
     getNextProductCodeForSession: () => '001',
-    addSale: (value) => { const saved = { id: `sale-${stored.length + 1}`, ...value }; stored.push(saved); return saved; },
-    updateSale: (value) => { stored[stored.findIndex((entry) => entry.id === value.id)] = value; },
+    addSale: (value) => { const saved = { id: `sale-${stored.length + 1}`, syncStatus: 'PENDING', ...value }; stored.push(saved); return saved; },
+    updateSale: (value) => { stored[stored.findIndex((entry) => entry.id === value.id)] = value; return value; },
     screenCaptureService: { getActiveStream: () => null },
-    captureCurrentScreen: () => assert.fail('No capture is requested by this example'),
+    captureCurrentScreen: (...args) => { captureRequests.push(args); },
   };
   const module = { exports: {} };
   vm.runInNewContext(compiled, { module, ...globals });
-  return { stored, reserved, save: async (text = speech) => {
+  return { stored, reserved, captureRequests, save: async (text = speech, capture = false) => {
     const extracted = extractSaleFromTranscript(text);
     assert.ok(extracted, 'The seller allocation must reach the live persistence callback');
-    await module.exports(extracted, text, false, 1);
+    await module.exports(extracted, text, capture, 1);
   } };
 }
 
@@ -83,6 +84,66 @@ test('an abbreviated composite nickname persists the exact comment identity whil
   assert.equal(saved.pendingReasons.some((reason) => reason.code === 'DELAYED_COMMENT'), false);
   assert.equal(saved.purchaseRequestId, undefined, 'Missing price must not consume the purchase request');
   assert.equal(ctx.reserved.size, 0);
+});
+
+test('four-point confirmation consumes the matched purchase comment across repeated wording and reloads', async () => {
+  const buyer = comment('러블리', 'lovely-comment', 'lovely-account');
+  const live = fixture([buyer]);
+  await live.save('러블리님 드릴게요 1.5. 캡처하세요.', true);
+  const [saved] = live.stored;
+  assert.equal(saved.status, '확정');
+  assert.equal(saved.purchaseRequestId, 'broadcast:lovely-comment');
+  assert.equal(live.reserved.has(saved.purchaseRequestId), true);
+  await live.save('러블리님 확정이요 1.5. 캡처하세요.', true);
+  assert.equal(live.stored.length, 1);
+  // The stored identity must also suppress duplicates when the in-memory
+  // reservation has gone away, as it does after restarting the listener.
+  live.reserved.clear();
+  await live.save('러블리님 드릴게요. 가격은 1.5. 캡처하세요.', true);
+  assert.equal(live.stored.length, 1);
+  assert.equal(live.captureRequests.length, 1);
+});
+
+for (const syncStatus of ['SYNCED', 'PENDING']) {
+  test(`four-point continuation promotes the same ${syncStatus} pending purchase with fresh evidence and capture`, async () => {
+    const buyer = comment('러블리', 'lovely-comment', 'lovely-account');
+    const live = fixture([buyer]);
+    await live.save('러블리님 드릴게요');
+    const pending = live.stored[0];
+    assert.equal(pending.status, '보류');
+    assert.equal(pending.amount, 0);
+    pending.syncStatus = syncStatus;
+    const fullText = '러블리님 드릴게요 1.5. 캡처하세요.';
+    await live.save(fullText, true);
+    assert.equal(live.stored.length, 1);
+    const [saved] = live.stored;
+    assert.equal(saved.id, pending.id);
+    assert.equal(saved.productCode, pending.productCode);
+    assert.equal(saved.status, '확정');
+    assert.equal(saved.amount, 15000);
+    assert.equal(saved.purchaseRequestId, 'broadcast:lovely-comment');
+    assert.equal(saved.pendingReasons.length, 0);
+    assert.equal(saved.evidenceSnapshot.amount, 15000);
+    assert.equal(saved.evidenceSnapshot.originalUtterance, fullText);
+    assert.equal(saved.evidenceSnapshot.snapshotVersion, pending.evidenceSnapshot.snapshotVersion + 1);
+    assert.equal(live.captureRequests.length, 1);
+    assert.equal(live.captureRequests[0][3], pending.id);
+    await live.save('러블리님 확정이요 1.5. 캡처하세요.', true);
+    assert.equal(live.stored.length, 1);
+    assert.equal(live.captureRequests.length, 1);
+  });
+}
+
+test('ordinary price continuation still completes a pending purchase', async () => {
+  const live = fixture([comment('러블리')]);
+  await live.save('러블리님 드릴게요');
+  const id = live.stored[0].id;
+  await live.save('러블리님 15000원 드릴게요');
+  assert.equal(live.stored.length, 1);
+  assert.equal(live.stored[0].id, id);
+  assert.equal(live.stored[0].status, '자동저장');
+  assert.equal(live.stored[0].amount, 15000);
+  assert.equal(live.captureRequests.length, 0);
 });
 
 test('competing abbreviated buyers stay pending without assigning a guessed account', async () => {

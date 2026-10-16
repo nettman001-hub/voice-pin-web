@@ -12,6 +12,7 @@ import {
   type SellerLogicDeepStatus,
 } from "../types/sellerLogicDeep.ts";
 import { normalizeSellerLogicInput } from "./sellerLogicContract.ts";
+import { canMergeSellerLogicDeepTransactions } from "./sellerLogicDeepTransactions.ts";
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const text = (value: unknown, maximum: number): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= maximum;
@@ -20,6 +21,64 @@ function invalid(message: string): never { throw new Error(message); }
 
 const statuses: SellerLogicDeepStatus[] = ["CONFIRMED", "PENDING", "REVIEW", "CANCELLED"];
 const kinds: SellerLogicDeepSignalKind[] = ["BUYER_INTENT", "SELLER_ALLOCATE", "PRODUCT_ANNOUNCE", "PRICE_QUOTE", "PRICE_CORRECTION", "STOCK", "CANCEL", "INQUIRY", "NOISE"];
+
+const isPureAcknowledgment = (comments: CommentRecord[]): boolean => comments.length > 0 && comments.every((row) =>
+  /^(?:네|예|응|넵|넹|네네|예예|넵넵|넹넹|ㅇㅇ|ok|오케이|알겠어요|알겠습니다)[.!?~^]*$/i.test(row.content.trim()));
+
+function hasNamedConfirmation(
+  nickname: string | null,
+  spokenNickname: string | undefined,
+  citedTranscripts: WorkflowTranscript[],
+  allTranscripts: WorkflowTranscript[],
+): boolean {
+  if (!nickname) return false;
+  const letters = (value: string) => value.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  const nicknameDigits = nickname.match(/\d+/g)?.join("");
+  const spokenDigits = spokenNickname?.match(/\d+/g)?.join("");
+  const names = [...new Set([nickname, ...(spokenNickname && (!nicknameDigits || !spokenDigits || nicknameDigits === spokenDigits)
+    ? [spokenNickname] : [])].map(letters).filter(Boolean))];
+  // Decoration and punctuation in account names need not be spoken aloud.
+  const patterns = names.map((name) => new RegExp(
+    `(?<![\\p{L}\\p{N}])${Array.from(name).join("[^\\p{L}\\p{N}]*")}(?=$|[^\\p{L}\\p{N}]|고객님|언니|님|분|한테|꺼|거|줄게|드릴게)`, "giu"));
+  const allocation = /드릴[게께](?:요)?|줄게(?:요)?|준다|꺼|갈게(?:요)?|가요|드려(?:요)?|드림|가져가(?:세요)?|빼놔|빼드릴게(?:요)?|낙찰|확정|캡처|캡쳐/u;
+  const negative = /(?:안|못)\s*(?:드|줄|줘|가|빼|캡)|취소|아니|말고|말아|마세요|드릴까|줄까/u;
+  const otherAddressee = /[\p{L}\p{N}_]+\s*(?:고객님|언니|님|한테)|(?:다음|새)\s*상품/u;
+  const matches = (rawSpeech: string): boolean => {
+    const speech = rawSpeech.normalize("NFKC").replace(/(?<=\d)\.(?=\d)/gu, "");
+    for (const pattern of patterns) {
+      for (const nameMatch of speech.matchAll(pattern)) {
+        const afterName = speech.slice(nameMatch.index! + nameMatch[0].length).replace(/^\s*(?:고객님|언니|님|분|한테)/u, "");
+        const clause = afterName.match(/^([^.!?\n]*)([.!?\n]|$)/u)!;
+        if (clause[2] === "?" || negative.test(clause[1])) continue;
+        const action = clause[1].match(allocation);
+        if (action && action.index! <= 12 && !otherAddressee.test(clause[1].slice(0, action.index))) return true;
+        const beforeName = speech.slice(0, nameMatch.index).split(/[.!?\n]/u).at(-1)!;
+        if (!negative.test(beforeName) && /(?:드릴[게께](?:요)?|줄게(?:요)?|준다|드려요)\s*$/u.test(beforeName)) return true;
+      }
+    }
+    return false;
+  };
+  const ordered = allTranscripts.filter((row) => row.isFinal !== false).slice().sort((a, b) =>
+    Date.parse(a.recognizedAt || a.startedAt || "") - Date.parse(b.recognizedAt || b.startedAt || ""));
+  const sourceIndex = new Map(ordered.map((row, index) => [row.id, index]));
+  const citedIds = new Set(citedTranscripts.map((row) => row.id));
+  const rows = ordered.filter((row) => citedIds.has(row.id));
+  for (let index = 0; index < rows.length; index++) {
+    let speech = rows[index].text;
+    if (matches(speech)) return true;
+    // STT can finalize a name and its allocation in separate adjacent chunks.
+    // Keep the join local so an old name cannot claim a later allocation.
+    for (let next = index + 1; next < Math.min(rows.length, index + 3); next++) {
+      if (sourceIndex.get(rows[next].id)! !== sourceIndex.get(rows[next - 1].id)! + 1) break;
+      const gap = Date.parse(rows[next].recognizedAt || rows[next].startedAt || "") -
+        Date.parse(rows[index].recognizedAt || rows[index].startedAt || "");
+      if (!Number.isFinite(gap) || gap > 15_000) break;
+      speech = `${speech.replace(/[.]+\s*$/u, "")} ${rows[next].text}`;
+      if (matches(speech)) return true;
+    }
+  }
+  return false;
+}
 
 function references(value: unknown, valid: Set<string>, label: string): string[] {
   if (!Array.isArray(value) || value.some((id) => typeof id !== "string" || !valid.has(id))) {
@@ -41,20 +100,9 @@ function validateContextItems(
   const knownTranscripts = new Set(source.transcripts.map((row) => row.id));
   return raw.map((item: unknown) => {
     if (!object(item) || !text(item.text, 2000)) return invalid("문맥 항목에는 다음 구간에 필요한 설명이 필요합니다.");
-    // AI가 반환한 ID 중 현재 세그먼트에 유효한 ID만 안전하게 추출 (외래 ID로 인한 시간대 누락 및 건너뜀 방지)
-    const rawCommentIds = Array.isArray(item.commentIds) ? item.commentIds : [];
-    const rawTranscriptIds = Array.isArray(item.transcriptIds) ? item.transcriptIds : [];
-
-    let commentIds = [...new Set(rawCommentIds.filter((id): id is string => typeof id === "string" && knownComments.has(id)))];
-    let transcriptIds = [...new Set(rawTranscriptIds.filter((id): id is string => typeof id === "string" && knownTranscripts.has(id)))];
-
-    if (requireSources && !commentIds.length && !transcriptIds.length) {
-      if (source.transcripts.length > 0) {
-        transcriptIds = [source.transcripts[0].id];
-      } else if (source.comments.length > 0) {
-        commentIds = [source.comments[0].id];
-      }
-    }
+    const commentIds = references(item.commentIds, knownComments, "context.commentIds");
+    const transcriptIds = references(item.transcriptIds, knownTranscripts, "context.transcriptIds");
+    if (requireSources && !commentIds.length && !transcriptIds.length) return invalid("문맥 항목에는 원문 근거가 필요합니다.");
     return { text: item.text, commentIds, transcriptIds };
   });
 }
@@ -178,28 +226,8 @@ function validateDeepDecision(raw: unknown, source: Pick<SellerLogicDeepInput, "
 
     // 고객 댓글이 오직 단순 대답/호응("네", "예", "응", "넵", "넹", "네네" 등)인 경우:
     // 판매자의 명시적인 해당 고객 호명 배정/확정 멘트("A언니 드릴게요", "A언니 캡처하세요" 등)가 있어야만 확정 인정
-    const isPureAck = citedComments.length > 0 && citedComments.every((c) =>
-      /^(?:네|예|응|넵|넹|네네|예예|넵넵|넹넹|ㅇㅇ|ok|오케이|알겠어요|알겠습니다)[.!?~^]*$/i.test(c.content.trim())
-    );
-    if (isPureAck) {
-      const hasConfirm = nickname && citedTranscripts.some((t) => {
-        const text = t.text;
-        const escapedNick = nickname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const allocMatch = new RegExp(
-          `${escapedNick}(?:\\s*(?:님|언니|고객님|분))?[^.!?\\n]{0,12}(?:드릴|줄게|줄게요|준다|꺼|것|갈게|갈게요|가요|드려|드림|가져가|빼놔|빼드|낙찰|확정)`,
-          "u"
-        ).test(text);
-        const capMatch = new RegExp(
-          `${escapedNick}(?:\\s*(?:님|언니|고객님|분|한테))?[^.!?\\n]{0,12}(?:캡처|캡쳐)`,
-          "u"
-        ).test(text);
-        const reverseAllocMatch = new RegExp(
-          `(?:드릴|줄게|줄게요|준다|드려요)\\s*${escapedNick}`,
-          "u"
-        ).test(text);
-        return allocMatch || capMatch || reverseAllocMatch;
-      });
-      if (!hasConfirm) {
+    if (isPureAcknowledgment(citedComments)) {
+      if (!hasNamedConfirmation(nickname, spokenNickname, citedTranscripts, source.transcripts)) {
         status = "REVIEW";
         reason = `[확인 필요: 단순 호응/대답("${citedComments.map((c) => c.content).join(", ")}") 댓글이며 판매자의 호명 확정/배정/캡처 멘트 없음] ${reason}`.slice(0, 4000);
       }
@@ -477,23 +505,16 @@ export async function parseSellerLogicDeepResult(
         }
       }
     }
+    let validated = validateDeepDecision(decoded, input);
     if (!prior && decisionId === null && previous.size > 0) {
-      // AI가 id: null로 반환했으나 previousDecisions에 이미 동일 구매자 + 동일 상품/댓글 근거를 공유하는 기존 거래가 있는 경우 자동 매핑
-      const matchingPrior = [...previous.values()].find((p) => {
-        if (!isSameTransactionCandidate(p, decision as Record<string, unknown>)) return false;
-        const sharesComment = decoded.commentIds.some((cid) => p.commentIds.includes(cid));
-        const sameProduct = (p.lineKey && (decision as Record<string, unknown>).lineKey && p.lineKey === (decision as Record<string, unknown>).lineKey) ||
-          (p.orderCode && (decision as Record<string, unknown>).orderCode && p.orderCode === (decision as Record<string, unknown>).orderCode) ||
-          (!p.lineKey && !(decision as Record<string, unknown>).lineKey && !p.orderCode && !(decision as Record<string, unknown>).orderCode);
-        return sharesComment || sameProduct;
-      });
+      const matchingPrior = [...previous.values()].find((p) => canMergeSellerLogicDeepTransactions(p, validated));
       if (matchingPrior) {
         prior = matchingPrior;
         decoded.commentIds = [...new Set([...prior.commentIds, ...decoded.commentIds])];
         decoded.transcriptIds = [...new Set([...prior.transcriptIds, ...decoded.transcriptIds])];
+        validated = validateDeepDecision(decoded, input);
       }
     }
-    const validated = validateDeepDecision(decoded, input);
     let id: string;
     if (prior) {
       id = prior.id;
@@ -510,29 +531,9 @@ export async function parseSellerLogicDeepResult(
   // 단순 대답("네", "예" 등) 댓글이면서 판매자의 명확한 호명 확정/배정/캡처 멘트가 없는 거래는 제외
   const filteredDecisions = decisions.filter((d) => {
     const citedComments = input.comments.filter((c) => d.commentIds.includes(c.id));
-    const isPureAck = citedComments.length > 0 && citedComments.every((c) =>
-      /^(?:네|예|응|넵|넹|네네|예예|넵넵|넹넹|ㅇㅇ|ok|오케이|알겠어요|알겠습니다)[.!?~^]*$/i.test(c.content.trim())
-    );
-    if (isPureAck) {
+    if (isPureAcknowledgment(citedComments)) {
       const citedTranscripts = input.transcripts.filter((t) => d.transcriptIds.includes(t.id));
-      const hasConfirm = d.nickname && citedTranscripts.some((t) => {
-        const text = t.text;
-        const escapedNick = d.nickname!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const allocMatch = new RegExp(
-          `${escapedNick}(?:\\s*(?:님|언니|고객님|분))?[^.!?\\n]{0,12}(?:드릴|줄게|줄게요|준다|꺼|것|갈게|갈게요|가요|드려|드림|가져가|빼놔|빼드|낙찰|확정)`,
-          "u"
-        ).test(text);
-        const capMatch = new RegExp(
-          `${escapedNick}(?:\\s*(?:님|언니|고객님|분|한테))?[^.!?\\n]{0,12}(?:캡처|캡쳐)`,
-          "u"
-        ).test(text);
-        const reverseAllocMatch = new RegExp(
-          `(?:드릴|줄게|줄게요|준다|드려요)\\s*${escapedNick}`,
-          "u"
-        ).test(text);
-        return allocMatch || capMatch || reverseAllocMatch;
-      });
-      if (!hasConfirm) return false;
+      if (!hasNamedConfirmation(d.nickname, d.spokenNickname, citedTranscripts, input.transcripts)) return false;
     }
     return true;
   });
