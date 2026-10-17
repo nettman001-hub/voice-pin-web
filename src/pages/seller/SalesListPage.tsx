@@ -26,10 +26,12 @@ import {
   Smartphone,
   ChevronRight,
   ExternalLink,
-  Truck
+  Truck,
+  Trash2
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ShippingConfigModal } from '../../components/shipping/ShippingConfigModal';
+import { shippingService } from '../../services/shippingService';
 import { KeepingBadge } from '../../components/shipping/KeepingBadge';
 import { customerKeepingService } from '../../services/customerKeepingService';
 import { formatAmountAsDecimal, formatMultiSaleAmount } from '../../services/salesExtractor';
@@ -104,7 +106,7 @@ interface BuyerGroupedSale {
 
 export const SalesListPage: React.FC = () => {
   const { workspaceId } = useAuth();
-  const { sales, promiseDefaults, setPromiseDefault, exportCsv, refreshSales } = useSales();
+  const { sales, promiseDefaults, setPromiseDefault, exportCsv, refreshSales, deleteSale } = useSales();
   const { messages, payments, claims, invoices, shipments } = useCommerce();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -117,6 +119,53 @@ export const SalesListPage: React.FC = () => {
   const [promiseDefaultBusy, setPromiseDefaultBusy] = useState<string | null>(null);
   const [promiseDefaultError, setPromiseDefaultError] = useState<{ key: string; message: string } | null>(null);
   const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
+  const [shippingConfig, setShippingConfig] = useState(() => shippingService.getConfig(workspaceId));
+  const [actionToast, setActionToast] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setActionToast(msg);
+    setTimeout(() => setActionToast(null), 3000);
+  };
+
+  // 구매자별 내역 전체 삭제 핸들러
+  const handleDeleteBuyer = (buyer: BuyerGroupedSale, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const count = buyer.records.length;
+    if (count === 0) {
+      alert('삭제할 판매 내역이 없습니다.');
+      return;
+    }
+    const confirmed = window.confirm(
+      `'${buyer.buyerNickname}' 님의 판매 내역 전체 (${count}건)를 정말 삭제하시겠습니까?\n삭제된 판매 내역은 복구할 수 없습니다.`
+    );
+    if (!confirmed) return;
+
+    buyer.records.forEach((rec) => {
+      deleteSale(rec.id);
+    });
+
+    setExpandedBuyers((prev) => prev.filter((k) => k !== buyer.groupKey));
+    showToast(`'${buyer.buyerNickname}' 님의 판매 내역 ${count}건이 삭제되었습니다.`);
+  };
+
+  // 개별 판매 내역 단건 삭제 핸들러
+  const handleDeleteSingleSale = (sale: SaleRecord, e?: React.MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    const title = sale.productName || sale.productCode || (sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '해당 판매 건');
+    const confirmed = window.confirm(
+      `'${sale.buyerNickname}' 님의 [${title}] 판매 내역을 삭제하시겠습니까?`
+    );
+    if (!confirmed) return;
+
+    deleteSale(sale.id);
+    showToast('판매 내역 1건이 삭제되었습니다.');
+  };
+
+  useEffect(() => {
+    setShippingConfig(shippingService.getConfig(workspaceId));
+  }, [workspaceId, isShippingModalOpen]);
+
   const [viewerModal, setViewerModal] = useState<{
     isOpen: boolean;
     images: string[];
@@ -723,13 +772,13 @@ export const SalesListPage: React.FC = () => {
                         : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'
                     }`}
                   >
-                    <button
-                      type="button"
-                      onClick={() => toggleBuyerExpand(buyer.groupKey)}
-                      aria-expanded={isExpanded}
-                      className="w-full p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left cursor-pointer hover:bg-slate-50/80 transition"
+                    <div
+                      className="w-full p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left hover:bg-slate-50/80 transition"
                     >
-                      <div className="flex items-start space-x-3.5 min-w-0 flex-1">
+                      <div
+                        onClick={() => toggleBuyerExpand(buyer.groupKey)}
+                        className="flex items-start space-x-3.5 min-w-0 flex-1 cursor-pointer"
+                      >
                         {buyerThumbnail ? (
                           <div
                             role="button"
@@ -888,11 +937,17 @@ export const SalesListPage: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="flex items-center space-x-4 w-full sm:w-auto justify-between sm:justify-end flex-shrink-0">
-                        <div className="text-right">
+                      <div className="flex items-center space-x-2.5 w-full sm:w-auto justify-between sm:justify-end flex-shrink-0">
+                        <div
+                          onClick={() => toggleBuyerExpand(buyer.groupKey)}
+                          className="text-right cursor-pointer"
+                        >
                           <span className="text-[10px] text-slate-500">총 구매 합계</span>
                           {(() => {
                             const multi = formatMultiSaleAmount(buyer.records.map((r) => r.amount));
+                            const shippingCalc = shippingService.calculateShippingFee(buyer.totalAmount, shippingConfig);
+                            const totalWithShipping = buyer.totalAmount + shippingCalc.fee;
+
                             if (multi.isMulti) {
                               return (
                                 <div className="flex flex-col items-end">
@@ -902,22 +957,46 @@ export const SalesListPage: React.FC = () => {
                                   <span className="text-lg font-black text-brand-700">
                                     {multi.totalFormatted}
                                   </span>
+                                  <span className="text-xs font-bold text-slate-600 mt-0.5">
+                                    택비포함 : {totalWithShipping.toLocaleString()}원
+                                  </span>
                                 </div>
                               );
                             }
                             return (
-                              <div className="text-lg font-black text-brand-600">
-                                {buyer.totalAmount.toLocaleString()}원
+                              <div className="flex flex-col items-end">
+                                <div className="text-lg font-black text-brand-600">
+                                  {buyer.totalAmount.toLocaleString()}원
+                                </div>
+                                <span className="text-xs font-bold text-slate-600 mt-0.5">
+                                  택비포함 : {totalWithShipping.toLocaleString()}원
+                                </span>
                               </div>
                             );
                           })()}
                         </div>
 
-                        <div className="p-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-500">
+                        {/* 구매자 판매 내역 전체 삭제 버튼 */}
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteBuyer(buyer, e)}
+                          className="p-2 rounded-xl bg-slate-100 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-slate-400 hover:text-rose-600 transition cursor-pointer flex-shrink-0"
+                          title={`'${buyer.buyerNickname}' 구매자 내역 전체 (${buyer.records.length}건) 삭제`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+
+                        {/* 펼치기/접기 버튼 */}
+                        <button
+                          type="button"
+                          onClick={() => toggleBuyerExpand(buyer.groupKey)}
+                          className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-500 transition cursor-pointer flex-shrink-0"
+                          title={isExpanded ? '상세 내역 접기' : '상세 내역 펼치기'}
+                        >
                           {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                        </div>
+                        </button>
                       </div>
-                    </button>
+                    </div>
 
                     {isExpanded && (
                       <div className="p-4 border-t border-slate-100 bg-slate-50/70 space-y-4">
@@ -966,12 +1045,14 @@ export const SalesListPage: React.FC = () => {
                         {buyer.records.map((rec) => {
                           const recImage = rec.productImageUrl || rec.captureImageUrls?.[0];
                           return (
-                          <Link
+                          <div
                             key={rec.id}
-                            to={`/sales/${rec.id}${sessionQuery}`}
-                            className="p-3 rounded-xl bg-white border border-slate-200 hover:border-brand-400 flex items-center justify-between text-xs transition block shadow-sm group"
+                            className="p-3 rounded-xl bg-white border border-slate-200 hover:border-brand-400 flex items-center justify-between text-xs transition shadow-sm group"
                           >
-                            <div className="flex items-center space-x-3 min-w-0 flex-1 mr-2">
+                            <Link
+                              to={`/sales/${rec.id}${sessionQuery}`}
+                              className="flex items-center space-x-3 min-w-0 flex-1 mr-2 cursor-pointer"
+                            >
                               <div
                                 className="w-10 h-10 rounded-lg overflow-hidden border border-slate-200/80 bg-slate-100 flex-shrink-0 flex items-center justify-center shadow-xs relative group/thumb cursor-pointer"
                                 onClick={(e) => {
@@ -1023,17 +1104,31 @@ export const SalesListPage: React.FC = () => {
                                 </div>
                                 <p className="text-slate-600 italic truncate max-w-md mt-0.5">"{rec.rawTranscript}"</p>
                               </div>
-                            </div>
+                            </Link>
 
-                            <div className="flex items-center space-x-4 flex-shrink-0">
+                            <div className="flex items-center space-x-3 flex-shrink-0">
                               <span className="font-bold text-slate-900 text-sm">
                                 {rec.amount.toLocaleString()}원
                                 <span className="text-xs text-brand-600 font-mono ml-1 font-semibold">({formatAmountAsDecimal(rec.amount)})</span>
                               </span>
                               <span className="text-[10px] text-slate-400">{new Date(rec.recognizedAt).toLocaleTimeString('ko-KR')}</span>
-                              <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-brand-600 transition" />
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteSingleSale(rec, e)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition cursor-pointer"
+                                title="이 판매 내역 삭제"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                              <Link
+                                to={`/sales/${rec.id}${sessionQuery}`}
+                                className="text-slate-400 group-hover:text-brand-600 transition p-1"
+                                title="상세 보기 및 수정"
+                              >
+                                <ArrowRight className="w-3.5 h-3.5" />
+                              </Link>
                             </div>
-                          </Link>
+                          </div>
                           );
                         })}
                       </div>
@@ -1246,14 +1341,31 @@ export const SalesListPage: React.FC = () => {
                               </span>
                             </div>
                           ) : (
-                            <div className="text-lg font-black text-brand-600">
-                              {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}
+                            <div className="flex flex-col items-start sm:items-end">
+                              <div className="text-lg font-black text-brand-600">
+                                {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}
+                              </div>
+                              {sale.amount > 0 && (
+                                <span className="text-xs font-bold text-slate-600 mt-0.5">
+                                  택비포함 : {(sale.amount + shippingService.calculateShippingFee(sale.amount, shippingConfig).fee).toLocaleString()}원
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>
-                        <div className="text-[11px] text-slate-400 flex items-center space-x-1">
-                          <Clock className="w-3 h-3" />
-                          <span>{new Date(sale.recognizedAt).toLocaleString('ko-KR')}</span>
+                        <div className="flex items-center gap-2">
+                          <div className="text-[11px] text-slate-400 flex items-center space-x-1">
+                            <Clock className="w-3 h-3" />
+                            <span>{new Date(sale.recognizedAt).toLocaleString('ko-KR')}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteSingleSale(sale, e)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition cursor-pointer"
+                            title="이 판매 내역 삭제"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -1264,6 +1376,13 @@ export const SalesListPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {actionToast && (
+        <div className="fixed bottom-6 right-6 z-50 p-4 rounded-2xl bg-slate-900/95 text-white text-xs font-bold shadow-xl border border-slate-700 flex items-center space-x-2 animate-in fade-in slide-in-from-bottom-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+          <span>{actionToast}</span>
+        </div>
+      )}
 
       {viewerModal.isOpen && (
         <ImageViewerModal

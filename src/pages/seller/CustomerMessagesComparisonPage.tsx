@@ -10,6 +10,7 @@ import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 import { requireSupabase, isSupabaseConfigured } from '../../services/supabaseClient';
 import { formatSessionDisplay, SessionInfoLike } from '../../utils/sessionFormatter';
 import { productSalesApi } from '../../services/productSalesApi';
+import { shippingService } from '../../services/shippingService';
 import {
   MessageSquare,
   ShoppingBag,
@@ -35,7 +36,8 @@ import {
   CheckCheck,
   Link2,
   Unlink,
-  Check
+  Check,
+  Pencil
 } from 'lucide-react';
 
 const formatPhone = (raw: string): string => {
@@ -287,6 +289,8 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<'ALL' | 'UNMATCHED' | 'MATCHED'>('ALL');
   const [paymentLinkInputs, setPaymentLinkInputs] = useState<Record<string, string>>({});
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [editPaymentNickInput, setEditPaymentNickInput] = useState<string>('');
 
   // 선택된 판매 정보
   const selectedSale = useMemo(() => {
@@ -303,6 +307,7 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [cloudSessions, setCloudSessions] = useState<SessionInfoLike[]>([]);
+  const shippingConfig = useMemo(() => shippingService.getConfig(workspaceId), [workspaceId]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -692,7 +697,7 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     };
   }, [sales, selectedSessionId, buyerToThreadMap, getBuyerPaymentSummary]);
 
-  // 7. 선택된 스레드
+  // 7. 선택된 스레드 (명시적으로 선택된 번호가 있을 때만 반환)
   const activeThread = useMemo(() => {
     if (selectedPhoneKey) {
       const match = filteredThreads.find((t) => t.phoneKey === selectedPhoneKey);
@@ -703,7 +708,8 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
         if (globalMatch) return globalMatch;
       }
     }
-    return filteredThreads.length > 0 ? filteredThreads[0] : null;
+    // 선택된 번호가 없으면(또는 미수신 고객 클릭 시) 어떤 스레드도 자동 선택하지 않음
+    return null;
   }, [filteredThreads, threads, selectedPhoneKey, messagesSearch]);
 
   // 메시지 스크롤 맨 아래로 이동
@@ -870,6 +876,25 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     saveManualPaymentLinks(nextMap, workspaceId);
     setFeedback(`'${prevNick || ''}' 고객과의 입금 연결이 해제되었습니다.`);
     setTimeout(() => setFeedback(null), 3000);
+  };
+
+  // 입금 내역 닉네임 수정 모드 시작
+  const handleStartEditPayment = (paymentId: string, currentNick: string | null, payerName?: string) => {
+    setEditingPaymentId(paymentId);
+    setEditPaymentNickInput(currentNick || payerName || '');
+  };
+
+  // 입금 내역 닉네임 수정 저장
+  const handleSavePaymentNick = (paymentId: string) => {
+    const trimmed = editPaymentNickInput.trim();
+    if (!trimmed) {
+      setFeedback('고객 닉네임을 입력해 주세요.');
+      setTimeout(() => setFeedback(null), 3000);
+      return;
+    }
+    handleLinkPaymentToBuyer(paymentId, trimmed);
+    setEditingPaymentId(null);
+    setEditPaymentNickInput('');
   };
 
   return (
@@ -1130,9 +1155,16 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                         )}
                       </div>
 
-                      <span className="text-xs font-black text-brand-700 whitespace-nowrap">
-                        {(sale.amount || 0).toLocaleString()}원
-                      </span>
+                      <div className="flex flex-col items-end flex-shrink-0">
+                        <span className="text-xs font-black text-brand-700 whitespace-nowrap">
+                          {(sale.amount || 0).toLocaleString()}원
+                        </span>
+                        {sale.amount > 0 && (
+                          <span className="text-[10px] font-bold text-slate-500 mt-0.5">
+                            택비포함 : {(sale.amount + shippingService.calculateShippingFee(sale.amount, shippingConfig).fee).toLocaleString()}원
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <div className="mt-1.5 text-xs text-slate-600 flex items-center justify-between">
@@ -1709,68 +1741,9 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                   </p>
                 </div>
               </>
-            ) : selectedSale ? (
-              /* 문자가 없는 판매 건을 선택했을 때의 대화창 안내 화면 */
-              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-50/50 overflow-y-auto">
-                <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mb-4 shadow-xs">
-                  <MessageSquare className="w-8 h-8 text-amber-500" />
-                </div>
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-200 text-slate-700 text-xs font-bold mb-2">
-                  <span>선택된 판매 내역</span>
-                </div>
-                <h3 className="text-base font-black text-slate-900 mb-1">
-                  '{selectedSale.buyerNickname || '구매자'}' 고객님의 수신된 문자가 없습니다
-                </h3>
-                <p className="text-xs text-slate-500 max-w-sm mb-6 leading-relaxed">
-                  해당 고객이 아직 주문서나 입금/주소 문자를 발송하지 않았거나, 문자에 닉네임이 포함되지 않았습니다.
-                </p>
-
-                {/* 선택된 판매 정보 요약 카드 */}
-                <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 p-4 text-left shadow-xs mb-4">
-                  <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-slate-100">
-                    <span className="text-xs font-bold text-slate-500">구매자 닉네임</span>
-                    <span className="text-sm font-black text-slate-900">{selectedSale.buyerNickname || '-'}</span>
-                  </div>
-                  <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-slate-100">
-                    <span className="text-xs font-bold text-slate-500">주문 상품</span>
-                    <span className="text-xs font-bold text-slate-800">
-                      {selectedSale.productName || '상품명 미지정'} {selectedSale.quantity && selectedSale.quantity > 1 ? `(${selectedSale.quantity}개)` : ''}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-slate-100">
-                    <span className="text-xs font-bold text-slate-500">판매 금액</span>
-                    <span className="text-sm font-black text-brand-700">{(selectedSale.amount || 0).toLocaleString()}원</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-500">주문 시각</span>
-                    <span className="text-xs text-slate-500 font-medium">
-                      {selectedSale.recognizedAt ? formatDateTime(selectedSale.recognizedAt) : '-'}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedSaleId(null);
-                      setMessagesSearch('');
-                      setSelectedPhoneKey(null);
-                    }}
-                    className="px-3.5 py-1.5 text-xs font-bold bg-white hover:bg-slate-100 text-slate-700 rounded-xl border border-slate-300 transition-colors shadow-2xs"
-                  >
-                    선택 해제하고 전체 문자 보기
-                  </button>
-                </div>
-              </div>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400">
-                <MessageSquare className="w-10 h-10 text-slate-300 mb-2" />
-                <p className="text-sm font-bold text-slate-700">대화방을 선택하세요</p>
-                <p className="text-xs text-slate-400 mt-1">
-                  왼쪽 목록에서 고객 전화번호를 선택하거나, 판매 목록에서 대조할 고객을 클릭하세요.
-                </p>
-              </div>
+              /* 문자 미수신 고객이거나 대화방 미선택 시: 대화내역 빈칸 */
+              <div className="flex-1 flex flex-col items-center justify-center p-8 bg-slate-50/40" />
             )}
           </div>
         </div>
@@ -1884,12 +1857,15 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                   activeThread?.existingNickname ||
                   activeThread?.newMatchedNickname ||
                   null;
+                const isEditing = editingPaymentId === payment.id;
 
                 return (
                   <div
                     key={payment.id}
                     className={`p-3.5 rounded-2xl border transition-all bg-white shadow-xs ${
-                      matchedNick
+                      isEditing
+                        ? 'border-brand-500 ring-2 ring-brand-500/20 shadow-md'
+                        : matchedNick
                         ? 'border-slate-200 hover:border-cyan-400'
                         : 'border-amber-200 bg-amber-50/30 hover:border-amber-400'
                     }`}
@@ -1920,105 +1896,183 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                       </div>
                     )}
 
-                    <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
-                      {/* 매칭 상태 표시 */}
-                      <div className="flex items-center gap-1.5">
-                        {matchedNick ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-bold text-cyan-800 bg-cyan-50 px-2.5 py-0.5 rounded-full border border-cyan-200 flex items-center gap-1">
-                              <UserCheck className="w-3.5 h-3.5 text-cyan-600" />
-                              고객 매칭: <strong>{matchedNick}</strong>
-                            </span>
-                            {isManual && (
-                              <button
-                                type="button"
-                                onClick={() => handleUnlinkPayment(payment.id)}
-                                className="text-slate-400 hover:text-red-500 p-0.5 transition-colors"
-                                title="입금 연결 해제"
-                              >
-                                <Unlink className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-xs font-bold text-amber-700 bg-amber-100/80 px-2.5 py-0.5 rounded-full border border-amber-300 flex items-center gap-1">
-                            <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-                            확인 필요 (고객 미매칭)
+                    {isEditing ? (
+                      /* 수정/입력 모드 */
+                      <div className="mt-2.5 pt-2.5 border-t border-slate-200 bg-slate-50/90 -mx-3.5 -mb-3.5 p-3 rounded-b-2xl">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                            <Pencil className="w-3.5 h-3.5 text-brand-600" />
+                            고객 매칭 닉네임 입력/수정
                           </span>
-                        )}
-                      </div>
+                          <span className="text-[11px] text-slate-400">
+                            입금자명: <strong>{payment.payerName || '미지정'}</strong>
+                          </span>
+                        </div>
 
-                      {/* 액션 버튼 영역 */}
-                      <div className="flex items-center gap-1.5 ml-auto flex-wrap">
-                        {matchedNick ? (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <div className="relative flex-1 min-w-[150px]">
+                            <input
+                              type="text"
+                              list={`buyer-datalist-${payment.id}`}
+                              placeholder="고객 닉네임 검색 또는 직접 입력"
+                              value={editPaymentNickInput}
+                              onChange={(e) => setEditPaymentNickInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleSavePaymentNick(payment.id);
+                                } else if (e.key === 'Escape') {
+                                  setEditingPaymentId(null);
+                                }
+                              }}
+                              autoFocus
+                              className="w-full text-xs px-2.5 py-1.5 bg-white border border-brand-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 font-bold text-slate-800"
+                            />
+                            <datalist id={`buyer-datalist-${payment.id}`}>
+                              {allBuyerNicknames.map((nick) => (
+                                <option key={nick} value={nick} />
+                              ))}
+                            </datalist>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleSavePaymentNick(payment.id)}
+                            disabled={!editPaymentNickInput.trim()}
+                            className="px-3 py-1.5 text-xs font-black bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white rounded-lg transition-colors flex items-center gap-1 shadow-xs cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            매칭 저장
+                          </button>
+
+                          {matchedNick && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleUnlinkPayment(payment.id);
+                                setEditingPaymentId(null);
+                              }}
+                              className="px-2.5 py-1.5 text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg border border-rose-200 transition-colors flex items-center gap-1 cursor-pointer"
+                              title="기존 매칭 해제"
+                            >
+                              <Unlink className="w-3.5 h-3.5" />
+                              연결 해제
+                            </button>
+                          )}
+
                           <button
                             type="button"
                             onClick={() => {
-                              setInboxTab('MESSAGES');
-                              setMessagesSearch(matchedNick);
-                              handleSelectBuyerFromSales({ buyerNickname: matchedNick } as any);
+                              setEditingPaymentId(null);
+                              setEditPaymentNickInput('');
                             }}
-                            className="px-2.5 py-1 text-xs font-bold bg-cyan-50 hover:bg-cyan-100 text-cyan-700 rounded-lg border border-cyan-200 transition-colors flex items-center gap-1"
+                            className="px-2.5 py-1.5 text-xs font-bold bg-white hover:bg-slate-100 text-slate-600 rounded-lg border border-slate-200 transition-colors flex items-center gap-1 cursor-pointer"
                           >
-                            <MessageSquare className="w-3 h-3" />
-                            문자 대화 보기
+                            <X className="w-3.5 h-3.5" />
+                            취소
                           </button>
-                        ) : (
-                          <div className="flex items-center gap-1.5 flex-wrap">
+                        </div>
+
+                        {allBuyerNicknames.length > 0 && (
+                          <div className="mt-2 flex items-center gap-1 flex-wrap">
+                            <span className="text-[10px] text-slate-400 font-medium">추천 선택:</span>
                             {selectedCandidateNick && (
                               <button
                                 type="button"
+                                onClick={() => setEditPaymentNickInput(selectedCandidateNick)}
+                                className="text-[10px] px-1.5 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded font-bold border border-amber-300 transition-colors cursor-pointer"
+                              >
+                                {selectedCandidateNick} (현재 선택 고객)
+                              </button>
+                            )}
+                            {allBuyerNicknames.slice(0, 5).map((nick) => {
+                              if (nick === selectedCandidateNick) return null;
+                              return (
+                                <button
+                                  key={nick}
+                                  type="button"
+                                  onClick={() => setEditPaymentNickInput(nick)}
+                                  className="text-[10px] px-1.5 py-0.5 bg-slate-200/80 hover:bg-slate-200 text-slate-700 rounded font-medium transition-colors cursor-pointer"
+                                >
+                                  {nick}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* 일반 조회 모드 */
+                      <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                        {/* 매칭 상태 표시 */}
+                        <div className="flex items-center gap-1.5">
+                          {matchedNick ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-bold text-cyan-800 bg-cyan-50 px-2.5 py-0.5 rounded-full border border-cyan-200 flex items-center gap-1">
+                                <UserCheck className="w-3.5 h-3.5 text-cyan-600" />
+                                고객 매칭: <strong>{matchedNick}</strong>
+                              </span>
+                              {isManual && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnlinkPayment(payment.id)}
+                                  className="text-slate-400 hover:text-red-500 p-0.5 transition-colors cursor-pointer"
+                                  title="입금 연결 해제"
+                                >
+                                  <Unlink className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs font-bold text-amber-700 bg-amber-100/80 px-2.5 py-0.5 rounded-full border border-amber-300 flex items-center gap-1">
+                              <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                              확인 필요 (고객 미매칭)
+                            </span>
+                          )}
+                        </div>
+
+                        {/* 액션 버튼 영역 */}
+                        <div className="flex items-center gap-1.5 ml-auto flex-wrap">
+                          {/* 수정 버튼 */}
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditPayment(payment.id, matchedNick, payment.payerName)}
+                            className="px-2.5 py-1 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg border border-slate-200 transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
+                            title="고객 매칭 닉네임 수정 및 입력"
+                          >
+                            <Pencil className="w-3 h-3 text-slate-600" />
+                            수정
+                          </button>
+
+                          {matchedNick ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setInboxTab('MESSAGES');
+                                setMessagesSearch(matchedNick);
+                                handleSelectBuyerFromSales({ buyerNickname: matchedNick } as any);
+                              }}
+                              className="px-2.5 py-1 text-xs font-bold bg-cyan-50 hover:bg-cyan-100 text-cyan-700 rounded-lg border border-cyan-200 transition-colors flex items-center gap-1 cursor-pointer"
+                            >
+                              <MessageSquare className="w-3 h-3" />
+                              문자 대화 보기
+                            </button>
+                          ) : (
+                            selectedCandidateNick && (
+                              <button
+                                type="button"
                                 onClick={() => handleLinkPaymentToBuyer(payment.id, selectedCandidateNick)}
-                                className="px-2.5 py-1 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg shadow-2xs transition-colors flex items-center gap-1"
-                                title={`현재 선택된 '${selectedCandidateNick}' 고객과 연결합니다`}
+                                className="px-2.5 py-1 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg shadow-2xs transition-colors flex items-center gap-1 cursor-pointer"
+                                title={`현재 선택된 '${selectedCandidateNick}' 고객과 즉시 연결합니다`}
                               >
                                 <Link2 className="w-3 h-3" />
                                 '{selectedCandidateNick}'에 즉시 연결
                               </button>
-                            )}
-
-                            {/* 다른 구매자 닉네임 선택 연결 폼 */}
-                            <form
-                              onSubmit={(e) => {
-                                e.preventDefault();
-                                const customNick = paymentLinkInputs[payment.id]?.trim();
-                                if (customNick) {
-                                  handleLinkPaymentToBuyer(payment.id, customNick);
-                                  setPaymentLinkInputs((prev) => ({ ...prev, [payment.id]: '' }));
-                                }
-                              }}
-                              className="flex items-center gap-1"
-                            >
-                              <input
-                                type="text"
-                                list={`buyer-datalist-${payment.id}`}
-                                placeholder="고객 닉네임 선택"
-                                value={paymentLinkInputs[payment.id] || ''}
-                                onChange={(e) =>
-                                  setPaymentLinkInputs((prev) => ({
-                                    ...prev,
-                                    [payment.id]: e.target.value,
-                                  }))
-                                }
-                                className="text-xs px-2 py-1 bg-white border border-slate-300 rounded-lg w-28 sm:w-36 focus:outline-none focus:border-amber-500"
-                              />
-                              <datalist id={`buyer-datalist-${payment.id}`}>
-                                {allBuyerNicknames.map((nick) => (
-                                  <option key={nick} value={nick} />
-                                ))}
-                              </datalist>
-                              <button
-                                type="submit"
-                                disabled={!paymentLinkInputs[payment.id]?.trim()}
-                                className="px-2 py-1 text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white rounded-lg disabled:opacity-40 transition-colors"
-                              >
-                                연결
-                              </button>
-                            </form>
-                          </div>
-                        )}
+                            )
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 );
               })
