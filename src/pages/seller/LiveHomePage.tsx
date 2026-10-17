@@ -710,6 +710,7 @@ export const LiveHomePage: React.FC = () => {
                   <Link
                     key={sale.id}
                     to={isDemoActive ? '#' : `/sales/${sale.id}`}
+                    state={{ returnTo: '/live' }}
                     onClick={(e) => { if (isDemoActive) e.preventDefault(); }}
                     className={`block p-2 sm:p-2.5 rounded-xl border transition active:scale-[0.99] hover:shadow-xs ${
                       sale.status === '보류'

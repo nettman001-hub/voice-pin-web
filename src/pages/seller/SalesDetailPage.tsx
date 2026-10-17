@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
 import { SaleStatus } from '../../types/live';
@@ -31,7 +31,9 @@ export const SalesDetailPage: React.FC = () => {
   const { sales, updateSale, retrySalePrint, deleteSale } = useSales();
 
   const sale = sales.find((s) => s.id === id);
-  const returnToSalesList = `/sales${location.search}`;
+  const fromLiveHome = (location.state as { returnTo?: unknown } | null)?.returnTo === '/live';
+  const returnPath = fromLiveHome ? '/live' : `/sales${location.search}`;
+  const returnLabel = fromLiveHome ? '라이브 청취 홈으로 돌아가기' : '판매 목록으로 돌아가기';
 
   const [buyerNickname, setBuyerNickname] = useState(sale?.buyerNickname || '');
   const [productName, setProductName] = useState(sale?.productName || '');
@@ -55,6 +57,16 @@ export const SalesDetailPage: React.FC = () => {
     title: ''
   });
 
+  useLayoutEffect(() => {
+    const scrollToTop = () => {
+      window.scrollTo(0, 0);
+      if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+    };
+    scrollToTop();
+    const frame = window.requestAnimationFrame(scrollToTop);
+    return () => window.cancelAnimationFrame(frame);
+  }, [id, sale?.id]);
+
   useEffect(() => {
     productSalesApi.listSessions()
       .then((data) => setCloudSessions(data.sessions))
@@ -65,8 +77,8 @@ export const SalesDetailPage: React.FC = () => {
     return (
       <div className="p-12 text-center text-xs text-slate-500">
         해당 판매 내역을 찾을 수 없습니다.{' '}
-        <Link to={returnToSalesList} className="text-brand-600 underline font-bold">
-          목록으로 돌아가기
+        <Link to={returnPath} className="text-brand-600 underline font-bold">
+          {returnLabel}
         </Link>
       </div>
     );
@@ -119,21 +131,28 @@ export const SalesDetailPage: React.FC = () => {
   const handleDelete = () => {
     if (window.confirm('정말 이 판매 내역을 삭제하시겠습니까?')) {
       deleteSale(sale.id);
-      navigate(returnToSalesList);
+      navigate(returnPath);
     }
   };
 
   return (
     <div className="p-3.5 sm:p-6 max-w-4xl mx-auto space-y-4 sm:space-y-6">
       {/* 상단 네비게이션 */}
-      <div className="flex items-center justify-between">
-        <button
-          onClick={() => navigate(returnToSalesList)}
-          className="text-xs font-bold text-slate-600 hover:text-slate-900 flex items-center space-x-1 transition active:scale-95"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>판매 목록으로 돌아가기</span>
-        </button>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => navigate(returnPath)}
+            className="text-xs font-bold text-slate-600 hover:text-slate-900 flex items-center space-x-1 transition active:scale-95"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>{returnLabel}</span>
+          </button>
+          {!fromLiveHome && (
+            <Link to="/live" className="text-xs font-bold text-brand-600 hover:underline">
+              라이브 청취 홈
+            </Link>
+          )}
+        </div>
 
         <button
           onClick={handleDelete}
