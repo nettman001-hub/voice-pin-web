@@ -130,6 +130,16 @@ export const InvoiceManagementPage: React.FC = () => {
     [sales, isPaid, sessionFilter]
   );
 
+  const selectedSession = sessionFilter === 'ALL'
+    ? null
+    : availableSessions.find((session) => session.id === sessionFilter) || null;
+
+  const sessionStartTime = useMemo(() => {
+    if (!selectedSession?.startedAt) return null;
+    const t = new Date(selectedSession.startedAt).getTime();
+    return isNaN(t) ? null : t;
+  }, [selectedSession]);
+
   const filteredInvoices = useMemo(() => {
     if (sessionFilter === 'ALL') return invoices;
     const saleSessionMap = new Map(sales.map((s) => [s.id, s.sessionId]));
@@ -137,6 +147,16 @@ export const InvoiceManagementPage: React.FC = () => {
       inv.saleIds.some((id) => saleSessionMap.get(id) === sessionFilter)
     );
   }, [invoices, sales, sessionFilter]);
+
+  // 선택한 회차 이전에 수신된 입금 내역은 제외
+  const filteredPayments = useMemo(() => {
+    if (!sessionStartTime) return payments;
+    return payments.filter((p) => {
+      const timeStr = p.paidAt || p.createdAt;
+      const t = new Date(timeStr).getTime();
+      return isNaN(t) || t >= sessionStartTime;
+    });
+  }, [payments, sessionStartTime]);
 
   // 구매자별 판매 그룹 목록 생성 (금액 수식, 택배비 포함 금액 포함)
   interface BuyerGroup {
@@ -716,7 +736,7 @@ export const InvoiceManagementPage: React.FC = () => {
         )}
       </section>
 
-      <PaymentReconciliationPanel payments={payments} invoices={invoices} onConfirm={confirmPayment} onDismiss={dismissPayment} />
+      <PaymentReconciliationPanel payments={filteredPayments} invoices={invoices} onConfirm={confirmPayment} onDismiss={dismissPayment} />
     </div>
   );
 };

@@ -37,11 +37,17 @@ final class ConversationLogic {
 
     /**
      * 폰에서 보낸 문자를 서버에 올릴지. 웹 발송분(origin=WEB)은 outbox-status로 이미 서버에 있으므로 절대 올리지 않고
-     * (같은 문자 2건 방지), 업무 고객 번호(구매정보 문자를 보낸 번호·등록 번호)에게 보낸 문자만 올린다.
+     * (같은 문자 2건 방지), 010 번호이거나 업무 고객 번호(구매정보 문자를 보낸 번호·등록 번호)에게 보낸 문자만 올린다.
      */
-    static boolean shouldUploadOutgoing(String origin, boolean businessNumber, boolean blocked) {
+    static boolean shouldUploadOutgoing(String origin, String phone, boolean businessNumber, boolean blocked) {
         if (LocalDb.ORIGIN_WEB.equals(origin)) return false;
-        return businessNumber && !blocked;
+        if (blocked) return false;
+        if (UploadFilter.is010Number(phone)) return true;
+        return businessNumber;
+    }
+
+    static boolean shouldUploadOutgoing(String origin, boolean businessNumber, boolean blocked) {
+        return shouldUploadOutgoing(origin, null, businessNumber, blocked);
     }
 
     /**

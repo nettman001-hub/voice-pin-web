@@ -336,10 +336,28 @@ export const SalesListPage: React.FC = () => {
     return Array.from(new Set(list)).sort((a, b) => b.length - a.length);
   }, [sales]);
 
+  // 선택한 회차의 시작 시각 도출
+  const sessionStartTime = useMemo(() => {
+    if (!selectedSession?.startedAt) return null;
+    const t = new Date(selectedSession.startedAt).getTime();
+    return isNaN(t) ? null : t;
+  }, [selectedSession]);
+
+  // 선택한 회차 이전에 보내온 문자는 완전히 제외
+  const sessionFilteredMessages = useMemo(() => {
+    if (!sessionStartTime) return messages;
+    return messages.filter((msg) => {
+      const timeStr = msg.receivedAt || msg.createdAt;
+      const msgTime = new Date(timeStr).getTime();
+      if (isNaN(msgTime)) return true;
+      return msgTime >= sessionStartTime;
+    });
+  }, [messages, sessionStartTime]);
+
   // 문자 메시지 스레드 목록
   const threads = useMemo(() => {
     const groupMap = new Map<string, any[]>();
-    messages.forEach((msg) => {
+    sessionFilteredMessages.forEach((msg) => {
       const norm = normalizePhone(msg.phoneNumber);
       if (!norm) return;
       const list = groupMap.get(norm) || [];
@@ -375,7 +393,7 @@ export const SalesListPage: React.FC = () => {
       });
     });
     return list;
-  }, [messages, pastTransactionPhoneMap, allBuyerNicknames]);
+  }, [sessionFilteredMessages, pastTransactionPhoneMap, allBuyerNicknames]);
 
   // 구매자 닉네임 -> 일치하는 문자 스레드 매핑
   const buyerToThreadMap = useMemo(() => {
@@ -392,6 +410,17 @@ export const SalesListPage: React.FC = () => {
     return map;
   }, [threads, allBuyerNicknames]);
 
+  // 선택한 회차 이전에 수신된 은행 입금 알림은 완전히 제외
+  const sessionFilteredPayments = useMemo(() => {
+    if (!sessionStartTime) return payments;
+    return payments.filter((payment) => {
+      const timeStr = payment.paidAt || payment.createdAt;
+      const paymentTime = new Date(timeStr).getTime();
+      if (isNaN(paymentTime)) return true;
+      return paymentTime >= sessionStartTime;
+    });
+  }, [payments, sessionStartTime]);
+
   // 은행 입금 내역 매핑
   const buyerPaymentsMap = useMemo(() => {
     const map = new Map<string, any[]>();
@@ -404,7 +433,7 @@ export const SalesListPage: React.FC = () => {
       if (inv.id && inv.customerNickname?.trim()) invoiceIdToBuyerMap.set(inv.id, inv.customerNickname.trim());
     });
 
-    payments.forEach((p) => {
+    sessionFilteredPayments.forEach((p) => {
       let matchedBuyer: string | null = null;
       if (p.saleIds && p.saleIds.length > 0) {
         for (const sid of p.saleIds) {
@@ -434,7 +463,7 @@ export const SalesListPage: React.FC = () => {
       }
     });
     return map;
-  }, [payments, sales, invoices, allBuyerNicknames]);
+  }, [sessionFilteredPayments, sales, invoices, allBuyerNicknames]);
 
   // 구매자 입금 요약 계산 헬퍼
   const getBuyerPaymentSummary = useMemo(() => {
@@ -927,7 +956,13 @@ export const SalesListPage: React.FC = () => {
                                 약속 미이행 확정
                               </span>
                             )}
-                            {buyerSaleIds.length > 0 && <BuyerStatusBadges saleIds={buyerSaleIds} buyerNickname={buyer.buyerNickname} />}
+                            {buyerSaleIds.length > 0 && (
+                              <BuyerStatusBadges
+                                saleIds={buyerSaleIds}
+                                buyerNickname={buyer.buyerNickname}
+                                sessionStartTime={sessionStartTime}
+                              />
+                            )}
                           </div>
 
                           <div className="text-[11px] text-slate-500 mt-1 flex items-center space-x-2">
@@ -1075,6 +1110,8 @@ export const SalesListPage: React.FC = () => {
                             records={buyer.records}
                             captureImageUrls={buyer.captureImageUrls}
                             availableSessions={availableSessions}
+                            sessionStartTime={sessionStartTime}
+                            sessionId={sessionFilter}
                           />
                         ) : (
                           <p className="text-xs text-slate-500">원본 판매내역이 삭제되어도 확정한 미이행 기록은 보존됩니다.</p>
@@ -1306,7 +1343,11 @@ export const SalesListPage: React.FC = () => {
                               {sale.status}
                             </span>
                             <AiSaleBadge sale={sale} />
-                            <BuyerStatusBadges saleIds={[sale.id]} buyerNickname={sale.buyerNickname} />
+                            <BuyerStatusBadges
+                              saleIds={[sale.id]}
+                              buyerNickname={sale.buyerNickname}
+                              sessionStartTime={sessionStartTime}
+                            />
                             <span className="text-[10px] text-slate-700 font-semibold bg-slate-100 px-2 py-0.5 rounded border border-slate-200" title={`방송 회차: ${sale.sessionId}`}>
                               회차: {formatSessionDisplay(sale.sessionId, { sessions: availableSessions, recognizedAt: sale.recognizedAt })}
                             </span>

@@ -163,9 +163,22 @@ const AdminRoute: React.FC = () => {
   return user?.role === '관리자' ? <Outlet /> : <Navigate to="/live" replace />;
 };
 
+const ScrollToTop: React.FC = () => {
+  const { pathname } = useLocation();
+
+  React.useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [pathname]);
+
+  return null;
+};
+
 export const App: React.FC = () => {
   return (
     <BrowserRouter>
+      <ScrollToTop />
       <AuthProvider>
         <SaleAiConversationProvider>
         <SalesProvider>

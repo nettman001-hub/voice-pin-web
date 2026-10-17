@@ -61,6 +61,8 @@ chrome-net-export-log.json
 *토큰*
 *token*
 *.secret
+*업로드키*
+구글플레이 업로드키 보관/
 
 # Local scratch & subprojects
 .tools/

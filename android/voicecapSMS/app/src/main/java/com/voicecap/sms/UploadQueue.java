@@ -273,17 +273,25 @@ public final class UploadQueue {
 
     static boolean isNoSubject(String s) {
         if (s == null) return true;
-        String norm = s.trim().replaceAll("\\s+", "").toLowerCase();
-        return norm.isEmpty()
+        String norm = s.trim().replaceAll("[\\s()\\[\\]<>_\\-:]+", "").toLowerCase();
+        if (norm.isEmpty()
                 || norm.equals("제목없음")
-                || norm.equals("(제목없음)")
-                || norm.equals("[제목없음]")
-                || norm.equals("<제목없음>")
+                || norm.equals("제목")
+                || norm.equals("무제")
                 || norm.equals("nosubject")
-                || norm.equals("(nosubject)")
-                || norm.equals("[nosubject]")
+                || norm.equals("subject")
+                || norm.equals("mms")
                 || norm.contains("ìœëª©ì—†ìŒ")
-                || norm.contains("ìœëª©");
+                || norm.contains("ìœëª©")
+                || norm.contains("ì—†ìŒ")
+                || norm.contains("제목")) {
+            return true;
+        }
+        // 한글도 영문자도 포함되지 않은 깨진 기호/외계어는 무의미한 제목으로 간주
+        if (!containsKorean(norm) && !norm.matches(".*[a-zA-Z0-9].*")) {
+            return true;
+        }
+        return false;
     }
 
     private static boolean containsKorean(String s) {

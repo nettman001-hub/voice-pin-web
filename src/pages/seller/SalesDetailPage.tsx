@@ -420,6 +420,7 @@ export const SalesDetailPage: React.FC = () => {
             records={[sale]}
             captureImageUrls={sale.captureImageUrls || []}
             availableSessions={cloudSessions}
+            sessionId={sale.sessionId}
           />
         </div>
 

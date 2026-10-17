@@ -58,16 +58,91 @@ function tryDecodeMojibakeChunk(chunk: string): string {
 }
 
 /**
+ * MIME 인코딩된 단어 (RFC 2047: =?UTF-8?B?...?= 또는 =?EUC-KR?B?...?=) 디코딩
+ */
+export function decodeMimeEncodedWords(str: string): string {
+  if (!str || !str.includes('=?')) return str;
+  return str.replace(/=\?([\w-]+)\?([BQbq])\?([^?]+)\?=/g, (fullMatch, charset, encoding, encodedText) => {
+    try {
+      const enc = encoding.toUpperCase();
+      let bytes: Uint8Array;
+      if (enc === 'B') {
+        const binary = atob(encodedText.trim());
+        bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      } else if (enc === 'Q') {
+        const decoded = encodedText.replace(/_/g, ' ').replace(/=([A-Fa-f0-9]{2})/g, (_: string, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+        bytes = new Uint8Array(decoded.length);
+        for (let i = 0; i < decoded.length; i++) bytes[i] = decoded.charCodeAt(i);
+      } else {
+        return fullMatch;
+      }
+      const cs = charset.toLowerCase();
+      const isEucKr = cs.includes('euc') || cs.includes('5601') || cs.includes('ksc');
+      const decoder = new TextDecoder(isEucKr ? 'euc-kr' : 'utf-8', { fatal: false });
+      return decoder.decode(bytes);
+    } catch {
+      return fullMatch;
+    }
+  });
+}
+
+/**
+ * 첫 줄이 의미 없는 기본 제목(제목없음, no subject 등)이거나 깨진 외계어 제목인지 판별
+ */
+export function isCorruptedOrNoSubject(line: string): boolean {
+  if (!line) return true;
+  const trimmed = line.trim();
+  if (!trimmed) return true;
+
+  // 1. 일반적인 '제목없음' 계열
+  const normalized = trimmed.replace(/[\s()[\]<>_\-:]+/g, '').toLowerCase();
+  if (
+    normalized === '' ||
+    normalized === '제목없음' ||
+    normalized === '제목' ||
+    normalized === '무제' ||
+    normalized === 'nosubject' ||
+    normalized === 'subject' ||
+    normalized === 'mms'
+  ) {
+    return true;
+  }
+
+  // 2. 한국 통신사 MMS '제목없음' 깨짐 외계어 패턴 (ì œëª©ì—†ì Œ 등)
+  if (
+    /ì[\s\u00a0\u009d\u0020]?œëª©/i.test(trimmed) ||
+    /ì[\s\u00a0\u009d\u0020]?—†ì/i.test(trimmed) ||
+    /œëª©/i.test(trimmed) ||
+    /ì—†ì/i.test(trimmed)
+  ) {
+    return true;
+  }
+
+  // 3. 디코딩 실패하여 라틴1 깨진 특수문자만 남아있는 껍데기 제목
+  if (/^[<(\[]?\s*[\x80-\xFF\u20AC\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178\s\W]+\s*[>)\]]?$/.test(trimmed)) {
+    // 한글도 없고 정상 영단어도 없으면 깨진 기호/외계어로 판정
+    if (!/[\uac00-\ud7a3a-zA-Z0-9]/.test(trimmed)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * 안드로이드 MMS 제목이 ISO-8859-1 / Windows-1252로 잘못 해석되어 저장된 깨진 문자열 복구
  */
 export function decodeMojibakeText(str?: string | null): string {
   if (!str) return '';
 
-  let s = str;
+  // 0. MIME Base64 인코딩된 단어 디코딩
+  let s = decodeMimeEncodedWords(str);
 
   // 1. 한국 MMS 기본 제목인 '제목없음' 깨짐 패턴 직접 정규화
-  s = s.replace(/ì[\s\u00a0\u009d\u0020]?œëª©ì—†ì[\s\u00a0\u009d\u0020]?Œ/g, '제목없음');
+  s = s.replace(/ì[\s\u00a0\u009d\u0020]?œëª©ì[\s\u00a0\u009d\u0020]?—†ì[\s\u00a0\u009d\u0020]?Œ/g, '제목없음');
   s = s.replace(/ì[\s\u00a0\u009d\u0020]?œëª©/g, '제목');
+  s = s.replace(/ì[\s\u00a0\u009d\u0020]?—†ì[\s\u00a0\u009d\u0020]?Œ/g, '없음');
 
   // 2. 전체가 단일 mojibake인 경우
   const decodedWhole = tryDecodeMojibakeChunk(s);
@@ -92,7 +167,7 @@ export function decodeMojibakeText(str?: string | null): string {
 }
 
 /**
- * 메시지 본문에서 깨진 글자 복구 및 안드로이드 MMS 자동 생성 제목("제목없음", "no subject", 본문 중복 제목) 제거
+ * 메시지 본문에서 깨진 글자 복구 및 안드로이드 MMS 자동 생성 제목("제목없음", "no subject", 깨진 제목, 본문 중복 제목) 제거
  */
 export function cleanMessageBody(body?: string | null): string {
   if (!body) return '';
@@ -104,8 +179,10 @@ export function cleanMessageBody(body?: string | null): string {
     const firstLine = rawLines[0];
     const secondLine = rawLines[1];
 
-    // 첫 줄이 '제목없음' 또는 'no subject'인 경우 제거
-    if (/^[<(\[]?\s*(제목없음|no\s*subject)\s*[>)\]]?$/i.test(firstLine)) {
+    // 첫 줄이 무의미하거나 깨진 제목인 경우 과감히 제거
+    if (isCorruptedOrNoSubject(firstLine)) {
+      rawLines.shift();
+    } else if (/^[<(\[]?\s*(제목|subject)\s*[:：]\s*(제목없음|no\s*subject|[^\w가-힣]*)\s*[>)\]]?$/i.test(firstLine)) {
       rawLines.shift();
     } else {
       // MMS 발신 시 본문 앞부분이 자동으로 제목으로 복제된 경우 중복 제거
@@ -116,10 +193,16 @@ export function cleanMessageBody(body?: string | null): string {
       }
     }
     text = rawLines.join('\n');
-  } else {
-    text = text.replace(/^[<(\[]?\s*제목없음\s*[>)\]]?[\r\n\s]*/g, '');
-    text = text.replace(/^[<(\[]?\s*no\s*subject\s*[>)\]]?[\r\n\s]*/gi, '');
+  } else if (rawLines.length === 1) {
+    if (isCorruptedOrNoSubject(rawLines[0])) {
+      return '';
+    }
+    text = rawLines[0];
   }
+
+  // 첫머리에 여전히 깨진 제목 형식 "[제목없음]" 등이 남아있을 경우 제거
+  text = text.replace(/^[<(\[]?\s*(제목없음|no\s*subject)\s*[>)\]]?[\r\n\s]*/gi, '');
+  text = text.replace(/^제목\s*[:：]\s*(제목없음|no\s*subject)\s*[\r\n\s]*/gi, '');
 
   return text.trim();
 }

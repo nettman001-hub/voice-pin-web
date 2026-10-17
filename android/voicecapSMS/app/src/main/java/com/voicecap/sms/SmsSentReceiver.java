@@ -115,11 +115,16 @@ public final class SmsSentReceiver extends BroadcastReceiver {
             db.update(item);
             SyncScheduler.scheduleNow(context);
         } else {
-            // 폰에서 직접 보낸 문자: 업무 고객 번호에게 보낸 것만 outgoing으로 올린다 (개인 문자는 SKIPPED, 배지 없음).
+            // 폰에서 직접 보낸 문자: 010 번호 또는 업무 고객 번호에게 보낸 것을 outgoing으로 올린다.
             // 보낸편지함 기록이 없으면(문자함 id 없음) 서버에 올릴 원문도 없으므로 올리지 않는다.
             String phone = item.payload.optString("phone", "");
+            boolean is010 = UploadFilter.is010Number(phone);
+            boolean isBusiness = BusinessContactStore.contains(context, phone);
             boolean upload = item.providerUri != null && ConversationLogic.shouldUploadOutgoing(
-                    item.origin, BusinessContactStore.contains(context, phone), SmsReceiver.isBlocked(context, phone));
+                    item.origin, phone, isBusiness, SmsReceiver.isBlocked(context, phone));
+            if (upload && is010) {
+                BusinessContactStore.register(context, phone);
+            }
             item.state = upload ? LocalDb.STATE_PENDING : LocalDb.STATE_SKIPPED;
             item.attempts = 0;
             item.nextAt = 0;

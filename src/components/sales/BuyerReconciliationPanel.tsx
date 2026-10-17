@@ -22,6 +22,7 @@ import {
   Check
 } from 'lucide-react';
 import { useCommerce } from '../../context/CommerceContext';
+import { useSales } from '../../context/SalesContext';
 import { CustomerPurchaseClaim, MatchStatus } from '../../types/commerce';
 import { SaleRecord } from '../../types/live';
 import { productSalesApi } from '../../services/productSalesApi';
@@ -35,6 +36,8 @@ interface BuyerReconciliationPanelProps {
   records: SaleRecord[];
   captureImageUrls: string[];
   availableSessions?: SessionInfoLike[];
+  sessionStartTime?: number | null;
+  sessionId?: string;
 }
 
 export interface QuickSmsTemplate {
@@ -142,16 +145,69 @@ const StatusPill: React.FC<{ label: string; className: string }> = ({ label, cla
   </span>
 );
 
-export const BuyerStatusBadges: React.FC<{ saleIds: string[]; buyerNickname?: string }> = ({ saleIds, buyerNickname }) => {
-  const { getClaimForSales, getMessagesForSales, isPaid, isVerified, messages: allMessages } = useCommerce();
+export const BuyerStatusBadges: React.FC<{
+  saleIds: string[];
+  buyerNickname?: string;
+  sessionStartTime?: number | null;
+}> = ({ saleIds, buyerNickname, sessionStartTime }) => {
+  const { sales } = useSales();
+  const { getClaimForSales, getMessagesForSales, isPaid, isVerified, messages: allMessages, payments: allPayments } = useCommerce();
   const claim = getClaimForSales(saleIds);
-  const messages = getMessagesForSales(saleIds);
+
+  // 세션 시작 시각 계산 (명시 prop 우선, 없으면 해당 판매건의 시작/기록 시각)
+  const effectiveStartTime = useMemo(() => {
+    if (sessionStartTime !== undefined) return sessionStartTime;
+    if (!saleIds || saleIds.length === 0) return null;
+    const relatedSales = sales.filter((s) => saleIds.includes(s.id));
+    const times = relatedSales
+      .map((s) => (s.recognizedAt ? new Date(s.recognizedAt).getTime() : NaN))
+      .filter((t) => !isNaN(t));
+    if (times.length > 0) return Math.min(...times);
+    return null;
+  }, [sessionStartTime, saleIds, sales]);
+
+  const rawMessages = getMessagesForSales(saleIds);
+  const messages = useMemo(() => {
+    if (!effectiveStartTime) return rawMessages;
+    return rawMessages.filter((m) => {
+      const t = new Date(m.receivedAt || m.createdAt).getTime();
+      return isNaN(t) || t >= effectiveStartTime;
+    });
+  }, [rawMessages, effectiveStartTime]);
+
   const outgoing = messages.filter((message) => message.direction === 'OUTGOING');
 
-  const nicknameIncoming = buyerNickname
-    ? allMessages.filter((m) => m.direction === 'INCOMING' && m.body && m.body.toLowerCase().includes(buyerNickname.toLowerCase()))
-    : [];
+  const nicknameIncoming = useMemo(() => {
+    if (!buyerNickname) return [];
+    return allMessages.filter((m) => {
+      if (m.direction !== 'INCOMING' || !m.body || !m.body.toLowerCase().includes(buyerNickname.toLowerCase())) {
+        return false;
+      }
+      if (effectiveStartTime) {
+        const t = new Date(m.receivedAt || m.createdAt).getTime();
+        if (!isNaN(t) && t < effectiveStartTime) return false;
+      }
+      return true;
+    });
+  }, [allMessages, buyerNickname, effectiveStartTime]);
+
   const hasIncoming = messages.some((m) => m.direction === 'INCOMING') || nicknameIncoming.length > 0;
+
+  // 회차 시작 이전의 입금 내역은 배제한 입금 완료 여부 계산
+  const isPaidEffective = useMemo(() => {
+    if (!saleIds || saleIds.length === 0) return false;
+    return allPayments.some((p) => {
+      if (p.matchStatus !== 'MATCHED') return false;
+      if (!p.saleIds?.some((id) => saleIds.includes(id))) return false;
+      if (effectiveStartTime) {
+        const t = new Date(p.paidAt || p.createdAt).getTime();
+        if (!isNaN(t) && t < effectiveStartTime) return false;
+      }
+      return true;
+    });
+  }, [allPayments, saleIds, effectiveStartTime]);
+
+  const isPaidResult = effectiveStartTime ? isPaidEffective : isPaid(saleIds);
 
   let match = matchLabels[claim?.matchStatus || 'NOT_RECEIVED'];
   if (!claim && hasIncoming) {
@@ -174,8 +230,8 @@ export const BuyerStatusBadges: React.FC<{ saleIds: string[]; buyerNickname?: st
         <StatusPill label="확인완료" className="bg-indigo-50 text-indigo-700 border-indigo-200" />
       )}
       <StatusPill
-        label={isPaid(saleIds) ? '입금완료' : '미입금'}
-        className={isPaid(saleIds)
+        label={isPaidResult ? '입금완료' : '미입금'}
+        className={isPaidResult
           ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
           : 'bg-slate-50 text-slate-500 border-slate-200'}
       />
@@ -434,7 +490,9 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
   buyerNickname,
   records,
   captureImageUrls,
-  availableSessions
+  availableSessions,
+  sessionStartTime,
+  sessionId,
 }) => {
   const [internalSessions, setInternalSessions] = useState<SessionInfoLike[]>([]);
 
@@ -449,6 +507,26 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
   const effectiveSessions = (availableSessions && availableSessions.length > 0)
     ? availableSessions
     : internalSessions;
+
+  // 세션 시작 시각 도출 (명시 전달값 -> records의 sessionId 매칭 -> records[0].recognizedAt)
+  const effectiveSessionStartTime = useMemo(() => {
+    if (sessionStartTime !== undefined) return sessionStartTime;
+    const targetSessionId = sessionId || records[0]?.sessionId;
+    if (targetSessionId && targetSessionId !== 'ALL') {
+      const foundSession = effectiveSessions.find((s) => s.id === targetSessionId);
+      if (foundSession?.startedAt) {
+        const t = new Date(foundSession.startedAt).getTime();
+        if (!isNaN(t)) return t;
+      }
+    }
+    const recordTimes = records
+      .map((r) => (r.recognizedAt ? new Date(r.recognizedAt).getTime() : NaN))
+      .filter((t) => !isNaN(t));
+    if (recordTimes.length > 0) {
+      return Math.min(...recordTimes);
+    }
+    return null;
+  }, [sessionStartTime, sessionId, records, effectiveSessions]);
 
   const {
     bridgeStatus,
@@ -515,6 +593,10 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
     if (buyerNickname && buyerNickname.length >= 2) {
       const q = buyerNickname.toLowerCase();
       allMessages.forEach((m) => {
+        if (effectiveSessionStartTime) {
+          const t = new Date(m.receivedAt || m.createdAt).getTime();
+          if (!isNaN(t) && t < effectiveSessionStartTime) return;
+        }
         if (m.body && m.body.toLowerCase().includes(q)) {
           addPhone(m.phoneNumber);
         }
@@ -522,7 +604,7 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
     }
 
     return Array.from(phones);
-  }, [claim, allClaims, allInvoices, allShipments, allMessages, buyerNickname]);
+  }, [claim, allClaims, allInvoices, allShipments, allMessages, buyerNickname, effectiveSessionStartTime]);
 
   // 대표 전화번호 (문자 발송 기본 번호)
   const matchedPhone = useMemo(() => {
@@ -537,10 +619,14 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
     const list: typeof allMessages = [];
 
     const add = (m: (typeof allMessages)[0]) => {
-      if (m && !set.has(m.id)) {
-        set.add(m.id);
-        list.push(m);
+      if (!m || set.has(m.id)) return;
+      // 선택한 회차 이전에 보내온 문자는 완전히 제외
+      if (effectiveSessionStartTime) {
+        const t = new Date(m.receivedAt || m.createdAt).getTime();
+        if (!isNaN(t) && t < effectiveSessionStartTime) return;
       }
+      set.add(m.id);
+      list.push(m);
     };
 
     // 1) saleIds 직접 연결 문자
@@ -581,7 +667,7 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
 
     // 최신 순 정렬
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [allMessages, saleIds, getMessagesForSales, matchedPhoneList, claim, allClaims, buyerNickname]);
+  }, [allMessages, saleIds, getMessagesForSales, matchedPhoneList, claim, allClaims, buyerNickname, effectiveSessionStartTime]);
 
   // 해당 고객이 보낸 모든 수신 문자 목록 (최신순)
   const incomingMessages = useMemo(() => {
@@ -655,7 +741,7 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
           <h3 className="text-sm font-black text-slate-900">판매·구매정보 대조</h3>
           <p className="mt-0.5 text-[11px] text-slate-500">자동 판매정보와 고객이 보낸 문자를 나란히 확인합니다.</p>
         </div>
-        <BuyerStatusBadges saleIds={saleIds} buyerNickname={buyerNickname} />
+        <BuyerStatusBadges saleIds={saleIds} buyerNickname={buyerNickname} sessionStartTime={effectiveSessionStartTime} />
       </div>
 
       {feedback && (
