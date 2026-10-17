@@ -89,20 +89,18 @@ function buttonWithText(tree, label) {
   return found;
 }
 
-test('comment settings moved into the helper page, in operational order', () => {
+test('seller comment helper shows connection and capture settings in operational order', () => {
   const fixture = renderFixture('src/pages/seller/CommentHelperPage.tsx', {
     '../../context/AuthContext': { useAuth: () => ({ user: { role: '판매자' } }) },
     '../../components/helper/CommentCaptureSettings': { CommentCaptureSettings: () => null },
     '../../services/commentHelperService': { commentHelperService: {} },
   });
   const tree = fixture.render('CommentHelperPage');
-  // The imported component is a separate section between status and printing.
+  // The imported capture settings follow connection status for sellers.
   const children = tree.props.children.flat(Infinity).filter((child) => child && typeof child === 'object');
   const positions = children.map((child) => child.props?.id || (typeof child.type === 'function' ? 'comment-capture-settings' : ''));
-  assert.deepEqual(positions.filter(Boolean), [
-    'helper-status', 'comment-capture-settings', 'helper-print-settings', 'helper-system-settings',
-  ]);
-  assert.ok(visibleText(tree).includes('댓글/판매멘트 기록'));
+  assert.deepEqual(positions.filter(Boolean), ['helper-status', 'comment-capture-settings']);
+  assert.ok(visibleText(tree).includes('댓글 수집·알림'));
   assert.ok(!visibleText(tree).includes('STT'));
   assert.ok(!visibleText(tree).includes('하드웨어 가속'));
 });

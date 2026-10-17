@@ -41,6 +41,10 @@ function pageFixture() {
     '../../context/CommerceContext': { useCommerce: () => ({ messages: [], payments: [], claims: [], invoices: [], shipments: [] }) },
     '../../services/productSalesApi': { productSalesApi: { listSessions: async () => ({ sessions: [] }) } },
     '../../services/customerKeepingService': { customerKeepingService: { getBuyerSummary: () => ({ hasActiveKeeping: false }) } },
+    '../../services/shippingService': { shippingService: {
+      getConfig: () => ({ enabled: false }),
+      calculateShippingFee: () => ({ fee: 0 }),
+    } },
     '../../services/salesExtractor': { formatAmountAsDecimal, formatMultiSaleAmount },
     '../../services/saleRowHistory': { getSalePurchaseHistory },
     '../../services/promiseDefaultService': { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults },
