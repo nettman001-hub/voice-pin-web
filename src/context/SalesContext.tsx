@@ -18,13 +18,20 @@ interface SettlementSummary {
   pendingCount: number;
 }
 
+interface SaleUpdateOptions {
+  voiceAllocationContinuation?: boolean;
+  voiceTransactionContinuation?: boolean;
+  voiceCommentIdentity?: boolean;
+}
+
 interface SalesContextType {
   sales: SaleRecord[];
   promiseDefaults: PromiseDefaultRecord[];
   setPromiseDefault: (buyerKey: string, buyerNickname: string, sessionId: string,
     status: PromiseDefaultRecord['status']) => Promise<void>;
   addSale: (sale: Omit<SaleRecord, 'id'>) => SaleRecord;
-  updateSale: (sale: SaleRecord, options?: { voiceAllocationContinuation?: boolean }) => SaleRecord | undefined;
+  updateSale: (sale: SaleRecord, options?: SaleUpdateOptions) => SaleRecord | undefined;
+  updateSaleCapture: (saleId: string, imageUrl: string) => SaleRecord | undefined;
   retrySalePrint: (id: string) => void;
   deleteSale: (id: string) => void;
   restoreSales: (records: SaleRecord[]) => void;
@@ -53,6 +60,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const promiseDefaultChangeRef = useRef(0);
   const [syncError, setSyncError] = useState<string | null>(null);
   const salesRef = useRef<SaleRecord[]>(sales);
+  const dispatchedPrintsRef = useRef<Set<string>>(new Set());
   const identityRef = useRef(workspaceId);
   identityRef.current = workspaceId;
   const identityKey = `${user?.id || ''}:${workspaceId || ''}:${isRemoteAuth}`;
@@ -62,6 +70,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     identityKeyRef.current = identityKey;
     identityGenerationRef.current += 1;
     salesRef.current = [];
+    dispatchedPrintsRef.current.clear();
   }
   const controllerRef = useRef<{ workspaceId: string; generation: number; controller: SalesSyncController } | null>(null);
   const readSyncRef = useRef<{ workspaceId: string; sync: WorkspaceReadSync<unknown> } | null>(null);
@@ -274,6 +283,20 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return controller.upsert(sale);
   };
 
+  // A capture finishes asynchronously. Merge only its image into the latest
+  // sale so server reconciliation and print acknowledgements remain intact.
+  const updateSaleCapture = (saleId: string, imageUrl: string): SaleRecord | undefined => {
+    const latest = salesRef.current.find((sale) => sale.id === saleId);
+    if (!latest || !imageUrl) return;
+    const images = latest.captureImageUrls || [];
+    if (images.includes(imageUrl)) return latest;
+    return replaceSale({
+      ...latest,
+      captureImageUrls: [...images, imageUrl],
+      productImageUrl: images.length === 0 ? imageUrl : latest.productImageUrl || imageUrl,
+    });
+  };
+
   const isPrintableSale = (sale: SaleRecord) => (
     sale.status !== '보류' && sale.status !== '취소' && sale.recordState !== 'CANCELLED'
     && sale.amount > 0
@@ -286,7 +309,8 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const hasSellerEditChanged = (before: SaleRecord, after: SaleRecord) => (
     before.buyerNickname.trim() !== after.buyerNickname.trim()
     || before.amount !== after.amount
-    || before.recognizedAt !== after.recognizedAt
+    || (before.recognizedAt !== after.recognizedAt
+      && Date.parse(before.recognizedAt) !== Date.parse(after.recognizedAt))
     || before.productName !== after.productName
     || before.status !== after.status
     || before.note !== after.note
@@ -295,6 +319,11 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const sendToPrinter = (sale: SaleRecord) => {
     const owner = workspaceId;
     const generation = identityGenerationRef.current;
+    const printKey = `${generation}:${sale.id}:${sale.printRevision || 1}`;
+    // Image/metadata saves can acknowledge the same queued revision again
+    // while printing. Only an explicit new revision creates another job.
+    if (dispatchedPrintsRef.current.has(printKey)) return;
+    dispatchedPrintsRef.current.add(printKey);
     void commentStreamService.printSale({
       saleId: sale.id,
       printRevision: sale.printRevision || 1,
@@ -358,8 +387,27 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return persisted;
   };
 
-  const updateSale = (updated: SaleRecord, options?: { voiceAllocationContinuation?: boolean }) => {
+  const updateSale = (updated: SaleRecord, options?: SaleUpdateOptions) => {
     const previous = salesRef.current.find((sale) => sale.id === updated.id);
+    // LiveContext supplies these flags only after linking the original STT
+    // transaction or a comment author. Keep that continuation on the same row.
+    const sameVoiceTransaction = previous?.source === 'WEB_VOICE' && updated.source === 'WEB_VOICE'
+      && previous.sessionId === updated.sessionId && previous.recognizedAt === updated.recognizedAt
+      && previous.productId === updated.productId && previous.productCode === updated.productCode
+      && previous.productName === updated.productName
+      && previous.status !== '취소' && updated.status !== '취소'
+      && previous.recordState !== 'CANCELLED' && updated.recordState !== 'CANCELLED';
+    const voiceTransactionContinuation = options?.voiceTransactionContinuation === true && sameVoiceTransaction
+      && (previous.status === '보류'
+        ? updated.status === '보류' || updated.status === '자동저장' || updated.status === '확정'
+        : (previous.status === '자동저장' || previous.status === '확정') && updated.status === '확정');
+    const voiceCommentIdentity = options?.voiceCommentIdentity === true && sameVoiceTransaction
+      && previous.rawTranscript === updated.rawTranscript && previous.amount === updated.amount
+      && previous.quantity === updated.quantity && previous.unitPrice === updated.unitPrice
+      && Boolean(updated.sourceCommentIds?.some((id) => id.trim()))
+      && (!previous.buyerId || previous.buyerId === updated.buyerId)
+      && (previous.status === updated.status
+        || (previous.status === '보류' && (updated.status === '자동저장' || updated.status === '확정')));
     if (previous?.source === 'WEB_VOICE' && previous.syncStatus === 'PENDING') {
       const sameEvidence = previous.sessionId === updated.sessionId
         && previous.amount === updated.amount && previous.rawTranscript === updated.rawTranscript
@@ -388,19 +436,33 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         && (!previous.purchaseRequestId || previous.purchaseRequestId === updated.purchaseRequestId)
         && Boolean(previous.sourceCommentIds?.some((id) => updated.sourceCommentIds?.includes(id)))
         && (updated.status === '자동저장' || updated.status === '확정') && updated.amount > 0;
-      if (!metadataOnly && !lateCommentLinked && !workflowContinuation && !voiceAllocationContinuation) {
+      if (!metadataOnly && !lateCommentLinked && !workflowContinuation && !voiceAllocationContinuation
+        && !voiceTransactionContinuation && !voiceCommentIdentity) {
         setSyncError('음성 판매의 서버 저장 확인 전에는 구매자·가격을 수정할 수 없습니다.');
         return;
       }
-      if (metadataOnly) {
+      if (metadataOnly && !voiceTransactionContinuation && !voiceCommentIdentity) {
         return replaceSale(updated);
       }
     }
+    // Completing an already printable voice transaction or reconciling its
+    // comment identity is not a seller edit. Preserve the original print job;
+    // an actual price/name change in a transaction still creates a new one.
+    const sameReceiptContent = previous && previous.buyerNickname.trim() === updated.buyerNickname.trim()
+      && previous.amount === updated.amount && previous.quantity === updated.quantity
+      && previous.unitPrice === updated.unitPrice;
+    const automaticMetadataUpdate = previous && isPrintableSale(previous)
+      && (voiceCommentIdentity || (voiceTransactionContinuation && sameReceiptContent));
     const shouldPrint = previous
-      ? isPrintableSale(updated) && (!isPrintableSale(previous) || hasSellerEditChanged(previous, updated))
+      ? !automaticMetadataUpdate && isPrintableSale(updated)
+        && (!isPrintableSale(previous) || hasSellerEditChanged(previous, updated))
       : false;
     if (shouldPrint) {
       return queueSalePrint(updated, Math.max(previous?.printRevision || 0, updated.printRevision || 0) + 1);
+    }
+    if (automaticMetadataUpdate) {
+      return replaceSale({ ...updated, printRevision: previous.printRevision, printStatus: previous.printStatus,
+        printedAt: previous.printedAt, printError: previous.printError });
     }
     return replaceSale(updated);
   };
@@ -550,7 +612,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const visibleSales = controllerRef.current?.workspaceId === workspaceId && controllerRef.current.generation === identityGenerationRef.current ? sales : [];
   const visiblePromiseDefaults = promiseDefaultsState.workspaceId === workspaceId ? promiseDefaultsState.records : [];
   return <SalesContext.Provider value={{ sales: visibleSales, promiseDefaults: visiblePromiseDefaults, setPromiseDefault,
-    addSale, updateSale, retrySalePrint, deleteSale, restoreSales, confirmBatchSales, exportCsv, refreshSales, applyCommittedSales,
+    addSale, updateSale, updateSaleCapture, retrySalePrint, deleteSale, restoreSales, confirmBatchSales, exportCsv, refreshSales, applyCommittedSales,
     syncError, retrySync, getSalesBySession, getSettlementSummary }}>
     {children}
   </SalesContext.Provider>;

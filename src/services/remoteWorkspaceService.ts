@@ -124,6 +124,9 @@ const persistImages = async (workspaceId: string, entity: string, references: st
   }));
 };
 
+const saleCaptureReferences = (sale: SaleRecord): string[] => (sale.captureImageUrls || []).map((value, index) =>
+  value.startsWith('data:') ? value : ((sale as SaleRecord & { __voicecapStoragePaths?: string[] }).__voicecapStoragePaths?.[index] || value));
+
 const toSaleRow = async (workspaceId: string, sale: SaleRecord) => ({
   id: sale.id,
   workspace_id: workspaceId,
@@ -154,9 +157,7 @@ const toSaleRow = async (workspaceId: string, sale: SaleRecord) => ({
   capture_image_paths: await persistImages(
     workspaceId,
     `sales/${sale.id}`,
-    (sale.captureImageUrls || []).map((value, index) =>
-      value.startsWith('data:') ? value : ((sale as SaleRecord & { __voicecapStoragePaths?: string[] }).__voicecapStoragePaths?.[index] || value)
-    ),
+    saleCaptureReferences(sale),
   ),
   note: sale.note || null,
   print_status: sale.printStatus || 'NOT_REQUESTED',
@@ -615,6 +616,18 @@ export const remoteWorkspaceService = {
         throw Object.assign(new Error(serverError?.message || error?.message || '음성 판매 서버 확정 실패'), {
           code: serverError?.code, retryable, details: serverError?.details,
         });
+      }
+      // A capture can finish while revision 1 is still queued for printing.
+      // Replaying the commit is safe, but its evidence-only payload does not
+      // save the attached images. Persist only those paths after the commit;
+      // never replace the server's canonical sale or its newer print status.
+      const captures = saleCaptureReferences(sale);
+      if (captures.length) {
+        const paths = await persistImages(workspaceId, `sales/${sale.id}`, captures);
+        const { error: captureError } = await ensureEnabled().from('sales')
+          .update({ capture_image_paths: paths })
+          .eq('workspace_id', workspaceId).eq('id', sale.id);
+        if (captureError) throw captureError;
       }
       return;
     }

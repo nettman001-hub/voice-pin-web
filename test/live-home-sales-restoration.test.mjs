@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { formatMultiSaleAmount } from '../src/services/salesExtractor.ts';
+import { getSalePurchaseHistory, isCountedSale } from '../src/services/saleRowHistory.ts';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const sale = (id, extra = {}) => ({
@@ -73,7 +75,8 @@ function pageFixture() {
     '../../services/purchaseFirstSales': { getPurchaseRequests: () => [] },
     '../../services/screenCaptureService': { screenCaptureService: {} },
     '../../components/live/ListeningStopControl': { ListeningStopControl: 'ListeningStopControl', ListeningStopStatus: 'ListeningStopStatus' },
-    '../../services/salesExtractor': { formatMultiSaleAmount: () => ({ isMulti: false }) },
+    '../../services/salesExtractor': { formatMultiSaleAmount },
+    '../../services/saleRowHistory': { getSalePurchaseHistory, isCountedSale },
     '../../services/nicknameMatcher': { areNicknamesSimilar: (a, b) => a === b },
     '../../services/salesDemoService': { salesDemoService: { stop() {} } },
     '../../services/customerKeepingService': { customerKeepingService: {
@@ -124,6 +127,14 @@ const visibleSaleIds = (tree) => nodes(tree).filter((node) =>
   node.type === 'link' && /^\/sales\/[^/]+$/.test(node.props.to) && node.props.to !== '/sales/review')
   .map((node) => node.props.to.slice('/sales/'.length));
 const refreshButton = (tree) => nodes(tree).find((node) => node.props.title === '판매 내역 새로고침');
+const textContent = (tree) => Array.isArray(tree) ? tree.map(textContent).join('')
+  : typeof tree === 'string' || typeof tree === 'number' ? String(tree)
+    : tree && typeof tree === 'object' ? textContent(tree.props?.children) : '';
+const cardText = (tree, id) => {
+  const card = nodes(tree).find((node) => node.type === 'link' && node.props.to === `/sales/${id}`);
+  assert.ok(card, `Missing sale card ${id}`);
+  return textContent(card);
+};
 
 test('a stopped live page keeps the STT failure visible and wires the engine selector to persisted settings', () => {
   const ctx = pageFixture();
@@ -213,4 +224,127 @@ test('AI updates the nickname and price of an existing stopped row without appen
   const card = nodes(tree).find((node) => node.props.to === '/sales/pending');
   assert.equal(nodes(card).some((node) => node.props.children.includes('KH')), true);
   assert.equal(nodes(card).some((node) => node.props.children.includes('15,000원')), true);
+});
+
+test('a confirmed 하니 row does not add two separate pending rows to its amount', () => {
+  const ctx = pageFixture();
+  ctx.state.activeSession = { id: 'broadcast-1' };
+  ctx.state.sales = [
+    sale('sold', { buyerNickname: '하니', buyerId: 'buyer-hani', amount: 10000, sourceCommentIds: ['request-1'] }),
+    sale('pending-12', { buyerNickname: '하니', amount: 12000, status: '보류' }),
+    sale('pending-10', { buyerNickname: '하니', amount: 10000, status: '보류', aiVerification: { nicknameVerified: false } }),
+  ];
+  const tree = ctx.settle();
+  assert.deepEqual(visibleSaleIds(tree), ['sold', 'pending-12', 'pending-10']);
+  assert.match(cardText(tree, 'sold'), /10,000원/);
+  assert.doesNotMatch(cardText(tree, 'sold'), /다건|32,000원|추정 닉네임/);
+  for (const [id, amount] of [['pending-12', '12,000원'], ['pending-10', '10,000원']]) {
+    assert.ok(cardText(tree, id).includes(amount));
+    assert.match(cardText(tree, id), /추정 닉네임/);
+    assert.doesNotMatch(cardText(tree, id), /다건|32,000원/);
+  }
+  assert.match(textContent(tree), /이번회차판매 :1건\/10,000원/);
+});
+
+test('each row totals completed purchases only up to that sale, leaving other statuses independent', () => {
+  const ctx = pageFixture();
+  ctx.state.activeSession = { id: 'broadcast-1' };
+  const buyer = { buyerNickname: '하니', buyerId: 'buyer-hani', sourceCommentIds: ['comment'], aiVerification: { nicknameVerified: true } };
+  ctx.state.sales = [
+    sale('auto', { ...buyer, amount: 10000, recognizedAt:'2026-10-01T01:00:00Z' }),
+    sale('confirmed', { ...buyer, buyerNickname: '하니 새이름', amount: 12000, status: '확정', recognizedAt:'2026-10-01T01:01:00Z' }),
+    sale('edited', { ...buyer, amount: 10000, status: '수동수정', recognizedAt:'2026-10-01T01:02:00Z' }),
+    sale('pending', { ...buyer, amount: 9000, status: '보류' }),
+    sale('cancelled', { ...buyer, amount: 8000, status: '취소' }),
+    sale('server-cancelled', { ...buyer, amount: 7000, recordState: 'CANCELLED' }),
+    sale('unsynced', { ...buyer, amount: 6000, syncStatus: 'PENDING' }),
+  ];
+  const tree = ctx.settle();
+  assert.match(cardText(tree, 'auto'), /10,000원/);
+  assert.doesNotMatch(cardText(tree, 'auto'), /다건|22,000원|32,000원/);
+  assert.match(cardText(tree, 'confirmed'), /다건 2건/);
+  assert.match(cardText(tree, 'confirmed'), /1\.0 \+ 1\.2 =22,000원/);
+  assert.match(cardText(tree, 'edited'), /다건 3건/);
+  assert.match(cardText(tree, 'edited'), /1\.0 \+ 1\.2 \+ 1\.0 =32,000원/);
+  for (const [id, amount] of [['pending', '9,000원'], ['cancelled', '8,000원'], ['server-cancelled', '7,000원'], ['unsynced', '6,000원']]) {
+    assert.ok(cardText(tree, id).includes(amount));
+    assert.doesNotMatch(cardText(tree, id), /다건|32,000원/);
+  }
+  assert.match(textContent(tree), /이번회차판매 :3건\/32,000원/);
+});
+
+test('matching display names do not combine different buyer IDs or an identified buyer with a legacy name', () => {
+  const ctx = pageFixture();
+  ctx.state.activeSession = { id: 'broadcast-1' };
+  ctx.state.sales = [
+    sale('buyer-a', { buyerNickname: '하니', buyerId: 'buyer-a', amount: 10000 }),
+    sale('buyer-b', { buyerNickname: '하니', buyerId: 'buyer-b', amount: 12000 }),
+    sale('legacy', { buyerNickname: '하니', amount: 13000 }),
+  ];
+  const tree = ctx.settle();
+  for (const [id, amount] of [['buyer-a', '10,000원'], ['buyer-b', '12,000원'], ['legacy', '13,000원']]) {
+    assert.ok(cardText(tree, id).includes(amount));
+    assert.doesNotMatch(cardText(tree, id), /다건|35,000원/);
+  }
+});
+
+test('legacy confirmed names can still show multiple purchases without absorbing an unverified name', () => {
+  const ctx = pageFixture();
+  ctx.state.activeSession = { id: 'broadcast-1' };
+  ctx.state.sales = [
+    sale('legacy-a', { buyerNickname: '하니', amount: 10000, status: '확정', aiVerification: { nicknameVerified: true } }),
+    sale('legacy-b', { buyerNickname: '하니', amount: 12000, status: '수동수정', recognizedAt:'2026-10-01T01:01:00Z' }),
+    sale('unverified', { buyerNickname: '하니', amount: 9000, aiVerification: { nicknameVerified: false } }),
+  ];
+  const tree = ctx.settle();
+  assert.match(cardText(tree, 'legacy-a'), /10,000원/);
+  assert.doesNotMatch(cardText(tree, 'legacy-a'), /다건|22,000원/);
+  assert.match(cardText(tree, 'legacy-b'), /다건 2건/);
+  assert.match(cardText(tree, 'legacy-b'), /22,000원/);
+  assert.doesNotMatch(cardText(tree, 'unverified'), /다건|22,000원/);
+  assert.match(cardText(tree, 'unverified'), /9,000원/);
+});
+
+test('adding or correcting the current purchase never replaces earlier cards with the final total', () => {
+  const ctx = pageFixture();
+  ctx.state.activeSession = {id:'broadcast-1'};
+  ctx.state.live.isListening = true;
+  const buyer = {buyerNickname:'하니',buyerId:'buyer-hani'};
+  const first = sale('first', {...buyer, amount:10000});
+  ctx.state.sales = [first];
+  const firstCard = cardText(ctx.settle(), 'first');
+  const second = sale('second', {...buyer, amount:12000, recognizedAt:'2026-10-01T01:01:00Z'});
+  ctx.state.sales = [second, first];
+  const secondTree = ctx.settle();
+  const secondCard = cardText(secondTree, 'second');
+  assert.equal(cardText(secondTree, 'first'), firstCard);
+  assert.match(secondCard, /1\.0 \+ 1\.2 =22,000원/);
+  const third = sale('third', {...buyer, amount:10000, recognizedAt:'2026-10-01T01:02:00Z'});
+  ctx.state.sales = [third, second, first];
+  const thirdTree = ctx.settle();
+  assert.equal(cardText(thirdTree, 'first'), firstCard);
+  assert.equal(cardText(thirdTree, 'second'), secondCard);
+  assert.match(cardText(thirdTree, 'third'), /다건 3건/);
+  assert.match(cardText(thirdTree, 'third'), /1\.0 \+ 1\.2 \+ 1\.0 =32,000원/);
+  ctx.state.sales = [{...third, amount:15000}, second, first];
+  const correctedTree = ctx.settle();
+  assert.equal(cardText(correctedTree, 'first'), firstCard);
+  assert.equal(cardText(correctedTree, 'second'), secondCard);
+  assert.match(cardText(correctedTree, 'third'), /1\.0 \+ 1\.2 \+ 1\.5 =37,000원/);
+});
+
+test('equal timestamps and list reordering cannot add a later row to an earlier purchase', () => {
+  const ctx = pageFixture();
+  ctx.state.activeSession = {id:'broadcast-1'};
+  const first = sale('first', {buyerNickname:'하니', buyerId:'buyer-hani',amount:10000});
+  ctx.state.sales = [first];
+  const before = cardText(ctx.settle(), 'first');
+  const second = {...first, id:'second',amount:12000};
+  for (const records of [[second, first], [first, second]]) {
+    ctx.state.sales = records;
+    const tree = ctx.settle();
+    assert.equal(cardText(tree, 'first'), before);
+    assert.match(cardText(tree, 'second'), /12,000원/);
+    assert.doesNotMatch(cardText(tree, 'second'), /다건|22,000원/);
+  }
 });

@@ -147,6 +147,8 @@ test('workspace changes retain each owner archive without letting old cleanup up
   const before = [log('previous-owner')], after = [log('next-owner')], localWrites = [], cloudWrites = [];
   const globals = {
     workspaceId: workspace1, user: { id: 'seller-1' }, isSupabaseConfigured: true,
+    voiceSaleTransactionRef: {current:{id:'old-transaction'}}, voiceTransactionSalesRef:{current:new Map([['old',{}]])},
+    recentVoiceDecisionsRef:{current:new Map([['old',1]])}, reservedPurchaseRequestsRef:{current:new Set(['old'])},
     transcriptWorkspaceIdRef: { current: workspace1 }, currentSessionIdRef: { current: session1 },
     sessionTranscriptsRef: { current: new Map([[session1, before]]) }, allSessionTranscriptsRef: { current: before },
     transcriptPersistTimerRef: { current: 123 }, lastSavedCloudTranscriptCountRef: { current: new Map([[session1, 1]]) },
@@ -163,6 +165,10 @@ test('workspace changes retain each owner archive without letting old cleanup up
   assert.equal(globals.transcriptWorkspaceIdRef.current, workspace2);
   assert.equal(globals.transcriptPersistTimerRef.current, null);
   assert.equal(globals.lastSavedCloudTranscriptCountRef.current.size, 0);
+  assert.equal(globals.voiceSaleTransactionRef.current, null);
+  assert.equal(globals.voiceTransactionSalesRef.current.size, 0);
+  assert.equal(globals.recentVoiceDecisionsRef.current.size, 0);
+  assert.equal(globals.reservedPurchaseRequestsRef.current.size, 0);
   assert.equal(await previousCleanupSync(), false);
   assert.equal(cloudWrites.length, 0);
 });

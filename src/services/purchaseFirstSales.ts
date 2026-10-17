@@ -73,12 +73,31 @@ export type RequestMatch =
   | { kind: 'MATCH'; request: PurchaseRequest; score: number }
   | { kind: 'AMBIGUOUS' | 'DIGIT_CONFLICT' | 'NO_REQUEST'; candidates: PurchaseRequest[] };
 
+export type CommentAuthorMatch =
+  | { kind: 'MATCH'; comment: CommentRecord; score: number }
+  | { kind: 'AMBIGUOUS' | 'DIGIT_CONFLICT' | 'NO_MATCH'; candidates: CommentRecord[] };
+
+interface NicknameCandidate {
+  nickname: string;
+  capturedAt: string;
+  accountKey: string;
+}
+
+type NicknameMatch<T> =
+  | { kind: 'MATCH'; candidate: T; score: number }
+  | { kind: 'AMBIGUOUS' | 'DIGIT_CONFLICT' | 'NO_MATCH'; candidates: T[] };
+
+const isNearbyComment = (capturedAt: string, recognizedAt: string) => {
+  const delay = Date.parse(recognizedAt) - Date.parse(capturedAt);
+  return delay >= -10_000 && delay <= 5 * 60_000;
+};
+
 const spokenBase = (value: string) => normalizeNickname(value).replace(/(?:언니|님|씨)$/u, '');
 const digits = (value: string) => spokenBase(value).match(/\d+/gu) || [];
 
 /** A short spoken name may identify the first complete component of a display
- * name, but never an arbitrary substring. Keep this purchase-only: aliases must
- * not merge customer histories or establish identity outside current requests. */
+ * name, but never an arbitrary substring. This is only a local speech match;
+ * aliases must never merge customer accounts or their histories. */
 function matchesDelimitedNicknamePrefix(spoken: string, nickname: string): boolean {
   if (!/^\p{L}{2,}$/u.test(spoken)) return false;
   const parts = nickname.normalize('NFKC').split(/[\s\p{P}\p{S}]+/u)
@@ -116,40 +135,109 @@ export function matchPurchaseRequest(
   recognizedAt: string,
   consumedRequestIds: ReadonlySet<string> = new Set(),
 ): RequestMatch {
+  const available = requests.filter((request) => !request.withdrawn && !request.conditional
+    && !consumedRequestIds.has(request.id) && isNearbyComment(request.capturedAt, recognizedAt));
+  const result = matchNicknameCandidates(spokenNickname, available);
+  return result.kind === 'MATCH'
+    ? { kind: 'MATCH', request: result.candidate, score: result.score }
+    : { kind: result.kind === 'NO_MATCH' ? 'NO_REQUEST' : result.kind, candidates: result.candidates };
+}
+
+/** Identify a recent commenter independently of purchase intent or allocation.
+ * Only shared IDs (including a duplicate platform message) connect local and
+ * canonical records. Identical display names alone are never account evidence. */
+export function matchCommentAuthor(
+  spokenNickname: string,
+  comments: CommentRecord[],
+  sessionId: string,
+  recognizedAt: string,
+): CommentAuthorMatch {
+  const nearby = comments.filter((comment) => comment.sessionId === sessionId
+    && comment.nickname.trim() && comment.nickname.trim() !== '알 수 없음'
+    && isNearbyComment(comment.capturedAt, recognizedAt));
+  const result = matchNicknameCandidates(spokenNickname, commentAuthorCandidates(nearby));
+  return result.kind === 'MATCH'
+    ? { kind: 'MATCH', comment: result.candidate.comment, score: result.score }
+    : { kind: result.kind, candidates: result.candidates.map((candidate) => candidate.comment) };
+}
+
+/** Compare account evidence, never display-name similarity. The caller supplies
+ * the same-session evidence it has retained; contradictory IDs never establish
+ * equivalence, even when a message/handle happens to connect the records. */
+export function areSameCommentAuthor(left: CommentRecord, right: CommentRecord, comments: CommentRecord[]): boolean {
+  if (!left.sessionId || left.sessionId !== right.sessionId) return false;
+  const candidates = commentAuthorCandidates([
+    ...comments.filter((comment) => comment.sessionId === left.sessionId), left, right,
+  ]);
+  const a = candidates[candidates.length - 2], b = candidates[candidates.length - 1];
+  return !a.identityConflict && !b.identityConflict && a.accountKey === b.accountKey;
+}
+
+function commentAuthorCandidates(comments: CommentRecord[]) {
+  const parents = new Map<string, string>();
+  const find = (key: string): string => {
+    const parent = parents.get(key);
+    if (!parent) { parents.set(key, key); return key; }
+    if (parent === key) return key;
+    const root = find(parent);
+    parents.set(key, root);
+    return root;
+  };
+  const tokensFor = (comment: CommentRecord) => [
+    `comment:${comment.platformMessageId || comment.id}`,
+    ...(comment.buyerId ? [`buyer:${comment.buyerId}`] : []),
+    ...(comment.platformUserId ? [`platform:${comment.platformUserId}`] : []),
+    ...(comment.uniqueId ? [`handle:${comment.uniqueId.toLowerCase()}`] : []),
+  ];
+  for (const comment of comments) {
+    const tokens = tokensFor(comment);
+    for (const token of tokens.slice(1)) parents.set(find(token), find(tokens[0]));
+  }
+  const identities = new Map<string, { buyers: Set<string>; platforms: Set<string> }>();
+  for (const comment of comments) {
+    const root = find(tokensFor(comment)[0]);
+    const identity = identities.get(root) || { buyers: new Set<string>(), platforms: new Set<string>() };
+    if (comment.buyerId) identity.buyers.add(comment.buyerId);
+    if (comment.platformUserId) identity.platforms.add(comment.platformUserId);
+    identities.set(root, identity);
+  }
+  return comments.map((comment) => {
+    const root = find(tokensFor(comment)[0]);
+    const identity = identities.get(root)!;
+    const conflictingIds = identity.buyers.size > 1 || identity.platforms.size > 1;
+    const accountKey = conflictingIds
+      ? (comment.buyerId ? `buyer:${comment.buyerId}` : comment.platformUserId
+        ? `platform:${comment.platformUserId}` : `unresolved:${comment.id}`)
+      : root;
+    const resolvedComment = !conflictingIds && !comment.buyerId && identity.buyers.size === 1
+      ? { ...comment, buyerId: [...identity.buyers][0] } : comment;
+    return { ...comment, accountKey, comment: resolvedComment, identityConflict: conflictingIds };
+  });
+}
+
+function matchNicknameCandidates<T extends NicknameCandidate>(spokenNickname: string, candidates: T[]): NicknameMatch<T> {
   // A spoken phrase like "이거 성훈 맘" may hold a spaced display name ("성훈 맘")
   // or a product word before the name ("맨투맨 엑소"). A longer reading wins
   // only when it equals a requesting commenter's nickname exactly; otherwise
   // the last word is matched as before, including similar-sounding names.
   const variants = spokenNicknameVariants(spokenNickname);
   for (const variant of variants.slice(0, -1)) {
-    const result = matchSpokenVariant(variant, requests, recognizedAt, consumedRequestIds);
+    const result = matchSpokenVariant(variant, candidates);
     if (result.kind === 'MATCH' && result.score === 100) return result;
+    if (result.kind === 'AMBIGUOUS' && result.candidates.some((candidate) =>
+      spokenBase(candidate.nickname) === spokenBase(variant))) return result;
   }
-  return matchSpokenVariant(variants[variants.length - 1] || '', requests, recognizedAt, consumedRequestIds);
+  return matchSpokenVariant(variants[variants.length - 1] || '', candidates);
 }
 
-function matchSpokenVariant(
+function matchSpokenVariant<T extends NicknameCandidate>(
   spokenNickname: string,
-  requests: PurchaseRequest[],
-  recognizedAt: string,
-  consumedRequestIds: ReadonlySet<string> = new Set(),
-): RequestMatch {
-  const when = Date.parse(recognizedAt);
+  available: T[],
+): NicknameMatch<T> {
   const spoken = spokenBase(spokenNickname);
-  if (!spoken || !Number.isFinite(when)) return { kind: 'NO_REQUEST', candidates: [] };
-
-  // A recently delayed comment may arrive a few seconds after the speech. It is
-  // considered a candidate, but never outweighs a different exact account.
-  const available = requests.filter((request) => {
-    const delay = when - Date.parse(request.capturedAt);
-    // 수량·옵션 댓글("빨강 2개 저요")도 판매자가 배정하면 판매가 된다. 금액은 판매자가
-    // 부른 금액 그대로이고 수량·옵션은 연결된 댓글 원문으로 남는다. 조건부 의사만 뺀다.
-    return !request.withdrawn && !request.conditional
-      && !consumedRequestIds.has(request.id)
-      && delay >= -10_000 && delay <= 5 * 60_000;
-  });
+  if (!spoken) return { kind: 'NO_MATCH', candidates: [] };
   const explicitDigits = digits(spoken);
-  const contenders = new Map<string, { request: PurchaseRequest; score: number }>();
+  const contenders = new Map<string, { candidate: T; score: number }>();
   let digitConflict = false;
   for (const request of available) {
     const candidateDigits = digits(request.nickname);
@@ -164,15 +252,15 @@ function matchSpokenVariant(
     const score = prefixAlias ? Math.max(comparison.score, 94) : comparison.score;
     if (score < 84 || (!prefixAlias && !comparison.isSame && !comparison.isSimilar)) continue;
     const prior = contenders.get(request.accountKey);
-    if (!prior || score > prior.score || (score === prior.score && request.capturedAt > prior.request.capturedAt)) {
-      contenders.set(request.accountKey, { request, score });
+    if (!prior || score > prior.score || (score === prior.score && request.capturedAt > prior.candidate.capturedAt)) {
+      contenders.set(request.accountKey, { candidate: request, score });
     }
   }
   const ranked = [...contenders.values()].sort((a, b) => b.score - a.score);
-  if (!ranked.length) return { kind: digitConflict ? 'DIGIT_CONFLICT' : 'NO_REQUEST', candidates: [] };
+  if (!ranked.length) return { kind: digitConflict ? 'DIGIT_CONFLICT' : 'NO_MATCH', candidates: [] };
   // Equal/near names are not resolved using purchase recency or AI confidence.
   if (ranked.length > 1 && ranked[0].score - ranked[1].score < 8) {
-    return { kind: 'AMBIGUOUS', candidates: ranked.map((item) => item.request) };
+    return { kind: 'AMBIGUOUS', candidates: ranked.map((item) => item.candidate) };
   }
-  return { kind: 'MATCH', request: ranked[0].request, score: ranked[0].score };
+  return { kind: 'MATCH', candidate: ranked[0].candidate, score: ranked[0].score };
 }

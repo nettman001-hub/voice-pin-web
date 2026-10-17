@@ -36,7 +36,7 @@ import { shippingService } from '../../services/shippingService';
 import { KeepingBadge } from '../../components/shipping/KeepingBadge';
 import { customerKeepingService } from '../../services/customerKeepingService';
 import { formatAmountAsDecimal, formatMultiSaleAmount } from '../../services/salesExtractor';
-import { areNicknamesSimilar } from '../../services/nicknameMatcher';
+import { getSalePurchaseHistory } from '../../services/saleRowHistory';
 import { formatSessionDisplay } from '../../utils/sessionFormatter';
 import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 import { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults } from '../../services/promiseDefaultService';
@@ -1186,9 +1186,7 @@ export const SalesListPage: React.FC = () => {
               </div>
             ) : (
               sortedIndividualSales.map((sale) => {
-                const buyerSales = filteredSales
-                  .filter((s) => areNicknamesSimilar(s.buyerNickname, sale.buyerNickname))
-                  .sort((a, b) => new Date(a.recognizedAt).getTime() - new Date(b.recognizedAt).getTime());
+                const buyerSales = getSalePurchaseHistory(sale, filteredSales);
                 const multi = formatMultiSaleAmount(buyerSales.map((s) => s.amount));
 
                 const saleImage = sale.productImageUrl || sale.captureImageUrls?.[0];

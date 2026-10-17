@@ -106,6 +106,7 @@ export const SalesDetailPage: React.FC = () => {
       productName,
       amount: parseInt(amount, 10) || 0,
       status,
+      recordState: status === '취소' ? 'CANCELLED' as const : 'ACTIVE' as const,
       note,
       productImageUrl: productImageUrl || undefined,
       captureImageUrls: captureImages.length > 0 ? captureImages : undefined,
@@ -168,6 +169,8 @@ export const SalesDetailPage: React.FC = () => {
               className={`px-3 py-1 rounded-full text-xs font-bold ${
                 sale.status === '보류'
                   ? 'bg-amber-400 text-slate-950'
+                  : sale.status === '취소'
+                  ? 'bg-rose-100 text-rose-700'
                   : sale.status === '수동수정'
                   ? 'bg-purple-100 text-purple-700'
                   : 'bg-emerald-50 text-emerald-700'
@@ -333,6 +336,7 @@ export const SalesDetailPage: React.FC = () => {
                 <option value="자동저장">📦 자동저장</option>
                 <option value="수동수정">✏️ 수동수정</option>
                 <option value="보류">⚠️ 보류 (추가 확인 필요)</option>
+                <option value="취소">🚫 취소</option>
               </select>
             </div>
 
@@ -400,7 +404,7 @@ export const SalesDetailPage: React.FC = () => {
           />
         </div>
 
-        {sale.status !== '보류' && sale.syncStatus !== 'PENDING' && (
+        {sale.status !== '보류' && sale.status !== '취소' && sale.recordState !== 'CANCELLED' && sale.syncStatus !== 'PENDING' && (
           <div className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between ${
             sale.printStatus === 'PRINTED' ? 'bg-emerald-50 border-emerald-200' : sale.printStatus === 'FAILED' ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'
           }`}>

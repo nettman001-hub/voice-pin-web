@@ -6,10 +6,10 @@ import { screenCaptureService } from '../services/screenCaptureService';
 import { extractSaleFromTranscript, parseKoreanAmount } from '../services/salesExtractor';
 import { extractSpeechPrice } from '../services/priceEvidence';
 import { parseVoiceCommand } from '../services/voiceCommandParser';
-import { splitTranscriptClauses } from '../services/voiceUtteranceService';
-import { getPurchaseRequests, matchPurchaseRequest, resolveSpokenNicknameWithoutRequest } from '../services/purchaseFirstSales';
+import { splitTranscriptClauses, isQuestionUtterance } from '../services/voiceUtteranceService';
+import { getPurchaseRequests, matchPurchaseRequest, matchCommentAuthor, areSameCommentAuthor } from '../services/purchaseFirstSales';
+import { advanceVoiceSaleTransaction, type VoiceSaleTransactionState } from '../services/voiceSaleTransaction';
 import type { CommentRecord } from '../types/comment';
-import { nicknameVerificationNote, verifyNicknameFromComments } from '../services/commentNicknameVerifier';
 import { storageService, generateSessionId, getNextProductCodeForSession } from '../services/storageService';
 import { generateSequentialProductName, formatSequentialProductName } from '../utils/productNaming';
 import { useSales } from './SalesContext';
@@ -174,7 +174,7 @@ interface LiveContextType {
 const LiveContext = createContext<LiveContextType | undefined>(undefined);
 
 export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { addSale, updateSale, deleteSale, sales, refreshSales } = useSales();
+  const { addSale, updateSale, updateSaleCapture, deleteSale, sales, refreshSales } = useSales();
   const { isAuthenticated, user, workspaceId, isRemoteAuth } = useAuth();
   const { getWordsForConnection } = useSttVocabulary();
   const productSales = useProductSales();
@@ -221,7 +221,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sonioxSaleBufferRef = useRef<string>('');
   const sonioxSaleTimeoutRef = useRef<number | null>(null);
   const sonioxCommandTailRef = useRef<string>('');
-  const recentFinalFragmentRef = useRef<{ text: string; at: number } | null>(null);
+  const voiceSaleTransactionRef = useRef<VoiceSaleTransactionState | null>(null);
+  const voiceTransactionSalesRef = useRef(new Map<string, SaleRecord>());
   const recentVoiceDecisionsRef = useRef<Map<string, number>>(new Map());
   const reservedPurchaseRequestsRef = useRef<Set<string>>(new Set());
   const pendingAiAttemptsRef = useRef<Map<string, { fingerprint: string; attemptedAt: number; failed: boolean }>>(new Map());
@@ -327,6 +328,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const nextOwner = workspaceId || user?.id || 'local';
     if (transcriptWorkspaceIdRef.current !== nextOwner) {
+      voiceSaleTransactionRef.current = null;
+      voiceTransactionSalesRef.current.clear();
+      recentVoiceDecisionsRef.current.clear();
+      reservedPurchaseRequestsRef.current.clear();
       appliedWorkflowRef.current=null;workflowReplayRef.current=null;
       workflowDecisionsRef.current.clear();workflowFingerprintsRef.current.clear();
       const sessionId = currentSessionIdRef.current;
@@ -616,9 +621,12 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return '';
     }
 
-    // 최신 판매 목록: 상태 반영 전에 막 저장된 판매(lastSavedSaleRef)가 더 최신이다.
+    // 서버 동기화/인쇄 결과가 반영된 현재 목록을 우선한다.
+    // 막 저장해서 아직 렌더링되지 않은 판매만 마지막 저장 참조로 보충한다.
     const latestSales = new Map(currentWorkflowSalesRef.current.map((sale) => [sale.id, sale]));
-    if (lastSavedSaleRef.current) latestSales.set(lastSavedSaleRef.current.id, lastSavedSaleRef.current);
+    if (lastSavedSaleRef.current && !latestSales.has(lastSavedSaleRef.current.id)) {
+      latestSales.set(lastSavedSaleRef.current.id, lastSavedSaleRef.current);
+    }
 
     // 상품등록 촬영(targetSaleId === null)은 판매에 연결하지 않는다.
     // 지정 판매가 없으면 캡처 시각 앞뒤 10초 안에 저장된, 아직 사진 없는 판매와 짝짓는다.
@@ -636,9 +644,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
             [...latestSales.values()]
           );
 
+    // 이미지 디코딩 중 판매 정보가 바뀔 수 있으므로 최신 판매에 이미지만 추가한다.
+    const updatedSale = targetSale ? updateSaleCapture(targetSale.id, imageUrl) : undefined;
     const newCapture: CaptureItem = {
       id: `cap-${Date.now()}`,
-      saleId: targetSale?.id,
+      saleId: updatedSale?.id,
       sessionId: currentSessionIdRef.current,
       imageUrl,
       capturedAt,
@@ -650,15 +660,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     storageService.addCapture(newCapture);
     setRecentCaptures((prev) => [newCapture, ...prev.slice(0, 9)]);
 
-    if (targetSale) {
-      const isFirstCapture = (targetSale.captureImageUrls?.length || 0) === 0;
-      const updatedSale: SaleRecord = {
-        ...targetSale,
-        captureImageUrls: [...(targetSale.captureImageUrls || []), imageUrl],
-        // 판매의 첫 캡처가 상품 이미지1이 된다.
-        productImageUrl: isFirstCapture ? imageUrl : targetSale.productImageUrl || imageUrl,
-      };
-      updateSale(updatedSale);
+    if (updatedSale) {
       if (!lastSavedSaleRef.current || lastSavedSaleRef.current.id === updatedSale.id) {
         lastSavedSaleRef.current = updatedSale;
       }
@@ -790,12 +792,28 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     saleResult: NonNullable<ReturnType<typeof extractSaleFromTranscript>>,
     fullText: string,
     hasCaptureInstruction: boolean,
-    requiredListeningGeneration?: number
+    requiredListeningGeneration?: number,
+    transaction?: { id: string; startedAt: string; evidenceText: string; continuation: boolean; precedingTransactionId?: string }
   ) => {
-    const recognizedAt = new Date().toISOString();
+    let recognizedAt = transaction?.startedAt || new Date().toISOString();
     const sales = currentWorkflowSalesRef.current;
     const sessionSnapshot = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
-    const decisionKey = `${sessionSnapshot}:${fullText.replace(/\s+/gu, '')}`;
+    const linkedSale = transaction?.continuation ? voiceTransactionSalesRef.current.get(transaction.id) : undefined;
+    let transactionSale = linkedSale
+      ? sales.find((sale) => sale.id === linkedSale.id) || linkedSale : undefined;
+    if (transactionSale) recognizedAt = transactionSale.recognizedAt;
+    if (transactionSale && (transactionSale.sessionId !== sessionSnapshot || transactionSale.status === '취소'
+      || transactionSale.recordState === 'CANCELLED' || transactionSale.status === '수동수정')) return;
+    const rememberSale = (sale: SaleRecord) => {
+      lastSavedSaleRef.current = sale;
+      if (transaction) {
+        voiceTransactionSalesRef.current.set(transaction.id, sale);
+        if (voiceTransactionSalesRef.current.size > 30) {
+          voiceTransactionSalesRef.current.delete(voiceTransactionSalesRef.current.keys().next().value!);
+        }
+      }
+    };
+    const decisionKey = `${sessionSnapshot}:${transaction?.id || ''}:${fullText.replace(/\s+/gu, '')}`;
     const previousDecisionAt = recentVoiceDecisionsRef.current.get(decisionKey) || 0;
     if (Date.now() - previousDecisionAt < 5_000) return;
     recentVoiceDecisionsRef.current.set(decisionKey, Date.now());
@@ -822,9 +840,14 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     for (const item of localMappedComments) {
       const key = `${item.sessionId}:${item.platformMessageId || item.id}`;
       const existing = commentMap.get(key);
-      commentMap.set(key, existing?.buyerId && !item.buyerId ? existing : item);
+      commentMap.set(key, existing ? { ...item, ...existing,
+        buyerId: existing.buyerId || item.buyerId,
+        platformUserId: item.platformUserId || existing.platformUserId,
+        uniqueId: item.uniqueId || existing.uniqueId,
+      } : item);
     }
     const cloudComments = Array.from(commentMap.values());
+    const identityComments = [...feedComments, ...localCommentRecords];
     const requestCandidates = [
       ...storageService.getPurchaseRequests(workspaceId).filter((item) => item.sessionId === sessionSnapshot),
       ...getPurchaseRequests(cloudComments, sessionSnapshot),
@@ -843,48 +866,98 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     for (const id of reservedPurchaseRequestsRef.current) consumed.add(id);
     const spokenBuyer = saleResult.buyerNicknamePhrase || saleResult.buyerNickname;
-    const match = matchPurchaseRequest(spokenBuyer, requests, recognizedAt, consumed);
-    if (match.kind === 'NO_REQUEST') {
-      const priorMatch = matchPurchaseRequest(spokenBuyer, requests, recognizedAt);
-      if (priorMatch.kind === 'MATCH' && consumed.has(priorMatch.request.id)) return;
-    }
-    const request = match.kind === 'MATCH' ? match.request : null;
+    // Continuing a transaction may reuse its own request, never another sale's.
+    if (transactionSale?.purchaseRequestId) consumed.delete(transactionSale.purchaseRequestId);
+    const match = matchPurchaseRequest(spokenBuyer,
+      transactionSale?.purchaseRequestId ? requests.filter((item) => item.id === transactionSale?.purchaseRequestId) : requests,
+      recognizedAt, consumed);
+    let request = match.kind === 'MATCH' ? match.request : null;
     if (saleResult.intent === 'UNCERTAIN' && !getVoiceReviewRequests({
       sessionId: sessionSnapshot, recognizedAt, rawTranscript: fullText,
     }, cloudComments).length) return;
     const isFourPoint = Boolean(saleResult.isFourPointConfirmed);
-    const commentNickname = request?.nickname
-      || resolveSpokenNicknameWithoutRequest(spokenBuyer, cloudComments.map((comment) => comment.nickname));
+    const authorMatch = matchCommentAuthor(spokenBuyer, identityComments, sessionSnapshot, recognizedAt);
+    const author = authorMatch.kind === 'MATCH' ? authorMatch.comment : null;
+    const matchesAuthor = (candidate: NonNullable<typeof request>) => !author || areSameCommentAuthor(
+      cloudComments.find((comment) => comment.id === candidate.commentId
+        || Boolean(candidate.platformMessageId && comment.platformMessageId === candidate.platformMessageId))
+        || { ...candidate, id: candidate.commentId }, author, identityComments);
+    if (request && !matchesAuthor(request)) request = null;
+    if (match.kind === 'NO_REQUEST' && !transactionSale && !(transaction && isFourPoint)) {
+      const priorMatch = matchPurchaseRequest(spokenBuyer, requests, recognizedAt);
+      if (priorMatch.kind === 'MATCH' && matchesAuthor(priorMatch.request) && consumed.has(priorMatch.request.id)) return;
+    }
+    const identityConflict = authorMatch.kind === 'AMBIGUOUS' || authorMatch.kind === 'DIGIT_CONFLICT';
+    if (identityConflict) request = null;
+    const previousAuthor = transactionSale?.sourceCommentIds?.map((id) => identityComments.find((comment) => comment.id === id))
+      .find((comment): comment is CommentRecord => Boolean(comment));
+    // A newly arriving exact name must not transfer an already linked sale to
+    // a different account while retaining the first buyer's purchase request.
+    if (transactionSale && author && ((transactionSale.buyerId && author.buyerId && transactionSale.buyerId !== author.buyerId)
+      || (previousAuthor && !areSameCommentAuthor(previousAuthor, author, identityComments)))) return;
+    const commentNickname = !identityConflict ? author?.nickname || request?.nickname : undefined;
     // 판매 확정 시 고객 댓글에 있는 닉네임을 최우선으로 저장하고,
     // 고객 댓글에 닉네임이 없는 예외 상황에서만 판매자가 발화한 닉네임을 사용한다.
     const buyerNickname = commentNickname || saleResult.buyerNickname || spokenBuyer;
     // The registered product price is only a fallback when the seller said no
     // price at all; a spoken price we could not link must stay for review.
     const effectiveAmount = saleResult.amount > 0 ? saleResult.amount
-      : extractSpeechPrice(fullText) ? 0 : (activeProductSnapshot?.unitPrice ?? 0);
+      : transaction || extractSpeechPrice(fullText) ? 0 : (activeProductSnapshot?.unitPrice ?? 0);
     // 고객이 댓글로 구매의사를 밝히지 않았더라도 판매자의 4단 멘트(닉네임 + 확정멘트 + 소수점/일반가격 + 캡처멘트)가 일치한 경우 '확정'으로 등록하여 전표를 출력한다.
-    const status = isFourPoint
+    const status = identityConflict ? '보류' : isFourPoint
       ? '확정'
       : (request && effectiveAmount > 0 && saleResult.intent === 'ALLOCATION' ? '자동저장' : '보류');
+    const buyerId = author?.buyerId || request?.buyerId || undefined;
+    const sourceCommentIds = [...new Set([request?.commentId, author?.id].filter((id): id is string => Boolean(id)))];
+    const identityNote = identityConflict ? '구매자 후보가 여러 명이거나 숫자 식별자가 달라 확인이 필요합니다.'
+      : request ? `구매 댓글 "${request.content}" · 판매자 발화 "${saleResult.buyerNickname}" 연결 (${match.kind === 'MATCH' ? match.score : 0}점)`
+        : author ? `댓글 작성자 "${author.nickname}" · 판매자 발화 "${saleResult.buyerNickname}" 연결 (${authorMatch.kind === 'MATCH' ? authorMatch.score : 0}점)`
+          : '판매자 발화의 추정 닉네임입니다. 댓글 닉네임 연결 후 판매자 확인이 필요합니다.';
+    const preceding = transaction?.precedingTransactionId
+      ? voiceTransactionSalesRef.current.get(transaction.precedingTransactionId) : undefined;
+    const precedingSale = preceding ? sales.find((sale) => sale.id === preceding.id) || preceding : undefined;
+    const samePrecedingBuyer = precedingSale && (precedingSale.buyerId || buyerId
+      ? Boolean(precedingSale.buyerId && precedingSale.buyerId === buyerId)
+      : precedingSale.buyerNickname === buyerNickname);
+    const newRequest = request && request.id !== precedingSale?.purchaseRequestId
+      && !precedingSale?.sourceCommentIds?.includes(request.commentId);
+    // A new STT event is not necessarily a new purchase. Without a new buyer
+    // request or an intervening product/buyer boundary, a same-price restatement
+    // refines the preceding row. A genuinely new request remains independent.
+    if (!transactionSale && precedingSale && !newRequest && samePrecedingBuyer && !identityConflict
+      && precedingSale.sessionId === sessionSnapshot && precedingSale.amount === effectiveAmount
+      && precedingSale.productId === activeProductSnapshot?.id
+      && precedingSale.status !== '취소' && precedingSale.status !== '수동수정'
+      && precedingSale.recordState !== 'CANCELLED') {
+      rememberSale(precedingSale);
+      if (precedingSale.status === '확정' || !isFourPoint) return;
+      transactionSale = precedingSale;
+      recognizedAt = precedingSale.recognizedAt;
+    }
     // Repeated allocation/price phrases for one purchase comment refine the
     // same pending sale rather than creating another transaction.
-    const existingPending = request ? sales.find((sale) => sale.sessionId === sessionSnapshot
+    const existingPending = transactionSale || (request ? sales.find((sale) => sale.sessionId === sessionSnapshot
       && sale.source === 'WEB_VOICE' && sale.status === '보류'
-      && (sale.purchaseRequestId === request.id || sale.sourceCommentIds?.includes(request.commentId))) : undefined;
+      && (sale.purchaseRequestId === request.id || sale.sourceCommentIds?.includes(request.commentId))) : undefined);
     if (existingPending) {
-      if (status === '자동저장' || status === '확정') {
-        const updated: SaleRecord = { ...existingPending, buyerNickname: request!.nickname, buyerId: request!.buyerId || undefined,
-          purchaseRequestId: request!.id, sourceCommentIds: [request!.commentId], amount: effectiveAmount,
-          unitPrice: effectiveAmount, rawTranscript: fullText, recognizedAt, status, pendingReasons: [],
-          aiVerification: undefined, note: '같은 구매 댓글의 후속 판매 배정·가격 확인' };
+      if (transactionSale || status === '자동저장' || status === '확정') {
+        const updated: SaleRecord = { ...existingPending, buyerNickname, buyerId: buyerId || existingPending.buyerId,
+          purchaseRequestId: status !== '보류' ? request?.id || existingPending.purchaseRequestId : undefined,
+          sourceCommentIds: [...new Set([...(existingPending.sourceCommentIds || []), ...sourceCommentIds])],
+          amount: effectiveAmount, unitPrice: effectiveAmount, rawTranscript: fullText,
+          recognizedAt: transactionSale ? existingPending.recognizedAt : recognizedAt, status,
+          pendingReasons: status === '보류' ? buildPendingReasons({ rawTranscript: fullText, buyerNickname, amount: effectiveAmount }) : [],
+          aiVerification: undefined, note: identityNote };
         updated.evidenceSnapshot = buildEvidenceSnapshot(updated, {
-          relevantCommentIds: [request!.commentId],
+          relevantCommentIds: updated.sourceCommentIds,
           snapshotVersion: (existingPending.evidenceSnapshot?.snapshotVersion || 0) + 1,
         });
-        const saved = updateSale(updated, { voiceAllocationContinuation: true });
+        if (transaction) updated.evidenceSnapshot.transactionUtterance = transaction.evidenceText;
+        const saved = updateSale(updated, { voiceAllocationContinuation: true,
+          voiceTransactionContinuation: Boolean(transactionSale) });
         if (!saved) return;
-        reservedPurchaseRequestsRef.current.add(request!.id);
-        lastSavedSaleRef.current = saved;
+        if (saved.purchaseRequestId && status !== '보류') reservedPurchaseRequestsRef.current.add(saved.purchaseRequestId);
+        rememberSale(saved);
         if (hasCaptureInstruction) {
           await captureCurrentScreen(undefined, '캡처하세요 (판매 자동 연동)', requiredListeningGeneration, saved.id);
         }
@@ -930,7 +1003,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       : [];
     if (status === '보류' && !request && !pendingReasons.some((reason) => reason.code === 'MISSING_NICKNAME'
       || reason.code === 'DELAYED_COMMENT' || reason.code === 'MULTIPLE_CANDIDATES_CONFLICT')) {
-      pendingReasons.push(match.kind === 'AMBIGUOUS'
+      pendingReasons.push(identityConflict || match.kind === 'AMBIGUOUS'
         ? { code: 'MULTIPLE_CANDIDATES_CONFLICT', message: '구매 댓글 후보가 여러 명이라 확인이 필요합니다.', resolved: false }
         : { code: 'DELAYED_COMMENT', message: `판매자 발화 닉네임 '${buyerNickname}'과 일치하는 구매 댓글이 없어 보류합니다.`, resolved: false });
     }
@@ -948,26 +1021,23 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         captureImageUrls: fallbackImage ? [fallbackImage] : undefined,
       },
       {
-        relevantCommentIds: request ? [request.commentId] : [],
+        relevantCommentIds: sourceCommentIds,
         snapshotVersion: 1,
       }
     );
+    if (transaction) evidenceSnapshot.transactionUtterance = transaction.evidenceText;
 
     const saved = addSale({
       sessionId,
       buyerNickname,
-      buyerId: request?.buyerId || undefined,
+      buyerId,
       purchaseRequestId: status === '자동저장' || status === '확정' ? request?.id : undefined,
-      sourceCommentIds: request ? [request.commentId] : [],
+      sourceCommentIds,
       amount: effectiveAmount,
       recognizedAt,
       rawTranscript: fullText,
       status,
-      note: request
-        ? `구매 댓글 "${request.content}" · 판매자 발화 "${saleResult.buyerNickname}" 연결 (${match.kind === 'MATCH' ? match.score : 0}점)`
-        : match.kind === 'AMBIGUOUS' ? '구매자 후보가 여러 명이라 확인이 필요합니다.'
-          : match.kind === 'DIGIT_CONFLICT' ? '판매자 발화와 댓글의 숫자 식별자가 다릅니다.'
-            : '판매자 발화의 추정 닉네임입니다. 댓글 닉네임 연결 후 판매자 확인이 필요합니다.',
+      note: identityNote,
       productId: product?.id,
       productCode: resolvedProductCode,
       productName: resolvedProductName,
@@ -981,7 +1051,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       pendingReasons: pendingReasons.length > 0 ? pendingReasons : undefined,
       evidenceSnapshot,
     });
-    lastSavedSaleRef.current = saved;
+    rememberSale(saved);
     if (pairedCapture) {
       storageService.linkCaptureToSale(pairedCapture.id, saved.id);
       setRecentCaptures((prev) => prev.map((capture) => (
@@ -1000,46 +1070,92 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // A buyer's comment can arrive after the seller's short allocation phrase.
-  // Re-evaluate only still-pending voice decisions, preserving the original
-  // speech/price evidence and never consuming an already allocated request.
-  useEffect(() => {
-    const reconcile = () => {
+  // Late delivery uses the comment's original timestamp against the original
+  // seller utterance. Ordinary replies can verify identity, never purchase intent.
+  const reconcileVoiceSaleComments = () => {
       if (!workspaceId) return;
-      const cloudRequests = getPurchaseRequests((productSales.feed?.comments || []).map((comment) => ({
+      const comments: CommentRecord[] = [...storageService.getCommentRecords(workspaceId),
+        ...(productSalesRef.current.feed?.comments || []).map((comment) => ({
         id: comment.id, sessionId: comment.sessionId, platformMessageId: comment.platformMessageId,
         buyerId: comment.buyerId, nickname: comment.nicknameSnapshot, content: comment.content,
         capturedAt: comment.capturedAt,
-      })), productSales.activeSession?.id || currentSessionId);
+      }))];
+      const sessionId = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
+      const cloudRequests = getPurchaseRequests(comments, sessionId);
       const requests = [...new Map([
         ...storageService.getPurchaseRequests(workspaceId), ...cloudRequests,
       ].map((item) => [item.id, item])).values()];
+      const sales = currentWorkflowSalesRef.current;
       const claimed = new Set(sales.filter((sale) => sale.status !== '보류').map((sale) => sale.purchaseRequestId)
         .filter((id): id is string => Boolean(id)));
       for (const sale of sales) {
-        if (sale.workflowEvidence || sale.source !== 'WEB_VOICE' || sale.status !== '보류' || sale.amount <= 0
-          || sale.purchaseRequestId || !sale.sessionId) continue;
+        if (sale.status === '보류' || sale.status === '취소' || sale.sessionId !== sessionId || !sale.purchaseRequestId) continue;
+        const original = requests.find((request) => request.id === sale.purchaseRequestId);
+        if (!original) continue;
+        for (const request of requests) {
+          const age = Date.parse(sale.recognizedAt) - Date.parse(request.capturedAt);
+          if (request.accountKey === original.accountKey && age >= 0 && age <= 30_000) claimed.add(request.id);
+        }
+      }
+      for (const id of reservedPurchaseRequestsRef.current) claimed.add(id);
+      for (const sale of sales) {
+        if (sale.workflowEvidence || sale.source !== 'WEB_VOICE' || sale.amount <= 0
+          || sale.status === '취소' || sale.status === '수동수정' || sale.recordState === 'CANCELLED'
+          || sale.purchaseRequestId || sale.sessionId !== sessionId) continue;
         const extracted = extractSaleFromTranscript(sale.rawTranscript);
         if (!extracted || extracted.intent !== 'ALLOCATION' || !extracted.buyerNickname || extracted.amount !== sale.amount) continue;
-        const match = matchPurchaseRequest(extracted.buyerNicknamePhrase || extracted.buyerNickname,
+        const spoken = extracted.buyerNicknamePhrase || extracted.buyerNickname;
+        const authorMatch = matchCommentAuthor(spoken, comments, sale.sessionId, sale.recognizedAt);
+        if (authorMatch.kind !== 'MATCH') continue;
+        const author = authorMatch.comment;
+        if (sale.buyerId && author.buyerId && sale.buyerId !== author.buyerId) continue;
+        const match = matchPurchaseRequest(spoken,
           requests.filter((request) => request.sessionId === sale.sessionId), sale.recognizedAt, claimed);
-        if (match.kind !== 'MATCH') continue;
-        claimed.add(match.request.id);
-        updateSale({
+        let request = match.kind === 'MATCH' ? match.request : null;
+        if (request && !areSameCommentAuthor(comments.find((comment) => comment.id === request!.commentId
+          || Boolean(request!.platformMessageId && comment.platformMessageId === request!.platformMessageId))
+          || { ...request, id: request.commentId }, author, comments)) request = null;
+        if (!extracted.isFourPointConfirmed && !request) continue;
+        const status = sale.status === '보류' ? (extracted.isFourPointConfirmed ? '확정' : '자동저장') : sale.status;
+        const ids = [...new Set([...(sale.sourceCommentIds || []), author.id, ...(request ? [request.commentId] : [])])];
+        if (sale.status === status && sale.buyerNickname === author.nickname
+          && sale.buyerId === (author.buyerId || undefined) && !request
+          && ids.length === (sale.sourceCommentIds || []).length) continue;
+        const updated: SaleRecord = {
           ...sale,
-          buyerNickname: match.request.nickname,
-          buyerId: match.request.buyerId || undefined,
-          purchaseRequestId: match.request.id,
-          sourceCommentIds: [match.request.commentId],
-          status: '자동저장',
+          buyerNickname: author.nickname,
+          buyerId: author.buyerId || sale.buyerId,
+          purchaseRequestId: request?.id,
+          sourceCommentIds: ids,
+          status,
           pendingReasons: [],
-          note: `늦게 도착한 구매 댓글 "${match.request.content}" 연결`,
+          note: request ? `늦게 도착한 구매 댓글 "${request.content}" 연결`
+            : `늦게 도착한 댓글 작성자 "${author.nickname}" 연결 · 4단 판매확정`,
+        };
+        updated.evidenceSnapshot = buildEvidenceSnapshot(updated, {
+          relevantCommentIds: ids, snapshotVersion: (sale.evidenceSnapshot?.snapshotVersion || 0) + 1,
         });
+        updated.evidenceSnapshot.transactionUtterance = sale.evidenceSnapshot?.transactionUtterance;
+        const saved = updateSale(updated, { voiceCommentIdentity: true });
+        if (saved?.purchaseRequestId) {
+          claimed.add(saved.purchaseRequestId);
+          reservedPurchaseRequestsRef.current.add(saved.purchaseRequestId);
+          const allocated = requests.find((request) => request.id === saved.purchaseRequestId);
+          if (allocated) for (const sibling of requests) {
+            const age = Date.parse(saved.recognizedAt) - Date.parse(sibling.capturedAt);
+            if (sibling.accountKey === allocated.accountKey && age >= 0 && age <= 30_000) claimed.add(sibling.id);
+          }
+        }
       }
+  };
+  useEffect(() => {
+    window.addEventListener('voicecap_purchase_requests_updated', reconcileVoiceSaleComments);
+    window.addEventListener('voicecap_comments_updated', reconcileVoiceSaleComments);
+    reconcileVoiceSaleComments();
+    return () => {
+      window.removeEventListener('voicecap_purchase_requests_updated', reconcileVoiceSaleComments);
+      window.removeEventListener('voicecap_comments_updated', reconcileVoiceSaleComments);
     };
-    window.addEventListener('voicecap_purchase_requests_updated', reconcile);
-    reconcile();
-    return () => window.removeEventListener('voicecap_purchase_requests_updated', reconcile);
   }, [sales, updateSale, workspaceId, productSales.feed?.comments, productSales.activeSession?.id, currentSessionId]);
 
   useEffect(() => {
@@ -1131,6 +1247,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     clearSonioxSaleTimeout();
     sonioxSaleBufferRef.current = '';
     sonioxCommandTailRef.current = '';
+    voiceSaleTransactionRef.current = null;
+    voiceTransactionSalesRef.current.clear();
   };
 
   function scheduleSonioxSaleTimeout(
@@ -1150,7 +1268,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         { text: pendingText, isFinal: true, confidence },
         requiredListeningGeneration,
         requiredUserId,
-        { skipCommands: true, skipCapture: true, skipCorrections: true, skipProductCommands: true }
+        { skipCommands: true, skipCorrections: true, skipProductCommands: true }
       );
     }, SONIOX_SALE_TIMEOUT_MS);
   }
@@ -1174,6 +1292,9 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const command = parseVoiceCommand(clause, isVoiceEditingRef.current);
       if (intent.isQuestion || intent.isNegativeCommand) continue;
       const isCaptureCommand = /캡[처쳐]/u.test(clause) && command.type === 'NONE';
+      // Legacy sales capture only after the transaction is linked, so a new
+      // buyer's image cannot be attached to the previously saved sale.
+      if (isCaptureCommand && appliedWorkflowRef.current?.mode !== 'ACTIVE') continue;
       if (!isCaptureCommand && command.type === 'NONE') continue;
       handleTranscript(
         { text: clause, isFinal: true, confidence },
@@ -1240,12 +1361,25 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .map((pattern) => buffer.indexOf(pattern))
       .filter((index) => index >= 0);
 
-    if (triggerPositions.length === 0) {
+    if (triggerPositions.length === 0 && !isFinalized) {
       sonioxSaleBufferRef.current = buffer.slice(-SONIOX_SCAN_TAIL_LIMIT);
       return;
     }
+    if (triggerPositions.length === 0) {
+      const preview = advanceVoiceSaleTransaction(voiceSaleTransactionRef.current, {
+        sessionId: productSalesRef.current.activeSession?.id || currentSessionIdRef.current,
+        eventId: crypto.randomUUID(), text: buffer, recognizedAt: new Date().toISOString(),
+        activeKeywords: storageService.getRules().filter((rule) => rule.isEnabled).map((rule) => rule.word),
+      });
+      if (!preview.emission && !hasCaptureInstructionText(buffer)) {
+        voiceSaleTransactionRef.current = preview.state;
+        clearSonioxSaleTimeout();
+        sonioxSaleBufferRef.current = '';
+        return;
+      }
+    }
 
-    const saleStart = Math.min(...triggerPositions);
+    const saleStart = triggerPositions.length ? Math.min(...triggerPositions) : 0;
     if (saleStart > 0) {
       // "러블리님 구매확정"처럼 트리거 앞에 닉네임이 먼저 나온 경우를 보존한다.
       sonioxSaleBufferRef.current = buffer.slice(Math.max(0, saleStart - 32));
@@ -1263,8 +1397,27 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sonioxSaleBufferRef.current,
       rules.map((rule) => rule.word)
     );
+    if (isFinalized && !saleResult) {
+      const preview = advanceVoiceSaleTransaction(voiceSaleTransactionRef.current, {
+        sessionId: productSalesRef.current.activeSession?.id || currentSessionIdRef.current,
+        eventId: crypto.randomUUID(), text: sonioxSaleBufferRef.current,
+        recognizedAt: new Date().toISOString(), activeKeywords: rules.map((rule) => rule.word),
+      });
+      if (!preview.emission && !hasCaptureInstructionText(sonioxSaleBufferRef.current)) {
+        voiceSaleTransactionRef.current = preview.state;
+        clearSonioxSaleTimeout();
+        sonioxSaleBufferRef.current = '';
+        return;
+      }
+    }
+    if (isFinalized && saleResult?.isPending && splitTranscriptClauses(sonioxSaleBufferRef.current).some(isQuestionUtterance)) {
+      clearSonioxSaleTimeout();
+      sonioxSaleBufferRef.current = '';
+      voiceSaleTransactionRef.current = null;
+      return;
+    }
 
-    if (saleResult && !saleResult.isPending) {
+    if ((saleResult && !saleResult.isPending) || isFinalized) {
       const completeSaleText = sonioxSaleBufferRef.current.trim();
       clearSonioxSaleTimeout();
       sonioxSaleBufferRef.current = '';
@@ -1272,7 +1425,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         { text: completeSaleText, isFinal: true, confidence },
         requiredListeningGeneration,
         requiredUserId,
-        { skipCommands: true, skipCapture: true, skipCorrections: true, skipProductCommands: true }
+        { skipCommands: true, skipCorrections: true, skipProductCommands: true }
       );
       return;
     }
@@ -1424,6 +1577,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const command = processingOptions.skipCommands
           ? { type: 'NONE' as const, rawText: fullText }
           : parseVoiceCommand(fullText, isVoiceEditingRef.current);
+        if (!processingOptions.skipSale && (command.type !== 'NONE' || correctionIntent.isCorrection
+          || correctionIntent.isQuestion || correctionIntent.isNegativeCommand || ruleActionName)) {
+          voiceSaleTransactionRef.current = null;
+        }
         if (processingOptions.skipCorrections && command.type === 'NONE'
           && (correctionIntent.isCorrection || correctionIntent.isCorrectionQuestion || correctionIntent.isNegativeCommand)) continue;
 
@@ -1616,17 +1773,15 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           } else {
             // 2. 판매 멘트 감지 ("구매확정 됐습니다...")
-            const previousFragment = recentFinalFragmentRef.current;
-            const combinedText = previousFragment && Date.now() - previousFragment.at <= 3_000
-              && !extractSaleFromTranscript(previousFragment.text, activeKeywords)
-              ? `${previousFragment.text} ${fullText}` : fullText;
             const workflowActive = appliedWorkflowRef.current?.mode === 'ACTIVE';
-            const currentSaleResult = processingOptions.skipSale || workflowActive ? null : extractSaleFromTranscript(fullText, activeKeywords);
-            const combinedSaleResult = !processingOptions.skipSale && !workflowActive && combinedText !== fullText
-              ? extractSaleFromTranscript(combinedText, activeKeywords) : null;
-            const saleResult = currentSaleResult?.isPending && combinedSaleResult && !combinedSaleResult.isPending
-              ? combinedSaleResult : currentSaleResult || combinedSaleResult;
-            recentFinalFragmentRef.current = { text: fullText, at: Date.now() };
+            const transactionAdvance = processingOptions.skipSale || workflowActive ? null
+              : advanceVoiceSaleTransaction(voiceSaleTransactionRef.current, {
+                sessionId: targetSessionId, eventId: crypto.randomUUID(), text: fullText,
+                recognizedAt: new Date().toISOString(), activeKeywords,
+              });
+            if (transactionAdvance) voiceSaleTransactionRef.current = transactionAdvance.state;
+            const emission = transactionAdvance?.emission;
+            const saleResult = emission?.result;
 
           // 캡처 조건: '캡처하세요' 멘트가 반드시 포함되어 있어야 함
           // (띄어쓰기 유연성 및 단어 규칙 관리 등록 반영)
@@ -1657,13 +1812,16 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
             void persistVoiceSale(
               saleResult,
               saleResult.rawTranscript,
-              hasCaptureInstruction || isFourPoint,
-              requiredListeningGeneration
+              !processingOptions.skipCapture && Boolean(emission?.captureRequested),
+              requiredListeningGeneration,
+              emission ? {
+                id: emission.transactionId, startedAt: emission.startedAt,
+                evidenceText: emission.evidenceText, continuation: emission.continuation,
+                precedingTransactionId: emission.precedingTransactionId,
+              } : undefined
             );
           } else if (
-            hasCaptureInstruction ||
-            (!processingOptions.skipCapture &&
-              (fullText.includes('화면캡처') || fullText.includes('화면 캡처')))
+            hasCaptureInstruction && !(transactionAdvance?.state?.captureSeen && !emission)
           ) {
             // 3. 단독 캡처 트리거 감지 (판매 멘트가 없을 때 '캡처하세요' 또는 '화면 캡처')
             actionTriggered = 'SCREEN_CAPTURED';

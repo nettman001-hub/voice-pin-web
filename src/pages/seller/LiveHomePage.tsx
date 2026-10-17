@@ -36,6 +36,7 @@ import { COMMENT_HELPER_DOWNLOAD_URL } from '../../types/comment';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
 import { useProductSales } from '../../context/ProductSalesContext';
 import { formatMultiSaleAmount } from '../../services/salesExtractor';
+import { getSalePurchaseHistory, isCountedSale } from '../../services/saleRowHistory';
 import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
 import { ListeningStopControl, ListeningStopStatus } from '../../components/live/ListeningStopControl';
 import { AiSaleBadge } from '../../components/sales/AiSaleBadge';
@@ -324,7 +325,7 @@ export const LiveHomePage: React.FC = () => {
     : currentSessionSales;
 
   const todayTotalAmount = currentSessionSales
-    .filter((s) => s.status !== '보류' && s.status !== '취소' && s.syncStatus !== 'PENDING')
+    .filter(isCountedSale)
     .reduce((sum, item) => sum + item.amount, 0);
 
   const purchaseRequests = React.useMemo(() => {
@@ -343,8 +344,7 @@ export const LiveHomePage: React.FC = () => {
   const effectiveInterimTranscript = isDemoActive ? demoInterimTranscript : currentInterimTranscript;
   const effectiveMatchedRuleItem = isDemoActive ? demoMatchedRuleItem : lastMatchedRuleItem;
   const effectiveSessionSales = isDemoActive ? demoSales : displayedSessionSales;
-  const effectiveSalesCount = isDemoActive ? demoSalesCount : currentSessionSales.filter((sale) =>
-    sale.status !== '보류' && sale.status !== '취소' && sale.syncStatus !== 'PENDING').length;
+  const effectiveSalesCount = isDemoActive ? demoSalesCount : currentSessionSales.filter(isCountedSale).length;
   const effectiveTotalAmount = isDemoActive ? demoTotalAmount : todayTotalAmount;
 
 
@@ -702,9 +702,7 @@ export const LiveHomePage: React.FC = () => {
                       : sale.source === 'MANUAL'
                         ? '수동'
                         : '기타';
-                  const buyerSessionSales = (nicknameNeedsConfirmation ? [sale] : effectiveSessionSales
-                    .filter((s) => sale.buyerId && s.buyerId ? s.buyerId === sale.buyerId : s.buyerNickname === sale.buyerNickname))
-                    .sort((a, b) => new Date(a.recognizedAt).getTime() - new Date(b.recognizedAt).getTime());
+                  const buyerSessionSales = getSalePurchaseHistory(sale, effectiveSessionSales);
                   const multiAmount = formatMultiSaleAmount(buyerSessionSales.map((s) => s.amount));
                   const purchaseIntentWord = getBuyerPurchaseIntentWord(sale, effectiveComments);
 

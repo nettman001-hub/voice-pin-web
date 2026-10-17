@@ -13,6 +13,11 @@ export const NON_PURCHASE_VERB_PREFIX = /(?:보여|입어|비춰|알려|해|답�
 // "주세요" 앞에 동사 어간이 오지 않는 구매형 "주세요" 및 구매 키워드 패턴
 export const PURCHASE_INTENT_PATTERN = /(저요|ㅈ\s*ㅇ|구매|살게요|살께요|(?<!보여\s*|입어\s*|비춰\s*|알려\s*|해\s*|답변\s*|설명\s*|확인\s*|바꿔\s*|틀어\s*)주세요|주문|결제|입금|확정)/u;
 
+// An explicit item plus "I'll take it" is an order. Keep the whole comment
+// bounded so questions, conditions, cancellations and other future actions
+// ("이거 확인할게요", "가능하면 이거 할게요") do not become requests.
+export const ITEM_TAKE_INTENT_PATTERN = /^(?:(?:네|넵|저|제가)\s*[,!~]?\s*)?(?:아까\s*(?:꺼|거|것)|이\s*(?:거|것)|요거|그거|저거)(?:는|를|요)?\s*할[게께]요[.!~\s]*$/u;
+
 /**
  * 댓글의 구매 의사 여부 정밀 판별
  * "보여주세요", "입어주세요" 등은 제외하고, "1번 주세요", "저요", "살게요" 등만 구매 의사로 판정
@@ -20,6 +25,7 @@ export const PURCHASE_INTENT_PATTERN = /(저요|ㅈ\s*ㅇ|구매|살게요|살�
 export function hasCommentPurchaseIntent(content?: string): boolean {
   if (!content) return false;
   const text = String(content).trim();
+  if (ITEM_TAKE_INTENT_PATTERN.test(text)) return true;
 
   // 1. "보여주세요", "입어주세요" 등 비구매 요청어가 포함된 경우
   if (NON_PURCHASE_VERB_PREFIX.test(text)) {

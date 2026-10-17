@@ -159,3 +159,20 @@ test('voice sale commit rejects an earlier filler account even when that account
   assert.equal(body.error.code, 'BUYER_AMBIGUOUS');
   assert.deepEqual(state.calls, []);
 });
+
+test('voice sale commit shares explicit item-taking eligibility with the client', async () => {
+  for (const content of ['아까꺼 할께요', '아까꺼 할게요', '이거 할게요']) {
+    const state = fixture();
+    state.comments[0].content = content;
+    const response = await handleCommitVoiceSale('workspace', 'actor', { operationId, sale });
+    assert.equal(response.status, 200, content);
+    assert.equal(state.calls.length, 1);
+  }
+  for (const content of ['네', 'ㅇ', '이거 확인할게요', '가능하면 이거 할게요', '아까꺼 취소할게요']) {
+    const state = fixture();
+    state.comments[0].content = content;
+    const response = await handleCommitVoiceSale('workspace', 'actor', { operationId, sale });
+    assert.equal(response.status, 409, content);
+    assert.deepEqual(state.calls, [], 'identity evidence is not an automatic purchase request');
+  }
+});

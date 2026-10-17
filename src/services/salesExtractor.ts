@@ -1,6 +1,7 @@
 import type { SaleRecord, SaleStatus } from '../types/live.ts';
 import { extractSpeechPrice } from './priceEvidence.ts';
-import { CAPTURE_REQUEST_SOURCE, isQuestionUtterance, splitTranscriptClauses } from './voiceUtteranceService.ts';
+import { isQuestionUtterance, splitTranscriptClauses } from './voiceUtteranceService.ts';
+import { CAPTURE_INSTRUCTION_PATTERN, hasCaptureCancellationText, hasCaptureInstructionText } from './saleCapturePairing.ts';
 
 /**
  * 한국어 금액 표현(예: "35,000원", "3만 5천원", "3만원", "42000원", "5천원")을 숫자(number)로 변환
@@ -219,7 +220,7 @@ export interface ExtractedSaleResult {
 export const FOUR_POINT_CONFIRMATION_PATTERN =
   /(?:이거\s*|요거\s*|상품\s*)?(?:드릴[게께]요|드리겠습니다|확정(?:이[요야]|입니다)?|가져가세요|낙찰(?:이[요야]|입니다)?)/u;
 
-export const FOUR_POINT_CAPTURE_PATTERN = new RegExp(`${CAPTURE_REQUEST_SOURCE}|화면\\s*캡[처쳐]`, 'u');
+export const FOUR_POINT_CAPTURE_PATTERN = CAPTURE_INSTRUCTION_PATTERN;
 
 export interface FourPointSaleCheck {
   isFourPointSale: boolean;
@@ -307,6 +308,20 @@ export function findExplicitPriceTranscript(text: string): string | null {
   return `${prefix[0]}${price.quote}`;
 }
 
+/** A standalone currency/decimal answer can finish a split price declaration.
+ * Do not treat measurements, product descriptions or a second number as price. */
+export function findStandalonePriceTranscript(text: string): string | null {
+  const clause = text.trim().replace(/[.!。\s]+$/u, '');
+  const price = extractSpeechPrice(clause);
+  if (!price || !clause.startsWith(price.quote)) return null;
+  const suffix = clause.slice(price.quote.length).trim()
+    .replace(/^(?:입니다|이에요|이요|요)(?=$|[\s,，.!。])/u, '').replace(/^[\s,，.!。]+/u, '');
+  if (!suffix || /^(?:화면\s*)?캡[처쳐](?:\s*(?:하세요|해\s*주세요|해\s*주시고(?:요)?|요))?[.!。\s]*$/u.test(suffix)) {
+    return price.quote;
+  }
+  return null;
+}
+
 const ALLOCATION_FILLER = /^(?:네|넵|예|자|아|어|음|이거|요거)(?:[,，\s]*(?:네|넵|예|자|아|어|음|이거|요거))*$/u;
 const PRODUCT_TRANSITION = /(?:다음|새|다른)\s*(?:상품|물건|옷|거(?=[는은\s,.!?]|$))/u;
 const TRANSACTION_INTERRUPTION = /(?:취소|정정|수정|변경|말고|아니|이면|라면|다면|하시면|하지\s*마)/u;
@@ -375,10 +390,12 @@ function findAllocationClause(clauses: string[], includeFourPoint = false): Allo
     // A clear allocation with several possible names must stay visible for
     // review, even without a price; never promote one of those names by order.
     if (getBuyerNicknameCandidates(clause).length > 0) return { text: clause, index: i, start: i };
-    const previous = clauses[i - 1];
+    let previousIndex = i - 1;
+    while (previousIndex >= 0 && ALLOCATION_FILLER.test(clauses[previousIndex])) previousIndex--;
+    const previous = clauses[previousIndex];
     // A short, stand-alone vocative can be a separate STT sentence.
     if (previous && /^(?:네[,，]?\s*)?[가-힣a-zA-Z0-9_]{2,20}\s*(?:언니|님|씨)(?:께|에게|한테)?$/u.test(previous)
-      && parseBuyerNickname(previous)) return { text: `${previous}. ${clause}`, index: i, start: i - 1 };
+      && parseBuyerNickname(previous)) return { text: clauses.slice(previousIndex, i + 1).join('. '), index: i, start: previousIndex };
     if (/구매\s*확정|낙찰|판매\s*완료|주문\s*확정|결제\s*완료|(?:넣어|담아|배정해)\s*드/u.test(clause)) return { text: clause, index: i, start: i };
     if (/캡처/u.test(clause)) {
       const precedingClauses = clauses.slice(Math.max(0, i - 2), i);
@@ -405,10 +422,10 @@ export function findAllocationTranscript(text: string): string | null {
   if (extractSpeechPrice(allocation.text)) return allocation.text;
   const names = new Set(getBuyerNicknameCandidates(allocation.text).map((name) => name.replace(/\s+/gu, '')));
   // Preserve the existing bounded follow-up price rules for ordinary sales.
-  for (let j = allocation.index + 1; j < Math.min(clauses.length, allocation.index + 4); j++) {
+  for (let j = allocation.index + 1; j < Math.min(clauses.length, allocation.index + 8); j++) {
     const next = clauses[j];
     if (PRODUCT_TRANSITION.test(next)) break;
-    const priceClause = findExplicitPriceTranscript(next);
+    const priceClause = findExplicitPriceTranscript(next) || findStandalonePriceTranscript(next);
     if (priceClause) return `${allocation.text}. ${priceClause}`;
     const nextNames = getBuyerNicknameCandidates(next).map((name) => name.replace(/\s+/gu, ''));
     const repeatsAllocation = ALLOCATION_ACTION.test(next) && !NON_ALLOCATION.test(next) && !isQuestionUtterance(next)
@@ -432,36 +449,36 @@ function findFourPointEvidence(text: string): {
   const validAllocation = allocationClauses(initial).every(isSafeFourPointClause);
   const evidence = { allocationTranscript: initial, validAllocation, hasCapture: false };
   if (!validAllocation) return evidence;
-  evidence.hasCapture = FOUR_POINT_CAPTURE_PATTERN.test(initial);
+  evidence.hasCapture = hasCaptureInstructionText(initial, { saleContext: true });
 
   const names = new Set(getBuyerNicknameCandidates(initial).map((name) => name.replace(/\s+/gu, '').toLowerCase()));
   let price = extractSpeechPrice(initial);
   // Capture may precede the first allocation, but never borrow a capture from
   // an earlier buyer/allocation. Only an initial standalone instruction qualifies.
-  if (allocation.start === 1 && FOUR_POINT_CAPTURE_PATTERN.test(clauses[0])
+  if (allocation.start === 1 && hasCaptureInstructionText(clauses[0], { saleContext: true })
     && isSafeFourPointClause(clauses[0]) && !PRODUCT_TRANSITION.test(clauses[0])
     && getBuyerNicknameCandidates(clauses[0]).length === 0 && !extractSpeechPrice(clauses[0])) {
     evidence.hasCapture = true;
   }
   if (initial !== allocation.text) return evidence;
-  for (let j = allocation.index + 1; j < Math.min(clauses.length, allocation.index + 4); j++) {
+  for (let j = allocation.index + 1; j < Math.min(clauses.length, allocation.index + 8); j++) {
     const next = beforeProductChange(clauses[j]);
     if (!next) break;
     const nextNames = getBuyerNicknameCandidates(next).map((name) => name.replace(/\s+/gu, '').toLowerCase());
     if (nextNames.some((name) => !names.has(name))) break;
-    if (/캡[처쳐]\s*하지\s*마/u.test(next)) {
+    if (hasCaptureCancellationText(next)) {
       evidence.hasCapture = false;
       break;
     }
     if (!isSafeFourPointClause(next)) break;
-    const priceClause = findExplicitPriceTranscript(next);
+    const priceClause = findExplicitPriceTranscript(next) || findStandalonePriceTranscript(next);
     const nextPrice = extractSpeechPrice(priceClause || next);
     // Preserve the existing rejection of an ambiguous first price declaration
     // that also introduces another product in the same clause.
     if (!price && nextPrice && next !== clauses[j]) break;
     // A second, different price is not a continuation of the selected sale.
     if (price && nextPrice && price.amount !== nextPrice.amount) break;
-    const capture = FOUR_POINT_CAPTURE_PATTERN.test(next);
+    const capture = hasCaptureInstructionText(next, { saleContext: true });
     const repeatsAllocation = (ALLOCATION_ACTION.test(next) || FOUR_POINT_CONFIRMATION_PATTERN.test(next))
       && (!nextPrice || nextNames.length === 1);
     if (!priceClause && !repeatsAllocation && !(capture && !nextPrice) && !ALLOCATION_FILLER.test(next)) break;

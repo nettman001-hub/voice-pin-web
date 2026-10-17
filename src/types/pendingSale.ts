@@ -21,6 +21,7 @@ export interface StructuredPendingReason {
 
 export interface PendingEvidenceSnapshot {
   originalUtterance: string;         // 원본 발화
+  transactionUtterance?: string;     // 분할 STT를 연결한 전체 원본 근거
   recognizedAt: string;              // 인식 일시
   relevantCommentIds: string[];      // 관련 댓글 ID 목록
   productCode?: string;              // 상품 코드

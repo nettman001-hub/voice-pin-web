@@ -10,6 +10,7 @@ import { parseVoiceCommand } from '../src/services/voiceCommandParser.ts';
 import { splitTranscriptClauses, isQuestionUtterance } from '../src/services/voiceUtteranceService.ts';
 import {replaySalesWorkflow,DEFAULT_WORKFLOW_PROFILE} from '../src/services/salesWorkflowEngine.ts';
 import { hasCaptureInstructionText } from '../src/services/saleCapturePairing.ts';
+import { advanceVoiceSaleTransaction } from '../src/services/voiceSaleTransaction.ts';
 
 // Execute the real live callbacks with controlled storage/audio/cloud boundaries.
 const source = fs.readFileSync(new URL('../src/context/LiveContext.tsx', import.meta.url), 'utf8');
@@ -45,8 +46,8 @@ function fixture({ sales = [], renderSales = sales, rules = [], pendingCorrectio
   const timers = new Map();
   let nextTimerId = 1;
   const globals = {
-    ...corrections, extractSaleFromTranscript, parseKoreanAmount, parseVoiceCommand, splitTranscriptClauses,
-    crypto: { randomUUID }, console, hasCaptureInstructionText,
+    ...corrections, extractSaleFromTranscript, parseKoreanAmount, parseVoiceCommand, splitTranscriptClauses, isQuestionUtterance,
+    crypto: { randomUUID }, console, hasCaptureInstructionText, advanceVoiceSaleTransaction,
     appliedWorkflowRef: {current:workflow},replaySalesWorkflow,
     workflowQueueRef:{current:Promise.resolve()},workflowReplayRef:{current:null},workflowObservationAtRef:{current:0},
     workflowFingerprintsRef:{current:new Map()},workflowDecisionsRef:{current:new Set()},
@@ -67,7 +68,7 @@ function fixture({ sales = [], renderSales = sales, rules = [], pendingCorrectio
     },
     isVoiceEditingRef: { current: false }, setIsVoiceEditing() {}, setEditingFieldInfo() {}, resetVoiceEditTimeout() {}, editTimeoutRef: { current: null },
     activePendingCorrectionRef: { current: pendingCorrection }, lastSavedSaleRef: { current: sales[0] || null },
-    recentFinalFragmentRef: { current: null }, pendingVoiceFollowupRef: { current: new Map() }, setPendingAiTick() {},
+    voiceSaleTransactionRef: { current: null }, pendingVoiceFollowupRef: { current: new Map() }, setPendingAiTick() {},
     playBeep: (...args) => state.beeps.push(args),
     deleteSale: (id) => { state.deleted.push(id); sales.splice(sales.findIndex((entry) => entry.id === id), 1); },
     reservedPurchaseRequestsRef: { current: new Set(['request-1']) },
@@ -94,6 +95,30 @@ function fixture({ sales = [], renderSales = sales, rules = [], pendingCorrectio
     const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach((callback) => callback());
   }, send: (text, extra = {}, options = {}) => module.exports.handleTranscript(
     { text, isFinal: true, confidence: 0.99, ...extra }, 1, 'seller', options) };
+}
+
+for (const provider of ['DEEPGRAM', 'SONIOX']) {
+  const sourceOptions = (text) => provider === 'SONIOX'
+    ? { provider, confirmedTextDelta: text } : { provider };
+  test(`${provider}: 완료 거래의 캡처 재발화는 독립 캡처로 다시 실행하지 않는다`, () => {
+    const ctx = fixture();
+    for (const text of ['하니님 1.2 드릴게요 캡처해주세요.', '캡처해주세요.']) {
+      ctx.send(text, sourceOptions(text));
+    }
+    assert.equal(ctx.state.saves.length, 1);
+    assert.equal(ctx.state.saves.filter((args) => args[2]).length, 1);
+    assert.equal(ctx.state.captures.length, 0);
+  });
+  test(`${provider}: 화면 캡처 설명은 실행하지 않고 독립 지시는 실행한다`, () => {
+    const ctx = fixture();
+    const description = '화면 캡처 방법을 설명합니다.';
+    ctx.send(description, sourceOptions(description));
+    assert.equal(ctx.state.captures.length, 0);
+    const command = '화면 캡처.';
+    ctx.send(command, sourceOptions(command));
+    assert.equal(ctx.state.captures.length, 1);
+    assert.equal(ctx.state.saves.length, 0);
+  });
 }
 
 test('active workflow replaces the legacy extractor and allocates numeric orders through real live callbacks',async()=>{
@@ -244,6 +269,32 @@ test('Soniox connects a confirmed allocation to the next explicit price without 
   ctx.send(allocation + price, { provider: 'SONIOX' });
   assert.equal(ctx.state.saves.length, 1);
 });
+
+for (const provider of ['DEEPGRAM', 'SONIOX']) {
+  test(`${provider} keeps a stable transaction through nickname, allocation, price and capture final results`, () => {
+    const ctx = fixture();
+    for (const text of ['하니님.', '드릴게요.', '가격은 1.2입니다.', '캡처해주시고요.']) {
+      ctx.send(text, {provider, ...(provider === 'SONIOX' ? {confirmedTextDelta:text} : {})});
+    }
+    const saves = ctx.state.saves;
+    assert.ok(saves.length >= 2);
+    assert.equal(new Set(saves.map(args => args[4].id)).size, 1);
+    assert.equal(saves.at(-1)[0].isFourPointConfirmed, true);
+    assert.equal(saves.at(-1)[0].amount, 12000);
+    assert.equal(saves.at(-1)[0].buyerNickname, '하니');
+    assert.equal(ctx.state.captures.length + saves.filter(args => args[2]).length, 1);
+  });
+  test(`${provider} attaches the actual Hani restatement to the pending allocation`, () => {
+    const ctx = fixture();
+    for (const text of ['네. 하니님, 이거 드릴게요. 캡처해 주시고요.', "네. 맞으시면 'ᄋ' 한 번만. 하니님 드릴게요. 가격은 1.2, 캡처."]) {
+      ctx.send(text, {provider, ...(provider === 'SONIOX' ? {confirmedTextDelta:text} : {})});
+    }
+    assert.equal(ctx.state.saves.length, 2);
+    assert.equal(ctx.state.saves[0][4].id, ctx.state.saves[1][4].id);
+    assert.equal(ctx.state.saves[1][0].amount, 12000);
+    assert.equal(ctx.state.saves[1][0].isFourPointConfirmed, true);
+  });
+}
 
 test('Soniox waits for the price ending before treating confirmed price tokens as a declaration', () => {
   for (const ending of ['인가요?', '입니다.']) {

@@ -59,3 +59,18 @@ test('캡처 지시 문장을 알아듣고, 질문이나 금지는 무시한다'
     assert.equal(hasCaptureInstructionText(text), false, text);
   }
 });
+
+test('구어체 캡처 지시를 인식하고 단독 캡처는 거래 문맥에서만 인정한다', () => {
+  for (const text of ['캡처해주시고요', '캡처해 주시고', '캡쳐해주시고요', '캡쳐해주세요']) {
+    assert.equal(hasCaptureInstructionText(text), true, text);
+  }
+  for (const text of ['캡처', '네, 캡쳐.']) {
+    assert.equal(hasCaptureInstructionText(text), false, text);
+    assert.equal(hasCaptureInstructionText(text, { saleContext: true }), true, text);
+  }
+  for (const text of [
+    '캡처해주시고요?', '캡쳐하지 마세요', '캡처 안 할게요', '안 캡처해주세요',
+    '캡처해주세요라는 문구', '캡처하세요라고 말했어요', '화면 캡처 방법을 설명합니다',
+    '캡처 화면이 예쁘네요', '캡처해주세요. 캡처하지 마세요.',
+  ]) assert.equal(hasCaptureInstructionText(text, { saleContext: true }), false, text);
+});

@@ -5,7 +5,8 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { extractSaleFromTranscript } from '../src/services/salesExtractor.ts';
 import { extractSpeechPrice } from '../src/services/priceEvidence.ts';
-import { getPurchaseRequests, matchPurchaseRequest, resolveSpokenNicknameWithoutRequest } from '../src/services/purchaseFirstSales.ts';
+import { getPurchaseRequests, matchPurchaseRequest, matchCommentAuthor, areSameCommentAuthor } from '../src/services/purchaseFirstSales.ts';
+import { advanceVoiceSaleTransaction } from '../src/services/voiceSaleTransaction.ts';
 import { buildPendingReasons, buildEvidenceSnapshot } from '../src/services/pendingSalesService.ts';
 import { getVoiceReviewRequests, shouldReviewVoiceSale, buildVoiceReviewRequest,
   isVoiceReviewReady } from '../src/services/voicePendingReviewService.ts';
@@ -17,15 +18,17 @@ import { findCaptureForSale } from '../src/services/saleCapturePairing.ts';
 const source = fs.readFileSync(new URL('../src/context/LiveContext.tsx', import.meta.url), 'utf8');
 const file = ts.createSourceFile('LiveContext.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let callback;
+let reconcile;
 function visit(node) {
   if (ts.isVariableDeclaration(node) && node.name.getText(file) === 'persistVoiceSale') {
     callback = node.initializer?.getText(file);
   }
+  if (ts.isVariableDeclaration(node) && node.name.getText(file) === 'reconcileVoiceSaleComments') reconcile = node.initializer?.getText(file);
   ts.forEachChild(node, visit);
 }
 visit(file);
 assert.ok(callback, 'The live persistence callback must be found in the source');
-const compiled = ts.transpileModule(`const persistVoiceSale = ${callback}; module.exports = persistVoiceSale;`, {
+const compiled = ts.transpileModule(`const persistVoiceSale = ${callback}; const reconcile = ${reconcile}; module.exports = {persistVoiceSale, reconcile};`, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText;
 
@@ -41,13 +44,14 @@ function fixture(comments, activeProduct = undefined, captures = []) {
   const reserved = new Set();
   const captureRequests = [];
   const globals = {
-    extractSaleFromTranscript, extractSpeechPrice, getPurchaseRequests, matchPurchaseRequest, resolveSpokenNicknameWithoutRequest,
+    extractSaleFromTranscript, extractSpeechPrice, getPurchaseRequests, matchPurchaseRequest, matchCommentAuthor, areSameCommentAuthor,
     buildPendingReasons, buildEvidenceSnapshot, getVoiceReviewRequests, generateSequentialProductName, findCaptureForSale,
     workspaceId: 'workspace', sales: [], currentWorkflowSalesRef: { current: stored },
     productSalesRef: { current: { activeSession: { id: 'broadcast', displayCode: '20261001-1' },
       activeProduct, feed: { comments: [] } } },
     currentSessionIdRef: { current: 'broadcast' }, recentVoiceDecisionsRef: { current: new Map() },
     reservedPurchaseRequestsRef: { current: reserved }, lastSavedSaleRef: { current: null },
+    voiceTransactionSalesRef: {current: new Map()},
     storageService: { getCommentRecords: () => comments, getPurchaseRequests: () => [], getCaptures: () => captures,
       linkCaptureToSale: (captureId, saleId) => { captures.find((entry) => entry.id === captureId).saleId = saleId; } },
     setRecentCaptures() {},
@@ -59,10 +63,22 @@ function fixture(comments, activeProduct = undefined, captures = []) {
   };
   const module = { exports: {} };
   vm.runInNewContext(compiled, { module, ...globals });
-  return { stored, reserved, captureRequests, save: async (text = speech, capture = false) => {
+  let transaction = null;
+  let event = 0;
+  return { stored, reserved, captureRequests, reconcile: module.exports.reconcile,
+    fragment: async (text, at = new Date().toISOString()) => {
+      const advanced = advanceVoiceSaleTransaction(transaction, {sessionId:'broadcast',eventId:String(++event),text,recognizedAt:at});
+      transaction = advanced.state;
+      if (advanced.emission) await module.exports.persistVoiceSale(advanced.emission.result,
+        advanced.emission.result.rawTranscript, advanced.emission.captureRequested, 1, {
+          id: advanced.emission.transactionId, startedAt: advanced.emission.startedAt,
+          evidenceText: advanced.emission.evidenceText, continuation: advanced.emission.continuation,
+          precedingTransactionId: advanced.emission.precedingTransactionId,
+        });
+    }, save: async (text = speech, capture = false) => {
     const extracted = extractSaleFromTranscript(text);
     assert.ok(extracted, 'The seller allocation must reach the live persistence callback');
-    await module.exports(extracted, text, capture, 1);
+    await module.exports.persistVoiceSale(extracted, text, capture, 1);
   } };
 }
 
@@ -144,6 +160,232 @@ test('ordinary price continuation still completes a pending purchase', async () 
   assert.equal(live.stored[0].status, '자동저장');
   assert.equal(live.stored[0].amount, 15000);
   assert.equal(live.captureRequests.length, 0);
+});
+
+for (const content of ['네', 'ㅇ', '안녕하세요']) {
+  test(`four-point speech uses the comment author's real name without consuming "${content}" as a purchase`, async () => {
+    const buyer = comment('하니💕', 'hani-comment', 'hani-account', content);
+    const ctx = fixture([buyer]);
+    await ctx.save('하니님 드릴게요 1.2. 캡처해주시고요.', true);
+    assert.equal(ctx.stored[0].status, '확정');
+    assert.equal(ctx.stored[0].buyerNickname, buyer.nickname);
+    assert.equal(ctx.stored[0].buyerId, buyer.buyerId);
+    assert.deepEqual(Array.from(ctx.stored[0].sourceCommentIds), [buyer.id]);
+    assert.equal(ctx.stored[0].purchaseRequestId, undefined);
+    assert.equal(ctx.reserved.size, 0);
+  });
+}
+
+test('four-point identity ambiguity stays pending instead of assigning a same-name stranger', async () => {
+  const ctx = fixture([comment('하니', 'a', 'account-a', '네'), comment('하니', 'b', 'account-b', 'ㅇ')]);
+  await ctx.save('하니님 드릴게요 1.2. 캡처해주세요.');
+  assert.equal(ctx.stored[0].status, '보류');
+  assert.equal(ctx.stored[0].buyerId, undefined);
+  assert.equal(ctx.reserved.size, 0);
+});
+
+test('real Hani allocation, capture, and later price refine one row with the original speech time', async () => {
+  const start = Date.now();
+  const buyer = comment('하니💕', 'hani', 'hani-account', '네');
+  const ctx = fixture([buyer], {id:'product', productCode:'001', name:'상품', unitPrice:10000});
+  await ctx.fragment('네. 하니님, 이거 드릴게요. 캡처해 주시고요.', new Date(start).toISOString());
+  assert.equal(ctx.stored[0].status, '보류');
+  assert.equal(ctx.stored[0].amount, 0, 'Registered price must not preempt the following spoken price');
+  const id = ctx.stored[0].id;
+  await ctx.fragment("네. 맞으시면 'ᄋ' 한 번만. 하니님 드릴게요. 가격은 1.2, 캡처.", new Date(start + 18000).toISOString());
+  assert.equal(ctx.stored.length, 1);
+  assert.equal(ctx.stored[0].id, id);
+  assert.equal(ctx.stored[0].status, '확정');
+  assert.equal(ctx.stored[0].amount, 12000);
+  assert.equal(ctx.stored[0].buyerNickname, buyer.nickname);
+  assert.equal(ctx.stored[0].recognizedAt, new Date(start).toISOString());
+  assert.match(ctx.stored[0].evidenceSnapshot.transactionUtterance, /캡처해 주시고요/);
+  assert.match(ctx.stored[0].evidenceSnapshot.transactionUtterance, /가격은 1.2/);
+  assert.equal(extractSaleFromTranscript(ctx.stored[0].rawTranscript).amount, 12000);
+  assert.equal(ctx.captureRequests.length, 1);
+});
+
+test('split nickname, allocation, price and capture become one canonical sale; a new product remains separate', async () => {
+  const ctx = fixture([comment('하니💕', 'hani', 'account', '네')]);
+  for (const text of ['하니님.', '드릴게요.', '가격은 1.2입니다.', '캡처해주세요.']) await ctx.fragment(text);
+  assert.equal(ctx.stored.length, 1);
+  assert.equal(ctx.stored[0].status, '확정');
+  assert.equal(ctx.stored[0].amount, 12000);
+  assert.equal(ctx.stored[0].buyerNickname, '하니💕');
+  await ctx.fragment('다음 상품입니다.');
+  await ctx.fragment('하니님 드릴게요 1.0. 캡처해주시고요.');
+  assert.equal(ctx.stored.length, 2);
+  assert.deepEqual(ctx.stored.map(sale => sale.amount), [12000, 10000]);
+});
+
+test('capture continuation keeps the purchase request already allocated to this transaction', async () => {
+  const comments = [comment('하니', 'first', 'account')];
+  const ctx = fixture(comments);
+  await ctx.fragment('하니님 드릴게요 1.2.');
+  comments.push({...comment('하니', 'second', 'account'), capturedAt:new Date().toISOString()});
+  await ctx.fragment('캡처해주세요.');
+  assert.equal(ctx.stored.length, 1);
+  assert.equal(ctx.stored[0].status, '확정');
+  assert.equal(ctx.stored[0].purchaseRequestId, 'broadcast:first');
+  assert.equal(ctx.reserved.has('broadcast:second'), false);
+});
+
+test('a later independent four-point transaction does not reuse or get blocked by a consumed purchase request', async () => {
+  const ctx = fixture([comment('하니', 'first', 'account')]);
+  await ctx.fragment('하니님 드릴게요 1.2. 캡처해주세요.');
+  await ctx.fragment('다음 상품입니다.');
+  await ctx.fragment('하니님 드릴게요 1.0.');
+  await ctx.fragment('캡처해주세요.');
+  assert.equal(ctx.stored.length, 2);
+  assert.deepEqual(ctx.stored.map(sale => sale.amount), [12000, 10000]);
+  assert.equal(ctx.stored[0].purchaseRequestId, 'broadcast:first');
+  assert.equal(ctx.stored[1].purchaseRequestId, undefined);
+  assert.equal(ctx.stored[1].buyerId, 'account');
+  assert.equal(ctx.stored[1].status, '확정');
+});
+
+for (const content of ['ㅈㅇ', '네']) {
+  test(`reworded four-point statements remain one transaction with ${content} evidence`, async () => {
+    const ctx = fixture([comment('러블리', 'same-comment', 'same-account', content)]);
+    await ctx.fragment('러블리님 드릴게요 1.5. 캡처해주세요.');
+    await ctx.fragment('러블리님 확정이요 1.5. 캡처해주시고요.');
+    assert.equal(ctx.stored.length, 1);
+    assert.equal(ctx.captureRequests.length, 1);
+    await ctx.fragment('다음 상품입니다.');
+    await ctx.fragment('러블리님 드릴게요 1.5. 캡처해주세요.');
+    assert.equal(ctx.stored.length, 2, 'The same customer and price still form a new sale after a product change');
+  });
+  test(`a priced ${content} sale is completed on its original row by a repeated four-point allocation`, async () => {
+    const ctx = fixture([comment('하니', 'same-comment', 'same-account', content)]);
+    await ctx.fragment('하니님 드릴게요 1.2.');
+    const id = ctx.stored[0].id;
+    await ctx.fragment('하니님 확정이요 1.2. 캡처해주세요.');
+    assert.equal(ctx.stored.length, 1);
+    assert.equal(ctx.stored[0].id, id);
+    assert.equal(ctx.stored[0].status, '확정');
+  });
+}
+
+test('a fresh purchase request preserves a new same-buyer same-price transaction', async () => {
+  const now = Date.now();
+  const comments = [comment('하니', 'first', 'same-account')];
+  const ctx = fixture(comments);
+  await ctx.fragment('하니님 드릴게요 1.2. 캡처해주세요.', new Date(now).toISOString());
+  comments.push({...comment('하니', 'new-purchase', 'same-account'), capturedAt:new Date(now + 1000).toISOString()});
+  await ctx.fragment('하니님 확정이요 1.2. 캡처해주세요.', new Date(now + 2000).toISOString());
+  assert.equal(ctx.stored.length, 2);
+  assert.equal(ctx.stored[0].purchaseRequestId, 'broadcast:first');
+  assert.equal(ctx.stored[1].purchaseRequestId, 'broadcast:new-purchase');
+});
+
+test('an exact ordinary commenter never receives another account\'s similar-name purchase request', async () => {
+  const comments = [comment('넥스트', 'purchase', 'buyer-b', 'ㅈㅇ'), comment('네스트', 'ordinary', 'buyer-a', '네')];
+  for (const fourPoint of [true, false]) {
+    const ctx = fixture(comments);
+    await ctx.save(`네스트님 드릴게요 1.2.${fourPoint ? ' 캡처해주세요.' : ''}`);
+    assert.equal(ctx.stored[0].buyerNickname, '네스트');
+    assert.equal(ctx.stored[0].buyerId, 'buyer-a');
+    assert.equal(ctx.stored[0].purchaseRequestId, undefined);
+    assert.equal(ctx.stored[0].status, fourPoint ? '확정' : '보류');
+    assert.deepEqual(Array.from(ctx.stored[0].sourceCommentIds), ['ordinary']);
+    assert.equal(ctx.reserved.size, 0);
+  }
+  const late = [];
+  const ctx = fixture(late);
+  await ctx.save('네스트님 드릴게요 1.2. 캡처해주세요.');
+  late.push(...comments);
+  ctx.reconcile();
+  assert.equal(ctx.stored[0].buyerId, 'buyer-a');
+  assert.equal(ctx.stored[0].purchaseRequestId, undefined);
+});
+
+test('late reconciliation cannot allocate a repeated thirty-second purchase comment to another sale', async () => {
+  const now = Date.now();
+  const comments = [
+    {...comment('하니', 'first', 'account'), capturedAt:new Date(now - 5000).toISOString()},
+    {...comment('하니', 'repeat', 'account'), capturedAt:new Date(now - 4000).toISOString()},
+  ];
+  const ctx = fixture(comments);
+  await ctx.fragment('하니님 드릴게요 1.0.', new Date(now).toISOString());
+  const pending = {...ctx.stored[0], id:'pending-other', purchaseRequestId:undefined,
+    sourceCommentIds:[], status:'보류', rawTranscript:'하니님 드릴게요 1.2.', amount:12000, unitPrice:12000};
+  ctx.stored.push(pending);
+  ctx.reconcile();
+  assert.equal(ctx.stored[1].status, '보류');
+  assert.equal(ctx.stored[1].purchaseRequestId, undefined);
+});
+
+test('capture completion cannot transfer an allocated purchase to a newly appearing different exact-name account', async () => {
+  const now = Date.now();
+  const comments = [comment('넥스트', 'purchase', 'buyer-b', 'ㅈㅇ')];
+  const ctx = fixture(comments);
+  await ctx.fragment('네스트님 드릴게요 1.2.', new Date(now).toISOString());
+  assert.equal(ctx.stored[0].buyerId, 'buyer-b');
+  comments.push({...comment('네스트', 'ordinary', 'buyer-a', '네'), capturedAt:new Date(now + 1000).toISOString()});
+  await ctx.fragment('캡처해주세요.', new Date(now + 2000).toISOString());
+  assert.equal(ctx.stored.length, 1);
+  assert.equal(ctx.stored[0].buyerId, 'buyer-b');
+  assert.equal(ctx.stored[0].purchaseRequestId, 'broadcast:purchase');
+  assert.equal(ctx.stored[0].sourceCommentIds.includes('ordinary'), false);
+});
+
+test('one reconciliation pass claims repeated comments before promoting another pending row', async () => {
+  const now = Date.now();
+  const comments = [];
+  const ctx = fixture(comments);
+  await ctx.fragment('하니님 드릴게요 1.0.', new Date(now).toISOString());
+  await ctx.fragment('하니님 드릴게요 1.2.', new Date(now + 1000).toISOString());
+  comments.push(
+    {...comment('하니', 'first', 'account'), capturedAt:new Date(now - 5000).toISOString()},
+    {...comment('하니', 'repeat', 'account'), capturedAt:new Date(now - 4000).toISOString()},
+  );
+  ctx.reconcile();
+  assert.equal(ctx.stored.filter(sale => sale.status === '자동저장').length, 1);
+  assert.equal(ctx.stored.filter(sale => sale.status === '보류').length, 1);
+});
+
+for (const offset of [-300000, -300001, 10000, 10001]) {
+  test(`comment author time boundary ${offset}ms is evaluated against the original seller speech`, async () => {
+    const start = Date.now();
+    const comments = [{...comment('하니💕', 'timed', 'account', '네'), capturedAt:new Date(start + offset).toISOString()}];
+    const ctx = fixture(comments);
+    await ctx.fragment('하니님 드릴게요 1.2. 캡처해주세요.', new Date(start).toISOString());
+    const allowed = offset >= -300000 && offset <= 10000;
+    assert.equal(ctx.stored[0].buyerId, allowed ? 'account' : undefined);
+    assert.equal(ctx.stored[0].buyerNickname, allowed ? '하니💕' : '하니');
+  });
+}
+
+test('a late-delivered ordinary reply verifies a four-point sale without a second row or purchase request', async () => {
+  const start = Date.now();
+  const comments = [];
+  const ctx = fixture(comments);
+  await ctx.fragment('하니님 드릴게요 1.2. 캡처해주세요.', new Date(start).toISOString());
+  const id = ctx.stored[0].id;
+  comments.push({...comment('하니💕', 'late', 'account', '네'), capturedAt:new Date(start + 8000).toISOString()});
+  ctx.reconcile();
+  assert.equal(ctx.stored.length, 1);
+  assert.equal(ctx.stored[0].id, id);
+  assert.equal(ctx.stored[0].buyerNickname, '하니💕');
+  assert.equal(ctx.stored[0].buyerId, 'account');
+  assert.equal(ctx.stored[0].purchaseRequestId, undefined);
+  assert.equal(ctx.reserved.size, 0);
+  const snapshot = ctx.stored[0].evidenceSnapshot.snapshotVersion;
+  ctx.reconcile();
+  assert.equal(ctx.stored[0].evidenceSnapshot.snapshotVersion, snapshot);
+});
+
+test('a late reply after ten seconds or an incomplete seller confirmation cannot promote a sale', async () => {
+  for (const [speechText, offset] of [['하니님 드릴게요 1.2. 캡처해주세요.', 10001], ['하니님 드릴게요 1.2.', 8000]]) {
+    const start = Date.now();
+    const comments = [];
+    const ctx = fixture(comments);
+    await ctx.fragment(speechText, new Date(start).toISOString());
+    const before = ctx.stored[0];
+    comments.push({...comment('하니💕', 'late', 'account', '네'), capturedAt:new Date(start + offset).toISOString()});
+    ctx.reconcile();
+    assert.equal(ctx.stored[0], before);
+  }
 });
 
 test('competing abbreviated buyers stay pending without assigning a guessed account', async () => {

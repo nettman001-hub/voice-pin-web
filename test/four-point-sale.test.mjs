@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 import { extractSaleFromTranscript, checkFourPointSaleCriteria } from '../src/services/salesExtractor.ts';
 import { extractSpeechPrice } from '../src/services/priceEvidence.ts';
 
+test('확정 문맥의 구어체·단독 캡처는 인식하되 질문·부정·설명은 제외한다', () => {
+  for (const capture of ['캡처해주시고요', '캡처해주세요', '캡쳐해 주시고요', '캡쳐해주세요', '캡처']) {
+    const sale = extractSaleFromTranscript(`하니님 드릴게요. 가격은 1.2. ${capture}.`);
+    assert.equal(sale?.isFourPointConfirmed, true, capture);
+    assert.equal(sale?.amount, 12000, capture);
+  }
+  for (const capture of ['캡처해주시고요?', '캡처하지 마세요', '캡처 안 할게요', '캡처해주세요라는 문구를 보세요']) {
+    assert.equal(checkFourPointSaleCriteria(`하니님 드릴게요 1.2. ${capture}`).isFourPointSale, false, capture);
+  }
+});
+
 test('1. 4단 멘트 판별 - xxx님, 닉네임 xxx, xxx언니 호출 패턴 정상 추출', () => {
   // 패턴 1: xxx님
   const r1 = checkFourPointSaleCriteria('러블리님 이거 드릴게요 1.5 캡처하세요.');
