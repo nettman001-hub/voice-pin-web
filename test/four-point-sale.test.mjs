@@ -389,3 +389,30 @@ test('단위가 명확한 후속 가격도 숫자 닉네임과 구분한다', ()
   assert.equal(sale?.isFourPointConfirmed, true);
 });
 
+
+test('STT가 가격 라벨과 숫자를 다른 문장으로 끊어도 같은 판매의 가격으로 연결한다', () => {
+  // 2026-10-17 라이브 2회차: "가격은. 2.0."으로 끊겨 금액 0원 보류가 된 실제 발화.
+  const transcript = '무릎선에 오거든요. 제가 166. 이거. 네. 이거 빵님 드릴게요. 가격은. 2.0. 이거 캡처해 주시고요.';
+  const sale = extractSaleFromTranscript(transcript);
+  assert.equal(sale?.buyerNickname, '빵');
+  assert.equal(sale?.amount, 20000);
+  assert.equal(sale?.status, '확정');
+  assert.equal(sale?.isFourPointConfirmed, true);
+  assert.equal(sale?.allocationTranscript, '이거 빵님 드릴게요. 가격은 2.0');
+
+  for (const label of ['금액은', '가격은요', '가격', '가격이']) {
+    const split = extractSaleFromTranscript(`하늘님 이거 드릴게요. ${label}. 1.5. 캡처하세요.`);
+    assert.equal(split?.amount, 15000, label);
+    assert.equal(split?.isFourPointConfirmed, true, label);
+  }
+});
+
+test('가격 라벨 뒤 문장이 순수한 가격 선언이 아니면 합치지 않는다', () => {
+  for (const next of ['166', '1.5 사이즈', '빵님 드릴게요', '2.0 아니고 2.5', '2.0?']) {
+    const sale = extractSaleFromTranscript(`하늘님 이거 드릴게요. 가격은. ${next}.`);
+    assert.equal(sale?.status, '보류', next);
+    assert.equal(sale?.amount, 0, next);
+    assert.equal(sale?.allocationTranscript, '하늘님 이거 드릴게요', next);
+  }
+  assert.equal(extractSaleFromTranscript('하늘님 이거 드릴게요. 가격은? 1.5.')?.amount, 0);
+});

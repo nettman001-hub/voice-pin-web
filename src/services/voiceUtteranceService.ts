@@ -1,3 +1,8 @@
+/** A spoken capture request ("캡처하세요", "캡처해 주시고요"). Shared by the
+ * sale-confirmation and screen-capture patterns so they cannot drift apart. */
+export const CAPTURE_REQUEST_SOURCE =
+  '캡[처쳐]\\s*(?:하세요|해\\s*주세요|해\\s*주시고(?:요)?|해\\s*주시구요|해\\s*주십시오|해\\s*줘요|요|부탁(?:드려요|드립니다|해요)|해\\s*줘|해요|할게요|합니다)';
+
 /** Keep STT sentence boundaries without breaking decimal prices or ellipses. */
 export function splitTranscriptClauses(text: string): string[] {
   const clauses: string[] = [];

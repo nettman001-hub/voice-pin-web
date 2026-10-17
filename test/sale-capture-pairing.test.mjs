@@ -52,10 +52,10 @@ test('10초 안에 판매가 둘이면 캡처 시각에 더 가까운 판매에 
 });
 
 test('캡처 지시 문장을 알아듣고, 질문이나 금지는 무시한다', () => {
-  for (const text of ['자 캡처하세요.', '캡쳐 해 주세요', '화면 캡처', '캡처할게요']) {
+  for (const text of ['자 캡처하세요.', '캡쳐 해 주세요', '화면 캡처', '캡처할게요', '이거 캡처해 주시고요', '캡처 부탁드립니다']) {
     assert.equal(hasCaptureInstructionText(text), true, text);
   }
-  for (const text of ['캡처할까요?', '캡처하세요?', '캡처하지 마세요', '캡처 화면이 예쁘네요']) {
+  for (const text of ['캡처할까요?', '캡처하세요?', '캡처하지 마세요', '캡처 화면이 예쁘네요', '캡처해 주시고요?']) {
     assert.equal(hasCaptureInstructionText(text), false, text);
   }
 });

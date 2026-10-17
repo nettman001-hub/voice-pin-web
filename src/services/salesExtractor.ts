@@ -1,6 +1,6 @@
 import type { SaleRecord, SaleStatus } from '../types/live.ts';
 import { extractSpeechPrice } from './priceEvidence.ts';
-import { isQuestionUtterance, splitTranscriptClauses } from './voiceUtteranceService.ts';
+import { CAPTURE_REQUEST_SOURCE, isQuestionUtterance, splitTranscriptClauses } from './voiceUtteranceService.ts';
 
 /**
  * 한국어 금액 표현(예: "35,000원", "3만 5천원", "3만원", "42000원", "5천원")을 숫자(number)로 변환
@@ -219,8 +219,7 @@ export interface ExtractedSaleResult {
 export const FOUR_POINT_CONFIRMATION_PATTERN =
   /(?:이거\s*|요거\s*|상품\s*)?(?:드릴[게께]요|드리겠습니다|확정(?:이[요야]|입니다)?|가져가세요|낙찰(?:이[요야]|입니다)?)/u;
 
-export const FOUR_POINT_CAPTURE_PATTERN =
-  /캡[처쳐]\s*(?:하세요|해\s*주세요|해\s*줘요|요|부탁(?:드려요|해요)|해\s*줘|해요|할게요|합니다)|화면\s*캡[처쳐]/u;
+export const FOUR_POINT_CAPTURE_PATTERN = new RegExp(`${CAPTURE_REQUEST_SOURCE}|화면\\s*캡[처쳐]`, 'u');
 
 export interface FourPointSaleCheck {
   isFourPointSale: boolean;
@@ -312,9 +311,25 @@ const ALLOCATION_FILLER = /^(?:네|넵|예|자|아|어|음|이거|요거)(?:[,�
 const PRODUCT_TRANSITION = /(?:다음|새|다른)\s*(?:상품|물건|옷|거(?=[는은\s,.!?]|$))/u;
 const TRANSACTION_INTERRUPTION = /(?:취소|정정|수정|변경|말고|아니|이면|라면|다면|하시면|하지\s*마)/u;
 
+const PRICE_LABEL_ONLY = /^(?:가격|금액|단가|판매가)(?:은|는|이|가)?요?$/u;
+
 function allocationClauses(text: string): string[] {
-  return splitTranscriptClauses(text)
+  const clauses = splitTranscriptClauses(text)
     .map((part) => part.replace(/[.!。\s]+$/u, '').trim()).filter(Boolean);
+  // STT often ends a sentence at the pause after the label: "가격은. 2.0."
+  // Rejoin it only when the result is one explicit price declaration.
+  const joined: string[] = [];
+  for (let i = 0; i < clauses.length; i++) {
+    const next = clauses[i + 1];
+    const merged = next && PRICE_LABEL_ONLY.test(clauses[i]) ? `${clauses[i].replace(/요$/u, '')} ${next}` : null;
+    if (merged && findExplicitPriceTranscript(merged)) {
+      joined.push(merged);
+      i++;
+    } else {
+      joined.push(clauses[i]);
+    }
+  }
+  return joined;
 }
 
 function beforeProductChange(text: string, allowLeadingAnnouncement = false): string {

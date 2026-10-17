@@ -1,3 +1,5 @@
+import { CAPTURE_REQUEST_SOURCE } from './voiceUtteranceService.ts';
+
 // 라이브 청취 홈: 판매 저장과 "캡처하세요" 화면 캡처를 시각으로 짝짓는다.
 // 판매 저장 시각과 캡처 시각이 앞뒤 10초 안이면 그 캡처가 판매의 상품 이미지1이 된다.
 // 10초 안에 짝이 없으면 판매는 이미지 없이 저장된다.
@@ -24,9 +26,8 @@ export interface PairableSale {
   captureImageUrls?: string[];
 }
 
-// "캡처하세요", "캡처해주세요", "캡처요", "화면 캡처" 같은 캡처 지시. "캡처할까요?", "캡처하지 마세요"는 제외한다.
-const CAPTURE_INSTRUCTION_PATTERN =
-  /캡[처쳐]\s*(?:하세요|해\s*주세요|해\s*줘요|요|부탁(?:드려요|해요)|해\s*줘|해요|할게요|합니다)(?![가-힣]*\?)|화면\s*캡[처쳐]/u;
+// "캡처하세요", "캡처해주세요", "캡처해 주시고요", "캡처요", "화면 캡처" 같은 캡처 지시. "캡처할까요?", "캡처하지 마세요"는 제외한다.
+const CAPTURE_INSTRUCTION_PATTERN = new RegExp(`${CAPTURE_REQUEST_SOURCE}(?![가-힣]*\\?)|화면\\s*캡[처쳐]`, 'u');
 
 export function hasCaptureInstructionText(text: string): boolean {
   return CAPTURE_INSTRUCTION_PATTERN.test(text) && !/캡[처쳐]\s*하지\s*마/u.test(text);
