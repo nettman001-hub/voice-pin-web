@@ -704,6 +704,7 @@ test('SalesProvider receives other-tab changes without losing either offline ope
       '../services/commentStreamService': {}, '../services/aiSettingsApi': {},
       '../services/salesSyncController': { SalesSyncController },
       '../services/workspaceReadSync': workspaceReadSync,
+      '../services/salesExtractor': salesExtractor,
     }, { window });
     return { render: () => hooks.render(SalesProvider) };
   };

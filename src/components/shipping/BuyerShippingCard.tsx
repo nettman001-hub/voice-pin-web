@@ -21,6 +21,7 @@ import { ShippingConfig, BuyerShippingOverride, CalculatedShipping } from '../..
 import { shippingService } from '../../services/shippingService';
 import { customerKeepingService } from '../../services/customerKeepingService';
 import { BuyerKeepingSummary, CustomerKeepingRecord } from '../../types/keeping';
+import { calculateBillableAmount, isBillableSale } from '../../services/billableSales';
 
 interface BuyerShippingCardProps {
   buyerNickname: string;
@@ -75,11 +76,7 @@ export const BuyerShippingCard: React.FC<BuyerShippingCardProps> = ({
   }, [buyerNickname, sessionId, workspaceId]);
 
   // 현재 회차 상품 순수 합계
-  const currentProductAmount = useMemo(() => {
-    return currentSales
-      .filter((s) => s.status !== '취소' && s.status !== '보류' && s.recordState !== 'CANCELLED')
-      .reduce((sum, s) => sum + (s.amount || 0), 0);
-  }, [currentSales]);
+  const currentProductAmount = useMemo(() => calculateBillableAmount(currentSales), [currentSales]);
 
   // 합산 적용된 상품 총액 (키핑 묶음 시 키핑 금액 포함)
   const effectiveProductAmount = useMemo(() => {
@@ -157,7 +154,7 @@ export const BuyerShippingCard: React.FC<BuyerShippingCardProps> = ({
           buyerNickname,
           sessionId,
           sessionCode,
-          sales: currentSales
+          sales: currentSales.filter(isBillableSale)
         },
         workspaceId
       );

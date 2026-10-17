@@ -1,5 +1,6 @@
 import type { SaleRecord } from '../types/live.ts';
 import { promiseDefaultBuyerKey, type PromiseDefaultRecord } from './promiseDefaultService.ts';
+import { isBillableSale } from './billableSales.ts';
 
 export interface SalesListRevenue {
   totalAmount: number;
@@ -22,8 +23,7 @@ export function calculateSalesListRevenue(
   let confirmedAmount = 0;
   const buyers = new Set<string>();
   for (const sale of sales) {
-    if (sale.status === '보류' || sale.status === '취소' || sale.recordState === 'CANCELLED'
-      || sale.syncStatus === 'PENDING') continue;
+    if (!isBillableSale(sale)) continue;
     const amount = Number(sale.amount) || 0;
     totalAmount += amount;
     if (sale.buyerNickname.trim()) buyers.add(sale.buyerNickname.trim());

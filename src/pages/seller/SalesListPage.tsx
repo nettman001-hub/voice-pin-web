@@ -41,6 +41,7 @@ import { formatSessionDisplay } from '../../utils/sessionFormatter';
 import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 import { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults } from '../../services/promiseDefaultService';
 import { calculateSalesListRevenue } from '../../services/salesListRevenue';
+import { isBillableSale } from '../../services/billableSales';
 
 const getBankBadgeStyle = (bank?: string | null): string => {
   if (!bank) return 'bg-slate-100 text-slate-700 border-slate-200';
@@ -512,7 +513,7 @@ export const SalesListPage: React.FC = () => {
       }
 
       const group = map[key];
-      if (sale.status !== '보류' && sale.status !== '취소' && sale.syncStatus !== 'PENDING') {
+      if (isBillableSale(sale)) {
         group.totalAmount += sale.amount || 0;
       }
       group.orderCount += 1;
@@ -812,6 +813,8 @@ export const SalesListPage: React.FC = () => {
             ) : (
               buyerGroupedList.map((buyer) => {
                 const isExpanded = expandedBuyers.includes(buyer.groupKey);
+                const billableRecords = buyer.records.filter(isBillableSale);
+                const excludedOrderCount = buyer.records.length - billableRecords.length;
                 const buyerSaleIds = buyer.records.map((record) => record.id);
                 const promiseDefault = sessionFilter === 'ALL' ? undefined
                   : getPromiseDefault(promiseDefaults, buyer.groupKey, sessionFilter);
@@ -890,6 +893,10 @@ export const SalesListPage: React.FC = () => {
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="font-bold text-base text-slate-900">{buyer.buyerNickname}</span>
+                            {buyer.records.some((record) => record.evidenceSnapshot?.buyerResolution
+                              && record.evidenceSnapshot.buyerResolution.status !== 'MATCHED') && (
+                              <span className="text-[10px] rounded bg-amber-100 px-2 py-0.5 font-bold text-amber-800">판매 확정 · 구매자 연결 확인</span>
+                            )}
                             {(() => {
                               const keepingSummary = customerKeepingService.getBuyerSummary(
                                 buyer.buyerNickname,
@@ -1021,7 +1028,7 @@ export const SalesListPage: React.FC = () => {
                         >
                           <span className="text-[10px] text-slate-500">총 구매 합계</span>
                           {(() => {
-                            const multi = formatMultiSaleAmount(buyer.records.map((r) => r.amount));
+                            const multi = formatMultiSaleAmount(billableRecords.map((r) => r.amount));
                             const shippingCalc = shippingService.calculateShippingFee(buyer.totalAmount, shippingConfig);
                             const totalWithShipping = buyer.totalAmount + shippingCalc.fee;
 
@@ -1051,6 +1058,14 @@ export const SalesListPage: React.FC = () => {
                               </div>
                             );
                           })()}
+                          {excludedOrderCount > 0 && (
+                            <span
+                              className="block text-[10px] text-slate-500 mt-0.5"
+                              title="취소·보류·저장 대기 주문은 합계에서 제외합니다."
+                            >
+                              합계 제외 {excludedOrderCount}건
+                            </span>
+                          )}
                         </div>
 
                         {/* 구매자 판매 내역 전체 삭제 버튼 */}
@@ -1224,7 +1239,7 @@ export const SalesListPage: React.FC = () => {
             ) : (
               sortedIndividualSales.map((sale) => {
                 const buyerSales = getSalePurchaseHistory(sale, filteredSales);
-                const multi = formatMultiSaleAmount(buyerSales.map((s) => s.amount));
+                const multi = formatMultiSaleAmount(buyerSales.filter(isBillableSale).map((s) => s.amount));
 
                 const saleImage = sale.productImageUrl || sale.captureImageUrls?.[0];
 
@@ -1426,7 +1441,7 @@ export const SalesListPage: React.FC = () => {
                               <div className="text-lg font-black text-brand-600">
                                 {sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'}
                               </div>
-                              {sale.amount > 0 && (
+                              {isBillableSale(sale) && sale.amount > 0 && (
                                 <span className="text-xs font-bold text-slate-600 mt-0.5">
                                   택비포함 : {(sale.amount + shippingService.calculateShippingFee(sale.amount, shippingConfig).fee).toLocaleString()}원
                                 </span>

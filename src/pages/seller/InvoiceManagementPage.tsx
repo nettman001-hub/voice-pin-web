@@ -123,6 +123,7 @@ export const InvoiceManagementPage: React.FC = () => {
 
   const selectableSales = useMemo(
     () => sales.filter((sale) => {
+      if (sale.evidenceSnapshot?.buyerResolution && sale.evidenceSnapshot.buyerResolution.status !== 'MATCHED') return false;
       if (sale.status === '보류' || sale.status === '취소' || sale.syncStatus === 'PENDING' || isPaid([sale.id])) return false;
       if (sessionFilter !== 'ALL' && sale.sessionId !== sessionFilter) return false;
       return true;

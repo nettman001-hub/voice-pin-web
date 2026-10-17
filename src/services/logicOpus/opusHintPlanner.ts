@@ -1,5 +1,6 @@
 import { LOGIC_OPUS_LIMITS } from "../../types/logicOpus.ts";
 import { plainForm } from "./opusNicknameCandidates.ts";
+import { LIVE_HINT_PURCHASER_LIMIT } from "../liveSttHints.ts";
 
 /**
  * STT 힌트 단어 구성과 세션 교체 간격 조절.
@@ -46,7 +47,10 @@ export function buildHintTerms(input: HintTermInput): HintTermResult {
 
   const ordered: string[] = [];
   const added = new Set<string>();
-  for (const n of [...input.intentNicknames, ...input.recentNicknames]) {
+  const intents = input.intentNicknames.filter((name, index, names) => (
+    name && names.findIndex((other) => plainForm(other) === plainForm(name)) === index
+  )).slice(0, LIVE_HINT_PURCHASER_LIMIT);
+  for (const n of [...intents, ...input.recentNicknames]) {
     const key = plainForm(n) || n;
     if (!n || added.has(key)) continue;
     added.add(key);

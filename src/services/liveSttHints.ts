@@ -6,11 +6,12 @@ import {
 
 /**
  * 라이브 청취 홈 STT 닉네임 힌트.
- * - 구매의사 댓글 작성자를 최신 순으로 먼저, 남는 자리는 최근 댓글 작성자로 채워 최대 50명
+ * - 최신 구매의사자 최대 30명을 먼저, 남는 자리는 최근 댓글 작성자로 채워 최대 50명
  * - 영어가 들어간 닉네임은 원문과 함께 한국어 발음(단어식, 짧으면 알파벳 읽기)도 보낸다
  */
 
 export const LIVE_HINT_NICKNAME_LIMIT = 50;
+export const LIVE_HINT_PURCHASER_LIMIT = 30;
 export const LIVE_HINT_MIN_INTERVAL_MS = 5_000;
 /** 평상시(구매의사 없이) 새 닉네임을 확인하는 주기 */
 export const LIVE_HINT_ROUTINE_CHECK_MS = 10_000;
@@ -50,7 +51,8 @@ export function getPurchaserNicknames(requests: HintPurchaseRequest[], sessionId
     const previous = latest.get(key);
     if (!previous || time > previous.at) latest.set(key, { nickname, at: time });
   }
-  return [...latest.values()].sort((a, b) => b.at - a.at).map((item) => item.nickname);
+  return [...latest.values()].sort((a, b) => b.at - a.at)
+    .slice(0, LIVE_HINT_PURCHASER_LIMIT).map((item) => item.nickname);
 }
 
 /** 구매의사자 먼저, 그다음 최근 댓글 작성자. 같은 사람은 한 번만. */
@@ -61,7 +63,10 @@ export function selectHintNicknames(
 ): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
-  for (const nickname of [...purchaserNicknames, ...recentCommenterNicknames]) {
+  const purchasers = purchaserNicknames.filter((nickname, index, names) => (
+    hintNicknameKey(nickname || '') && names.findIndex((name) => hintNicknameKey(name || '') === hintNicknameKey(nickname)) === index
+  )).slice(0, LIVE_HINT_PURCHASER_LIMIT);
+  for (const nickname of [...purchasers, ...recentCommenterNicknames]) {
     if (result.length >= limit) break;
     const key = hintNicknameKey(nickname || '');
     if (!key || seen.has(key)) continue;

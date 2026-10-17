@@ -146,6 +146,23 @@ test('unchanged and reconstructed commerce data produce zero Supabase requests',
   assert.deepEqual(calls, []);
 });
 
+test('a resolved four-point buyer persists its canonical comment and resolution snapshot without restoring an old placeholder', async () => {
+  const { client, calls } = createClient();
+  const resolution = { saleConfirmed: true, status: 'MATCHED', spokenNickname: '꼬순이',
+    candidates: [{ nickname: '꽃순이', buyerId: 'flower', accountKey: 'flower', commentId: 'comment', score: 88, nameScore: 88 }] };
+  await remoteService(client).saveSale('workspace-1', {
+    id: 'sale', sessionId: 'broadcast', status: '확정', source: 'WEB_VOICE', revision: 2,
+    buyerNickname: '꽃순이', buyerId: 'flower', purchaseRequestId: 'broadcast:comment', sourceCommentIds: ['comment'],
+    amount: 10000, rawTranscript: '꼬순이님 1.0 드릴게요. 캡처하세요.', recognizedAt: timestamp,
+    evidenceSnapshot: { buyerResolution: resolution },
+  });
+  const row = calls[0].rows;
+  assert.equal(row.buyer_nickname, '꽃순이');
+  assert.equal(row.buyer_id, 'flower');
+  assert.equal(row.evidence_snapshot.buyerResolution.spokenNickname, '꼬순이');
+  assert.deepEqual(row.source_comment_ids, ['comment']);
+});
+
 test('editing one shipment saves exactly that row and leaves every other table alone', async () => {
   const previous = populatedState();
   const next = { ...previous, shipments: previous.shipments.map((row) => row.id === 'shipment-2'

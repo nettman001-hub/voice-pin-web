@@ -635,7 +635,8 @@ export const remoteWorkspaceService = {
     // canonical buyer/comment/product IDs. Later print/correction updates must
     // not overwrite those IDs with the optimistic client's empty placeholders.
     let canonicalSale = sale;
-    if (sale.source === 'WEB_VOICE' && sale.purchaseRequestId && (sale.revision || 1) > 1) {
+    if (sale.source === 'WEB_VOICE' && sale.purchaseRequestId && (sale.revision || 1) > 1
+      && !sale.evidenceSnapshot?.buyerResolution?.saleConfirmed) {
       const { data: confirmed, error: readError } = await ensureEnabled().from('sales').select(
         'status, buyer_id, product_id, source_comment_ids, buyer_nickname, product_code_snapshot, product_name_snapshot')
         .eq('workspace_id', workspaceId).eq('id', sale.id).maybeSingle();

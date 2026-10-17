@@ -42,6 +42,23 @@ test('영어 닉네임은 원문과 한국어 발음을 함께 보낸다', () =>
   assert.deepEqual(buildNicknameHintTerms(['👑sweet', '러블리']), ['sweet', '스윗', '러블리']);
 });
 
+test('latest thirty distinct purchasers get priority, then recent commenters fill the remaining twenty', () => {
+  const requests = Array.from({ length: 42 }, (_, i) => ({ sessionId: 's1', nickname: `구매자${i}`,
+    capturedAt: new Date(Date.UTC(2026, 9, 18, 0, 0, i)).toISOString() }));
+  requests.push({ ...requests[41], nickname: '다른회차', sessionId: 's2' });
+  requests.push({ ...requests[41], nickname: '철회', withdrawn: true });
+  const purchasers = getPurchaserNicknames(requests, 's1');
+  assert.equal(purchasers.length, 30);
+  assert.equal(purchasers[0], '구매자41');
+  assert.equal(purchasers[29], '구매자12');
+  const commenters = Array.from({ length: 25 }, (_, i) => `댓글${i}`);
+  const selected = selectHintNicknames([...purchasers, '넘친구매자'], [purchasers[0], ...commenters]);
+  assert.equal(selected.length, 50);
+  assert.deepEqual(selected.slice(0, 30), purchasers);
+  assert.deepEqual(selected.slice(30), commenters.slice(0, 20));
+  assert.equal(selected.includes('넘친구매자'), false);
+});
+
 /* ------------------------------------------------------------------ */
 /* Soniox 세션 교체 중 멘트 유실 방지                                   */
 /* ------------------------------------------------------------------ */

@@ -1,4 +1,5 @@
 import { spellEnglishToKorean, transliterateEnglishToKorean } from './nicknameMatcher';
+import { LIVE_HINT_PURCHASER_LIMIT } from './liveSttHints';
 
 export const SELLER_LOGIC_NICKNAME_LIMIT = 50;
 export interface SellerLogicNicknameSource { nickname: string; capturedAt?: string; receivedAt?: string }
@@ -10,7 +11,12 @@ export function recentSellerLogicNicknames(comments: SellerLogicNicknameSource[]
     const timeB = Date.parse(b.comment.capturedAt || b.comment.receivedAt || '') || 0;
     return timeB - timeA || b.index - a.index;
   }).map(({ comment }) => comment.nickname);
-  return [...new Set([...priority, ...recent].filter((name) => typeof name === 'string' && name.trim()))]
+  const purchasers = [...new Set(priority.filter((name) => typeof name === 'string' && name.trim()))]
+    .sort((a, b) => {
+      const left = recent.indexOf(a), right = recent.indexOf(b);
+      return (left < 0 ? Infinity : left) - (right < 0 ? Infinity : right);
+    }).slice(0, LIVE_HINT_PURCHASER_LIMIT);
+  return [...new Set([...purchasers, ...recent].filter((name) => typeof name === 'string' && name.trim()))]
     .slice(0, SELLER_LOGIC_NICKNAME_LIMIT);
 }
 

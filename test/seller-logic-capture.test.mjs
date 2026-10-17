@@ -17,12 +17,13 @@ function load(name, dependencies = {}, globals = {}) {
 }
 
 const nicknameMatcher = load('nicknameMatcher');
-const vocabulary = load('sellerLogicVocabulary', { './nicknameMatcher': nicknameMatcher });
 const liveSttHints = load('liveSttHints', { './nicknameMatcher.ts': nicknameMatcher, './nicknameMatcher': nicknameMatcher });
+const vocabulary = load('sellerLogicVocabulary', { './nicknameMatcher': nicknameMatcher, './liveSttHints': liveSttHints });
 const sttVocab = load('sttVocabularyService');
 const opusHintPlanner = load('logicOpus/opusHintPlanner', {
   '../../types/logicOpus.ts': { LOGIC_OPUS_LIMITS: { maxHintTerms: 200 } },
   './opusNicknameCandidates.ts': { plainForm: (s) => s },
+  '../liveSttHints.ts': liveSttHints,
 });
 
 test('admin Soniox vocabulary keeps 50 distinct platform names and their Latin Korean readings', () => {
@@ -43,6 +44,17 @@ test('admin Soniox vocabulary keeps 50 distinct platform names and their Latin K
   assert.equal(manyEnglish.length, 100);
   assert.ok(manyEnglish.includes('user49'));
   assert.ok(!manyEnglish.includes('user50'));
+});
+
+test('admin Soniox prioritizes only the latest thirty purchasers and fills remaining slots from recent comments', () => {
+  const old = Array.from({ length: 40 }, (_, i) => ({ nickname: `구매자${i}`, capturedAt: new Date(1000 + i * 1000).toISOString() }));
+  const recent = Array.from({ length: 25 }, (_, i) => ({ nickname: `댓글${i}`, capturedAt: new Date(100_000 + i * 1000).toISOString() }));
+  const names = vocabulary.recentSellerLogicNicknames([...old, ...recent], old.map((entry) => entry.nickname));
+  assert.equal(names.length, 50);
+  assert.equal(names[0], '구매자39');
+  assert.equal(names[29], '구매자10');
+  assert.equal(names[30], '댓글24');
+  assert.ok(!names.includes('구매자9'));
 });
 
 async function fixture({ selection, created } = {}) {

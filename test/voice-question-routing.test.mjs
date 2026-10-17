@@ -11,6 +11,7 @@ import { splitTranscriptClauses, isQuestionUtterance } from '../src/services/voi
 import {replaySalesWorkflow,DEFAULT_WORKFLOW_PROFILE} from '../src/services/salesWorkflowEngine.ts';
 import { hasCaptureInstructionText } from '../src/services/saleCapturePairing.ts';
 import { advanceVoiceSaleTransaction } from '../src/services/voiceSaleTransaction.ts';
+import { collectFourPointWorkflowSales } from '../src/services/fourPointWorkflow.ts';
 
 // Execute the real live callbacks with controlled storage/audio/cloud boundaries.
 const source = fs.readFileSync(new URL('../src/context/LiveContext.tsx', import.meta.url), 'utf8');
@@ -48,7 +49,7 @@ function fixture({ sales = [], renderSales = sales, rules = [], pendingCorrectio
   const globals = {
     ...corrections, extractSaleFromTranscript, parseKoreanAmount, parseVoiceCommand, splitTranscriptClauses, isQuestionUtterance,
     crypto: { randomUUID }, console, hasCaptureInstructionText, advanceVoiceSaleTransaction,
-    appliedWorkflowRef: {current:workflow},replaySalesWorkflow,
+    appliedWorkflowRef: {current:workflow},replaySalesWorkflow,collectFourPointWorkflowSales,
     workflowQueueRef:{current:Promise.resolve()},workflowReplayRef:{current:null},workflowObservationAtRef:{current:0},
     workflowFingerprintsRef:{current:new Map()},workflowDecisionsRef:{current:new Set()},
     currentWorkflowSalesRef:{current:sales},transcriptWorkspaceIdRef:{current:'workspace'},
@@ -139,6 +140,19 @@ test('shadow workflow retains legacy sales processing and never writes a new-pro
   ctx.send('햇살언니 챙겨드릴게요 0.5',{provider:'DEEPGRAM'});await ctx.flushWorkflow();
   assert.equal(ctx.state.saves.length,1);assert.equal(ctx.state.sales.length,0);assert.deepEqual(ctx.state.cloud,['observe']);
 });
+test('active seller workflow routes four-point speech through canonical buyer resolution once', async () => {
+  const ctx = fixture({ workflow: { id: 'profile', version: 1, mode: 'ACTIVE', profile: DEFAULT_WORKFLOW_PROFILE } });
+  ctx.send('꼬순이님 1.0 드릴게요. 캡처하세요.', { provider: 'DEEPGRAM' });
+  await ctx.flushWorkflow();
+  assert.equal(ctx.state.saves.length, 1);
+  assert.equal(ctx.state.saves[0][0].isFourPointConfirmed, true);
+  assert.equal(ctx.state.saves[0][5].recognizedAt.length > 0, true);
+  assert.equal(ctx.state.sales.length, 0, 'the ordinary workflow must not duplicate the four-point transaction');
+  ctx.send('원단도 부드럽습니다.', { provider: 'DEEPGRAM' });
+  await ctx.flushWorkflow();
+  assert.equal(ctx.state.saves.length, 1);
+});
+
 test('ordinary questions remain logs without correction alerts, beeps, edits, capture or AI calls', () => {
   for (const text of ['이거 자켓 어때, 언니들?', '이거 자켓 어때, 언니들.', '가격이 1.2인가요?', '햇살언니 1.5에 드릴까요?']) {
     const ctx = fixture({ sales: [sale()] });

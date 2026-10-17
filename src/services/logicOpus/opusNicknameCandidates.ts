@@ -9,58 +9,8 @@ import { transliterateEnglishToKorean } from "../nicknameMatcher.ts";
  * 이 점수는 AI에게 주는 참고자료일 뿐, 구매자 결정은 AI가 한다.
  */
 
-const CHO = ["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
-const JUNG = ["ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅘ","ㅙ","ㅚ","ㅛ","ㅜ","ㅝ","ㅞ","ㅟ","ㅠ","ㅡ","ㅢ","ㅣ"];
-const JONG = ["","ㄱ","ㄲ","ㄳ","ㄴ","ㄵ","ㄶ","ㄷ","ㄹ","ㄺ","ㄻ","ㄼ","ㄽ","ㄾ","ㄿ","ㅀ","ㅁ","ㅂ","ㅄ","ㅅ","ㅆ","ㅇ","ㅈ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
-
-export function toJamo(text: string): string[] {
-  const out: string[] = [];
-  for (const ch of text) {
-    const code = ch.charCodeAt(0) - 0xac00;
-    if (code >= 0 && code < 11172) {
-      out.push(CHO[Math.floor(code / 588)], JUNG[Math.floor((code % 588) / 28)]);
-      const jong = JONG[code % 28];
-      if (jong) out.push(jong);
-    } else {
-      out.push(ch);
-    }
-  }
-  return out;
-}
-
-/** 비슷하게 들리는 자모 묶음 (STT가 자주 바꿔 적는 소리) */
-const SOUND_CLASSES = [
-  "ㅏㅑㅘ", "ㅓㅕㅝ", "ㅗㅛ", "ㅜㅠ", "ㅐㅔㅒㅖㅙㅚㅞ", "ㅡㅢㅣㅟ",
-  "ㄱㄲㅋ", "ㄷㄸㅌ", "ㅂㅃㅍ", "ㅅㅆ", "ㅈㅉㅊ", "ㅇㅎ", "ㄴㅁ", "ㄴㄹ",
-];
-const WEAK = new Set(["ㅇ", "ㅎ"]);
-
-function substitutionCost(a: string, b: string): number {
-  if (a === b) return 0;
-  return SOUND_CLASSES.some((c) => c.includes(a) && c.includes(b)) ? 0.3 : 1;
-}
-
-function indelCost(ch: string): number {
-  return WEAK.has(ch) ? 0.5 : 1;
-}
-
-/** 소리 유사도를 반영한 자모 편집거리 */
-export function soundDistance(a: string[], b: string[]): number {
-  let prev = [0];
-  for (let j = 1; j <= b.length; j++) prev[j] = prev[j - 1] + indelCost(b[j - 1]);
-  for (let i = 1; i <= a.length; i++) {
-    const cur = [prev[0] + indelCost(a[i - 1])];
-    for (let j = 1; j <= b.length; j++) {
-      cur[j] = Math.min(
-        prev[j] + indelCost(a[i - 1]),
-        cur[j - 1] + indelCost(b[j - 1]),
-        prev[j - 1] + substitutionCost(a[i - 1], b[j - 1]),
-      );
-    }
-    prev = cur;
-  }
-  return prev[b.length];
-}
+export { toJamo, soundDistance } from '../hangulSound.ts';
+import { toJamo, soundDistance } from '../hangulSound.ts';
 
 /** 이모지·기호·공백 제거, 소문자화 */
 export function plainForm(text: string): string {

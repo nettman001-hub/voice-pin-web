@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import ts from "typescript";
 import vm from "node:vm";
+import { checkFourPointSaleCriteria } from '../src/services/salesExtractor.ts';
 const source = fs.readFileSync(
   new URL("../src/context/SalesContext.tsx", import.meta.url),
   "utf8",
@@ -48,6 +49,7 @@ function fixture(previous = pending) {
   const state = { saved: [], errors: [] }, module = { exports: null };
   vm.runInNewContext(compiled, {
     module,
+    checkFourPointSaleCriteria,
     salesRef: { current: [previous] },
     setSyncError: (e) => state.errors.push(e),
     replaceSale: (s) => { state.saved.push(s); return s; },
@@ -144,4 +146,21 @@ test('voice continuation does not permit a different purchase, product, session,
   const final = fixture({ ...fourPointContinuation, syncStatus: 'PENDING' });
   final.update({ ...fourPointContinuation, amount: 20000 }, { voiceAllocationContinuation: true });
   assert.equal(final.saved.length, 0);
+});
+
+test('an uploading confirmed sale can link its real commenter while preserving the sale evidence', () => {
+  const previous = { ...voicePending, status: '확정', amount: 15000,
+    evidenceSnapshot: { buyerResolution: { saleConfirmed: true, status: 'NO_MATCH', candidates: [] } } };
+  const updated = { ...previous, buyerNickname: '꽃순이', sourceCommentIds: ['real-comment'],
+    evidenceSnapshot: { buyerResolution: { saleConfirmed: true, status: 'MATCHED',
+      candidates: [{ nickname: '꽃순이', commentId: 'real-comment' }] } } };
+  const ctx = fixture(previous);
+  const saved = ctx.update(updated);
+  assert.equal(ctx.errors.length, 0);
+  assert.equal(saved.id, previous.id);
+  assert.equal(saved.buyerNickname, '꽃순이');
+  assert.equal(saved.printStatus, 'QUEUED');
+  const bad = fixture(previous);
+  bad.update({ ...updated, amount: 20000 });
+  assert.equal(bad.saved.length, 0, 'buyer linking cannot change the confirmed amount');
 });

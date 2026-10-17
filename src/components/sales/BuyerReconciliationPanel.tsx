@@ -30,6 +30,8 @@ import { formatSessionDisplay, SessionInfoLike } from '../../utils/sessionFormat
 import { cleanMessageBody } from '../../utils/textCleaner';
 import { ImageViewerModal } from '../common/ImageViewerModal';
 import { BuyerShippingCard } from '../shipping/BuyerShippingCard';
+import { calculateBillableAmount } from '../../services/billableSales';
+import { ConfirmedBuyerCard } from './ConfirmedBuyerCard';
 
 interface BuyerReconciliationPanelProps {
   buyerNickname: string;
@@ -545,7 +547,7 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
 
   const saleIds = useMemo(() => records.map((record) => record.id), [records]);
   const claim = getClaimForSales(saleIds);
-  const totalAmount = records.reduce((sum, record) => sum + (record.amount || 0), 0);
+  const totalAmount = calculateBillableAmount(records);
   const productNames = Array.from(new Set(records.map((record) => record.productName).filter(Boolean)));
   const primaryProductName = productNames.join(', ') || records[0]?.productName || '상품';
 
@@ -736,6 +738,9 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
 
   return (
     <div className="space-y-4">
+      {records.filter((record) => record.evidenceSnapshot?.buyerResolution).map((record) => (
+        <ConfirmedBuyerCard key={record.id} sale={record} />
+      ))}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3 className="text-sm font-black text-slate-900">판매·구매정보 대조</h3>

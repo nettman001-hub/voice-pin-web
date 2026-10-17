@@ -7,6 +7,7 @@ import React from 'react';
 import { formatAmountAsDecimal, formatMultiSaleAmount } from '../src/services/salesExtractor.ts';
 import { getSalePurchaseHistory } from '../src/services/saleRowHistory.ts';
 import { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults } from '../src/services/promiseDefaultService.ts';
+import * as billableSales from '../src/services/billableSales.ts';
 import { calculateSalesListRevenue } from '../src/services/salesListRevenue.ts';
 
 const sale = (id, amount, second, extra = {}) => ({
@@ -49,6 +50,7 @@ function pageFixture() {
     '../../services/saleRowHistory': { getSalePurchaseHistory },
     '../../services/promiseDefaultService': { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults },
     '../../services/salesListRevenue': { calculateSalesListRevenue },
+    '../../services/billableSales': billableSales,
     '../../utils/textCleaner': { cleanMessageBody: (value) => value },
     '../../utils/sessionFormatter': { formatSessionDisplay: (value) => value },
     '../../components/sales/BuyerReconciliationPanel': { BuyerReconciliationPanel: 'BuyerReconciliationPanel', BuyerStatusBadges: 'BuyerStatusBadges' },

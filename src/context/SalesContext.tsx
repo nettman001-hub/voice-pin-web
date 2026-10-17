@@ -8,6 +8,7 @@ import { commentStreamService } from '../services/commentStreamService';
 import type { BatchConfirmResult, SaleHistoryRecord } from '../types/pendingSale';
 import { aiSettingsApi } from '../services/aiSettingsApi';
 import { SalesSyncController } from '../services/salesSyncController';
+import { checkFourPointSaleCriteria } from '../services/salesExtractor';
 import type { PromiseDefaultRecord } from '../services/promiseDefaultService';
 import { createWorkspaceReadSync, workspaceReadsAvailable, type WorkspaceReadSync } from '../services/workspaceReadSync';
 
@@ -302,6 +303,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     && sale.amount > 0
     && Boolean(sale.buyerNickname.trim())
     && sale.buyerNickname !== '미확인(보류)'
+    && (!sale.evidenceSnapshot?.buyerResolution || sale.evidenceSnapshot.buyerResolution.status === 'MATCHED')
   );
 
   // 판매 상세에서 판매자가 바꾼 정보는 전표에도 다시 확인할 수 있도록 재출력한다.
@@ -416,6 +418,12 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         && previous.productName === updated.productName;
       const metadataOnly = sameEvidence && previous.buyerNickname === updated.buyerNickname
         && previous.purchaseRequestId === updated.purchaseRequestId && previous.status === updated.status;
+      const confirmedBuyerLinked = sameEvidence && previous.status === '확정' && updated.status === '확정'
+        && previous.evidenceSnapshot?.buyerResolution?.saleConfirmed === true
+        && previous.evidenceSnapshot.buyerResolution.status !== 'MATCHED'
+        && updated.evidenceSnapshot?.buyerResolution?.status === 'MATCHED'
+        && updated.evidenceSnapshot.buyerResolution.candidates[0]?.nickname === updated.buyerNickname
+        && updated.sourceCommentIds?.includes(updated.evidenceSnapshot.buyerResolution.candidates[0]?.commentId);
       const lateCommentLinked = sameEvidence && previous.status === '보류'
         && updated.status === '자동저장' && Boolean(updated.purchaseRequestId);
       const workflowContinuation = previous.status === '보류' && Boolean(previous.workflowEvidence)
@@ -432,11 +440,13 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         && previous.sessionId === updated.sessionId
         && previous.productId === updated.productId && previous.productCode === updated.productCode
         && previous.productName === updated.productName
-        && Boolean(updated.purchaseRequestId)
+        && (Boolean(updated.purchaseRequestId) || (updated.evidenceSnapshot?.buyerResolution?.saleConfirmed === true
+          && checkFourPointSaleCriteria(updated.rawTranscript).isFourPointSale))
         && (!previous.purchaseRequestId || previous.purchaseRequestId === updated.purchaseRequestId)
-        && Boolean(previous.sourceCommentIds?.some((id) => updated.sourceCommentIds?.includes(id)))
+        && (Boolean(previous.sourceCommentIds?.some((id) => updated.sourceCommentIds?.includes(id)))
+          || Boolean(previous.workflowEvidence?.transcripts.length && previous.workflowEvidence.transcripts.every((row) => updated.rawTranscript.includes(row.text))))
         && (updated.status === '자동저장' || updated.status === '확정') && updated.amount > 0;
-      if (!metadataOnly && !lateCommentLinked && !workflowContinuation && !voiceAllocationContinuation
+      if (!metadataOnly && !confirmedBuyerLinked && !lateCommentLinked && !workflowContinuation && !voiceAllocationContinuation
         && !voiceTransactionContinuation && !voiceCommentIdentity) {
         setSyncError('음성 판매의 서버 저장 확인 전에는 구매자·가격을 수정할 수 없습니다.');
         return;
@@ -502,6 +512,9 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const validationErrors: string[] = [];
       if (!hasValidNickname) validationErrors.push('구매자 닉네임 미확인');
+      if (sale.evidenceSnapshot?.buyerResolution && sale.evidenceSnapshot.buyerResolution.status !== 'MATCHED') {
+        validationErrors.push('판매 확정 · 댓글 구매자 연결 필요');
+      }
       if (!hasValidAmount) validationErrors.push('판매 금액 0원 또는 미입력');
       if (!hasProduct) validationErrors.push('연결 상품 정보 누락');
       if (sale.syncStatus === 'PENDING') validationErrors.push('서버 저장 확인 대기');

@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { createWorkspaceReadSync } from '../src/services/workspaceReadSync.ts';
 import * as commerceChanges from '../src/services/commerceChanges.ts';
+import * as salesExtractor from '../src/services/salesExtractor.ts';
 
 const tick = () => new Promise(setImmediate);
 const empty = () => ({ messages: [], claims: [], invoices: [], payments: [], shipments: [], verifiedSaleIds: [] });
@@ -319,6 +320,7 @@ function salesProviderFixture({ autoSubscribe = false, deferredReads = false } =
     '../services/csvExporter': {}, './AuthContext': { useAuth: () => ({ workspaceId: 'workspace-1', user: { id: 'user-1' }, isRemoteAuth: true }) },
     '../services/remoteWorkspaceService': { remoteWorkspaceService }, '../services/commentStreamService': {}, '../services/aiSettingsApi': {},
     '../services/salesSyncController': { SalesSyncController }, '../services/workspaceReadSync': syncModule,
+    '../services/salesExtractor': salesExtractor,
   }, { window, document });
   SalesProvider({ children: null });
   const cleanup = effects.map((effect) => effect());

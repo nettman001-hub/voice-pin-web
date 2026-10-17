@@ -12,6 +12,7 @@ import { getVoiceReviewRequests, shouldReviewVoiceSale, buildVoiceReviewRequest,
   isVoiceReviewReady } from '../src/services/voicePendingReviewService.ts';
 import { generateSequentialProductName } from '../src/utils/productNaming.ts';
 import { findCaptureForSale } from '../src/services/saleCapturePairing.ts';
+import { resolveConfirmedBuyer, applyConfirmedBuyer, BUYER_LINK_PENDING, mergeBuyerComments } from '../src/services/confirmedBuyerResolver.ts';
 
 // Exercise the actual persistence callback. Only storage, UI, and capture
 // boundaries are mocked; sale extraction and comment matching remain real.
@@ -45,6 +46,7 @@ function fixture(comments, activeProduct = undefined, captures = []) {
   const captureRequests = [];
   const globals = {
     extractSaleFromTranscript, extractSpeechPrice, getPurchaseRequests, matchPurchaseRequest, matchCommentAuthor, areSameCommentAuthor,
+    resolveConfirmedBuyer, applyConfirmedBuyer, BUYER_LINK_PENDING, mergeBuyerComments, confirmedBuyerAliases: { get: () => [] },
     buildPendingReasons, buildEvidenceSnapshot, getVoiceReviewRequests, generateSequentialProductName, findCaptureForSale,
     workspaceId: 'workspace', sales: [], currentWorkflowSalesRef: { current: stored },
     productSalesRef: { current: { activeSession: { id: 'broadcast', displayCode: '20261001-1' },
@@ -75,10 +77,10 @@ function fixture(comments, activeProduct = undefined, captures = []) {
           evidenceText: advanced.emission.evidenceText, continuation: advanced.emission.continuation,
           precedingTransactionId: advanced.emission.precedingTransactionId,
         });
-    }, save: async (text = speech, capture = false) => {
+    }, save: async (text = speech, capture = false, workflowContinuation) => {
     const extracted = extractSaleFromTranscript(text);
     assert.ok(extracted, 'The seller allocation must reach the live persistence callback');
-    await module.exports.persistVoiceSale(extracted, text, capture, 1);
+    await module.exports.persistVoiceSale(extracted, text, capture, 1, undefined, workflowContinuation);
   } };
 }
 
@@ -118,6 +120,32 @@ test('four-point confirmation consumes the matched purchase comment across repea
   await live.save('러블리님 드릴게요. 가격은 1.5. 캡처하세요.', true);
   assert.equal(live.stored.length, 1);
   assert.equal(live.captureRequests.length, 1);
+});
+
+test('four-point speech resolves the original nickname from a general comment anywhere in the same broadcast', async () => {
+  const buyer = comment('꽃순이', 'flower-comment', 'flower-account', '안녕하세요');
+  buyer.capturedAt = new Date(Date.now() - 60 * 60_000).toISOString();
+  const live = fixture([buyer]);
+  await live.save('꼬순이님 1.0 드릴게요. 캡처하세요.', true);
+  assert.equal(live.stored[0].status, '확정');
+  assert.equal(live.stored[0].buyerNickname, '꽃순이');
+  assert.equal(live.stored[0].buyerId, 'flower-account');
+  assert.equal(live.stored[0].purchaseRequestId, undefined, 'never fabricate a purchase request from a greeting');
+  assert.deepEqual(Array.from(live.stored[0].sourceCommentIds), ['flower-comment']);
+  assert.equal(live.stored[0].evidenceSnapshot.buyerResolution.status, 'MATCHED');
+  assert.equal(live.captureRequests.length, 1);
+});
+
+test('four-point speech retains sale confirmation when buyer identity is ambiguous or no comment has arrived', async () => {
+  for (const comments of [[], [comment('꽃순이', 'one', 'one'), comment('꽃순이', 'two', 'two')]]) {
+    const live = fixture(comments);
+    await live.save('꼬순이님 1.0 드릴게요. 캡처하세요.', true);
+    assert.equal(live.stored[0].status, '확정');
+    assert.equal(live.stored[0].amount, 10000);
+    assert.equal(live.stored[0].buyerNickname, BUYER_LINK_PENDING);
+    assert.equal(live.stored[0].buyerId, undefined);
+    assert.notEqual(live.stored[0].evidenceSnapshot.buyerResolution.status, 'MATCHED');
+  }
 });
 
 for (const syncStatus of ['SYNCED', 'PENDING']) {
@@ -176,10 +204,12 @@ for (const content of ['네', 'ㅇ', '안녕하세요']) {
   });
 }
 
-test('four-point identity ambiguity stays pending instead of assigning a same-name stranger', async () => {
+test('four-point identity ambiguity retains sale confirmation while waiting for the real account', async () => {
   const ctx = fixture([comment('하니', 'a', 'account-a', '네'), comment('하니', 'b', 'account-b', 'ㅇ')]);
   await ctx.save('하니님 드릴게요 1.2. 캡처해주세요.');
-  assert.equal(ctx.stored[0].status, '보류');
+  assert.equal(ctx.stored[0].status, '확정');
+  assert.equal(ctx.stored[0].evidenceSnapshot.buyerResolution.status, 'AMBIGUOUS');
+  assert.equal(ctx.stored[0].buyerNickname, BUYER_LINK_PENDING);
   assert.equal(ctx.stored[0].buyerId, undefined);
   assert.equal(ctx.reserved.size, 0);
 });
@@ -350,9 +380,9 @@ for (const offset of [-300000, -300001, 10000, 10001]) {
     const comments = [{...comment('하니💕', 'timed', 'account', '네'), capturedAt:new Date(start + offset).toISOString()}];
     const ctx = fixture(comments);
     await ctx.fragment('하니님 드릴게요 1.2. 캡처해주세요.', new Date(start).toISOString());
-    const allowed = offset >= -300000 && offset <= 10000;
+    const allowed = offset <= 10000; // Four-point identity searches the entire current broadcast.
     assert.equal(ctx.stored[0].buyerId, allowed ? 'account' : undefined);
-    assert.equal(ctx.stored[0].buyerNickname, allowed ? '하니💕' : '하니');
+    assert.equal(ctx.stored[0].buyerNickname, allowed ? '하니💕' : BUYER_LINK_PENDING);
   });
 }
 

@@ -228,9 +228,10 @@ export class SellerLogicCapture {
 
   /** 구매의사 댓글자 발생 시 즉시/5초 버퍼링 스케줄러 요청 */
   prioritizeNicknames(names: string[]): void {
-    const missing = names.filter((name) => this.seenNicknames.has(name) && !this.active?.nicknames.includes(name));
-    if (!missing.length) return;
-    this.priority = [...new Set([...missing, ...this.priority])].slice(0, 50);
+    const known = names.filter((name) => this.seenNicknames.has(name));
+    if (!known.length) return;
+    this.priority = [...new Set([...known, ...this.priority])].slice(0, 50);
+    if (!findUnsentNicknames(this.desiredNames(), this.active?.nicknames || []).length) return;
     const now = Date.now();
     const wait = this.lastRotationAt + LIVE_HINT_MIN_INTERVAL_MS - now;
     if (!this.pending && wait <= 0 && this.active) {
@@ -375,7 +376,6 @@ export class SellerLogicCapture {
     connection.onPromoted = undefined;
     if (connection.timeout !== null) window.clearTimeout(connection.timeout);
     connection.timeout = null;
-    this.priority = this.priority.filter((name) => !connection.nicknames.includes(name));
     const pCount = this.options?.presetWords?.length || 0;
     const rCount = this.options?.ruleWords?.length || 0;
     if (!this.stopping) {

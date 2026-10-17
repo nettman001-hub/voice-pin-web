@@ -775,6 +775,9 @@ export const LiveHomePage: React.FC = () => {
                                 추정 닉네임
                               </span>
                             )}
+                            {sale.evidenceSnapshot?.buyerResolution && sale.evidenceSnapshot.buyerResolution.status !== 'MATCHED' && (
+                              <span className="text-[9px] rounded border border-amber-200 bg-amber-100 px-1.5 py-0.5 text-amber-800">판매 확정 · 구매자 연결 확인</span>
+                            )}
                             {multiAmount.isMulti && (
                               <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200">
                                 ★ 다건 {buyerSessionSales.length}건

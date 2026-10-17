@@ -45,6 +45,9 @@ export const SalesDetailPage: React.FC = () => {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
+  useEffect(() => {
+    setBuyerNickname(sale?.buyerNickname || '');
+  }, [sale?.buyerNickname]);
   const [viewerModal, setViewerModal] = useState<{
     isOpen: boolean;
     images: string[];
@@ -108,6 +111,10 @@ export const SalesDetailPage: React.FC = () => {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    if (sale.evidenceSnapshot?.buyerResolution && buyerNickname !== sale.buyerNickname) {
+      alert('아래 구매자 연결 카드에서 실제 댓글 닉네임을 선택해 주세요.');
+      return;
+    }
     if (sale.syncStatus === 'PENDING') {
       alert('서버 저장 확인 후 판매 정보를 수정할 수 있습니다.');
       return;
