@@ -14,6 +14,7 @@ import { productSalesApi } from '../../services/productSalesApi';
 import { shippingService } from '../../services/shippingService';
 import { groupSalesByBuyer, BuyerSaleGroup } from '../../services/buyerSaleGrouping';
 import { formatMultiSaleAmount } from '../../services/salesExtractor';
+import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
 import {
   MessageSquare,
   ShoppingBag,
@@ -1212,22 +1213,23 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                 const isSelected = selectedBuyerKey === buyer.key;
                 const totalAmount = buyer.records.reduce((sum, r) => sum + (r.amount || 0), 0);
                 const multi = formatMultiSaleAmount(buyer.records.map((r) => r.amount));
-                const shippingCalc = shippingService.calculateShippingFee(totalAmount, shippingConfig);
-                const totalWithShipping = totalAmount + shippingCalc.fee;
                 const hasPending = buyer.records.some((r) => r.status === '보류');
+                const hasManualEdit = buyer.records.some((r) => r.status === '수동수정');
+                const mainStatus = hasPending ? '보류' : hasManualEdit ? '수동수정' : '확정';
 
-                const matchedThread = buyer.nickname
-                  ? buyerToThreadMap.get(buyer.nickname.trim().toLowerCase())
-                  : undefined;
+                const hasVoice = buyer.records.some((r) => r.source === 'WEB_VOICE');
+                const hasApp = buyer.records.some((r) => r.source === 'ANDROID_COMMENTS');
+                const hasManual = buyer.records.some((r) => r.source === 'MANUAL');
+                const sourceLabel = hasVoice ? '음성' : hasApp ? '앱' : hasManual ? '수동' : '기타';
 
-                const paymentSummary = getBuyerPaymentSummary(buyer.nickname, totalAmount);
-                const lastPayment = paymentSummary.paymentList[paymentSummary.paymentList.length - 1];
+                const productImage = buyer.records.find((r) => r.productImageUrl || r.captureImageUrls?.[0])?.productImageUrl
+                  || buyer.records.find((r) => r.captureImageUrls?.[0])?.captureImageUrls?.[0];
 
                 return (
                   <div
                     key={buyer.key}
                     onClick={() => handleSelectBuyer(buyer)}
-                    className={`group p-3.5 rounded-2xl border transition-all cursor-pointer ${
+                    className={`group p-2.5 sm:p-3 rounded-2xl border transition-all cursor-pointer ${
                       isSelected
                         ? 'bg-cyan-50/70 border-cyan-500 shadow-sm ring-2 ring-cyan-400/40'
                         : hasPending
@@ -1240,187 +1242,113 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                         : `'${buyer.nickname}' 클릭 시 우측 문자함 및 입금 내역을 대조합니다`
                     }
                   >
-                    {/* 상단: 닉네임 + 배지들 + 금액 */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-black text-sm text-slate-900 group-hover:text-brand-600 transition-colors">
-                            {buyer.nickname}
-                          </span>
-
-                          {/* 구매 건수 배지 */}
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                            총 {buyer.records.length}건
-                          </span>
-                          {buyer.records.length > 1 && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
-                              ★ 다건 구매자
-                            </span>
-                          )}
-
-                          {/* 문자 수신 상태 배지 */}
-                          {matchedThread ? (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
-                              <MessageSquare className="w-2.5 h-2.5 text-emerald-600" />
-                              문자 확인 ({matchedThread.messages.length}건)
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
-                              문자 미수신
-                            </span>
-                          )}
-
-                          {/* 은행 입금 상태 배지 */}
-                          {paymentSummary.status === 'PAID' && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-cyan-50 text-cyan-700 border border-cyan-200 flex items-center gap-1">
-                              <CheckCircle2 className="w-2.5 h-2.5 text-cyan-600" />
-                              입금완료
-                            </span>
-                          )}
-                          {paymentSummary.status === 'OVERPAID' && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200 flex items-center gap-1">
-                              <CheckCircle2 className="w-2.5 h-2.5 text-purple-600" />
-                              초과입금 (+{paymentSummary.diff.toLocaleString()}원)
-                            </span>
-                          )}
-                          {paymentSummary.status === 'PARTIAL' && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
-                              <Clock className="w-2.5 h-2.5 text-amber-600" />
-                              부분입금 ({paymentSummary.totalPaid.toLocaleString()}원)
-                            </span>
-                          )}
-                          {paymentSummary.status === 'UNPAID' && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
-                              입금대기
-                            </span>
-                          )}
-
-                          {hasPending && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-400 text-slate-950">
-                              보류 포함
-                            </span>
-                          )}
-                        </div>
+                    <div className="flex items-center gap-2.5 sm:gap-3">
+                      {/* 좌측: 상품 이미지 또는 쇼핑백 아이콘 */}
+                      <div className="w-10 h-10 rounded-xl bg-sky-50 border border-sky-100 flex items-center justify-center flex-shrink-0 text-sky-600 overflow-hidden shadow-2xs">
+                        {productImage ? (
+                          <img
+                            src={productImage}
+                            alt={`${buyer.nickname} 상품`}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                          />
+                        ) : (
+                          <ShoppingBag className="w-5 h-5 text-sky-600" />
+                        )}
                       </div>
 
-                      {/* 금액 영역 */}
-                      <div className="flex flex-col items-end flex-shrink-0 text-right">
+                      {/* 우측: 닉네임, 통계 배지, 금액, 상태 태그 */}
+                      <div className="min-w-0 flex-1">
                         {multi.isMulti ? (
-                          <div className="flex flex-col items-end">
-                            <span className="text-[11px] font-bold text-brand-600 font-mono">
-                              {multi.decimalExpression} =
-                            </span>
-                            <span className="text-sm font-black text-brand-700">
-                              {multi.totalFormatted}
-                            </span>
-                            <span className="text-[10px] font-bold text-slate-500 mt-0.5">
-                              택비포함 : {totalWithShipping.toLocaleString()}원
-                            </span>
+                          // 다건인 경우
+                          <div>
+                            {/* 1행: 닉네임 + 다건 뱃지 + 고객 통계 알약 */}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-sm sm:text-base text-slate-900 group-hover:text-brand-600 transition-colors">
+                                {buyer.nickname}
+                              </span>
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 whitespace-nowrap">
+                                ★ 다건 {buyer.records.length}건
+                              </span>
+                              <CustomerStatsBadge
+                                nickname={buyer.nickname}
+                                buyerId={buyer.records[0]?.buyerId}
+                                variant="pill"
+                                currentSessionId={selectedSessionId !== 'ALL' ? selectedSessionId : undefined}
+                              />
+                            </div>
+
+                            {/* 2행: 0.5 + 1.5 = 20,000원 */}
+                            <div className="text-base sm:text-lg font-black text-blue-600 font-mono mt-0.5 tracking-tight">
+                              {multi.displayFull}
+                            </div>
+
+                            {/* 3행: 출처/상태 태그 */}
+                            <div className="flex items-center gap-1 mt-1 flex-wrap">
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                sourceLabel === '음성'
+                                  ? 'bg-pink-50 text-pink-600 border border-pink-100'
+                                  : sourceLabel === '앱'
+                                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                    : 'bg-slate-100 text-slate-600 border border-slate-200'
+                              }`}>
+                                {sourceLabel}
+                              </span>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                mainStatus === '보류'
+                                  ? 'bg-amber-400 text-slate-950'
+                                  : mainStatus === '수동수정'
+                                    ? 'bg-purple-100 text-purple-700'
+                                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              }`}>
+                                {mainStatus}
+                              </span>
+                            </div>
                           </div>
                         ) : (
-                          <div className="flex flex-col items-end">
-                            <span className="text-sm font-black text-brand-700 whitespace-nowrap">
-                              {totalAmount.toLocaleString()}원
-                            </span>
-                            {totalAmount > 0 && (
-                              <span className="text-[10px] font-bold text-slate-500 mt-0.5">
-                                택비포함 : {totalWithShipping.toLocaleString()}원
+                          // 단건인 경우
+                          <div>
+                            {/* 1행: 닉네임 + 고객 통계 알약 + 우측 끝 금액 */}
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                <span className="font-bold text-sm sm:text-base text-slate-900 group-hover:text-brand-600 transition-colors">
+                                  {buyer.nickname}
+                                </span>
+                                <CustomerStatsBadge
+                                  nickname={buyer.nickname}
+                                  buyerId={buyer.records[0]?.buyerId}
+                                  variant="pill"
+                                  currentSessionId={selectedSessionId !== 'ALL' ? selectedSessionId : undefined}
+                                />
+                              </div>
+                              <div className="text-base sm:text-lg font-black text-blue-600 whitespace-nowrap ml-auto">
+                                {totalAmount > 0 ? `${totalAmount.toLocaleString()}원` : '0원'}
+                              </div>
+                            </div>
+
+                            {/* 2행: 출처/상태 태그 */}
+                            <div className="flex items-center gap-1 mt-1 flex-wrap">
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                sourceLabel === '음성'
+                                  ? 'bg-pink-50 text-pink-600 border border-pink-100'
+                                  : sourceLabel === '앱'
+                                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                    : 'bg-slate-100 text-slate-600 border border-slate-200'
+                              }`}>
+                                {sourceLabel}
                               </span>
-                            )}
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                mainStatus === '보류'
+                                  ? 'bg-amber-400 text-slate-950'
+                                  : mainStatus === '수동수정'
+                                    ? 'bg-purple-100 text-purple-700'
+                                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              }`}>
+                                {mainStatus}
+                              </span>
+                            </div>
                           </div>
                         )}
                       </div>
-                    </div>
-
-                    {/* 구매 상품 상세 목록 */}
-                    <div className="mt-2.5 space-y-1">
-                      {buyer.records.map((rec, rIdx) => (
-                        <div
-                          key={rec.id || rIdx}
-                          className="flex items-center justify-between text-xs text-slate-600 bg-slate-50/90 px-2.5 py-1.5 rounded-xl border border-slate-100"
-                        >
-                          <div className="flex items-center gap-1.5 truncate flex-1 mr-2">
-                            <span className="text-[10px] font-bold text-slate-400 shrink-0">
-                              #{rIdx + 1}
-                            </span>
-                            <span className="font-medium truncate text-slate-800">
-                              {rec.productName || rec.productCode || '상품명 미지정'}
-                              {rec.quantity && rec.quantity > 1 ? ` (${rec.quantity}개)` : ''}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0 text-[11px]">
-                            <span className="font-bold text-slate-700">
-                              {(rec.amount || 0).toLocaleString()}원
-                            </span>
-                            {rec.status && (
-                              <span
-                                className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
-                                  rec.status === '확정'
-                                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                    : rec.status === '보류'
-                                    ? 'bg-amber-100 text-amber-800'
-                                    : 'bg-slate-100 text-slate-600'
-                                }`}
-                              >
-                                {rec.status}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* 입금 내역이 있는 경우: 은행/입금자 및 입금액 미리보기 박스 */}
-                    {paymentSummary.paymentList.length > 0 && lastPayment && (
-                      <div className="mt-2 p-2 rounded-xl bg-cyan-50/60 border border-cyan-100 text-[11px] space-y-1">
-                        <div className="flex items-center justify-between text-slate-700 font-semibold">
-                          <div className="flex items-center gap-1.5 truncate">
-                            <CreditCard className="w-3 h-3 text-cyan-600 flex-shrink-0" />
-                            <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${getBankBadgeStyle(lastPayment.bank)}`}>
-                              {lastPayment.bank || '은행'}
-                            </span>
-                            <span className="text-slate-900 font-bold truncate">{lastPayment.payerName}</span>
-                          </div>
-                          <span className="text-cyan-800 font-extrabold text-[11px] whitespace-nowrap ml-1">
-                            {paymentSummary.totalPaid.toLocaleString()}원 입금
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 수신된 문자가 있는 경우: 전화번호 및 최근 문자 미리보기 박스 */}
-                    {matchedThread && (
-                      <div className="mt-2 p-2 rounded-xl bg-emerald-50/60 border border-emerald-100 text-[11px] space-y-1">
-                        <div className="flex items-center justify-between text-slate-700 font-semibold">
-                          <div className="flex items-center gap-1.5">
-                            <Smartphone className="w-3 h-3 text-emerald-600" />
-                            <span className="text-slate-900 font-bold">{matchedThread.displayPhone}</span>
-                            {matchedThread.isNew && (
-                              <span className="bg-amber-500 text-white text-[9px] font-black px-1.5 py-0.2 rounded-md shadow-2xs">
-                                신규
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[10px] text-slate-400 font-medium">
-                            {formatDateTime(matchedThread.lastMessage.createdAt)}
-                          </span>
-                        </div>
-                        <p className="text-slate-600 truncate text-[11px] leading-tight">
-                          {cleanMessageBody(matchedThread.lastMessage.body) || '(내용 없음 또는 첨부파일)'}
-                        </p>
-                      </div>
-                    )}
-
-                    <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-end text-[11px] font-semibold">
-                      {matchedThread ? (
-                        <span className="text-emerald-700 font-bold flex items-center gap-0.5 group-hover:text-emerald-800">
-                          문자 대화 확인 ({matchedThread.messages.length}건) <ChevronRight className="w-3 h-3" />
-                        </span>
-                      ) : (
-                        <span className="text-slate-400 group-hover:text-brand-600 flex items-center gap-0.5">
-                          고객 대조 선택 <ChevronRight className="w-3 h-3" />
-                        </span>
-                      )}
                     </div>
                   </div>
                 );
