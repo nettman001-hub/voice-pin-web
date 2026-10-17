@@ -12,6 +12,7 @@ import { requireSupabase, isSupabaseConfigured } from '../../services/supabaseCl
 import { formatSessionDisplay, SessionInfoLike } from '../../utils/sessionFormatter';
 import { productSalesApi } from '../../services/productSalesApi';
 import { shippingService } from '../../services/shippingService';
+import { groupSalesByBuyer } from '../../services/buyerSaleGrouping';
 import {
   MessageSquare,
   ShoppingBag,
@@ -700,6 +701,8 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     });
   }, [sales, selectedSessionId, salesSearch, salesMessageFilter, salesPaymentFilter, buyerToThreadMap, getBuyerPaymentSummary]);
 
+  const salesByBuyer = useMemo(() => groupSalesByBuyer(filteredSales), [filteredSales]);
+
   // 문자 수신 및 입금 건수 집계
   const { receivedSalesCount, unreceivedSalesCount, paidSalesCount, unpaidSalesCount } = useMemo(() => {
     let received = 0;
@@ -1014,7 +1017,7 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
             <div className="flex items-center justify-between">
               <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
                 <ShoppingBag className="w-3.5 h-3.5 text-brand-600" />
-                판매 내역 목록 ({filteredSales.length}건)
+                판매 내역 목록 ({salesByBuyer.length}명 · {filteredSales.length}건)
               </span>
 
               {/* 회차 필터 */}
@@ -1123,7 +1126,16 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                 판매 내역이 없습니다.
               </div>
             ) : (
-              filteredSales.map((sale) => {
+              salesByBuyer.map((buyer) => (
+                <div key={buyer.key} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
+                  <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-100/70 px-3 py-2">
+                    <span className="min-w-0 truncate text-xs font-black text-slate-900">{buyer.nickname}</span>
+                    <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                      구매 {buyer.records.length}건
+                    </span>
+                  </div>
+                  <div className="space-y-2 p-2">
+                    {buyer.records.map((sale) => {
                 const isSelected = selectedSaleId === sale.id;
 
                 const matchedThread = sale.buyerNickname
@@ -1293,7 +1305,10 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                     </div>
                   </div>
                 );
-              })
+                    })}
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </section>
