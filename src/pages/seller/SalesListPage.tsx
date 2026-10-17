@@ -27,7 +27,8 @@ import {
   ChevronRight,
   ExternalLink,
   Truck,
-  Trash2
+  Trash2,
+  RotateCcw
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { ShippingConfigModal } from '../../components/shipping/ShippingConfigModal';
@@ -106,7 +107,7 @@ interface BuyerGroupedSale {
 
 export const SalesListPage: React.FC = () => {
   const { workspaceId } = useAuth();
-  const { sales, promiseDefaults, setPromiseDefault, exportCsv, refreshSales, deleteSale } = useSales();
+  const { sales, promiseDefaults, setPromiseDefault, exportCsv, refreshSales, deleteSale, restoreSales } = useSales();
   const { messages, payments, claims, invoices, shipments } = useCommerce();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -122,9 +123,48 @@ export const SalesListPage: React.FC = () => {
   const [shippingConfig, setShippingConfig] = useState(() => shippingService.getConfig(workspaceId));
   const [actionToast, setActionToast] = useState<string | null>(null);
 
+  // 최근 삭제 내역 (실행 취소 / Undo 지원)
+  const [deletedHistory, setDeletedHistory] = useState<{
+    sales: SaleRecord[];
+    label: string;
+    expiresAt: number;
+  } | null>(null);
+  const [undoCountdown, setUndoCountdown] = useState<number>(5);
+
   const showToast = (msg: string) => {
     setActionToast(msg);
     setTimeout(() => setActionToast(null), 3000);
+  };
+
+  // 실행 취소 타이머 처리
+  useEffect(() => {
+    if (!deletedHistory) return;
+    setUndoCountdown(5);
+    const interval = window.setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((deletedHistory.expiresAt - Date.now()) / 1000));
+      setUndoCountdown(remaining);
+      if (remaining <= 0) {
+        setDeletedHistory(null);
+      }
+    }, 250);
+
+    return () => window.clearInterval(interval);
+  }, [deletedHistory]);
+
+  const triggerUndoableDelete = (salesToSave: SaleRecord[], label: string) => {
+    setDeletedHistory({
+      sales: salesToSave,
+      label,
+      expiresAt: Date.now() + 5000,
+    });
+  };
+
+  const handleUndoDelete = () => {
+    if (!deletedHistory || deletedHistory.sales.length === 0) return;
+    const count = deletedHistory.sales.length;
+    restoreSales(deletedHistory.sales);
+    setDeletedHistory(null);
+    showToast(`삭제를 취소하고 판매 내역 ${count}건을 정상 복구했습니다.`);
   };
 
   // 구매자별 내역 전체 삭제 핸들러
@@ -136,16 +176,17 @@ export const SalesListPage: React.FC = () => {
       return;
     }
     const confirmed = window.confirm(
-      `'${buyer.buyerNickname}' 님의 판매 내역 전체 (${count}건)를 정말 삭제하시겠습니까?\n삭제된 판매 내역은 복구할 수 없습니다.`
+      `'${buyer.buyerNickname}' 님의 판매 내역 전체 (${count}건)를 삭제하시겠습니까?\n(삭제 후 5초 동안 화면 하단에서 실행 취소할 수 있습니다.)`
     );
     if (!confirmed) return;
 
+    const recordsToBackup = [...buyer.records];
     buyer.records.forEach((rec) => {
       deleteSale(rec.id);
     });
 
     setExpandedBuyers((prev) => prev.filter((k) => k !== buyer.groupKey));
-    showToast(`'${buyer.buyerNickname}' 님의 판매 내역 ${count}건이 삭제되었습니다.`);
+    triggerUndoableDelete(recordsToBackup, `'${buyer.buyerNickname}' 님의 판매 내역 ${count}건`);
   };
 
   // 개별 판매 내역 단건 삭제 핸들러
@@ -154,12 +195,13 @@ export const SalesListPage: React.FC = () => {
     e?.stopPropagation();
     const title = sale.productName || sale.productCode || (sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '해당 판매 건');
     const confirmed = window.confirm(
-      `'${sale.buyerNickname}' 님의 [${title}] 판매 내역을 삭제하시겠습니까?`
+      `'${sale.buyerNickname}' 님의 [${title}] 판매 내역을 삭제하시겠습니까?\n(삭제 후 5초 동안 화면 하단에서 실행 취소할 수 있습니다.)`
     );
     if (!confirmed) return;
 
+    const recordToBackup = [sale];
     deleteSale(sale.id);
-    showToast('판매 내역 1건이 삭제되었습니다.');
+    triggerUndoableDelete(recordToBackup, `'${title}' 판매 내역 1건`);
   };
 
   useEffect(() => {
@@ -1377,7 +1419,28 @@ export const SalesListPage: React.FC = () => {
         </div>
       </div>
 
-      {actionToast && (
+      {/* 실행 취소(Undo) 플로팅 바 */}
+      {deletedHistory && (
+        <div className="fixed bottom-6 right-6 z-50 p-3.5 sm:p-4 rounded-2xl bg-slate-900/95 text-white text-xs shadow-2xl border border-slate-700 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-3 backdrop-blur-md">
+          <div className="flex items-center gap-2">
+            <Trash2 className="w-4 h-4 text-rose-400 flex-shrink-0 animate-pulse" />
+            <div>
+              <span className="font-bold text-slate-100">{deletedHistory.label}</span>
+              <span className="text-slate-400 ml-1">삭제됨</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleUndoDelete}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-transform active:scale-95 shadow-md cursor-pointer ml-1"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>실행 취소 ({undoCountdown}초)</span>
+          </button>
+        </div>
+      )}
+
+      {actionToast && !deletedHistory && (
         <div className="fixed bottom-6 right-6 z-50 p-4 rounded-2xl bg-slate-900/95 text-white text-xs font-bold shadow-xl border border-slate-700 flex items-center space-x-2 animate-in fade-in slide-in-from-bottom-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
           <span>{actionToast}</span>

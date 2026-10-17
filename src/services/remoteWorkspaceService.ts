@@ -780,10 +780,46 @@ export const remoteWorkspaceService = {
     const { error } = decision === 'ambiguous'
       ? await client.from('depositor_aliases').update({ buyer_nickname: '' })
         .eq('workspace_id', workspaceId).eq('payer_name_normalized', payerNormalized)
-      : await client.from('depositor_aliases').insert({
+      : await client.from('depositor_aliases').upsert({
         workspace_id: workspaceId, payer_name_normalized: payerNormalized, buyer_nickname: buyerNickname.trim(),
-      });
+      }, { onConflict: 'workspace_id,payer_name_normalized' });
     if (error && error.code !== '23505') throw error;
+  },
+
+  async loadDepositorAliases(workspaceId: string): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    try {
+      const client = ensureEnabled();
+      const { data, error } = await client.from('depositor_aliases')
+        .select('payer_name_normalized, buyer_nickname')
+        .eq('workspace_id', workspaceId);
+      if (error) {
+        console.warn('[RemoteWorkspace] depositor_aliases 로드 실패:', error);
+        return map;
+      }
+      (data || []).forEach((row: any) => {
+        if (row.payer_name_normalized && row.buyer_nickname) {
+          map.set(row.payer_name_normalized, row.buyer_nickname);
+        }
+      });
+    } catch (e) {
+      console.warn('[RemoteWorkspace] depositor_aliases 조회 오류:', e);
+    }
+    return map;
+  },
+
+  async deleteDepositorAlias(workspaceId: string, payerName: string) {
+    if (isUnknownPayer(payerName)) return;
+    try {
+      const client = ensureEnabled();
+      const payerNormalized = normalizePayerName(payerName);
+      await client.from('depositor_aliases')
+        .delete()
+        .eq('workspace_id', workspaceId)
+        .eq('payer_name_normalized', payerNormalized);
+    } catch (e) {
+      console.warn('[RemoteWorkspace] depositor_aliases 삭제 오류:', e);
+    }
   },
 
   subscribe(workspaceId: string, callback: (change: WorkspaceChange) => void, options: {

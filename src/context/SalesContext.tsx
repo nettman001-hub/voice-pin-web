@@ -27,6 +27,7 @@ interface SalesContextType {
   updateSale: (sale: SaleRecord, options?: { voiceAllocationContinuation?: boolean }) => SaleRecord | undefined;
   retrySalePrint: (id: string) => void;
   deleteSale: (id: string) => void;
+  restoreSales: (records: SaleRecord[]) => void;
   confirmBatchSales: (saleIds: string[]) => BatchConfirmResult;
   exportCsv: (filteredRecords?: SaleRecord[], filename?: string) => boolean;
   refreshSales: () => Promise<SaleRecord[]>;
@@ -414,6 +415,14 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     getController()?.delete(id);
   };
 
+  const restoreSales = (records: SaleRecord[]) => {
+    const controller = getController();
+    if (!controller) return;
+    records.forEach((sale) => {
+      controller.upsert({ ...sale, syncStatus: 'PENDING' });
+    });
+  };
+
   const confirmBatchSales = (saleIds: string[]): BatchConfirmResult => {
     const allSales = salesRef.current;
     const targetSales = allSales.filter((sale) => saleIds.includes(sale.id));
@@ -541,7 +550,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const visibleSales = controllerRef.current?.workspaceId === workspaceId && controllerRef.current.generation === identityGenerationRef.current ? sales : [];
   const visiblePromiseDefaults = promiseDefaultsState.workspaceId === workspaceId ? promiseDefaultsState.records : [];
   return <SalesContext.Provider value={{ sales: visibleSales, promiseDefaults: visiblePromiseDefaults, setPromiseDefault,
-    addSale, updateSale, retrySalePrint, deleteSale, confirmBatchSales, exportCsv, refreshSales, applyCommittedSales,
+    addSale, updateSale, retrySalePrint, deleteSale, restoreSales, confirmBatchSales, exportCsv, refreshSales, applyCommittedSales,
     syncError, retrySync, getSalesBySession, getSettlementSummary }}>
     {children}
   </SalesContext.Provider>;

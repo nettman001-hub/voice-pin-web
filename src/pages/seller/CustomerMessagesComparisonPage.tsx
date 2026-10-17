@@ -5,7 +5,8 @@ import { useAuth } from '../../context/AuthContext';
 import { CustomerPurchaseClaim, SmsAttachment, SmsMessage, PaymentReceipt } from '../../types/commerce';
 import { SaleRecord } from '../../types/live';
 import { cleanMessageBody } from '../../utils/textCleaner';
-import { resolvePrivateImageUrl } from '../../services/remoteWorkspaceService';
+import { resolvePrivateImageUrl, remoteWorkspaceService } from '../../services/remoteWorkspaceService';
+import { normalizePayerName } from '../../services/paymentMatching';
 import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 import { requireSupabase, isSupabaseConfigured } from '../../services/supabaseClient';
 import { formatSessionDisplay, SessionInfoLike } from '../../utils/sessionFormatter';
@@ -37,7 +38,8 @@ import {
   Link2,
   Unlink,
   Check,
-  Pencil
+  Pencil,
+  Cloud
 } from 'lucide-react';
 
 const formatPhone = (raw: string): string => {
@@ -275,8 +277,41 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
 
   useEffect(() => {
     setManualNicknames(loadManualNicknames(workspaceId));
-    setManualPaymentLinks(loadManualPaymentLinks(workspaceId));
-  }, [workspaceId]);
+    const localLinks = loadManualPaymentLinks(workspaceId);
+    setManualPaymentLinks(localLinks);
+
+    // Supabase 클라우드(depositor_aliases)와 자동 동기화하여 기기간 공유 지원
+    if (isRemoteAuth && workspaceId && isSupabaseConfigured) {
+      let active = true;
+      remoteWorkspaceService.loadDepositorAliases(workspaceId)
+        .then((cloudAliases) => {
+          if (!active || cloudAliases.size === 0) return;
+          setManualPaymentLinks((prev) => {
+            const next = new Map(prev);
+            let updated = false;
+            payments.forEach((p) => {
+              if (p.payerName) {
+                const norm = normalizePayerName(p.payerName);
+                const aliasNick = cloudAliases.get(norm);
+                if (aliasNick && !next.has(p.id)) {
+                  next.set(p.id, aliasNick);
+                  updated = true;
+                }
+              }
+            });
+            if (updated) {
+              saveManualPaymentLinks(next, workspaceId);
+            }
+            return updated ? next : prev;
+          });
+        })
+        .catch((err) => console.warn('[CustomerMessages] 클라우드 별칭 동기화 실패:', err));
+
+      return () => {
+        active = false;
+      };
+    }
+  }, [workspaceId, isRemoteAuth, payments]);
 
   // 우측 인박스 탭 상태 ('MESSAGES': 고객 문자함, 'PAYMENTS': 실시간 은행 입금함)
   const [inboxTab, setInboxTab] = useState<'MESSAGES' | 'PAYMENTS'>('MESSAGES');
@@ -855,25 +890,47 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     setTimeout(() => setFeedback(null), 3000);
   };
 
-  // 입금 내역 수동 연결 함수 (paymentId -> buyerNickname)
-  const handleLinkPaymentToBuyer = (paymentId: string, rawNickname: string) => {
+  // 입금 내역 수동 연결 함수 (paymentId -> buyerNickname, 클라우드 동기화)
+  const handleLinkPaymentToBuyer = async (paymentId: string, rawNickname: string) => {
     const nick = rawNickname.trim();
     if (!nick) return;
     const nextMap = new Map(manualPaymentLinks);
     nextMap.set(paymentId, nick);
     setManualPaymentLinks(nextMap);
     saveManualPaymentLinks(nextMap, workspaceId);
-    setFeedback(`입금 내역이 '${nick}' 고객과 연결되었습니다.`);
+
+    // Supabase 클라우드 depositor_aliases 에 저장하여 다른 PC/기기와 공유
+    const targetPayment = payments.find((p) => p.id === paymentId);
+    if (isRemoteAuth && workspaceId && targetPayment?.payerName && isSupabaseConfigured) {
+      try {
+        await remoteWorkspaceService.saveDepositorAlias(workspaceId, targetPayment.payerName, nick);
+      } catch (err) {
+        console.warn('[CustomerMessages] 클라우드 별칭 저장 실패:', err);
+      }
+    }
+
+    setFeedback(`입금 내역이 '${nick}' 고객과 연결되었습니다. (클라우드 동기화 ☁️)`);
     setTimeout(() => setFeedback(null), 3000);
   };
 
-  // 입금 내역 수동 연결 해제 함수
-  const handleUnlinkPayment = (paymentId: string) => {
+  // 입금 내역 수동 연결 해제 함수 (클라우드 동기화)
+  const handleUnlinkPayment = async (paymentId: string) => {
     const nextMap = new Map(manualPaymentLinks);
     const prevNick = nextMap.get(paymentId);
     nextMap.delete(paymentId);
     setManualPaymentLinks(nextMap);
     saveManualPaymentLinks(nextMap, workspaceId);
+
+    // Supabase 클라우드 depositor_aliases 에서도 제거
+    const targetPayment = payments.find((p) => p.id === paymentId);
+    if (isRemoteAuth && workspaceId && targetPayment?.payerName && isSupabaseConfigured) {
+      try {
+        await remoteWorkspaceService.deleteDepositorAlias(workspaceId, targetPayment.payerName);
+      } catch (err) {
+        console.warn('[CustomerMessages] 클라우드 별칭 삭제 실패:', err);
+      }
+    }
+
     setFeedback(`'${prevNick || ''}' 고객과의 입금 연결이 해제되었습니다.`);
     setTimeout(() => setFeedback(null), 3000);
   };
@@ -1770,6 +1827,10 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                     확인 필요 {unmatchedPayments.length}건
                   </span>
                 )}
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200 flex items-center gap-1 shadow-2xs" title="입금자 매칭 정보가 클라우드에 자동 동기화되어 모든 기기에서 공유됩니다">
+                  <Cloud className="w-3 h-3 text-cyan-500" />
+                  클라우드 동기화
+                </span>
               </div>
 
               <span className="text-xs font-black text-slate-700">
