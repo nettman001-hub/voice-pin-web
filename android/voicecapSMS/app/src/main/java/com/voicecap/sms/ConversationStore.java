@@ -89,13 +89,13 @@ final class ConversationStore {
     List<Conversation> threads(int offset, Map<Long, Integer> unreadCounts) {
         List<Conversation> result = new ArrayList<>();
         try (Cursor cursor = context.getContentResolver().query(THREADS_URI,
-                new String[]{"_id", "date", "snippet", "recipient_ids"}, null, null, "date DESC")) {
+                new String[]{"_id", "date", "snippet", "recipient_ids", Telephony.Threads.SNIPPET_CHARSET}, null, null, "date DESC")) {
             if (cursor == null || !cursor.moveToPosition(offset)) return result;
             do {
                 Conversation thread = new Conversation();
                 thread.id = cursor.getLong(0);
                 thread.date = cursor.getLong(1);
-                thread.snippet = cursor.getString(2) == null ? "" : cursor.getString(2);
+                thread.snippet = ConversationLogic.decodeSnippet(cursor.getString(2), cursor.getInt(4));
                 thread.addresses = addresses(cursor.getString(3));
                 fill(thread);
                 Integer unread = unreadCounts.get(thread.id);
@@ -111,12 +111,12 @@ final class ConversationStore {
     /** 대화 하나 (대화방 제목·배지 판정용). 없으면 null. */
     Conversation thread(long threadId) {
         try (Cursor cursor = context.getContentResolver().query(THREADS_URI,
-                new String[]{"_id", "date", "snippet", "recipient_ids"}, "_id=?", new String[]{String.valueOf(threadId)}, null)) {
+                new String[]{"_id", "date", "snippet", "recipient_ids", Telephony.Threads.SNIPPET_CHARSET}, "_id=?", new String[]{String.valueOf(threadId)}, null)) {
             if (cursor == null || !cursor.moveToFirst()) return null;
             Conversation thread = new Conversation();
             thread.id = cursor.getLong(0);
             thread.date = cursor.getLong(1);
-            thread.snippet = cursor.getString(2) == null ? "" : cursor.getString(2);
+            thread.snippet = ConversationLogic.decodeSnippet(cursor.getString(2), cursor.getInt(4));
             thread.addresses = addresses(cursor.getString(3));
             fill(thread);
             return thread;

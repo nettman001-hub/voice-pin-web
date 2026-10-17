@@ -1,5 +1,9 @@
 package com.voicecap.sms;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.LinkedHashMap;
@@ -23,6 +27,25 @@ final class ConversationLogic {
     enum Badge { NONE, PENDING, SYNCED, FAILED }
 
     private ConversationLogic() { }
+
+    /** MMS snippets can contain byte values stored as Latin-1; SMS snippets are already Unicode (charset 0). */
+    static String decodeSnippet(String raw, int charset) {
+        if (raw == null) return "";
+        if (raw.isEmpty() || charset == 0) return raw;
+        // Never replace real Korean, emoji or other Unicode characters with '?' while recovering bytes.
+        for (int i = 0; i < raw.length(); i++) {
+            if (raw.charAt(i) > 0xFF) return raw;
+        }
+        try {
+            return MmsPdu.charsetFor(charset).newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(raw.getBytes(StandardCharsets.ISO_8859_1))).toString();
+        } catch (CharacterCodingException ignored) {
+            // Providers may truncate a preview in the middle of a multibyte character.
+            return raw;
+        }
+    }
 
     static String sentExternalId(String providerId) { return SENT_PREFIX + providerId; }
 
