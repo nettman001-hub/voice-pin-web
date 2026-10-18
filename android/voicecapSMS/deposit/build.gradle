@@ -24,6 +24,8 @@ android {
         versionName '1.0.0'
         def apiBaseUrl = (project.findProperty('VOICECAP_API_BASE_URL') ?: 'https://ymegrhxpbeanvxwdzfym.supabase.co/functions/v1').toString().replaceAll('/+$', '')
         buildConfigField 'String', 'VOICECAP_API_BASE_URL', '"' + apiBaseUrl.replace('"', '\\"') + '"'
+        // 은행 입금 문자 읽기(RECEIVE_SMS). 플레이 스토어 판(play)에서는 뺀다.
+        buildConfigField 'boolean', 'BANK_SMS_AVAILABLE', 'true'
     }
 
     buildFeatures { buildConfig true }
@@ -47,10 +49,16 @@ android {
             minifyEnabled false
             if (hasReleaseSigning) signingConfig signingConfigs.release
         }
+        // 플레이 스토어 업로드용 (:deposit:bundlePlay). release와 같고 은행 입금 문자 읽기만 뺀다:
+        // Play는 기본 문자앱이 아닌 앱의 문자 권한을 정해진 예외로만 허용한다. 권한·수신기는 src/play/AndroidManifest.xml에서 지운다.
+        play {
+            initWith release
+            buildConfigField 'boolean', 'BANK_SMS_AVAILABLE', 'false'
+        }
     }
 }
 
-// 빌드 완료 시 문자 앱과 같은 android/voicecapSMS/output 에 voicecap-deposit-<버전>-*.apk/aab 로 복사
+// 빌드 완료 시 문자 앱과 같은 android/voicecapSMS/output 에 voicecap-deposit-<버전>-*.apk/aab 로 복사 (플레이용은 -play)
 tasks.register('copyOutputsToRoot') {
     doLast {
         def targetDir = file("${rootDir}/output")
@@ -65,6 +73,8 @@ tasks.register('copyOutputsToRoot') {
             [file("${outputs}/outputs/apk/debug/deposit-debug.apk"), "voicecap-deposit-${vName}-debug.apk"],
             [file("${outputs}/outputs/apk/release/deposit-release.apk"), "voicecap-deposit-${vName}-release.apk"],
             [file("${outputs}/outputs/bundle/release/deposit-release.aab"), "voicecap-deposit-${vName}-release.aab"],
+            [file("${outputs}/outputs/apk/play/deposit-play.apk"), "voicecap-deposit-${vName}-play.apk"],
+            [file("${outputs}/outputs/bundle/play/deposit-play.aab"), "voicecap-deposit-${vName}-play.aab"],
         ]
         files.each { pair ->
             def source = pair[0]
@@ -84,7 +94,7 @@ tasks.register('copyOutputsToRoot') {
 
 gradle.projectsEvaluated {
     tasks.matching {
-        it.name in ['assembleDebug', 'assembleRelease', 'bundleRelease', 'assemble', 'bundle']
+        it.name in ['assembleDebug', 'assembleRelease', 'bundleRelease', 'assemblePlay', 'bundlePlay', 'assemble', 'bundle']
     }.configureEach {
         finalizedBy 'copyOutputsToRoot'
     }

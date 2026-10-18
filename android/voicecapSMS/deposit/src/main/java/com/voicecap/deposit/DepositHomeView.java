@@ -69,7 +69,8 @@ public final class DepositHomeView extends ScrollView {
         column.removeAllViews();
         column.addView(accessCard());
         column.addView(consentCard());
-        column.addView(bankSmsCard(rules));
+        // 플레이 스토어 판(play)에는 문자 수신 권한이 없어 은행 입금 문자 읽기를 보여 주지 않는다.
+        if (BuildConfig.BANK_SMS_AVAILABLE) column.addView(bankSmsCard(rules));
         if (DepositSettings.hasConsent(activity)) {
             column.addView(banksCard(rules));
             column.addView(recentAppsCard());
@@ -122,7 +123,8 @@ public final class DepositHomeView extends ScrollView {
         Button revoke = Ui.button(activity, "동의 철회 (입금 읽기 중단)", false);
         revoke.setOnClickListener(v -> new AlertDialog.Builder(activity)
                 .setTitle("입금 정보 전송 동의 철회")
-                .setMessage("고른 은행 앱을 모두 해제하고 은행 입금 문자 읽기도 끄며 입금 업로드를 멈춥니다. 알림 접근 권한 자체는 휴대폰 설정에서 끌 수 있습니다.")
+                .setMessage("고른 은행 앱을 모두 해제하고 " + (BuildConfig.BANK_SMS_AVAILABLE ? "은행 입금 문자 읽기도 끄며 " : "")
+                        + "입금 업로드를 멈춥니다. 알림 접근 권한 자체는 휴대폰 설정에서 끌 수 있습니다.")
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton("철회", (dialog, which) -> {
                     DepositSettings.setConsent(activity, false);

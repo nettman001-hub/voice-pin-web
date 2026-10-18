@@ -51,3 +51,5 @@ $env:VOICECAP_UPLOAD_KEY_PASSWORD='키 비밀번호'
 ```
 
 생성 파일은 `app/build/outputs/bundle/release/app-release.aab`입니다. 업로드 키와 비밀번호는 저장소에 커밋하지 말고 안전하게 백업합니다. Play Console에는 패키지 ID `shop.voicecap.smsbridge`를 등록하고 SMS/통화 기록 권한 선언에서 **기본 SMS 처리**를 핵심 기능으로 정확히 고지해야 합니다.
+
+입금확인 앱은 Play용으로 `.\gradlew.bat :deposit:bundlePlay`를 씁니다(`deposit/build/outputs/bundle/play/deposit-play.aab`, `output/voicecap-deposit-<버전>-play.aab`). `play` 빌드 유형은 release와 같은 키로 서명하고 은행 입금 문자 읽기만 뺍니다(`RECEIVE_SMS`·문자 수신기 제거, 스위치·안내 문구 숨김, `deposit/src/play/`). Play는 기본 문자앱이 아닌 앱의 문자 권한을 정해진 예외로만 허용하기 때문입니다. 직접 설치용 debug·release APK에는 그대로 있습니다.
