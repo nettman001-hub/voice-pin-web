@@ -53,10 +53,10 @@ android {
     }
 }
 
-// 빌드 완료 시 항상 android/voicecapSMS/output 에 복사
+// 빌드 완료 시 항상 android/voicecapSMS/release-output 에 복사 (APK·AAB 저장 폴더)
 tasks.register('copyOutputsToRoot') {
     doLast {
-        def targetDir = file("${rootDir}/output")
+        def targetDir = file("${rootDir}/release-output")
         if (!targetDir.exists()) {
             targetDir.mkdirs()
         }
