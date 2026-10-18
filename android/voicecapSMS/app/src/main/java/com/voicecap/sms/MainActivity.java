@@ -18,7 +18,6 @@ import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.Toast;
-import com.voicecap.sms.deposit.DepositTabView;
 import com.voicecap.sms.sales.FakeSalesRepository;
 import com.voicecap.sms.sales.RealSalesRepository;
 import com.voicecap.sms.sales.SalesRepository;
@@ -29,14 +28,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 탭 3개: 판매관리 / 문자연동(기본) / 입금확인. 첫 실행이면 {@link OnboardingActivity}로 보낸다.
+ * 탭 2개: 판매관리 / 문자연동(기본). 입금확인은 별도 앱(android/voicecapSMS/deposit)으로 옮겼다.
+ * 첫 실행이면 {@link OnboardingActivity}로 보낸다.
  * 판매관리는 {@link BuildConfig#SALES_TAB_ENABLED}가 false인 동안 회색으로만 보이고,
  * 판매 저장소·화면을 만들지도 시작하지도 않는다.
  */
 public final class MainActivity extends Activity {
     static final int TAB_SALES = 0;
     static final int TAB_SMS = 1;
-    static final int TAB_DEPOSIT = 2;
 
     private static final int SMS_PERMISSION_REQUEST = 901;
     private static final int ROLE_REQUEST = 902;
@@ -49,10 +48,8 @@ public final class MainActivity extends Activity {
     /** 판매관리 탭이 꺼져 있으면 null (판매 코드를 실행하지 않음). */
     private ProductSalesView productSalesView;
     private SmsHomeView smsHomeView;
-    private DepositTabView depositView;
     private Button tabSalesBtn;
     private Button tabSmsBtn;
-    private Button tabDepositBtn;
     private int currentTab = TAB_SMS;
 
     /** 즉시 발송(FCM)이 켜지지 않은 동안 화면이 떠 있으면 30초마다 웹 발송함을 확인한다. */
@@ -131,7 +128,6 @@ public final class MainActivity extends Activity {
         // 앱을 열면 백오프 중인 업로드·MMS 다운로드도 바로 다시 시도한다.
         SyncScheduler.scheduleNow(getApplicationContext(), true);
         smsHomeView.refresh();
-        if (currentTab == TAB_DEPOSIT) depositView.refresh();
         if (currentTab == TAB_SALES && productSalesView != null) productSalesView.start();
         outboxPoller.removeCallbacks(outboxPoll);
         outboxPoller.postDelayed(outboxPoll, OUTBOX_POLL_MILLIS);
@@ -158,10 +154,8 @@ public final class MainActivity extends Activity {
 
         tabSalesBtn = tabButton("🛍 판매관리", TAB_SALES);
         tabSmsBtn = tabButton("💬 문자연동", TAB_SMS);
-        tabDepositBtn = tabButton("💰 입금확인", TAB_DEPOSIT);
         tabBar.addView(tabSalesBtn);
         tabBar.addView(tabSmsBtn);
-        tabBar.addView(tabDepositBtn);
         if (!BuildConfig.SALES_TAB_ENABLED) {
             // 꺼진 동안 회색 + 안내. 숨기려면 이 줄을 tabSalesBtn.setVisibility(View.GONE)으로 바꾼다.
             tabSalesBtn.setAlpha(0.4f);
@@ -179,9 +173,7 @@ public final class MainActivity extends Activity {
             contentContainer.addView(productSalesView);
         }
         smsHomeView = new SmsHomeView(this);
-        depositView = new DepositTabView(this);
         contentContainer.addView(smsHomeView);
-        contentContainer.addView(depositView);
         root.addView(contentContainer);
         return root;
     }
@@ -208,16 +200,13 @@ public final class MainActivity extends Activity {
         currentTab = tabIndex;
         styleTab(tabSalesBtn, tabIndex == TAB_SALES);
         styleTab(tabSmsBtn, tabIndex == TAB_SMS);
-        styleTab(tabDepositBtn, tabIndex == TAB_DEPOSIT);
         smsHomeView.setVisibility(tabIndex == TAB_SMS ? View.VISIBLE : View.GONE);
-        depositView.setVisibility(tabIndex == TAB_DEPOSIT ? View.VISIBLE : View.GONE);
         if (productSalesView != null) {
             productSalesView.setVisibility(tabIndex == TAB_SALES ? View.VISIBLE : View.GONE);
             if (tabIndex == TAB_SALES) productSalesView.start();
             else productSalesView.stop();
         }
         if (tabIndex == TAB_SMS) smsHomeView.refresh();
-        if (tabIndex == TAB_DEPOSIT) depositView.refresh();
     }
 
     private void styleTab(Button button, boolean selected) {

@@ -39,6 +39,8 @@ android/voicecapSMS/local.properties
 android/voicecapSMS/.gradle/
 android/voicecapSMS/build/
 android/voicecapSMS/app/build/
+android/voicecapSMS/deposit/build/
+android/voicecapSMS/output/
 android/voicecapSMS/signing/
 android/voicecapSMS/release-output/
 android/voicecapSMS/outputs/

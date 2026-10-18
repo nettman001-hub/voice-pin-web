@@ -1,0 +1,96 @@
+plugins {
+    id 'com.android.application'
+}
+
+gradle.ext.depositBuildStartTime = System.currentTimeMillis()
+
+// 업로드 키 설정은 문자 앱과 같이 쓰도록 ../build.gradle에 있다.
+def releaseStoreFile = rootProject.ext.releaseStoreFile
+def releaseStorePassword = rootProject.ext.releaseStorePassword
+def releaseKeyAlias = rootProject.ext.releaseKeyAlias
+def releaseKeyPassword = rootProject.ext.releaseKeyPassword
+def hasReleaseSigning = rootProject.ext.hasReleaseSigning
+
+android {
+    namespace 'com.voicecap.deposit'
+    compileSdk 36
+
+    defaultConfig {
+        // 문자 앱(shop.voicecap.smsbridge)과 다른 앱. 휴대폰에 따로 설치되고 웹앱에도 따로 연결한다.
+        applicationId 'shop.voicecap.deposit'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+        def apiBaseUrl = (project.findProperty('VOICECAP_API_BASE_URL') ?: 'https://ymegrhxpbeanvxwdzfym.supabase.co/functions/v1').toString().replaceAll('/+$', '')
+        buildConfigField 'String', 'VOICECAP_API_BASE_URL', '"' + apiBaseUrl.replace('"', '\\"') + '"'
+    }
+
+    buildFeatures { buildConfig true }
+
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+                enableV1Signing true
+                enableV2Signing true
+                enableV3Signing true
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (hasReleaseSigning) signingConfig signingConfigs.release
+        }
+    }
+}
+
+// 빌드 완료 시 문자 앱과 같은 android/voicecapSMS/output 에 voicecap-deposit-<버전>-*.apk/aab 로 복사
+tasks.register('copyOutputsToRoot') {
+    doLast {
+        def targetDir = file("${rootDir}/output")
+        if (!targetDir.exists()) {
+            targetDir.mkdirs()
+        }
+
+        def vName = android.defaultConfig.versionName
+        def buildStartTime = gradle.ext.has('depositBuildStartTime') ? gradle.ext.depositBuildStartTime : 0L
+        def outputs = layout.buildDirectory.get().asFile
+        def files = [
+            [file("${outputs}/outputs/apk/debug/deposit-debug.apk"), "voicecap-deposit-${vName}-debug.apk"],
+            [file("${outputs}/outputs/apk/release/deposit-release.apk"), "voicecap-deposit-${vName}-release.apk"],
+            [file("${outputs}/outputs/bundle/release/deposit-release.aab"), "voicecap-deposit-${vName}-release.aab"],
+        ]
+        files.each { pair ->
+            def source = pair[0]
+            def name = pair[1]
+            // 방금 빌드된 것만 복사
+            if (source.exists() && (buildStartTime == 0L || source.lastModified() >= buildStartTime)) {
+                copy {
+                    from source
+                    into targetDir
+                    rename { name }
+                }
+                println "[VoiceCAP] 입금확인 ${name} 복사 완료 -> ${targetDir.absolutePath}/${name}"
+            }
+        }
+    }
+}
+
+gradle.projectsEvaluated {
+    tasks.matching {
+        it.name in ['assembleDebug', 'assembleRelease', 'bundleRelease', 'assemble', 'bundle']
+    }.configureEach {
+        finalizedBy 'copyOutputsToRoot'
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}

@@ -6,12 +6,12 @@ plugins {
 
 gradle.ext.buildStartTime = System.currentTimeMillis()
 
-def defaultKeystore = file("${rootDir}/signing/voicecap-upload.jks")
-def releaseStoreFile = providers.environmentVariable('VOICECAP_UPLOAD_KEYSTORE').orNull ?: (defaultKeystore.exists() ? defaultKeystore.absolutePath : null)
-def releaseStorePassword = providers.environmentVariable('VOICECAP_UPLOAD_STORE_PASSWORD').orNull ?: (defaultKeystore.exists() ? 'VoiceCAP!2026UploadKey#982' : null)
-def releaseKeyAlias = providers.environmentVariable('VOICECAP_UPLOAD_KEY_ALIAS').orNull ?: (defaultKeystore.exists() ? 'voicecap-upload' : null)
-def releaseKeyPassword = providers.environmentVariable('VOICECAP_UPLOAD_KEY_PASSWORD').orNull ?: (defaultKeystore.exists() ? 'VoiceCAP!2026UploadKey#982' : null)
-def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword && file(releaseStoreFile).exists()
+// 업로드 키 설정은 두 앱(문자·입금확인)이 같이 쓰도록 ../build.gradle에 있다.
+def releaseStoreFile = rootProject.ext.releaseStoreFile
+def releaseStorePassword = rootProject.ext.releaseStorePassword
+def releaseKeyAlias = rootProject.ext.releaseKeyAlias
+def releaseKeyPassword = rootProject.ext.releaseKeyPassword
+def hasReleaseSigning = rootProject.ext.hasReleaseSigning
 
 android {
     namespace 'com.voicecap.sms'
@@ -21,8 +21,8 @@ android {
         applicationId 'shop.voicecap.smsbridge'
         minSdk 26
         targetSdk 36
-        versionCode 17
-        versionName '1.6.6'
+        versionCode 18
+        versionName '1.7.0'
         def apiBaseUrl = (project.findProperty('VOICECAP_API_BASE_URL') ?: 'https://ymegrhxpbeanvxwdzfym.supabase.co/functions/v1').toString().replaceAll('/+$', '')
         buildConfigField 'String', 'VOICECAP_API_BASE_URL', '"' + apiBaseUrl.replace('"', '\\"') + '"'
         // 판매관리 탭. false인 동안 탭은 회색으로 보이고, 판매 코드(저장소·화면·작업)는 하나도 시작하지 않는다.

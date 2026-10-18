@@ -2,3 +2,5 @@ pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal()
 dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
 rootProject.name = 'voicecapSMS'
 include ':app'
+// 입금확인 앱 (문자 앱에서 분리). 은행 알림·은행 입금 문자 → payment-incoming.
+include ':deposit'
