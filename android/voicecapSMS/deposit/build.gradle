@@ -58,10 +58,10 @@ android {
     }
 }
 
-// 빌드 완료 시 문자 앱과 같은 android/voicecapSMS/output 에 voicecap-deposit-<버전>-*.apk/aab 로 복사 (플레이용은 -play)
+// 빌드 완료 시 문자 앱과 같은 android/voicecapSMS/release-output 에 voicecap-deposit-<버전>-*.apk/aab 로 복사 (플레이용은 -play)
 tasks.register('copyOutputsToRoot') {
     doLast {
-        def targetDir = file("${rootDir}/output")
+        def targetDir = file("${rootDir}/release-output")
         if (!targetDir.exists()) {
             targetDir.mkdirs()
         }

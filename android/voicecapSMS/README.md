@@ -9,7 +9,7 @@ VoiceCAP 웹앱의 판매자 작업공간에 1회용 연결 코드로 연결되�
 
 - 두 앱은 웹앱에 따로 연결합니다. 웹앱 **마이페이지 → voicecapSMS 휴대폰 연결**에서 코드를 앱마다 한 번씩 만들어 입력합니다.
 - 입금확인 앱은 기본 문자앱이 아니어도 됩니다. 은행 입금 문자 읽기를 켤 때만 문자 수신 권한(`RECEIVE_SMS`)을 묻습니다.
-- 빌드: `gradlew.bat :app:assembleDebug`(문자) → `app/build/outputs/apk/debug/app-debug.apk`, `gradlew.bat :deposit:assembleDebug`(입금확인) → `deposit/build/outputs/apk/debug/deposit-debug.apk`. 두 앱 모두 `output/`에 `voicecap-sms-<버전>-*.apk`, `voicecap-deposit-<버전>-*.apk`로도 복사됩니다. 업로드 키 설정(`VOICECAP_UPLOAD_*`, `signing/`)은 두 앱이 같이 씁니다(`build.gradle`).
+- 빌드: `gradlew.bat :app:assembleDebug`(문자) → `app/build/outputs/apk/debug/app-debug.apk`, `gradlew.bat :deposit:assembleDebug`(입금확인) → `deposit/build/outputs/apk/debug/deposit-debug.apk`. 두 앱 모두 `release-output/`에 `voicecap-sms-<버전>-*.apk`, `voicecap-deposit-<버전>-*.apk`로도 복사됩니다. 업로드 키 설정(`VOICECAP_UPLOAD_*`, `signing/`)은 두 앱이 같이 씁니다(`build.gradle`).
 - 문자 앱 1.7.0부터 입금확인 탭이 없습니다. 예전 앱에 쌓인 입금 기록은 문자 앱 저장소에 남지만 화면에는 보이지 않고, 새 입금확인 앱은 빈 기록에서 시작합니다(서버로 올라간 입금은 웹앱에 그대로 있습니다).
 
 ## 지원 범위
@@ -52,4 +52,4 @@ $env:VOICECAP_UPLOAD_KEY_PASSWORD='키 비밀번호'
 
 생성 파일은 `app/build/outputs/bundle/release/app-release.aab`입니다. 업로드 키와 비밀번호는 저장소에 커밋하지 말고 안전하게 백업합니다. Play Console에는 패키지 ID `shop.voicecap.smsbridge`를 등록하고 SMS/통화 기록 권한 선언에서 **기본 SMS 처리**를 핵심 기능으로 정확히 고지해야 합니다.
 
-입금확인 앱은 Play용으로 `.\gradlew.bat :deposit:bundlePlay`를 씁니다(`deposit/build/outputs/bundle/play/deposit-play.aab`, `output/voicecap-deposit-<버전>-play.aab`). `play` 빌드 유형은 release와 같은 키로 서명하고 은행 입금 문자 읽기만 뺍니다(`RECEIVE_SMS`·문자 수신기 제거, 스위치·안내 문구 숨김, `deposit/src/play/`). Play는 기본 문자앱이 아닌 앱의 문자 권한을 정해진 예외로만 허용하기 때문입니다. 직접 설치용 debug·release APK에는 그대로 있습니다.
+입금확인 앱은 Play용으로 `.\gradlew.bat :deposit:bundlePlay`를 씁니다(`deposit/build/outputs/bundle/play/deposit-play.aab`, `release-output/voicecap-deposit-<버전>-play.aab`). `play` 빌드 유형은 release와 같은 키로 서명하고 은행 입금 문자 읽기만 뺍니다(`RECEIVE_SMS`·문자 수신기 제거, 스위치·안내 문구 숨김, `deposit/src/play/`). Play는 기본 문자앱이 아닌 앱의 문자 권한을 정해진 예외로만 허용하기 때문입니다. 직접 설치용 debug·release APK에는 그대로 있습니다.
