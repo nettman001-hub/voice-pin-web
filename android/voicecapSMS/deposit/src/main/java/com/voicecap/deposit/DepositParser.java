@@ -90,13 +90,15 @@ public final class DepositParser {
     }
 
     /**
-     * 은행 SMS 입금 문자 (설계 4.5). 발신번호가 SMS 규칙의 senders에 있을 때만 그 규칙으로 읽는다.
-     * 결과 Deposit의 packageName은 "sms:&lt;규칙 id&gt;".
+     * 은행 SMS 입금 문자 (설계 4.5). 발신번호가 SMS 규칙의 senders에 있을 때만 읽는다. 결과 Deposit의 packageName은
+     * "sms:&lt;규칙 id&gt;"(규칙 패턴이 못 읽어 스마트 폴백으로 읽었으면 "sms:&lt;발신번호&gt;").
+     * 은행 번호가 아닌 발신자(고객·개인 문자)는 폴백으로도 읽지 않는다: 고객이 보낸 "홍길동 30,000원 입금했어요"가
+     * 입금으로 올라가 자동 확정되거나 개인 문자가 샘플로 남지 않게. 규칙이 제외(출금·취소·예정 등)한 문자도 폴백으로 되살리지 않는다.
      */
     public Result parseSms(String sender, String body, long sentAt) {
         String safeBody = body == null ? "" : body;
         Result result = match(rules.forSender(BankSmsDepositDetector.normalizeSender(sender)), safeBody, sentAt);
-        if (result.ok()) return result;
+        if (result.ok() || result.failure != Failure.NO_MATCH) return result;
         return parseSmartFallback("sms:" + sender, safeBody, sentAt);
     }
 
