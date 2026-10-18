@@ -167,7 +167,7 @@ public class SmsBridgeView extends ScrollView {
 
         LinearLayout privacyCard = card();
         privacyCard.addView(sectionTitle("개인정보 보호"));
-        TextView privacyCopy = bodyText("구매정보 문자 또는 판매자가 먼저 문자를 보낸 고객의 거래 문의만 동기화합니다. 인증번호와 일반 개인 문자는 서버로 보내지 않습니다. 은행 앱 알림은 입금확인 탭에서 따로 동의하고 직접 고른 앱만 읽으며, 금액·입금자명·시각·은행·받는 계좌 별칭만 보냅니다. 알림 원문은 휴대폰 밖으로 나가지 않고, 고르지 않은 앱의 알림은 즉시 버립니다. 휴대폰 설정 → 알림 접근에서 언제든 끌 수 있습니다.", 14);
+        TextView privacyCopy = bodyText("구매정보 문자 또는 판매자가 먼저 문자를 보낸 고객의 거래 문의만 동기화합니다. 인증번호와 일반 개인 문자는 서버로 보내지 않습니다. 은행 입금 알림은 이 앱이 읽지 않습니다. 입금 확인은 별도 앱(VoiceCAP 입금확인)에서 따로 동의하고 씁니다.", 14);
         privacyCopy.setPadding(dp(14), dp(13), dp(14), dp(13));
         privacyCopy.setBackground(roundRect(Color.rgb(236, 253, 245), Color.rgb(167, 243, 208), 16));
         privacyCopy.setTextColor(Color.rgb(6, 95, 70));

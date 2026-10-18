@@ -1,0 +1,106 @@
+plugins {
+    id 'com.android.application'
+}
+
+gradle.ext.depositBuildStartTime = System.currentTimeMillis()
+
+// 업로드 키 설정은 문자 앱과 같이 쓰도록 ../build.gradle에 있다.
+def releaseStoreFile = rootProject.ext.releaseStoreFile
+def releaseStorePassword = rootProject.ext.releaseStorePassword
+def releaseKeyAlias = rootProject.ext.releaseKeyAlias
+def releaseKeyPassword = rootProject.ext.releaseKeyPassword
+def hasReleaseSigning = rootProject.ext.hasReleaseSigning
+
+android {
+    namespace 'com.voicecap.deposit'
+    compileSdk 36
+
+    defaultConfig {
+        // 문자 앱(shop.voicecap.smsbridge)과 다른 앱. 휴대폰에 따로 설치되고 웹앱에도 따로 연결한다.
+        applicationId 'shop.voicecap.deposit'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+        def apiBaseUrl = (project.findProperty('VOICECAP_API_BASE_URL') ?: 'https://ymegrhxpbeanvxwdzfym.supabase.co/functions/v1').toString().replaceAll('/+$', '')
+        buildConfigField 'String', 'VOICECAP_API_BASE_URL', '"' + apiBaseUrl.replace('"', '\\"') + '"'
+        // 은행 입금 문자 읽기(RECEIVE_SMS). 플레이 스토어 판(play)에서는 뺀다.
+        buildConfigField 'boolean', 'BANK_SMS_AVAILABLE', 'true'
+    }
+
+    buildFeatures { buildConfig true }
+
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+                enableV1Signing true
+                enableV2Signing true
+                enableV3Signing true
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (hasReleaseSigning) signingConfig signingConfigs.release
+        }
+        // 플레이 스토어 업로드용 (:deposit:bundlePlay). release와 같고 은행 입금 문자 읽기만 뺀다:
+        // Play는 기본 문자앱이 아닌 앱의 문자 권한을 정해진 예외로만 허용한다. 권한·수신기는 src/play/AndroidManifest.xml에서 지운다.
+        play {
+            initWith release
+            buildConfigField 'boolean', 'BANK_SMS_AVAILABLE', 'false'
+        }
+    }
+}
+
+// 빌드 완료 시 문자 앱과 같은 android/voicecapSMS/output 에 voicecap-deposit-<버전>-*.apk/aab 로 복사 (플레이용은 -play)
+tasks.register('copyOutputsToRoot') {
+    doLast {
+        def targetDir = file("${rootDir}/output")
+        if (!targetDir.exists()) {
+            targetDir.mkdirs()
+        }
+
+        def vName = android.defaultConfig.versionName
+        def buildStartTime = gradle.ext.has('depositBuildStartTime') ? gradle.ext.depositBuildStartTime : 0L
+        def outputs = layout.buildDirectory.get().asFile
+        def files = [
+            [file("${outputs}/outputs/apk/debug/deposit-debug.apk"), "voicecap-deposit-${vName}-debug.apk"],
+            [file("${outputs}/outputs/apk/release/deposit-release.apk"), "voicecap-deposit-${vName}-release.apk"],
+            [file("${outputs}/outputs/bundle/release/deposit-release.aab"), "voicecap-deposit-${vName}-release.aab"],
+            [file("${outputs}/outputs/apk/play/deposit-play.apk"), "voicecap-deposit-${vName}-play.apk"],
+            [file("${outputs}/outputs/bundle/play/deposit-play.aab"), "voicecap-deposit-${vName}-play.aab"],
+        ]
+        files.each { pair ->
+            def source = pair[0]
+            def name = pair[1]
+            // 방금 빌드된 것만 복사
+            if (source.exists() && (buildStartTime == 0L || source.lastModified() >= buildStartTime)) {
+                copy {
+                    from source
+                    into targetDir
+                    rename { name }
+                }
+                println "[VoiceCAP] 입금확인 ${name} 복사 완료 -> ${targetDir.absolutePath}/${name}"
+            }
+        }
+    }
+}
+
+gradle.projectsEvaluated {
+    tasks.matching {
+        it.name in ['assembleDebug', 'assembleRelease', 'bundleRelease', 'assemblePlay', 'bundlePlay', 'assemble', 'bundle']
+    }.configureEach {
+        finalizedBy 'copyOutputsToRoot'
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}

@@ -2,3 +2,11 @@ plugins {
     id 'com.android.application' version '9.1.1' apply false
     id 'com.google.gms.google-services' version '4.4.4' apply false
 }
+
+// 두 앱(app: 문자, deposit: 입금확인)이 같은 업로드 키로 서명한다. signing/ 폴더는 저장소에 올리지 않는다.
+def defaultKeystore = file("${rootDir}/signing/voicecap-upload.jks")
+ext.releaseStoreFile = providers.environmentVariable('VOICECAP_UPLOAD_KEYSTORE').orNull ?: (defaultKeystore.exists() ? defaultKeystore.absolutePath : null)
+ext.releaseStorePassword = providers.environmentVariable('VOICECAP_UPLOAD_STORE_PASSWORD').orNull ?: (defaultKeystore.exists() ? 'VoiceCAP!2026UploadKey#982' : null)
+ext.releaseKeyAlias = providers.environmentVariable('VOICECAP_UPLOAD_KEY_ALIAS').orNull ?: (defaultKeystore.exists() ? 'voicecap-upload' : null)
+ext.releaseKeyPassword = providers.environmentVariable('VOICECAP_UPLOAD_KEY_PASSWORD').orNull ?: (defaultKeystore.exists() ? 'VoiceCAP!2026UploadKey#982' : null)
+ext.hasReleaseSigning = ext.releaseStoreFile && ext.releaseStorePassword && ext.releaseKeyAlias && ext.releaseKeyPassword && file(ext.releaseStoreFile).exists()

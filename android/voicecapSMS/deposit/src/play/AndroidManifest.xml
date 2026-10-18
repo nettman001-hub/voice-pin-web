@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 플레이 스토어 판(play 빌드 유형): 은행 입금 문자 읽기를 뺀다. 은행 앱 알림만 읽는다. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.RECEIVE_SMS" tools:node="remove" />
+    <application>
+        <receiver android:name="com.voicecap.deposit.BankSmsReceiver" tools:node="remove" />
+    </application>
+</manifest>

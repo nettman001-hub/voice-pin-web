@@ -1,6 +1,16 @@
 # voicecapSMS (Android 8.0+)
 
-VoiceCAP 웹앱의 판매자 작업공간에 1회용 연결 코드로 연결되는 SMS/MMS 브리지 앱입니다.
+VoiceCAP 웹앱의 판매자 작업공간에 1회용 연결 코드로 연결되는 안드로이드 앱 두 개입니다. 한 프로젝트에서 같이 빌드하지만 휴대폰에는 따로 설치됩니다.
+
+| 모듈 | 앱 이름 | 패키지 | 하는 일 |
+|---|---|---|---|
+| `app` | VoiceCAP SMS Bridge (문자) | `shop.voicecap.smsbridge` | 기본 문자앱. 구매정보·업무 고객 문자 동기화, 웹에서 넣은 문자 발송 |
+| `deposit` | VoiceCAP 입금확인 | `shop.voicecap.deposit` | 고른 은행 앱의 입금 알림(선택: 은행 입금 문자)에서 입금만 읽어 `payment-incoming`으로 전송 |
+
+- 두 앱은 웹앱에 따로 연결합니다. 웹앱 **마이페이지 → voicecapSMS 휴대폰 연결**에서 코드를 앱마다 한 번씩 만들어 입력합니다.
+- 입금확인 앱은 기본 문자앱이 아니어도 됩니다. 은행 입금 문자 읽기를 켤 때만 문자 수신 권한(`RECEIVE_SMS`)을 묻습니다.
+- 빌드: `gradlew.bat :app:assembleDebug`(문자) → `app/build/outputs/apk/debug/app-debug.apk`, `gradlew.bat :deposit:assembleDebug`(입금확인) → `deposit/build/outputs/apk/debug/deposit-debug.apk`. 두 앱 모두 `output/`에 `voicecap-sms-<버전>-*.apk`, `voicecap-deposit-<버전>-*.apk`로도 복사됩니다. 업로드 키 설정(`VOICECAP_UPLOAD_*`, `signing/`)은 두 앱이 같이 씁니다(`build.gradle`).
+- 문자 앱 1.7.0부터 입금확인 탭이 없습니다. 예전 앱에 쌓인 입금 기록은 문자 앱 저장소에 남지만 화면에는 보이지 않고, 새 입금확인 앱은 빈 기록에서 시작합니다(서버로 올라간 입금은 웹앱에 그대로 있습니다).
 
 ## 지원 범위
 
@@ -8,7 +18,7 @@ VoiceCAP 웹앱의 판매자 작업공간에 1회용 연결 코드로 연결되�
 - 닉네임·주소·상품/금액 항목이 함께 있는 첫 구매정보 SMS/MMS로 업무 고객 번호를 등록
 - 등록 고객의 배송·입금·계좌번호 등 후속 문의와 판매자 답변을 같은 거래 문자 이력으로 동기화
 - 등록되지 않은 번호의 OTP와 일반 개인 문자는 서버로 전송하지 않음
-- 입금확인 탭(선택): 알림 접근을 켜고 직접 고른 은행 앱의 입금 알림만 읽어 금액·입금자명·시각·은행·받는 계좌 별칭만 `payment-incoming`으로 전송. 알림 원문은 기기 밖으로 나가지 않고, 고르지 않은 앱의 알림은 즉시 버림. 규칙은 `app/src/main/assets/bank_rules.json`, fixture는 `app/src/test/resources/bank-noti/`
+- 입금확인 앱(`deposit`, 선택): 알림 접근을 켜고 직접 고른 은행 앱의 입금 알림만 읽어 금액·입금자명·시각·은행·받는 계좌 별칭만 `payment-incoming`으로 전송. 알림 원문은 기기 밖으로 나가지 않고, 고르지 않은 앱의 알림은 즉시 버림. 규칙은 `deposit/src/main/assets/bank_rules.json`, fixture는 `deposit/src/test/resources/bank-noti/`
 - 웹앱에서 큐에 넣은 정산서·배송·문의 SMS를 Android의 기본 메시지 기능으로 전송
 - Android 8.0 이상의 백그라운드 제한을 지키기 위해 수신 이벤트는 `JobScheduler`로 넘기고 15분마다 재동기화
 - 웹 즉시 발송(1.6.0): 웹이 문자를 대기열에 넣으면 서버(`device-pair` `notify-outbox`)가 내용 없는 FCM 고우선순위 신호(`data.type=OUTBOX`)를 보내고, `PushService`가 바로 `outbox-claim` → 발송한다. 웹에서 문자를 보낼 때 휴대폰을 깨우기 위해 Firebase 클라우드 메시징(FCM) 알림 토큰을 서버에 저장하며, 휴대폰 연결을 해제하면 삭제합니다. 구글 서비스가 없는 폰이나 서버에 `FCM_SERVICE_ACCOUNT_JSON`이 없을 때는 기존 15분 주기(앱 화면이 떠 있으면 30초마다)로 처리한다. Firebase 설정은 `app/google-services.json`(공개 설정, 비밀 키 아님)
@@ -41,3 +51,5 @@ $env:VOICECAP_UPLOAD_KEY_PASSWORD='키 비밀번호'
 ```
 
 생성 파일은 `app/build/outputs/bundle/release/app-release.aab`입니다. 업로드 키와 비밀번호는 저장소에 커밋하지 말고 안전하게 백업합니다. Play Console에는 패키지 ID `shop.voicecap.smsbridge`를 등록하고 SMS/통화 기록 권한 선언에서 **기본 SMS 처리**를 핵심 기능으로 정확히 고지해야 합니다.
+
+입금확인 앱은 Play용으로 `.\gradlew.bat :deposit:bundlePlay`를 씁니다(`deposit/build/outputs/bundle/play/deposit-play.aab`, `output/voicecap-deposit-<버전>-play.aab`). `play` 빌드 유형은 release와 같은 키로 서명하고 은행 입금 문자 읽기만 뺍니다(`RECEIVE_SMS`·문자 수신기 제거, 스위치·안내 문구 숨김, `deposit/src/play/`). Play는 기본 문자앱이 아닌 앱의 문자 권한을 정해진 예외로만 허용하기 때문입니다. 직접 설치용 debug·release APK에는 그대로 있습니다.
