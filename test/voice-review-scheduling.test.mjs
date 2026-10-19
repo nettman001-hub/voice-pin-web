@@ -21,7 +21,7 @@ const compiled = ts.transpileModule(`module.exports = ${reviewCallback};`, {
 }).outputText;
 
 function schedulerFixture() {
-  let now = Date.parse('2026-09-15T12:41:29Z');
+  let now = Date.parse('2026-09-15T12:42:10Z');
   const calls = [];
   const comment = { id: 'comment', platformMessageId: 'comment', sessionId: 'broadcast', buyerId: 'account',
     nickname: 'KH', content: '연핑 저요', capturedAt: '2026-09-15T12:40:19Z' };
@@ -32,6 +32,7 @@ function schedulerFixture() {
   const globals = {
     ...reviewService, Date: class extends Date { static now() { return now; } },
     isVoiceReviewReady: (current, comments) => reviewService.isVoiceReviewReady(current, comments, now),
+    isVoiceTextReviewReady: (current) => reviewService.isVoiceTextReviewReady(current, now),
     isRemoteAuth: true, workspaceId: 'workspace', isListening: false,
     currentSessionId: 'temporary-session-after-reload', productSales: { feed: { comments: [] } }, sales: [sale],
     storageService: { getCommentRecords: () => [comment], getSessionTranscripts: () => logs },
@@ -56,15 +57,16 @@ test('after reload or stopping, a mature purchase window uploads saved speech be
   assert.equal(ctx.calls[0][1], 'broadcast');
   assert.equal(ctx.calls[1][1], 'pending');
   assert.equal(ctx.calls[1][2].workspaceId, 'workspace');
+  assert.deepEqual(ctx.calls[1][2].comments.map((c) => c.nickname), ['KH'], 'The minute of local comments goes with the request');
   assert.equal(ctx.sale.status, '보류');
 });
 
-test('the scheduler waits until the last second of the window and excludes concurrent duplicate reviews', async () => {
+test('the scheduler waits one minute after the held sale and excludes concurrent duplicate reviews', async () => {
   const ctx = schedulerFixture();
-  ctx.setNow(Date.parse('2026-09-15T12:41:28Z'));
+  ctx.setNow(Date.parse('2026-09-15T12:42:09Z'));
   ctx.run(); await tick();
   assert.equal(ctx.calls.length, 0);
-  ctx.setNow(Date.parse('2026-09-15T12:41:29Z'));
+  ctx.setNow(Date.parse('2026-09-15T12:42:10Z'));
   ctx.run(); ctx.run(); await tick();
   assert.equal(ctx.calls.filter((call) => call[0] === 'review').length, 1);
 });

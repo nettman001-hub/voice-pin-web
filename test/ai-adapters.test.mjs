@@ -1011,3 +1011,51 @@ test('followingUtterances: buildResolutionPrompt normalizes single followingUtte
 });
 
 
+
+// The held-sale review sends the seller's plain prompt as the only message and
+// reads a plain "닉네임: … / 가격: …" answer: no system prompt, no JSON mode.
+test('plain-text held-sale prompts are sent as one user message without JSON mode on every adapter', async () => {
+  const prompt = '아래 내용은 라이브방송에서 판매자의 멘트와 구매자의 댓글 내용이다.\n\n<고객댓글>\n시각\t닉네임\t멘트';
+  const req = { taskType: 'PENDING_RESOLUTION', workspaceId: 'ws1', sessionId: 's', currentUtterance: 'KH님 드릴게요',
+    plainTextPrompt: prompt, saleCandidates: [{ saleId: 'held', productCode: '', buyerNickname: 'KH', amount: 0, quantity: 1, status: '보류' }] };
+  assert.deepEqual(buildResolutionPrompt(req), { systemPrompt: '', userPrompt: prompt });
+  const cloudSlot = (provider, model) => ({ type: 'CLOUD', provider, model, location: 'EXTERNAL_IP', endpointUrl: '',
+    routingMode: 'SERVER_DIRECT', authType: 'API_KEY', timeoutSeconds: 15, connectTimeoutSeconds: 3 });
+  const originalFetch = globalThis.fetch;
+  const bodies = [];
+  globalThis.fetch = async (url, init) => {
+    bodies.push([url.toString(), JSON.parse(init.body)]);
+    const text = '닉네임: KH\n가격: 15,000원';
+    return new Response(JSON.stringify(url.toString().includes('anthropic')
+      ? { content: [{ type: 'text', text }], usage: { input_tokens: 1, output_tokens: 1 } }
+      : { choices: [{ message: { content: text } }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    for (const [provider, model] of [['OPENAI', 'gpt-4o-mini'], ['ANTHROPIC', 'claude-sonnet-5-5']]) {
+      const result = await runCloudResolution(req, { slotConfig: cloudSlot(provider, model), secretApiKey: 'key' });
+      assert.equal(result.resolvable, true);
+      assert.equal(result.evidenceSummary, '닉네임: KH\n가격: 15,000원');
+      assert.equal(result.targetSaleId, 'held');
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const [openai, anthropic] = bodies;
+  assert.deepEqual(openai[1].messages, [{ role: 'user', content: prompt }]);
+  assert.equal(openai[1].response_format, undefined);
+  assert.deepEqual(anthropic[1].messages, [{ role: 'user', content: prompt }]);
+  assert.equal(anthropic[1].system, undefined);
+
+  let ollamaBody;
+  const local = await runSelfHostedResolution(req, {
+    slotConfig: { type: 'LOCAL', provider: 'OLLAMA', model: 'qwen2.5:7b', location: 'SAME_PC',
+      endpointUrl: 'http://127.0.0.1:11434', routingMode: 'PC_HELPER', authType: 'NONE', timeoutSeconds: 10, connectTimeoutSeconds: 3 },
+    helperDispatcher: async (_url, body) => { ollamaBody = body;
+      return { status: 200, body: JSON.stringify({ message: { content: '판단할 근거가 부족합니다.' } }) }; },
+  });
+  assert.deepEqual(ollamaBody.messages, [{ role: 'user', content: prompt }]);
+  assert.equal(ollamaBody.format, undefined);
+  assert.equal(local.resolvable, false);
+  assert.equal(local.action, 'INSUFFICIENT_DATA');
+});

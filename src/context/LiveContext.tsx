@@ -43,7 +43,9 @@ import type { PendingCorrectionRequest } from '../types/voiceCorrection';
 import { aiSettingsApi } from '../services/aiSettingsApi';
 import { useSttVocabulary } from './SttVocabularyContext';
 import { buildCloudSttTerms, getRecentCommentNicknames } from '../services/sttVocabularyService';
-import { getVoiceReviewRequests, shouldReviewVoiceSale, voiceReviewFingerprint, isVoiceReviewReady } from '../services/voicePendingReviewService';
+import { getVoiceReviewRequests, shouldReviewVoiceSale, voiceReviewFingerprint, isVoiceReviewReady,
+  shouldReviewVoiceSaleText, isVoiceTextReviewReady, voiceTextReviewFingerprint, getVoiceTextReviewComments,
+  confirmVoiceTextReviewSale } from '../services/voicePendingReviewService';
 import { STT_ROTATION_POLICY } from '../services/sttSessionRotationService';
 import {
   buildNicknameHintTerms,
@@ -1241,10 +1243,17 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const comments = [...feed, ...local];
     const reviewLogs = (sale: SaleRecord) => sessionTranscriptsRef.current.get(sale.sessionId)
       || storageService.getSessionTranscripts(workspaceId, sale.sessionId);
+    // A held sale without a numbered-order workflow goes to AI as the seller's
+    // plain-text prompt once one minute of following comments and speech exist.
+    const textReview = (sale: SaleRecord) => !sale.workflowEvidence;
+    const fingerprintOf = (sale: SaleRecord) => textReview(sale)
+      ? voiceTextReviewFingerprint(sale, comments, reviewLogs(sale))
+      : voiceReviewFingerprint(sale, comments, '', reviewLogs(sale));
     const pending = sales.find((sale) => {
-      if (sale.syncStatus === 'PENDING' || !shouldReviewVoiceSale(sale, comments)
-        || !isVoiceReviewReady(sale, comments)) return false;
-      const fingerprint = voiceReviewFingerprint(sale, comments, '', reviewLogs(sale));
+      if (sale.syncStatus === 'PENDING') return false;
+      if (textReview(sale) ? !shouldReviewVoiceSaleText(sale, comments) || !isVoiceTextReviewReady(sale)
+        : !shouldReviewVoiceSale(sale, comments) || !isVoiceReviewReady(sale, comments)) return false;
+      const fingerprint = fingerprintOf(sale);
       const previous = pendingAiAttemptsRef.current.get(`${workspaceId}:${sale.id}`);
       if (sale.aiVerification?.reviewFingerprint === fingerprint && sale.aiVerification.aiStatus !== 'CHECKING'
         && !sale.aiVerification.errorMessage) return false;
@@ -1252,7 +1261,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
     if (!pending) return;
     const key = `${workspaceId}:${pending.id}`;
-    const fingerprint = voiceReviewFingerprint(pending, comments, '', reviewLogs(pending));
+    const fingerprint = fingerprintOf(pending);
     const attempt = { fingerprint, attemptedAt: Date.now(), failed: false };
     pendingAiAttemptsRef.current.set(key, attempt);
     pendingAiRunningRef.current = true;
@@ -1271,7 +1280,12 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('판매자 멘트 저장을 기다린 후 AI 검토를 재시도합니다.');
       }
       if (!isCurrentReview()) return;
-      return aiSettingsApi.triggerPendingAiResolution(pending.id, { workspaceId });
+      // Ordinary chat is not uploaded during a broadcast, so the text review
+      // sends this PC's comments from the minute either side of the sale.
+      const windowComments = textReview(pending) ? getVoiceTextReviewComments(pending, comments)
+        .map((c) => ({ id: c.id, platformMessageId: c.platformMessageId, buyerId: c.buyerId,
+          nickname: c.nickname, content: c.content, capturedAt: c.capturedAt })) : undefined;
+      return aiSettingsApi.triggerPendingAiResolution(pending.id, { workspaceId, comments: windowComments });
     })()
       .then((result) => {
         if (!isCurrentReview() || !result) return;
@@ -1291,6 +1305,16 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
   }, [sales, workspaceId, isRemoteAuth, isListening, currentSessionId, productSales.activeSession?.id,
     productSales.feed?.comments, refreshSales, pendingAiTick, syncSessionTranscriptsToCloud]);
+
+  // The seller's text prompt answered "닉네임: … / 가격: …" for one comment
+  // account: confirm the held sale so it counts and prints like a 확정 sale.
+  useEffect(() => {
+    if (!isRemoteAuth || !workspaceId) return;
+    for (const sale of sales) {
+      const confirmed = confirmVoiceTextReviewSale(sale);
+      if (confirmed) updateSale(confirmed);
+    }
+  }, [sales, isRemoteAuth, workspaceId, updateSale]);
 
   interface TranscriptProcessingOptions {
     skipCommands?: boolean;

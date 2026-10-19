@@ -82,6 +82,8 @@ async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, 
 
   // 2. 프롬프트 구성
   const { systemPrompt, userPrompt } = 'systemPrompt' in request ? request : buildResolutionPrompt(request);
+  // A plain-text question gets a plain-text answer: no system message, no JSON mode.
+  const plainText = !('systemPrompt' in request) && Boolean(request.plainTextPrompt);
 
   // 3. 공급자별 엔드포인트 및 요청 바디 구성
   let url = (slotConfig.endpointUrl || '').trim();
@@ -97,7 +99,7 @@ async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, 
     headers['anthropic-version'] = '2023-06-01';
     requestBody = {
       model,
-      system: systemPrompt,
+      ...(plainText ? {} : { system: systemPrompt }),
       messages: [{ role: 'user', content: userPrompt }],
       max_tokens: 'systemPrompt' in request ? (request.maxOutputTokens ?? 4096) : 1024,
       temperature: 0.1,
@@ -109,11 +111,11 @@ async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, 
       contents: [
         {
           role: 'user',
-          parts: [{ text: `${systemPrompt}\n\n[입력 데이터]\n${userPrompt}` }],
+          parts: [{ text: plainText ? userPrompt : `${systemPrompt}\n\n[입력 데이터]\n${userPrompt}` }],
         },
       ],
       generationConfig: {
-        responseMimeType: 'application/json',
+        ...(plainText ? {} : { responseMimeType: 'application/json' }),
         temperature: 0.1,
         maxOutputTokens: 'systemPrompt' in request ? (request.maxOutputTokens ?? 4096) : 1024,
       },
@@ -139,7 +141,10 @@ async function runCloudCompletion(request: AiResolutionRequest | AiPromptInput, 
     // Preserve the legacy reasoner request shape for existing live resolution.
     const isDeepSeekReasoner = provider === 'DEEPSEEK' && model.includes('reasoner');
 
-    if (isDeepSeekReasoner) {
+    if (plainText) {
+      requestBody = { model, messages: [{ role: 'user', content: userPrompt }],
+        ...(isDeepSeekReasoner ? {} : { temperature: 0.1 }) };
+    } else if (isDeepSeekReasoner) {
       requestBody = {
         model,
         messages: [
