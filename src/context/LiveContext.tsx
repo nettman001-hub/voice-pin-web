@@ -19,7 +19,7 @@ import { generateSequentialProductName, formatSequentialProductName } from '../u
 import { useSales } from './SalesContext';
 import { useAuth } from './AuthContext';
 import { CaptureAreaConfig } from '../types/rules';
-import { findCapturesForSale, findSaleForCapture, hasCaptureInstructionText, SALE_CAPTURE_PAIR_WINDOW_MS } from '../services/saleCapturePairing';
+import { findCaptureForSale, findSaleForCapture, hasCaptureInstructionText } from '../services/saleCapturePairing';
 import { SttConfig, SttProvider } from '../types/deepgram';
 import { localSttService } from '../services/localSttService';
 import { LocalSttModel, LocalSttStatusPayload, SttMode } from '../types/stt';
@@ -672,25 +672,6 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!lastSavedSaleRef.current || lastSavedSaleRef.current.id === updatedSale.id) {
         lastSavedSaleRef.current = updatedSale;
       }
-    } else if (targetSaleId === undefined) {
-      // 같은 판매를 여러 장 찍으면 두 번째부터는 사진 없는 판매가 없다.
-      // 10초 동안 새로 저장되는 판매가 먼저 가져가게 두고, 그래도 남으면 10초 안의 가장 가까운 판매에 추가한다.
-      setTimeout(() => {
-        if (storageService.getCaptures().find((capture) => capture.id === newCapture.id)?.saleId) return;
-        if (currentUserIdRef.current !== requestedUserId) return;
-        const fallbackSale = findSaleForCapture(
-          { sessionIds: [newCapture.sessionId], capturedAt },
-          currentWorkflowSalesRef.current,
-          SALE_CAPTURE_PAIR_WINDOW_MS,
-          { allowCaptured: true }
-        );
-        const appended = fallbackSale ? updateSaleCapture(fallbackSale.id, imageUrl) : undefined;
-        if (!appended) return;
-        storageService.linkCaptureToSale(newCapture.id, appended.id);
-        setRecentCaptures((prev) => prev.map((capture) => (
-          capture.id === newCapture.id ? { ...capture, saleId: appended.id } : capture
-        )));
-      }, SALE_CAPTURE_PAIR_WINDOW_MS);
     }
 
     return imageUrl;
@@ -1038,15 +1019,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 판매 저장 시각 앞뒤 10초 안에 "캡처하세요"로 찍힌, 아직 쓰이지 않은 캡처가 있으면 상품 이미지1로 확정한다.
     // 없으면 이미지 없이 저장한다(직후 10초 안의 캡처는 captureCurrentScreen이 이 판매에 붙인다).
-    const pairedCaptures = findCapturesForSale(
+    const pairedCapture = findCaptureForSale(
       { sessionId: currentSessionIdRef.current, recognizedAt },
       storageService.getCaptures()
     );
-    const pairedImages = pairedCaptures.map((capture) => capture.imageUrl);
-    const fallbackImage = productLink.fallbackImageDataUrl || pairedImages[0];
-    const saleCaptureImages = productLink.fallbackImageDataUrl
-      ? [productLink.fallbackImageDataUrl, ...pairedImages]
-      : pairedImages;
+    const fallbackImage = productLink.fallbackImageDataUrl || pairedCapture?.imageUrl;
 
     const pendingReasons = status === '보류'
       ? buildPendingReasons(
@@ -1074,7 +1051,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         productName: resolvedProductName,
         unitPrice: effectiveAmount,
         quantity: 1,
-        captureImageUrls: saleCaptureImages.length > 0 ? saleCaptureImages : undefined,
+        captureImageUrls: fallbackImage ? [fallbackImage] : undefined,
       },
       {
         relevantCommentIds: sourceCommentIds,
@@ -1102,18 +1079,17 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       quantity: 1,
       unitPrice: effectiveAmount,
       source: 'WEB_VOICE',
-      captureImageUrls: saleCaptureImages.length > 0 ? saleCaptureImages : undefined,
+      captureImageUrls: fallbackImage ? [fallbackImage] : undefined,
       revision: 1,
       pendingReasons: pendingReasons.length > 0 ? pendingReasons : undefined,
       evidenceSnapshot,
     };
     const saved = addSale(buyerResolution ? applyConfirmedBuyer(saleData, buyerResolution) : saleData);
     rememberSale(saved);
-    if (pairedCaptures.length > 0) {
-      const pairedIds = new Set(pairedCaptures.map((capture) => capture.id));
-      pairedCaptures.forEach((capture) => storageService.linkCaptureToSale(capture.id, saved.id));
+    if (pairedCapture) {
+      storageService.linkCaptureToSale(pairedCapture.id, saved.id);
       setRecentCaptures((prev) => prev.map((capture) => (
-        pairedIds.has(capture.id) ? { ...capture, saleId: saved.id } : capture
+        capture.id === pairedCapture.id ? { ...capture, saleId: saved.id } : capture
       )));
     }
 
