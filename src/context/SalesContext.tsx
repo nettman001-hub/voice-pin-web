@@ -7,7 +7,7 @@ import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
 import { commentStreamService } from '../services/commentStreamService';
 import type { BatchConfirmResult, SaleHistoryRecord } from '../types/pendingSale';
 import { aiSettingsApi } from '../services/aiSettingsApi';
-import { heldAfterServerRejection } from '../services/serverRejectedSale';
+import { heldAfterServerRejection, markServerReviewCompleted } from '../services/serverRejectedSale';
 import { SalesSyncController } from '../services/salesSyncController';
 import { checkFourPointSaleCriteria } from '../services/salesExtractor';
 import type { PromiseDefaultRecord } from '../services/promiseDefaultService';
@@ -34,6 +34,7 @@ interface SalesContextType {
   addSale: (sale: Omit<SaleRecord, 'id'>) => SaleRecord;
   updateSale: (sale: SaleRecord, options?: SaleUpdateOptions) => SaleRecord | undefined;
   updateSaleCapture: (saleId: string, imageUrl: string) => SaleRecord | undefined;
+  completeServerReview: (saleId: string) => SaleRecord | undefined;
   retrySalePrint: (id: string) => void;
   deleteSale: (id: string) => void;
   restoreSales: (records: SaleRecord[]) => void;
@@ -285,6 +286,15 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const controller = getController();
     if (!controller) return;
     return controller.upsert(sale);
+  };
+
+  // A review acknowledgement changes only the note, including while its fallback
+  // sale is still pending. It must not queue a new receipt like a seller edit.
+  const completeServerReview = (saleId: string): SaleRecord | undefined => {
+    const latest = salesRef.current.find((sale) => sale.id === saleId);
+    if (!latest) return;
+    const completed = markServerReviewCompleted(latest);
+    return completed === latest ? latest : replaceSale(completed);
   };
 
   // A capture finishes asynchronously. Merge only its image into the latest
@@ -628,7 +638,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const visibleSales = controllerRef.current?.workspaceId === workspaceId && controllerRef.current.generation === identityGenerationRef.current ? sales : [];
   const visiblePromiseDefaults = promiseDefaultsState.workspaceId === workspaceId ? promiseDefaultsState.records : [];
   return <SalesContext.Provider value={{ sales: visibleSales, promiseDefaults: visiblePromiseDefaults, setPromiseDefault,
-    addSale, updateSale, updateSaleCapture, retrySalePrint, deleteSale, restoreSales, confirmBatchSales, exportCsv, refreshSales, applyCommittedSales,
+    addSale, updateSale, updateSaleCapture, completeServerReview, retrySalePrint, deleteSale, restoreSales, confirmBatchSales, exportCsv, refreshSales, applyCommittedSales,
     syncError, retrySync, getSalesBySession, getSettlementSummary }}>
     {children}
   </SalesContext.Provider>;

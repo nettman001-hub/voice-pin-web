@@ -21,6 +21,12 @@ export const SERVER_REVIEW_MARK = '[서버 확인 필요]';
 export const needsServerReview = (sale: Pick<SaleRecord, 'note'>): boolean =>
   Boolean(sale.note?.includes(SERVER_REVIEW_MARK));
 
+/** 판매자가 확인한 기록과 서버 사유는 남기고, 검토 대기 표시만 완료로 바꾼다. */
+export function markServerReviewCompleted(sale: SaleRecord): SaleRecord {
+  if (!needsServerReview(sale)) return sale;
+  return { ...sale, note: sale.note!.split(SERVER_REVIEW_MARK).join('[판매자 확인 완료]') };
+}
+
 /**
  * 서버가 자동 판매의 근거를 받아들이지 않아도 판매를 이 브라우저에만 "서버 저장 대기"로
  * 남기지 않는다. 화면에 보이는 상태(자동저장·확정) 그대로 일반 판매로 서버에 저장하고
