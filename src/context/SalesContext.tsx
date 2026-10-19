@@ -7,6 +7,7 @@ import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
 import { commentStreamService } from '../services/commentStreamService';
 import type { BatchConfirmResult, SaleHistoryRecord } from '../types/pendingSale';
 import { aiSettingsApi } from '../services/aiSettingsApi';
+import { heldAfterServerRejection } from '../services/serverRejectedSale';
 import { SalesSyncController } from '../services/salesSyncController';
 import { checkFourPointSaleCriteria } from '../services/salesExtractor';
 import type { PromiseDefaultRecord } from '../services/promiseDefaultService';
@@ -103,6 +104,8 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       },
       error: (message) => setSyncError(message),
+      // A voice sale the server will not accept is still saved (marked for review) instead of staying in this browser only.
+      fallback: (sale, error) => isRemoteAuth ? heldAfterServerRejection(sale, error) : null,
       active: () => identityGenerationRef.current === generation && identityRef.current === workspaceId && controllerRef.current?.controller === controller,
     });
     controllerRef.current = { workspaceId, generation, controller };
