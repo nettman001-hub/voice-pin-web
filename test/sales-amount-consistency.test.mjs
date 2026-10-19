@@ -6,6 +6,7 @@ import ts from 'typescript';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import * as billableSales from '../src/services/billableSales.ts';
+import * as serverRejectedSale from '../src/services/serverRejectedSale.ts';
 import * as salesExtractor from '../src/services/salesExtractor.ts';
 import * as saleRowHistory from '../src/services/saleRowHistory.ts';
 import * as salesListRevenue from '../src/services/salesListRevenue.ts';
@@ -64,6 +65,7 @@ function fixture(records, configOverrides = {}) {
     '../../context/CommerceContext': { useCommerce: () => commerce },
     '../../services/productSalesApi': { productSalesApi: {} },
     '../../services/billableSales': billableSales,
+    '../../services/serverRejectedSale': serverRejectedSale,
     '../../services/saleRowHistory': saleRowHistory,
     '../../services/salesExtractor': salesExtractor,
     '../../services/salesListRevenue': salesListRevenue,

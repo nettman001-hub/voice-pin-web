@@ -42,6 +42,7 @@ import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 import { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults } from '../../services/promiseDefaultService';
 import { calculateSalesListRevenue } from '../../services/salesListRevenue';
 import { isBillableSale } from '../../services/billableSales';
+import { needsServerReview } from '../../services/serverRejectedSale';
 import { findNicknameInMessages, messageMentionsNickname, needsNicknameConfirmation } from '../../services/smsNicknameLink';
 import { useBuyerPhoneLinks } from '../../hooks/useBuyerPhoneLinks';
 
@@ -1200,7 +1201,7 @@ export const SalesListPage: React.FC = () => {
                                 )}
                               </div>
                               <div className="min-w-0 flex-1">
-                                <div className="flex items-center space-x-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                   <span
                                     className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
                                       rec.status === '보류'
@@ -1219,6 +1220,14 @@ export const SalesListPage: React.FC = () => {
                                       title="아직 서버에 저장되지 않아 이 컴퓨터에만 있는 판매입니다. 합계에는 포함됩니다."
                                     >
                                       서버 저장 대기
+                                    </span>
+                                  )}
+                                  {needsServerReview(rec) && (
+                                    <span
+                                      className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-orange-50 text-orange-700 border border-orange-200"
+                                      title={rec.note}
+                                    >
+                                      서버 확인 필요
                                     </span>
                                   )}
                                   {(rec.productCode || rec.productName) && (
@@ -1395,6 +1404,14 @@ export const SalesListPage: React.FC = () => {
                                 title="아직 서버에 저장되지 않아 이 컴퓨터에만 있는 판매입니다. 합계에는 포함됩니다."
                               >
                                 서버 저장 대기
+                              </span>
+                            )}
+                            {needsServerReview(sale) && (
+                              <span
+                                className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-orange-50 text-orange-700 border border-orange-200"
+                                title={sale.note}
+                              >
+                                서버 확인 필요
                               </span>
                             )}
                             <BuyerStatusBadges

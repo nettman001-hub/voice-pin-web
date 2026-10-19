@@ -1,9 +1,12 @@
 import type { SaleRecord } from '../types/live.ts';
 
-/** 서버가 이미 같은 판매 ID를 갖고 있다는 거절: 보류로 덮어쓰면 서버의 판매가 바뀌므로 대체하지 않는다. */
+/** 서버가 이미 같은 판매 ID를 갖고 있다는 거절: 덮어쓰면 서버의 판매가 바뀌므로 대체하지 않는다. */
 const SERVER_HAS_SALE = new Set(['SALE_ALREADY_FINAL', 'OPERATION_PAYLOAD_MISMATCH']);
 
-/** 구매 댓글 업로드를 기다리는 동안은 재시도하고, 이 시간이 지나면 보류로 서버에 남긴다. */
+/** 서버 장애나 인증·권한 오류는 판매 근거 거절이 아니므로 일반 저장으로 우회하지 않는다. */
+const NON_EVIDENCE_ERRORS = new Set(['DATABASE_ERROR', 'TEMPORARILY_UNAVAILABLE', 'AUTH_REQUIRED', 'CAPABILITY_DENIED']);
+
+/** 구매 댓글 업로드를 기다리는 동안은 재시도하고, 이 시간이 지나면 검토 표시를 붙여 서버에 남긴다. */
 export const COMMENT_SYNC_WAIT_MS = 10 * 60 * 1000;
 
 interface SaveError {
@@ -29,9 +32,9 @@ export function heldAfterServerRejection(sale: SaleRecord, error: unknown, now =
   if (sale.status !== '자동저장' && sale.status !== '확정') return null;
   const failure = (error && typeof error === 'object' ? error : {}) as SaveError;
   const code = failure.code;
-  if (code && SERVER_HAS_SALE.has(code)) return null;
+  if (code && (SERVER_HAS_SALE.has(code) || NON_EVIDENCE_ERRORS.has(code))) return null;
   if (failure.retryable !== false) {
-    // 네트워크·서버 오류는 계속 재시도한다. 댓글 업로드 대기만 오래되면 보류로 넘긴다.
+    // 네트워크·서버 오류는 계속 재시도한다. 댓글 업로드 대기만 오래되면 검토 표시를 붙여 저장한다.
     if (code !== 'COMMENT_NOT_SYNCED') return null;
     const age = now - Date.parse(sale.recognizedAt);
     if (!(age > COMMENT_SYNC_WAIT_MS)) return null;

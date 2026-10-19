@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Calendar, ChevronDown, ChevronRight, Download, Layers } from 'lucide-react';
 import { useSales } from '../../context/SalesContext';
 import { productSalesApi } from '../../services/productSalesApi';
+import { isBillableSale } from '../../services/billableSales';
 import { LiveSession } from '../../types/productSales';
 import { formatSessionDisplay } from '../../utils/sessionFormatter';
 
@@ -83,8 +84,7 @@ export const SettlementPage: React.FC = () => {
     return sales.filter((s) => s.sessionId === sessionFilter);
   }, [sales, sessionFilter]);
 
-  const validSales = useMemo(() => filteredSalesBySession.filter((sale) => sale.status !== '보류'
-    && sale.status !== '취소' && sale.syncStatus !== 'PENDING'), [filteredSalesBySession]);
+  const validSales = useMemo(() => filteredSalesBySession.filter(isBillableSale), [filteredSalesBySession]);
   const groups = useMemo<SettlementGroup[]>(() => {
     const grouped = new Map<string, SettlementGroup>();
     validSales.forEach((sale) => {

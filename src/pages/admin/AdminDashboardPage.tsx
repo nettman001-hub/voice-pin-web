@@ -5,6 +5,7 @@ import { useSales } from '../../context/SalesContext';
 import { useLive } from '../../context/LiveContext';
 import { User } from '../../types/auth';
 import { remoteWorkspaceService } from '../../services/remoteWorkspaceService';
+import { calculateBillableAmount } from '../../services/billableSales';
 import { ReportItem } from '../../types/admin';
 import { aiSettingsApi } from '../../services/aiSettingsApi';
 import { maskEndpointUrl } from '../../utils/maskingUtils';
@@ -81,8 +82,7 @@ export const AdminDashboardPage: React.FC = () => {
   const totalMembers = allMembers.length;
   const activeMembers = allMembers.filter((m: User) => m.status === '활성').length;
   const pendingReports = reports.filter((r: ReportItem) => r.status === '접수').length;
-  const totalRevenue = sales.filter((s) => s.status !== '보류' && s.status !== '취소'
-    && s.syncStatus !== 'PENDING').reduce((sum, s) => sum + s.amount, 0);
+  const totalRevenue = calculateBillableAmount(sales);
   const sellerMembers = allMembers.filter((m: User) => m.role === '판매자');
   const allowedSellersCount = sellerMembers.filter((m: User) => m.allowAdminSttKey).length;
 

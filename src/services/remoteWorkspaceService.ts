@@ -610,10 +610,11 @@ export const remoteWorkspaceService = {
           saleId: sale.id,
           invalidFields: serverError?.details?.invalidFields || [],
         });
-        // A comment not yet uploaded, or a network/database failure, can succeed on
-        // the next retry. Any other server code is a definite rejection of this
-        // evidence and must not hold up later sales.
-        const retryable = !serverError?.code || ['COMMENT_NOT_SYNCED', 'DATABASE_ERROR'].includes(serverError.code);
+        // Missing comments, transient failures and expired authentication can recover.
+        // Permanent failures stay blocked or are saved with a review marker by the controller.
+        const retryable = !serverError?.code || [
+          'COMMENT_NOT_SYNCED', 'DATABASE_ERROR', 'TEMPORARILY_UNAVAILABLE', 'AUTH_REQUIRED',
+        ].includes(serverError.code);
         throw Object.assign(new Error(serverError?.message || error?.message || '음성 판매 서버 확정 실패'), {
           code: serverError?.code, retryable, details: serverError?.details,
         });
