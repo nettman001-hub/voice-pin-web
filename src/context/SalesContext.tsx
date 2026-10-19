@@ -43,7 +43,7 @@ interface SalesContextType {
   refreshSales: () => Promise<SaleRecord[]>;
   applyCommittedSales: (workspaceId: string, records: SaleRecord[]) => void;
   syncError: string | null;
-  retrySync: () => void;
+  retrySync: () => Promise<void>;
   getSalesBySession: (sessionId: string) => SaleRecord[];
   getSettlementSummary: (period: 'TODAY' | 'WEEK' | 'MONTH' | 'CUSTOM', customRange?: { start: string; end: string }) => {
     summary: SettlementSummary;
@@ -163,7 +163,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     getController()?.applyConfirmed(records);
   }, [getController]);
 
-  const retrySync = useCallback(() => { void getController()?.flush({ retryBlocked: true }); }, [getController]);
+  const retrySync = useCallback(() => getController()?.flush({ retryBlocked: true }) || Promise.resolve(), [getController]);
   const retryAutomaticSync = useCallback(() => { void getController()?.flush(); }, [getController]);
 
   useEffect(() => {
