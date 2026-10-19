@@ -3,13 +3,38 @@
  *
  * - EXACT: 본문에 닉네임이 그대로 들어 있음 (대소문자 무시)
  * - SPACING: 띄어쓰기·문장부호만 다름 ("꽃 심이" ↔ "꽃심이")
+ * - SHORT: 1~2글자 닉네임이 한 단어로 따로 쓰임 ("하늘입니다") → "닉네임 확인필요"
  * - SIMILAR: 자모 1~2개 차이 정도로 비슷함 ("꼿심이" ↔ "꽃심이") → "닉네임 확인필요"
  *
- * EXACT/SPACING 은 확정 연결로 보고 전화번호에 저장할 수 있으며,
- * SIMILAR 는 화면에만 연결해 보여 주고 판매자 확인 전에는 저장하지 않는다.
+ * EXACT/SPACING(3글자 이상)은 확정 연결로 보고 전화번호에 저장할 수 있으며,
+ * SHORT/SIMILAR 는 화면에만 연결해 보여 주고 판매자 확인 전에는 저장하지 않는다.
+ * 짧은 닉네임은 "하늘색", "예쁨 받았어요"처럼 다른 고객의 평범한 문장에도 들어가기 때문이다.
  */
 
-export type SmsNicknameMatchKind = 'EXACT' | 'SPACING' | 'SIMILAR';
+export type SmsNicknameMatchKind = 'EXACT' | 'SPACING' | 'SHORT' | 'SIMILAR';
+
+/** 판매자 확인 전까지 "닉네임 확인필요"로 보여 줄 연결인지 */
+export const needsNicknameConfirmation = (match: SmsNicknameMatch | null | undefined): boolean =>
+  match?.kind === 'SHORT' || match?.kind === 'SIMILAR';
+
+/** 확정 연결로 볼 최소 길이 (공백 제외) */
+const MIN_CONFIRMED_CHARS = 3;
+
+/** 짧은 닉네임 뒤에 붙어도 한 단어로 보는 호칭·어미 */
+const SHORT_NICK_SUFFIX = /^(?:님|씨|이|이에요|예요|에요|입니다|이요|요|이고|고|인데요|인데|이구요|구요|이름|이름은|이름이)?$/u;
+
+function wordsOf(body: string): string[] {
+  return String(body)
+    .normalize('NFKC')
+    .toLocaleLowerCase('ko-KR')
+    .split(/[\s\p{P}\p{S}]+/u)
+    .filter(Boolean);
+}
+
+/** 1~2글자 닉네임이 다른 낱말의 일부가 아니라 한 단어로 따로 쓰였는지 */
+function hasStandaloneShortNick(words: readonly string[], compactNick: string): boolean {
+  return words.some((word) => word.startsWith(compactNick) && SHORT_NICK_SUFFIX.test(word.slice(compactNick.length)));
+}
 
 export interface SmsNicknameMatch {
   nickname: string;
@@ -86,11 +111,7 @@ function bestSimilarDistance(body: string, nickname: string): number | null {
   const targetDigits = digitsOf(target);
   const targetChars = Array.from(target);
 
-  const words = String(body)
-    .normalize('NFKC')
-    .toLocaleLowerCase('ko-KR')
-    .split(/[\s\p{P}\p{S}]+/u)
-    .filter(Boolean);
+  const words = wordsOf(body);
   const candidates = new Set<string>(words);
   for (let i = 0; i + 1 < words.length; i += 1) candidates.add(words[i] + words[i + 1]);
 
@@ -114,18 +135,30 @@ export function findNicknameInText(body: string | null | undefined, nicknames: r
   const sorted = Array.from(new Set(nicknames.map((n) => String(n || '').trim()).filter(Boolean)))
     .sort((a, b) => compactText(b).length - compactText(a).length);
 
+  const longNicks = sorted.filter((n) => Array.from(compactText(n)).length >= MIN_CONFIRMED_CHARS);
+  const shortNicks = sorted.filter((n) => {
+    const length = Array.from(compactText(n)).length;
+    return length > 0 && length < MIN_CONFIRMED_CHARS;
+  });
+
   const lowerBody = body.toLocaleLowerCase('ko-KR');
-  for (const nickname of sorted) {
-    if (nickname.length >= 2 && lowerBody.includes(nickname.toLocaleLowerCase('ko-KR'))) {
+  for (const nickname of longNicks) {
+    if (lowerBody.includes(nickname.toLocaleLowerCase('ko-KR'))) {
       return { nickname, kind: 'EXACT' };
     }
   }
 
   const compactBody = compactText(body);
-  for (const nickname of sorted) {
-    const compactNick = compactText(nickname);
-    if (compactNick.length >= 2 && compactBody.includes(compactNick)) {
+  for (const nickname of longNicks) {
+    if (compactBody.includes(compactText(nickname))) {
       return { nickname, kind: 'SPACING' };
+    }
+  }
+
+  const words = wordsOf(body);
+  for (const nickname of shortNicks) {
+    if (hasStandaloneShortNick(words, compactText(nickname))) {
+      return { nickname, kind: 'SHORT' };
     }
   }
 
@@ -152,15 +185,16 @@ export function findNicknameInMessages(messages: readonly MessageLike[], nicknam
     if (message.direction !== 'INCOMING' || !message.body) continue;
     const match = findNicknameInText(message.body, nicknames);
     if (!match) continue;
-    if (match.kind !== 'SIMILAR') return match;
+    if (!needsNicknameConfirmation(match)) return match;
     if (!similar) similar = match;
   }
   return similar;
 }
 
-/** 받은 문자 본문에 이 닉네임이 (띄어쓰기 무시하고) 들어 있는지 */
+/** 받은 문자 본문에 이 닉네임이 (띄어쓰기 무시하고, 짧은 닉네임은 한 단어로) 들어 있는지 */
 export function messageMentionsNickname(body: string | null | undefined, nickname: string): boolean {
   const compactNick = compactText(nickname);
-  if (!body || compactNick.length < 2) return false;
+  if (!body || !compactNick) return false;
+  if (Array.from(compactNick).length < MIN_CONFIRMED_CHARS) return hasStandaloneShortNick(wordsOf(body), compactNick);
   return compactText(body).includes(compactNick);
 }

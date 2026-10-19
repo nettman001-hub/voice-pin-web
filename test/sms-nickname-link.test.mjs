@@ -24,6 +24,18 @@ test('평범한 문장이나 짧은 닉네임은 비슷함으로 잡지 않음',
   assert.equal(findNicknameInText('하눌', buyers), null);
 });
 
+test('1~2글자 닉네임은 한 단어로 쓰였을 때만 확인필요로 연결', () => {
+  assert.deepEqual(findNicknameInText('하늘입니다 입금했어요', buyers), { nickname: '하늘', kind: 'SHORT' });
+  assert.deepEqual(findNicknameInText('하늘 님', buyers), { nickname: '하늘', kind: 'SHORT' });
+  assert.deepEqual(findNicknameInText('별', ['별']), { nickname: '별', kind: 'SHORT' });
+  assert.equal(findNicknameInText('하늘색 원피스 입금했어요', buyers), null);
+  assert.equal(findNicknameInText('별로 안 늦게 보내주세요', ['별']), null);
+});
+
+test('긴 닉네임의 확정 연결이 짧은 닉네임보다 먼저', () => {
+  assert.deepEqual(findNicknameInText('하늘 꽃심이 입금', buyers), { nickname: '꽃심이', kind: 'EXACT' });
+});
+
 test('여러 문자 중 확실한 연결을 비슷함보다 먼저, 보낸 문자는 제외', () => {
   const messages = [
     { direction: 'OUTGOING', body: '꽃심이님 주문 확인' },

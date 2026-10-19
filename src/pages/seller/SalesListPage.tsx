@@ -42,7 +42,7 @@ import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 import { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults } from '../../services/promiseDefaultService';
 import { calculateSalesListRevenue } from '../../services/salesListRevenue';
 import { isBillableSale } from '../../services/billableSales';
-import { findNicknameInMessages, messageMentionsNickname } from '../../services/smsNicknameLink';
+import { findNicknameInMessages, messageMentionsNickname, needsNicknameConfirmation } from '../../services/smsNicknameLink';
 import { useBuyerPhoneLinks } from '../../hooks/useBuyerPhoneLinks';
 
 const getBankBadgeStyle = (bank?: string | null): string => {
@@ -401,7 +401,7 @@ export const SalesListPage: React.FC = () => {
         nicknameMatch,
         isNew: Boolean(matchedNick && !existingNick),
         // 닉네임이 비슷하기만 한 연결: 화면에는 연결하되 판매자 확인이 필요함
-        needsNicknameCheck: Boolean(nicknameMatch?.kind === 'SIMILAR' && !existingNick),
+        needsNicknameCheck: Boolean(needsNicknameConfirmation(nicknameMatch) && !existingNick),
       });
     });
     return list;

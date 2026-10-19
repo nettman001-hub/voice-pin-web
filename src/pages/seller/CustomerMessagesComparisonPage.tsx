@@ -15,7 +15,7 @@ import { shippingService } from '../../services/shippingService';
 import { groupSalesByBuyer, BuyerSaleGroup } from '../../services/buyerSaleGrouping';
 import { formatMultiSaleAmount } from '../../services/salesExtractor';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
-import { findNicknameInMessages, messageMentionsNickname, type SmsNicknameMatch } from '../../services/smsNicknameLink';
+import { findNicknameInMessages, messageMentionsNickname, needsNicknameConfirmation, type SmsNicknameMatch } from '../../services/smsNicknameLink';
 import { useBuyerPhoneLinks } from '../../hooks/useBuyerPhoneLinks';
 import {
   MessageSquare,
@@ -491,7 +491,7 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
       // C. 신규 판정:
       // 과거 거래 내역이 없거나, 이번 문자에 웹앱 구매자 닉네임이 명시되어 새로 식별된 경우 "신규" 아이콘 부여
       // 비슷하기만 한 닉네임은 "신규" 대신 "닉네임 확인필요"로 표시
-      const isNew = Boolean(matchedNick && !existingNick && nicknameMatch?.kind !== 'SIMILAR');
+      const isNew = Boolean(matchedNick && !existingNick && !needsNicknameConfirmation(nicknameMatch));
 
       threadList.push({
         phoneKey: norm,
@@ -502,7 +502,7 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
         newMatchedNickname: matchedNick,
         nicknameMatch,
         isNew,
-        needsNicknameCheck: Boolean(nicknameMatch?.kind === 'SIMILAR' && !existingNick),
+        needsNicknameCheck: Boolean(needsNicknameConfirmation(nicknameMatch) && !existingNick),
       });
     });
 
@@ -1551,7 +1551,7 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                             <Sparkles className="w-2.5 h-2.5" /> 신규 닉네임 감지
                           </span>
                         ) : thread.needsNicknameCheck ? (
-                          <span className="text-rose-600 font-bold">비슷한 닉네임 감지</span>
+                          <span className="text-rose-600 font-bold">닉네임 확인 필요</span>
                         ) : null}
                       </div>
                     </div>
