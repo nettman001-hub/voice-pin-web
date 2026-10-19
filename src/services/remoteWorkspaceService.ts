@@ -486,6 +486,51 @@ export const remoteWorkspaceService = {
   },
 
   /**
+   * 관리자 관제 전용: 특정 판매자의 방송 회차에 백업된 전체 STT 음성 발화 로그(잡담/설명/호명 포함)를 조회합니다.
+   * Supabase workspace_settings의 session_transcripts_{sessionId}에서 불러옵니다.
+   */
+  async fetchSessionTranscriptsForAdmin(sessionId: string, workspaceId?: string): Promise<SttTranscriptLog[]> {
+    if (!isSupabaseConfigured || !sessionId) return [];
+    const client = requireSupabase();
+    const namespace = `session_transcripts_${sessionId}`;
+
+    // 1차 시도: workspace_settings 직접 쿼리
+    try {
+      let query = client
+        .from('workspace_settings')
+        .select('value')
+        .eq('namespace', namespace);
+
+      if (workspaceId && isValidUuid(workspaceId)) {
+        query = query.eq('workspace_id', workspaceId);
+      }
+
+      const { data, error } = await query.maybeSingle();
+      if (!error && data?.value && Array.isArray((data.value as any)?.logs)) {
+        return (data.value as any).logs as SttTranscriptLog[];
+      }
+    } catch (err) {
+      console.warn('[RemoteWorkspace] fetchSessionTranscriptsForAdmin 직접 조회 실패:', err);
+    }
+
+    // 2차 시도: Edge Function voicecap-onboard get-workspace-setting
+    if (workspaceId && isValidUuid(workspaceId)) {
+      try {
+        const { data, error } = await client.functions.invoke('voicecap-onboard', {
+          body: { action: 'get-workspace-setting', workspaceId, namespace },
+        });
+        if (!error && data?.ok && data.value && Array.isArray(data.value.logs)) {
+          return data.value.logs as SttTranscriptLog[];
+        }
+      } catch (efErr) {
+        console.warn('[RemoteWorkspace] fetchSessionTranscriptsForAdmin Edge Function 실패:', efErr);
+      }
+    }
+
+    return [];
+  },
+
+  /**
    * 판매자 라이브 청취 종료 시 클라우드 STT(Deepgram, Soniox) 사용 시간을 Supabase에 기록합니다.
    */
   async recordSttUsage(payload: SttUsageRecordPayload): Promise<void> {

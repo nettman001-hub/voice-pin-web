@@ -75,13 +75,20 @@ export const AdminSalesManagementPage: React.FC = () => {
         seller.sellerUserId
       );
 
-      // 2. 해당 회차의 판매자 발화 멘트 (sess.sales)
+      // 2. 해당 회차의 판매자 전체 음성 멘트(잡담, 설명, 호명 포함) 조회
+      const transcripts = await remoteWorkspaceService.fetchSessionTranscriptsForAdmin(
+        sess.sessionId,
+        seller.sellerUserId
+      );
+
+      // 3. 해당 회차의 판매 확정 건 목록
       const sales = sess.sales;
 
-      // 3. 타임라인 통합 이벤트 생성
+      // 4. 타임라인 통합 이벤트 생성
       interface ArchiveTimelineEvent {
         time: string;
         kind: 'COMMENT' | 'SELLER_MENT';
+        category: '고객댓글' | '판매확정' | '일반설명';
         author: string;
         content: string;
         buyerNickname?: string;
@@ -90,24 +97,112 @@ export const AdminSalesManagementPage: React.FC = () => {
         productName?: string;
       }
 
-      const timeline: ArchiveTimelineEvent[] = [
-        ...comments.map((c) => ({
+      const timeline: ArchiveTimelineEvent[] = [];
+
+      // (A) 고객 댓글 추가
+      for (const c of comments) {
+        timeline.push({
           time: c.capturedAt,
-          kind: 'COMMENT' as const,
+          kind: 'COMMENT',
+          category: '고객댓글',
           author: c.nickname,
           content: c.content,
-        })),
-        ...sales.map((s) => ({
-          time: s.recognizedAt || s.createdAt,
-          kind: 'SELLER_MENT' as const,
-          author: seller.sellerNickname || '판매자',
-          content: s.rawTranscript || '(발화 내용 없음)',
-          buyerNickname: s.buyerNickname,
-          amount: s.amount,
-          status: s.status,
-          productName: s.productName,
-        })),
-      ];
+        });
+      }
+
+      // (B) 판매자 음성 멘트 추가 (전체 STT 로그가 있으면 스마트 매칭, 없으면 sales 활용)
+      let generalMentCount = 0;
+      let matchedSaleCount = 0;
+
+      if (transcripts && transcripts.length > 0) {
+        const unmatchedSales = [...sales];
+
+        for (const tr of transcripts) {
+          const trTimeMs = new Date(tr.timestamp).getTime();
+          const trText = (tr.text || '').trim();
+
+          // 해당 발화와 일치하거나 시간대(±8초)가 가장 가까운 판매 확정 건 매칭
+          let bestSaleIndex = -1;
+          let bestTimeDiff = Infinity;
+
+          for (let i = 0; i < unmatchedSales.length; i++) {
+            const sale = unmatchedSales[i];
+            const saleTimeMs = new Date(sale.recognizedAt || sale.createdAt).getTime();
+            const timeDiff = Math.abs(saleTimeMs - trTimeMs);
+            const saleTranscript = (sale.rawTranscript || '').trim();
+
+            const isTextMatch = trText && saleTranscript && (
+              trText.includes(saleTranscript) || saleTranscript.includes(trText)
+            );
+
+            if (isTextMatch || timeDiff <= 8000) {
+              if (timeDiff < bestTimeDiff) {
+                bestTimeDiff = timeDiff;
+                bestSaleIndex = i;
+              }
+            }
+          }
+
+          if (bestSaleIndex !== -1) {
+            const matched = unmatchedSales.splice(bestSaleIndex, 1)[0];
+            matchedSaleCount++;
+            timeline.push({
+              time: tr.timestamp,
+              kind: 'SELLER_MENT',
+              category: '판매확정',
+              author: seller.sellerNickname || '판매자',
+              content: trText || matched.rawTranscript || '(발화 내용 없음)',
+              buyerNickname: matched.buyerNickname,
+              amount: matched.amount,
+              status: matched.status,
+              productName: matched.productName,
+            });
+          } else {
+            generalMentCount++;
+            timeline.push({
+              time: tr.timestamp,
+              kind: 'SELLER_MENT',
+              category: '일반설명',
+              author: seller.sellerNickname || '판매자',
+              content: trText || '(발화 내용 없음)',
+              buyerNickname: '-',
+              amount: undefined,
+              status: '일반발화',
+              productName: '-',
+            });
+          }
+        }
+
+        // 매칭되지 않고 남은 판매 확정 건이 있다면 타임라인에 누락 없이 추가
+        for (const leftover of unmatchedSales) {
+          timeline.push({
+            time: leftover.recognizedAt || leftover.createdAt,
+            kind: 'SELLER_MENT',
+            category: '판매확정',
+            author: seller.sellerNickname || '판매자',
+            content: leftover.rawTranscript || '(발화 내용 없음)',
+            buyerNickname: leftover.buyerNickname,
+            amount: leftover.amount,
+            status: leftover.status,
+            productName: leftover.productName,
+          });
+        }
+      } else {
+        // 전체 STT 로그가 없는 과거 회차의 경우 sales의 rawTranscript 활용
+        for (const s of sales) {
+          timeline.push({
+            time: s.recognizedAt || s.createdAt,
+            kind: 'SELLER_MENT',
+            category: '판매확정',
+            author: seller.sellerNickname || '판매자',
+            content: s.rawTranscript || '(발화 내용 없음)',
+            buyerNickname: s.buyerNickname,
+            amount: s.amount,
+            status: s.status,
+            productName: s.productName,
+          });
+        }
+      }
 
       // 시간 순서대로 정렬 (오름차순)
       timeline.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
@@ -116,9 +211,10 @@ export const AdminSalesManagementPage: React.FC = () => {
       const sanitizedSellerName = (seller.sellerNickname || '판매자').replace(/[\\/:*?"<>|]/g, '_');
       const sanitizedSessionDisplay = sessionDisplay.replace(/[\\/:*?"<>|]/g, '_');
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const totalSellerMentCount = timeline.filter((e) => e.kind === 'SELLER_MENT').length;
 
       if (format === 'CSV') {
-        const headers = ['순번', '일시(KST)', '구분', '작성자/호명', '내용', '호명구매자', '판매금액', '판매상태', '상품명'];
+        const headers = ['순번', '일시(KST)', '구분', '세부구분', '작성자/발화자', '내용/음성멘트', '호명구매자', '판매금액', '판매상태', '상품명'];
         const escapeCsv = (val: string | number | undefined | null) => {
           if (val === undefined || val === null) return '""';
           const str = String(val).replace(/"/g, '""');
@@ -128,7 +224,8 @@ export const AdminSalesManagementPage: React.FC = () => {
         const rows = timeline.map((e, idx) => [
           idx + 1,
           escapeCsv(formatDateTimeKST(e.time)),
-          escapeCsv(e.kind === 'COMMENT' ? '고객댓글' : '판매자음성멘트'),
+          escapeCsv(e.kind === 'COMMENT' ? '고객댓글' : '판매자음성'),
+          escapeCsv(e.category),
           escapeCsv(e.author),
           escapeCsv(e.content),
           escapeCsv(e.buyerNickname || ''),
@@ -143,15 +240,15 @@ export const AdminSalesManagementPage: React.FC = () => {
       } else {
         const headerText = [
           '================================================================================',
-          '  VoiceCAP 방송 회차 통합 기록 (고객 댓글 & 판매자 음성 멘트)',
+          '  VoiceCAP 방송 회차 전체 통합 기록 (고객 댓글 & 판매자 전체 음성 멘트)',
           `  판매자: ${seller.sellerNickname} (${seller.sellerEmail})`,
           `  작업공간: ${seller.workspaceName}`,
           `  회차 ID: ${sess.sessionId}`,
           `  회차 명칭: ${sessionDisplay}`,
           `  다운로드 일시: ${new Date().toLocaleString('ko-KR')}`,
           `  총 고객 댓글: ${comments.length.toLocaleString()}건`,
-          `  총 판매 멘트: ${sales.length.toLocaleString()}건`,
-          `  총 타임라인 이벤트: ${timeline.length.toLocaleString()}건`,
+          `  총 판매자 발화: ${totalSellerMentCount.toLocaleString()}건 (판매확정: ${sales.length}건, 일반잡담/설명: ${generalMentCount}건)`,
+          `  총 타임라인 기록: ${timeline.length.toLocaleString()}건`,
           '================================================================================\n',
         ].join('\n');
 
@@ -159,9 +256,11 @@ export const AdminSalesManagementPage: React.FC = () => {
           const timeStr = formatTimeKST(e.time);
           if (e.kind === 'COMMENT') {
             return `[${timeStr}] 💬 [고객댓글] ${e.author} : ${e.content}`;
-          } else {
+          } else if (e.category === '판매확정') {
             const saleMeta = `[호명: ${e.buyerNickname || '미확인'} | 금액: ${(e.amount || 0).toLocaleString()}원 | 상태: ${e.status || '-'} | 상품: ${e.productName || '미지정'}]`;
-            return `[${timeStr}] 🎙️ [판매자음성] "${e.content}"\n           └─ ${saleMeta}`;
+            return `[${timeStr}] 🎯 [판매자음성:판매확정] "${e.content}"\n           └─ ${saleMeta}`;
+          } else {
+            return `[${timeStr}] 🎙️ [판매자음성:일반멘트] "${e.content}"`;
           }
         }).join('\n\n');
 
@@ -170,7 +269,7 @@ export const AdminSalesManagementPage: React.FC = () => {
         triggerDownload(txtContent, filename, 'text/plain;charset=utf-8;');
       }
 
-      showToast(`'${seller.sellerNickname}' 판매자 [${sessionDisplay}] 회차 기록(${timeline.length}건)이 다운로드되었습니다.`);
+      showToast(`'${seller.sellerNickname}' 판매자 [${sessionDisplay}] 회차 전체 기록(${timeline.length}건)이 다운로드되었습니다.`);
     } catch (err: any) {
       console.error('[AdminSales] 회차 다운로드 실패:', err);
       alert(`다운로드 중 오류가 발생했습니다: ${err?.message || err}`);
