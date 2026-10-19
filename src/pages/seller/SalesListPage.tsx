@@ -1027,14 +1027,6 @@ export const SalesListPage: React.FC = () => {
                                       신규
                                     </span>
                                   )}
-                                  {matchedThread.needsNicknameCheck && (
-                                    <span
-                                      className="bg-rose-100 text-rose-700 border border-rose-200 text-[9px] font-black px-1.5 py-0.2 rounded-md"
-                                      title={`문자 속 닉네임이 '${matchedThread.newMatchedNickname}'과(와) 비슷하지만 똑같지는 않습니다.`}
-                                    >
-                                      닉네임 확인필요
-                                    </span>
-                                  )}
                                 </div>
                                 <span className="text-[10px] text-slate-400 font-medium">
                                   {formatDateTime(matchedThread.lastMessage.createdAt)}
@@ -1437,14 +1429,6 @@ export const SalesListPage: React.FC = () => {
                                   {matchedThread.isNew && (
                                     <span className="bg-amber-500 text-white text-[9px] font-black px-1.5 py-0.2 rounded-md shadow-2xs">
                                       신규
-                                    </span>
-                                  )}
-                                  {matchedThread.needsNicknameCheck && (
-                                    <span
-                                      className="bg-rose-100 text-rose-700 border border-rose-200 text-[9px] font-black px-1.5 py-0.2 rounded-md"
-                                      title={`문자 속 닉네임이 '${matchedThread.newMatchedNickname}'과(와) 비슷하지만 똑같지는 않습니다.`}
-                                    >
-                                      닉네임 확인필요
                                     </span>
                                   )}
                                 </div>

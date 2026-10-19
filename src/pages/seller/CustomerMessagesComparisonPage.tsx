@@ -490,7 +490,8 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
 
       // C. 신규 판정:
       // 과거 거래 내역이 없거나, 이번 문자에 웹앱 구매자 닉네임이 명시되어 새로 식별된 경우 "신규" 아이콘 부여
-      const isNew = Boolean(matchedNick && !existingNick);
+      // 비슷하기만 한 닉네임은 "신규" 대신 "닉네임 확인필요"로 표시
+      const isNew = Boolean(matchedNick && !existingNick && nicknameMatch?.kind !== 'SIMILAR');
 
       threadList.push({
         phoneKey: norm,
@@ -1509,7 +1510,10 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                             </span>
                           )}
                           {thread.needsNicknameCheck && (
-                            <span className="text-[10px] font-black text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded border border-rose-200">
+                            <span
+                              className="text-[10px] font-black text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded border border-rose-200 whitespace-nowrap"
+                              title="문자 속 닉네임이 비슷하지만 똑같지는 않습니다. 맞으면 닉네임을 직접 연결해 주세요."
+                            >
                               닉네임 확인필요
                             </span>
                           )}
@@ -1546,6 +1550,8 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                           <span className="text-emerald-600 font-bold flex items-center gap-0.5">
                             <Sparkles className="w-2.5 h-2.5" /> 신규 닉네임 감지
                           </span>
+                        ) : thread.needsNicknameCheck ? (
+                          <span className="text-rose-600 font-bold">비슷한 닉네임 감지</span>
                         ) : null}
                       </div>
                     </div>
