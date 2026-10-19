@@ -268,6 +268,11 @@ export function checkFourPointSaleCriteria(text: string): FourPointSaleCheck {
   const hasCapture = evidence.hasCapture;
 
   const isFourPointSale = hasNickname && hasConfirmation && hasPrice && hasCapture;
+  if (!isFourPointSale) {
+    const unordered = findUnorderedFourPoint(text);
+    if (unordered) return { isFourPointSale: true, ...unordered, hasNickname: true,
+      hasConfirmation: true, hasPrice: true, hasCapture: true };
+  }
 
   return {
     isFourPointSale,
@@ -279,6 +284,44 @@ export function checkFourPointSaleCriteria(text: string): FourPointSaleCheck {
     hasCapture,
     allocationTranscript: evidence.allocationTranscript,
   };
+}
+
+const UNORDERED_CONFIRMATION = /(?:드릴[게께]요|드리겠습니다|확정(?:이[요야]|입니다)?|가져가세요|낙찰|(?:챙겨|넣어|담아|배정해)\s*드|챙겨\s*줄)/u;
+
+/** The 4 steps (name, 드릴게요, price, 캡처) in any order: "가격은 1.0. 캡처하세요.
+ * 루나님 드릴게요." Exactly one buyer and one price, and nothing in the window may
+ * ask, demonstrate, correct, cancel or move to another product. */
+function findUnorderedFourPoint(text: string): { buyerNickname: string; amount: number; allocationTranscript: string } | null {
+  const clauses = allocationClauses(text).filter((clause) => !ALLOCATION_FILLER.test(clause));
+  if (!clauses.length || clauses.length > 8) return null;
+  const names = new Map<string, string>();
+  const amounts = new Set<number>();
+  const evidence: string[] = [];
+  let confirmed = false;
+  let captured = false;
+  for (const clause of clauses) {
+    if (isQuestionUtterance(clause) || NON_ALLOCATION.test(clause) || hasTransactionInterruption(clause)
+      || PRODUCT_TRANSITION.test(clause) || hasCaptureCancellationText(clause)) return null;
+    const clauseNames = getBuyerNicknameCandidates(clause);
+    const price = extractSpeechPrice(clause);
+    const confirmation = UNORDERED_CONFIRMATION.test(clause);
+    const capture = hasCaptureInstructionText(clause, { saleContext: true });
+    if (!clauseNames.length && !price && !confirmation && !capture && !PRICE_LABEL_ONLY.test(clause)) return null;
+    for (const name of clauseNames) names.set(name.replace(/\s+/gu, '').toLowerCase(), name);
+    // "1.0. 1.5" stays one clause (decimal point); still two different prices.
+    for (const part of clause.split(/(?<=\d)\.\s+(?=\d)/u)) {
+      const partPrice = extractSpeechPrice(part);
+      if (partPrice) amounts.add(partPrice.amount);
+    }
+    confirmed ||= confirmation;
+    captured ||= capture;
+    if (clauseNames.length || price || confirmation) evidence.push(clause);
+  }
+  if (names.size !== 1 || amounts.size !== 1 || !confirmed || !captured) return null;
+  const allocationTranscript = evidence.join('. ');
+  const buyerNickname = parseBuyerNickname(allocationTranscript);
+  const amount = extractSpeechPrice(allocationTranscript)?.amount;
+  return buyerNickname && amount ? { buyerNickname, amount, allocationTranscript } : null;
 }
 
 const ALLOCATION_ACTION = /(?:드리겠습니다|드릴게요|드릴께요|챙겨\s*드릴게요|챙겨\s*드리겠습니다|챙겨\s*줄(?:게|께)(?:요)?(?=\s|[,.!?]|$)|(?:넣어|담아|배정해)\s*드(?:릴(?:게|께)요|렸(?:어요|습니다))|구매\s*확정(?:입니다|할게요)?|낙찰(?:입니다)?|판매\s*완료|주문\s*확정|결제\s*완료|캡처(?:해주세요|해\s*주시고|하세요|부탁)?|먼저\s*(?:하셨네요|하셨어요|하셨|잡으셨|가져가셨)|가져가(?:세요|실게요|셨어요)|가실게요)/u;
@@ -381,6 +424,12 @@ function isSafeFourPointClause(text: string): boolean {
 
 const PRICE_LABEL = /(?:가격|금액|단가|판매가)(?:은|는|이|가)?/gu;
 
+function isPendingPriceStep(clause: string): boolean {
+  return PRICE_LABEL_ONLY.test(clause) || (hasCaptureInstructionText(clause, { saleContext: true })
+    && !extractSpeechPrice(clause) && !getBuyerNicknameCandidates(clause).length
+    && !hasCaptureCancellationText(clause) && isSafeFourPointClause(clause) && !PRODUCT_TRANSITION.test(clause));
+}
+
 /** "가방, 아니, 가격은 1.0 드릴게요. 꼬심이님 드릴게요": a labelled price spoken
  * right before the allocation belongs to it, when that clause names no buyer. */
 function findLeadingPriceTranscript(clauses: string[], start: number): string | null {
@@ -417,7 +466,7 @@ function findAllocationClause(clauses: string[], includeFourPoint = false): Allo
     while (previousIndex >= 0 && ALLOCATION_FILLER.test(clauses[previousIndex])) previousIndex--;
     const previous = clauses[previousIndex];
     // A short, stand-alone vocative can be a separate STT sentence.
-    if (previous && /^(?:네[,，]?\s*)?[가-힣a-zA-Z0-9_]{2,20}\s*(?:언니|님|씨)(?:께|에게|한테)?$/u.test(previous)
+    if (previous && /^(?:네[,，]?\s*)?(?:[가-힣a-zA-Z0-9_]{1,20}\s+)?[가-힣a-zA-Z0-9_]{2,20}\s*(?:언니|님|씨)(?:께|에게|한테)?$/u.test(previous)
       && parseBuyerNickname(previous)) return { text: clauses.slice(previousIndex, i + 1).join('. '), index: i, start: previousIndex };
     if (/구매\s*확정|낙찰|판매\s*완료|주문\s*확정|결제\s*완료|(?:넣어|담아|배정해)\s*드/u.test(clause)) return { text: clause, index: i, start: i };
     if (/캡처/u.test(clause)) {
@@ -451,6 +500,9 @@ export function findAllocationTranscript(text: string): string | null {
     if (PRODUCT_TRANSITION.test(next)) break;
     const priceClause = findExplicitPriceTranscript(next) || findStandalonePriceTranscript(next);
     if (priceClause) return `${allocation.text}. ${priceClause}`;
+    // "유령님 드릴게요. 가격은. 캡처하세요. 1.0": the label the STT cut off and
+    // a capture instruction do not end the allocation before its price.
+    if (isPendingPriceStep(next)) continue;
     const nextNames = getBuyerNicknameCandidates(next).map((name) => name.replace(/\s+/gu, ''));
     const repeatsAllocation = ALLOCATION_ACTION.test(next) && !NON_ALLOCATION.test(next) && !isQuestionUtterance(next)
       && !extractSpeechPrice(next) && nextNames.every((name) => names.has(name));
@@ -500,6 +552,7 @@ function findFourPointEvidence(text: string): {
       break;
     }
     if (!isSafeFourPointClause(next)) break;
+    if (PRICE_LABEL_ONLY.test(next)) continue;
     const priceClause = findExplicitPriceTranscript(next) || findStandalonePriceTranscript(next);
     const nextPrice = extractSpeechPrice(priceClause || next);
     // Preserve the existing rejection of an ambiguous first price declaration

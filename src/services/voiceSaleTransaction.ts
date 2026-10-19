@@ -88,7 +88,9 @@ function softBoundary(text: string): boolean {
 }
 
 function standaloneAddress(text: string): boolean {
+  // "우아한 유령님": a two-word display name said on its own.
   return isStandaloneBuyerAddress(text)
+    || /^(?:네[,，]?\s*)?[가-힣a-zA-Z0-9_]{1,20}\s+[가-힣a-zA-Z0-9_]{1,20}\s*(?:언니|님|씨)[.!。\s]*$/u.test(text.trim())
     || /^닉네임(?:은)?\s*[가-힣a-zA-Z0-9_]{1,20}(?:님|언니|씨)?[.!。\s]*$/u.test(text.trim());
 }
 
@@ -102,11 +104,13 @@ function sameResult(left: ExtractedSaleResult | null, right: ExtractedSaleResult
 function canContinueWith(text: string, incoming: ExtractedSaleResult | null, hasSaleContext: boolean): boolean {
   if (incoming || standaloneAddress(text) || FILLER.test(text)) return true;
   return splitTranscriptClauses(text).every((clause) =>
-    FILLER.test(clause) || standaloneAddress(clause)
+    FILLER.test(clause) || standaloneAddress(clause) || PRICE_LABEL_ONLY.test(clause)
     || Boolean(findExplicitPriceTranscript(clause) || findStandalonePriceTranscript(clause))
     || FOUR_POINT_CONFIRMATION_PATTERN.test(clause)
     || hasCaptureInstructionText(clause, { saleContext: hasSaleContext }));
 }
+
+const PRICE_LABEL_ONLY = /^(?:가격|금액|단가|판매가)(?:은|는|이|가)?요?[.!。\s]*$/u;
 
 function isPriceAnswer(clause: string): boolean {
   return Boolean(findExplicitPriceTranscript(clause) || findStandalonePriceTranscript(clause));
@@ -194,7 +198,9 @@ export function advanceVoiceSaleTransaction(
 
   // A boundary without a new independently valid statement cannot keep the old
   // recipient alive for a later price/capture. A different buyer can start anew.
-  if (!prior && (!incoming && !standaloneAddress(text))) return { state: null, emission: null };
+  // A 4-step confirmation may start with any step ("캡처하세요." / "가격은 1.0.").
+  const fourPointStep = !incoming && !FILLER.test(text) && canContinueWith(text, null, true);
+  if (!prior && (!incoming && !standaloneAddress(text) && !fourPointStep)) return { state: null, emission: null };
   if (!prior && (softBoundary(text) || hard) && !incoming) return { state: null, emission: null };
 
   const fragment = { eventId: input.eventId, text, recognizedAt: input.recognizedAt };

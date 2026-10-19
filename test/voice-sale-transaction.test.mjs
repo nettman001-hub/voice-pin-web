@@ -227,3 +227,52 @@ test('끊긴 배정의 가격 연결은 다른 구매자·다른 가격·15초 �
   assert.equal(closed.emission.result.amount, 10000);
   assert.equal(closed.state, null);
 });
+
+test('4단 멘트는 순서가 바뀌어도, 조각으로 끊겨도 확정한다', () => {
+  const parts = ['루나님', '드릴게요', '가격은 1.0', '캡처하세요'];
+  const orders = [];
+  const permute = (rest, acc = []) => rest.length ? rest.forEach((part, i) =>
+    permute([...rest.slice(0, i), ...rest.slice(i + 1)], [...acc, part])) : orders.push(acc);
+  permute(parts);
+  assert.equal(orders.length, 24);
+  for (const order of orders) {
+    const sentence = `${order.join('. ')}.`;
+    const whole = extractSaleFromTranscript(sentence);
+    assert.equal(whole?.isFourPointConfirmed, true, sentence);
+    assert.equal(whole.buyerNickname, '루나', sentence);
+    assert.equal(whole.amount, 10000, sentence);
+    let step = { state: null, emission: null };
+    let last = null;
+    order.forEach((part, i) => {
+      step = advance(step.state, `${part}.`, i * 2);
+      last = step.emission || last;
+    });
+    assert.equal(last?.result.isFourPointConfirmed, true, `조각: ${sentence}`);
+    assert.equal(extractSaleFromTranscript(last.result.rawTranscript)?.isFourPointConfirmed, true, `서버: ${sentence}`);
+  }
+});
+
+test('순서 무관 4단도 구매자 둘·가격 둘·질문·정정·상품 전환이면 확정하지 않는다', () => {
+  for (const speech of [
+    '가격은 1.0. 캡처하세요. 루나님, 루비님 드릴게요.',
+    '가격은 1.0. 1.5. 캡처하세요. 루나님 드릴게요.',
+    '가격은 1.0. 캡처하세요. 루나님 드릴까요?',
+    '가격은 1.0. 캡처하지 마세요. 루나님 드릴게요.',
+    '가격은 1.0. 캡처하세요. 다음 상품. 루나님 드릴게요.',
+    '가격은 1.0. 캡처하세요. 루나님 보여 드릴게요.',
+  ]) assert.notEqual(extractSaleFromTranscript(speech)?.isFourPointConfirmed, true, speech);
+});
+
+test('가격 앞에서 끊긴 4단 멘트는 캡처가 가격 앞뒤 어디에 와도 확정한다', () => {
+  const first = () => advance(null, '네, 이거 우아한 유령님 드릴게요. 가격은.', 0);
+  for (const rest of [['1.0이고요. 예뻐요. 캡처하세요.'], ['캡처하세요.', '1.0'], ['캡처하세요. 1.0이에요.'], ['1.0', '캡처해 놓으세요.']]) {
+    let step = first();
+    rest.forEach((text, i) => { step = advance(step.state, text, 3 + i * 2); });
+    assert.equal(step.emission?.result.isFourPointConfirmed, true, rest.join(' / '));
+    assert.equal(step.emission.result.amount, 10000, rest.join(' / '));
+  }
+  let split = advance(null, '우아한 유령님', 0);
+  split = advance(split.state, '드릴게요. 가격은.', 2);
+  split = advance(split.state, '1.0. 캡처하세요.', 4);
+  assert.equal(split.emission?.result.isFourPointConfirmed, true);
+});
