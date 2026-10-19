@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { findSaleForCapture } from '../src/services/saleCapturePairing.ts';
+import { findSaleForCapture, SALE_CAPTURE_PAIR_WINDOW_MS } from '../src/services/saleCapturePairing.ts';
 
 // Run the production capture callback across the asynchronous frame boundary.
 // SalesContext's image-only patch is exercised separately by its print tests.
@@ -33,13 +33,15 @@ function fixture(records, lastSaved = records[0] ?? null) {
   const frame = new Promise((resolve) => { resolveFrame = resolve; });
   const captures = [];
   const patches = [];
+  const timers = [];
   const currentWorkflowSalesRef = { current: records };
   const lastSavedSaleRef = { current: lastSaved };
   const currentUserIdRef = { current: 'user-1' };
   const listeningGenerationRef = { current: 1 };
   const module = { exports: {} };
   vm.runInNewContext(compiled, {
-    module, findSaleForCapture, currentWorkflowSalesRef, lastSavedSaleRef,
+    module, findSaleForCapture, SALE_CAPTURE_PAIR_WINDOW_MS, currentWorkflowSalesRef,
+    setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, lastSavedSaleRef,
     currentUserIdRef, listeningGenerationRef,
     authBoundaryGenerationRef: { current: 1 },
     isAuthenticatedRef: { current: true }, isListeningRef: { current: true },
@@ -47,7 +49,9 @@ function fixture(records, lastSaved = records[0] ?? null) {
     currentSessionIdRef: { current: 'broadcast' },
     productSalesRef: { current: { activeSession: { id: 'broadcast' } } },
     screenCaptureService: { getActiveStream: () => ({}), captureArea: () => frame },
-    storageService: { getCaptureAreaConfig: () => undefined, addCapture: (capture) => captures.push(capture) },
+    storageService: { getCaptureAreaConfig: () => undefined, addCapture: (capture) => captures.push(capture),
+      getCaptures: () => captures,
+      linkCaptureToSale: (captureId, saleId) => { captures.find((entry) => entry.id === captureId).saleId = saleId; } },
     setRecentCaptures() {},
     updateSale: () => assert.fail('Automatic captures must not replay a whole sale through the seller edit path'),
     updateSaleCapture: (...args) => {
@@ -56,7 +60,7 @@ function fixture(records, lastSaved = records[0] ?? null) {
     },
   });
   const result = {
-    captures, patches, currentWorkflowSalesRef, lastSavedSaleRef, currentUserIdRef, listeningGenerationRef,
+    captures, patches, timers, currentWorkflowSalesRef, lastSavedSaleRef, currentUserIdRef, listeningGenerationRef,
     savedSale: records[0],
     capture: module.exports,
     resolveFrame: (image = 'data:image/png;base64,new-capture') => resolveFrame(image),
@@ -143,3 +147,29 @@ for (const boundary of ['account', 'listening']) {
     assert.equal(ctx.captures.length, 0);
   });
 }
+
+test('a second shot of an already captured sale is added to it after the 10-second wait', async () => {
+  const captured = sale('sale-1', { captureImageUrls: ['first-image'] });
+  const ctx = fixture([captured]);
+  ctx.savedSale = { ...captured, captureImageUrls: ['first-image', 'second-image'] };
+  const pending = ctx.capture();
+  ctx.resolveFrame('second-image');
+  await pending;
+  assert.equal(ctx.patches.length, 0, 'A newly saved imageless sale gets the first chance');
+  assert.equal(ctx.timers.length, 1);
+  assert.equal(ctx.timers[0].ms, SALE_CAPTURE_PAIR_WINDOW_MS);
+  ctx.timers[0].fn();
+  assert.deepEqual(ctx.patches, [[captured.id, 'second-image']]);
+  assert.equal(ctx.captures[0].saleId, captured.id);
+});
+
+test('a shot taken just before the next buyer is saved stays with the next buyer', async () => {
+  const previous = sale('sale-1', { captureImageUrls: ['first-image'] });
+  const ctx = fixture([previous]);
+  const pending = ctx.capture();
+  ctx.resolveFrame('next-image');
+  await pending;
+  ctx.captures[0].saleId = 'sale-2';
+  ctx.timers[0].fn();
+  assert.equal(ctx.patches.length, 0);
+});

@@ -240,6 +240,10 @@ export const INITIAL_COMMERCE_STATE: CommerceState = {
   verifiedSaleIds: []
 };
 
+// 판매에 붙은 캡처는 판매 기록에 따로 저장되므로, 캡처 목록은 짝짓기용 최근 것만 있으면 된다.
+const STORED_CAPTURE_LIMIT = 30;
+const MEMORY_CAPTURE_LIMIT = 50;
+
 // 로컬 스토리지 키
 const KEYS = {
   RULES: 'dadryeo_rules',
@@ -845,14 +849,22 @@ export class StorageService {
   }
 
   // 캡처 목록
-  public getCaptures(): CaptureItem[] { return this.getItem(KEYS.CAPTURES, []); }
+  // 캡처 원본(data URL)은 크다. 저장 목록은 최근 것만 남기고, 브라우저 저장소가 가득 차도
+  // 방송 중 판매 짝짓기가 직전 캡처를 찾을 수 있도록 최근 캡처를 메모리에도 둔다.
+  private recentCaptureMemory: CaptureItem[] = [];
+  public getCaptures(): CaptureItem[] {
+    const stored = this.getItem<CaptureItem[]>(KEYS.CAPTURES, []);
+    const ids = new Set(this.recentCaptureMemory.map((item) => item.id));
+    return [...this.recentCaptureMemory, ...stored.filter((item) => !ids.has(item.id))];
+  }
   public addCapture(item: CaptureItem) {
-    const list = this.getCaptures();
-    list.unshift(item);
-    this.setItem(KEYS.CAPTURES, list);
+    this.recentCaptureMemory = [item, ...this.recentCaptureMemory].slice(0, MEMORY_CAPTURE_LIMIT);
+    const list = [item, ...this.getItem<CaptureItem[]>(KEYS.CAPTURES, [])].slice(0, STORED_CAPTURE_LIMIT);
+    if (!this.setItem(KEYS.CAPTURES, list)) this.setItem(KEYS.CAPTURES, list.slice(0, 1));
   }
   public linkCaptureToSale(captureId: string, saleId: string) {
-    const list = this.getCaptures().map((item) => (item.id === captureId ? { ...item, saleId } : item));
+    this.recentCaptureMemory = this.recentCaptureMemory.map((item) => (item.id === captureId ? { ...item, saleId } : item));
+    const list = this.getItem<CaptureItem[]>(KEYS.CAPTURES, []).map((item) => (item.id === captureId ? { ...item, saleId } : item));
     this.setItem(KEYS.CAPTURES, list);
   }
 

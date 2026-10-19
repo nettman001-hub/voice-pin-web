@@ -41,6 +41,7 @@ test('직전 판매에 이미 사진이 있으면 캡처는 그 판매에 붙지
     { id: 'cancelled', sessionId: 's1', recognizedAt: at(-1), status: '취소' },
   ];
   assert.equal(findSaleForCapture({ sessionIds: ['s1'], capturedAt: at(0) }, sales), undefined);
+  assert.equal(findSaleForCapture({ sessionIds: ['s1'], capturedAt: at(0) }, sales, undefined, { allowCaptured: true })?.id, 'a');
 });
 
 test('10초 안에 판매가 둘이면 캡처 시각에 더 가까운 판매에 붙는다', () => {

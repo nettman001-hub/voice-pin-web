@@ -73,18 +73,39 @@ export function findCaptureForSale<T extends PairableCapture>(
   return best;
 }
 
-/** 캡처 시: 아직 캡처 사진이 없는 판매 중 10초 안에서 가장 가까운 것. */
+/** 판매 저장 시: 10초 안의 아직 쓰이지 않은 판매용 캡처 전부(가까운 순). 한 판매에 여러 장 찍은 캡처를 모두 붙인다. */
+export function findCapturesForSale<T extends PairableCapture>(
+  sale: { sessionId: string; recognizedAt: string },
+  captures: T[],
+  windowMs = SALE_CAPTURE_PAIR_WINDOW_MS
+): T[] {
+  const seen = new Set<string>();
+  return captures
+    .filter((capture) => {
+      if (capture.purpose !== 'SALE' || capture.saleId || capture.sessionId !== sale.sessionId) return false;
+      if (seen.has(capture.id)) return false;
+      seen.add(capture.id);
+      return distanceMs(capture.capturedAt, sale.recognizedAt) <= windowMs;
+    })
+    .sort((a, b) => distanceMs(a.capturedAt, sale.recognizedAt) - distanceMs(b.capturedAt, sale.recognizedAt));
+}
+
+/**
+ * 캡처 시: 아직 캡처 사진이 없는 판매 중 10초 안에서 가장 가까운 것.
+ * allowCaptured면 이미 사진이 있는 판매도 대상이다(같은 판매에 여러 장 찍은 경우의 추가 사진).
+ */
 export function findSaleForCapture<T extends PairableSale>(
   capture: { sessionIds: string[]; capturedAt: string },
   sales: T[],
-  windowMs = SALE_CAPTURE_PAIR_WINDOW_MS
+  windowMs = SALE_CAPTURE_PAIR_WINDOW_MS,
+  options: { allowCaptured?: boolean } = {}
 ): T | undefined {
   let best: T | undefined;
   let bestDistance = Number.POSITIVE_INFINITY;
   for (const sale of sales) {
     if (!capture.sessionIds.includes(sale.sessionId)) continue;
     if (sale.status === '취소' || sale.recordState === 'CANCELLED') continue;
-    if ((sale.captureImageUrls?.length || 0) > 0) continue;
+    if (!options.allowCaptured && (sale.captureImageUrls?.length || 0) > 0) continue;
     const distance = distanceMs(sale.recognizedAt, capture.capturedAt);
     if (distance <= windowMs && distance < bestDistance) {
       best = sale;

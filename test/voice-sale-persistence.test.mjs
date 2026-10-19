@@ -12,7 +12,7 @@ import { buildPendingReasons, buildEvidenceSnapshot } from '../src/services/pend
 import { getVoiceReviewRequests, shouldReviewVoiceSale, buildVoiceReviewRequest,
   isVoiceReviewReady } from '../src/services/voicePendingReviewService.ts';
 import { generateSequentialProductName } from '../src/utils/productNaming.ts';
-import { findCaptureForSale } from '../src/services/saleCapturePairing.ts';
+import { findCapturesForSale } from '../src/services/saleCapturePairing.ts';
 import { resolveConfirmedBuyer, applyConfirmedBuyer, BUYER_LINK_PENDING, mergeBuyerComments } from '../src/services/confirmedBuyerResolver.ts';
 
 // Exercise the actual persistence callback. Only storage, UI, and capture
@@ -49,7 +49,7 @@ function fixture(comments, activeProduct = undefined, captures = []) {
   const globals = {
     extractSaleFromTranscript, extractSpeechPrice, getPurchaseRequests, matchPurchaseRequest, matchCommentAuthor, areSameCommentAuthor,
     resolveConfirmedBuyer, applyConfirmedBuyer, BUYER_LINK_PENDING, mergeBuyerComments, confirmedBuyerAliases: { get: () => [] },
-    buildPendingReasons, buildEvidenceSnapshot, getVoiceReviewRequests, generateSequentialProductName, findCaptureForSale,
+    buildPendingReasons, buildEvidenceSnapshot, getVoiceReviewRequests, generateSequentialProductName, findCapturesForSale,
     announcesAdditionalPurchase, findRestatedVoiceSale,
     workspaceId: 'workspace', sales: [], currentWorkflowSalesRef: { current: stored },
     productSalesRef: { current: { activeSession: { id: 'broadcast', displayCode: '20261001-1' },
@@ -571,4 +571,20 @@ test('a "capture" shot taken within 10 seconds before the sale becomes its image
   await none.save('햇반님 드릴게요. 가격은 1.2.');
   assert.equal(none.stored[0].productImageUrl, undefined);
   assert.equal(none.stored[0].captureImageUrls, undefined);
+});
+
+test('several "capture" shots before the sale all attach to it, nearest first', async () => {
+  const now = Date.now();
+  const captures = [
+    { id: 'second', sessionId: 'broadcast', imageUrl: 'data:second', capturedAt: new Date(now - 2000).toISOString(), purpose: 'SALE' },
+    { id: 'first', sessionId: 'broadcast', imageUrl: 'data:first', capturedAt: new Date(now - 6000).toISOString(), purpose: 'SALE' },
+    { id: 'used', sessionId: 'broadcast', imageUrl: 'data:used', capturedAt: new Date(now - 1000).toISOString(), purpose: 'SALE', saleId: 'other' },
+  ];
+  const live = fixture([comment('햇반', 'c-3', 'buyer-3')], undefined, captures);
+  await live.save('햇반님 드릴게요. 가격은 1.2.');
+  assert.equal(live.stored[0].productImageUrl, 'data:second');
+  assert.deepEqual(Array.from(live.stored[0].captureImageUrls), ['data:second', 'data:first']);
+  assert.equal(captures[0].saleId, live.stored[0].id);
+  assert.equal(captures[1].saleId, live.stored[0].id);
+  assert.equal(captures[2].saleId, 'other');
 });
