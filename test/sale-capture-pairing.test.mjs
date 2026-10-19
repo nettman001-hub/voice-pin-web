@@ -74,3 +74,13 @@ test('구어체 캡처 지시를 인식하고 단독 캡처는 거래 문맥에�
     '캡처 화면이 예쁘네요', '캡처해주세요. 캡처하지 마세요.',
   ]) assert.equal(hasCaptureInstructionText(text, { saleContext: true }), false, text);
 });
+
+test('흔한 캡처 지시 표현과 음성인식 오타도 캡처로 알아듣는다', () => {
+  for (const text of ['캡처해 놓으세요', '캡처해 두세요', '캡처하시고요', '캡처해 주시면 돼요', '캡처하시면 됩니다',
+    '캡처 찍으세요', '갭처하세요', '켑처해 주세요', '캡챠하세요']) {
+    assert.equal(hasCaptureInstructionText(text), true, text);
+  }
+  for (const text of ['캡처해 주시면 안 돼요', '캡처하시면 안 돼요', '캡처해 둘까요?', '캡처해 놓으셨어요?', '갭이 있어요']) {
+    assert.equal(hasCaptureInstructionText(text), false, text);
+  }
+});

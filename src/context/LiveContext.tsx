@@ -1357,7 +1357,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const intent = parseVoiceCorrection(clause);
       const command = parseVoiceCommand(clause, isVoiceEditingRef.current);
       if (intent.isQuestion || intent.isNegativeCommand) continue;
-      const isCaptureCommand = /캡[처쳐]/u.test(clause) && command.type === 'NONE';
+      const isCaptureCommand = /[캡갭켑][처쳐챠]/u.test(clause) && command.type === 'NONE';
       // Legacy sales capture only after the transaction is linked, so a new
       // buyer's image cannot be attached to the previously saved sale.
       if (isCaptureCommand && appliedWorkflowRef.current?.mode !== 'ACTIVE') continue;
