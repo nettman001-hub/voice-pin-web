@@ -311,11 +311,15 @@ export function findExplicitPriceTranscript(text: string): string | null {
 /** A standalone currency/decimal answer can finish a split price declaration.
  * Do not treat measurements, product descriptions or a second number as price. */
 export function findStandalonePriceTranscript(text: string): string | null {
-  const clause = text.trim().replace(/[.!。\s]+$/u, '');
+  // "어, 1.0" / "이거 1.0이에요": a filler before the amount is not content.
+  const clause = text.trim().replace(/[.!。\s]+$/u, '')
+    .replace(/^(?:(?:네|넵|예|자|아|어|음|이거|요거|이건|요건)[\s,，]+)+/u, '');
   const price = extractSpeechPrice(clause);
   if (!price || !clause.startsWith(price.quote)) return null;
+  // "1.5예요", "1.0이고요", "1.0 할게요/받을게요" only state the amount.
   const suffix = clause.slice(price.quote.length).trim()
-    .replace(/^(?:입니다|이에요|이요|요)(?=$|[\s,，.!。])/u, '').replace(/^[\s,，.!。]+/u, '');
+    .replace(/^(?:입니다|이에요|에요|예요|이요|요|이고요|고요|이구요|구요|(?:에\s*)?(?:할|받을)[게께]요)(?=$|[\s,，.!。])/u, '')
+    .replace(/^[\s,，.!。]+/u, '');
   if (!suffix || /^(?:화면\s*)?[캡갭켑][처쳐챠](?:\s*(?:하세요|해\s*주세요|해\s*주시고(?:요)?|요))?[.!。\s]*$/u.test(suffix)) {
     return price.quote;
   }

@@ -198,3 +198,32 @@ test('수정·아니카 닉네임을 정정이나 부정으로 오인하지 않�
     assert.equal(next.emission.result.isFourPointConfirmed, true);
   }
 });
+
+test('가격 앞에서 끊긴 배정은 다음 조각 첫 가격을 다른 말이 섞여도 붙인다', () => {
+  for (const [speech, amount] of [
+    ['1.0이고요. 색깔 너무 예뻐요.', 10000], ['만 원. 이거 진짜 예쁘죠?', 10000], ['어, 1.0.', 10000],
+    ['1.5예요.', 15000], ['1.0 할게요.', 10000], ['1.0 받을게요.', 10000],
+    ['1.0. 다음 상품 보여 드릴게요.', 10000], ['1.0이고요. 예뻐요. 캡처하세요.', 10000],
+  ]) {
+    const first = advance(null, '네, 이거 우아한 유령님 드릴게요. 가격은.', 0);
+    assert.equal(first.emission.result.amount, 0, speech);
+    const next = advance(first.state, speech, 4);
+    assert.equal(next.emission?.result.amount, amount, speech);
+    assert.equal(next.emission.continuation, true, speech);
+    // sales-api re-reads the saved speech; it must find the same price.
+    assert.equal(extractSaleFromTranscript(next.emission.result.rawTranscript)?.amount, amount, speech);
+  }
+  const captured = advance(advance(null, '루나님 드릴게요.', 0).state, '1.0이고요. 예뻐요. 캡처하세요.', 3);
+  assert.equal(captured.emission.captureRequested, true);
+});
+
+test('끊긴 배정의 가격 연결은 다른 구매자·다른 가격·15초 경과에서 멈춘다', () => {
+  const first = () => advance(null, '이거, 이거 루나님 드릴게요.', 0);
+  assert.equal(advance(first().state, '1.0이고요. 예뻐요.', 20).emission, null);
+  assert.equal(advance(first().state, '1.0. 유령님 드릴게요.', 3).emission?.result.buyerNickname, '유령');
+  assert.equal(advance(first().state, '1.0이고요. 저건 1.5 했어요.', 3).emission, null);
+  assert.equal(advance(first().state, '1.0 아니고요, 취소할게요.', 3).emission, null);
+  const closed = advance(first().state, '1.0. 다음 상품 보여 드릴게요.', 3);
+  assert.equal(closed.emission.result.amount, 10000);
+  assert.equal(closed.state, null);
+});

@@ -3,10 +3,14 @@ import {
   FOUR_POINT_CONFIRMATION_PATTERN, getBuyerNicknameCandidates, parseBuyerNickname,
   type ExtractedSaleResult,
 } from './salesExtractor.ts';
+import { extractSpeechPrice } from './priceEvidence.ts';
 import { hasCaptureCancellationText, hasCaptureInstructionText } from './saleCapturePairing.ts';
 import { isQuestionUtterance, isStandaloneBuyerAddress, splitTranscriptClauses } from './voiceUtteranceService.ts';
 
 export const VOICE_SALE_TRANSACTION_WINDOW_MS = 30_000;
+/** A price-less allocation takes the seller's next price answer even when
+ * other talk follows it in the same STT fragment. */
+export const VOICE_SALE_PRICE_FOLLOWUP_MS = 15_000;
 
 export interface VoiceSaleTransactionInput {
   sessionId: string;
@@ -104,6 +108,26 @@ function canContinueWith(text: string, incoming: ExtractedSaleResult | null, has
     || hasCaptureInstructionText(clause, { saleContext: hasSaleContext }));
 }
 
+function isPriceAnswer(clause: string): boolean {
+  return Boolean(findExplicitPriceTranscript(clause) || findStandalonePriceTranscript(clause));
+}
+
+/** "1.0이고요. 색깔 너무 예뻐요." → "1.0이고요": the price answer leading a
+ * fragment, when the talk after it names no buyer, sale, price or correction. */
+function leadingPriceAnswer(text: string): { answer: string; rest: string } | null {
+  const clauses = splitTranscriptClauses(text);
+  let index = 0;
+  while (index < clauses.length && FILLER.test(clauses[index])) index++;
+  if (index >= clauses.length || !isPriceAnswer(clauses[index])) return null;
+  // A capture instruction later in the fragment still belongs to this sale.
+  const later = clauses.slice(index + 1);
+  const captures = later.filter((clause) => hasCaptureInstructionText(clause, { saleContext: true }));
+  const rest = later.filter((clause) => !captures.includes(clause)).join(' ');
+  if (rest && (getBuyerNicknameCandidates(rest).length || extractSaleFromTranscript(rest)
+    || extractSpeechPrice(rest) || saleInterruption(rest))) return null;
+  return { answer: [...clauses.slice(0, index + 1), ...captures].join(' '), rest };
+}
+
 /** Assemble only a single bounded transaction. The caller owns persistence and
  * maps the stable transactionId to its sale row. Never infer identity from price. */
 export function advanceVoiceSaleTransaction(
@@ -120,6 +144,17 @@ export function advanceVoiceSaleTransaction(
     || at < Date.parse(prior.updatedAt)
     || at - Date.parse(prior.startedAt) > VOICE_SALE_TRANSACTION_WINDOW_MS)) prior = null;
   if (prior?.fragments.some((fragment) => fragment.eventId === input.eventId)) return { state: prior, emission: null };
+
+  // STT ended the sentence at the seller's pause ("유령님 드릴게요. 가격은.").
+  // Read the price that opens the next fragment and ignore the talk after it.
+  if (prior?.result?.intent === 'ALLOCATION' && prior.result.amount === 0
+    && at - Date.parse(prior.updatedAt) <= VOICE_SALE_PRICE_FOLLOWUP_MS) {
+    const priceAnswer = leadingPriceAnswer(text);
+    if (priceAnswer?.rest && !FILLER.test(priceAnswer.rest)) {
+      const advanced = advanceVoiceSaleTransaction(prior, { ...input, text: priceAnswer.answer });
+      return PRODUCT_CHANGE.test(priceAnswer.rest) ? { ...advanced, state: null } : advanced;
+    }
+  }
 
   const incoming = extractSaleFromTranscript(text, input.activeKeywords);
   const names = getBuyerNicknameCandidates(text);
