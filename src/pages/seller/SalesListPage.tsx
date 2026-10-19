@@ -1084,7 +1084,7 @@ export const SalesListPage: React.FC = () => {
                           {excludedOrderCount > 0 && (
                             <span
                               className="block text-[10px] text-slate-500 mt-0.5"
-                              title="취소·보류·저장 대기 주문은 합계에서 제외합니다."
+                              title="취소·보류 주문은 합계에서 제외합니다."
                             >
                               합계 제외 {excludedOrderCount}건
                             </span>
@@ -1213,6 +1213,14 @@ export const SalesListPage: React.FC = () => {
                                     {rec.status}
                                   </span>
                                   <AiSaleBadge sale={rec} />
+                                  {rec.syncStatus === 'PENDING' && (
+                                    <span
+                                      className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-amber-50 text-amber-700 border border-amber-200"
+                                      title="아직 서버에 저장되지 않아 이 컴퓨터에만 있는 판매입니다. 합계에는 포함됩니다."
+                                    >
+                                      서버 저장 대기
+                                    </span>
+                                  )}
                                   {(rec.productCode || rec.productName) && (
                                     <span className="text-[11px] font-semibold text-slate-700">
                                       상품 {rec.productCode || ''}{rec.productName ? ` · ${rec.productName}` : ''}
@@ -1381,6 +1389,14 @@ export const SalesListPage: React.FC = () => {
                               {sale.status}
                             </span>
                             <AiSaleBadge sale={sale} />
+                            {sale.syncStatus === 'PENDING' && (
+                              <span
+                                className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-amber-50 text-amber-700 border border-amber-200"
+                                title="아직 서버에 저장되지 않아 이 컴퓨터에만 있는 판매입니다. 합계에는 포함됩니다."
+                              >
+                                서버 저장 대기
+                              </span>
+                            )}
                             <BuyerStatusBadges
                               saleIds={[sale.id]}
                               buyerNickname={sale.buyerNickname}

@@ -257,7 +257,7 @@ test('each row totals completed purchases only up to that sale, leaving other st
     sale('pending', { ...buyer, amount: 9000, status: '보류' }),
     sale('cancelled', { ...buyer, amount: 8000, status: '취소' }),
     sale('server-cancelled', { ...buyer, amount: 7000, recordState: 'CANCELLED' }),
-    sale('unsynced', { ...buyer, amount: 6000, syncStatus: 'PENDING' }),
+    sale('unsynced', { ...buyer, amount: 6000, syncStatus: 'PENDING', recognizedAt:'2026-10-01T01:03:00Z' }),
   ];
   const tree = ctx.settle();
   assert.match(cardText(tree, 'auto'), /10,000원/);
@@ -266,11 +266,14 @@ test('each row totals completed purchases only up to that sale, leaving other st
   assert.match(cardText(tree, 'confirmed'), /1\.0 \+ 1\.2 =22,000원/);
   assert.match(cardText(tree, 'edited'), /다건 3건/);
   assert.match(cardText(tree, 'edited'), /1\.0 \+ 1\.2 \+ 1\.0 =32,000원/);
-  for (const [id, amount] of [['pending', '9,000원'], ['cancelled', '8,000원'], ['server-cancelled', '7,000원'], ['unsynced', '6,000원']]) {
+  for (const [id, amount] of [['pending', '9,000원'], ['cancelled', '8,000원'], ['server-cancelled', '7,000원']]) {
     assert.ok(cardText(tree, id).includes(amount));
     assert.doesNotMatch(cardText(tree, id), /다건|32,000원/);
   }
-  assert.match(textContent(tree), /이번회차판매 :3건\/32,000원/);
+  // A sale still waiting for the server is shown as 자동저장/확정, so it counts.
+  assert.match(cardText(tree, 'unsynced'), /서버 저장 대기/);
+  assert.match(cardText(tree, 'unsynced'), /38,000원/);
+  assert.match(textContent(tree), /이번회차판매 :4건\/38,000원/);
 });
 
 test('matching display names do not combine different buyer IDs or an identified buyer with a legacy name', () => {

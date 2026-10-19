@@ -596,7 +596,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return true;
     });
     const validSales = filtered.filter((sale) => sale.status !== '보류' && sale.status !== '취소'
-      && sale.recordState !== 'CANCELLED' && sale.syncStatus !== 'PENDING');
+      && sale.recordState !== 'CANCELLED');
     const pendingSales = filtered.filter((sale) => sale.status === '보류');
     const groups: Record<string, SaleRecord[]> = {};
     validSales.forEach((sale) => {

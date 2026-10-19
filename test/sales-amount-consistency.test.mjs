@@ -104,7 +104,6 @@ for (const [name, excluded] of [
   ['cancelled status', { status: '취소' }],
   ['cancelled record state with confirmed status', { recordState: 'CANCELLED' }],
   ['held orders', { status: '보류' }],
-  ['orders awaiting server confirmation', { syncStatus: 'PENDING' }],
 ]) {
   test(`purchase formula, detail and shipping agree for ${name}`, () => {
     const ctx = fixture(screenshotSales(excluded));
@@ -120,6 +119,14 @@ for (const [name, excluded] of [
     assert.ok(ctx.shipping().includes('최종 청구 합계67,000원'));
   });
 }
+
+test('orders awaiting server confirmation still count in every total', () => {
+  const ctx = fixture(screenshotSales({ syncStatus: 'PENDING' }));
+  assert.ok(ctx.page().includes('택비포함 : 83,000원'));
+  assert.ok(!ctx.page().includes('합계 제외'));
+  assert.ok(ctx.detail().includes('판매금액83,000원'));
+  assert.ok(ctx.shipping().includes('최종 청구 합계83,000원'));
+});
 
 test('all nine active orders still total 83000 without an exclusion notice', () => {
   const ctx = fixture(screenshotSales());
