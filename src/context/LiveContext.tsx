@@ -8,7 +8,8 @@ import { extractSpeechPrice } from '../services/priceEvidence';
 import { parseVoiceCommand } from '../services/voiceCommandParser';
 import { splitTranscriptClauses, isQuestionUtterance } from '../services/voiceUtteranceService';
 import { getPurchaseRequests, matchPurchaseRequest, matchCommentAuthor, areSameCommentAuthor } from '../services/purchaseFirstSales';
-import { advanceVoiceSaleTransaction, type VoiceSaleTransactionState } from '../services/voiceSaleTransaction';
+import { advanceVoiceSaleTransaction, isProductChangeUtterance, type VoiceSaleTransactionState } from '../services/voiceSaleTransaction';
+import { announcesAdditionalPurchase, findRestatedVoiceSale } from '../services/voiceSaleRestatement';
 import { resolveConfirmedBuyer, applyConfirmedBuyer, BUYER_LINK_PENDING, mergeBuyerComments } from '../services/confirmedBuyerResolver';
 import { confirmedBuyerAliases } from '../services/confirmedBuyerAliases';
 import { collectFourPointWorkflowSales } from '../services/fourPointWorkflow';
@@ -226,6 +227,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sonioxCommandTailRef = useRef<string>('');
   const voiceSaleTransactionRef = useRef<VoiceSaleTransactionState | null>(null);
   const voiceTransactionSalesRef = useRef(new Map<string, SaleRecord>());
+  const voiceSaleBoundaryAtRef = useRef('');
   const recentVoiceDecisionsRef = useRef<Map<string, number>>(new Map());
   const reservedPurchaseRequestsRef = useRef<Set<string>>(new Set());
   const pendingAiAttemptsRef = useRef<Map<string, { fingerprint: string; attemptedAt: number; failed: boolean }>>(new Map());
@@ -943,6 +945,23 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (precedingSale.status === '확정' || !isFourPoint) return;
       transactionSale = precedingSale;
       recognizedAt = precedingSale.recognizedAt;
+    }
+    // A same-buyer restatement may arrive after the transaction was reset, and
+    // with the buyer's second "저요" as a fresh request. Keep it on the sale.
+    const restatedSale = !transactionSale && !identityConflict && !announcesAdditionalPurchase(fullText)
+      ? findRestatedVoiceSale(sales, { sessionId: sessionSnapshot, recognizedAt, buyerId, buyerNickname,
+        amount: effectiveAmount, productId: activeProductSnapshot?.id, notBefore: voiceSaleBoundaryAtRef.current }) : undefined;
+    if (restatedSale) {
+      if (request) reservedPurchaseRequestsRef.current.add(request.id);
+      rememberSale(restatedSale);
+      if (restatedSale.status === '확정' || (restatedSale.status !== '보류' && !isFourPoint)) {
+        if (hasCaptureInstruction && !restatedSale.captureImageUrls?.length) {
+          await captureCurrentScreen(undefined, '캡처하세요 (판매 자동 연동)', requiredListeningGeneration, restatedSale.id);
+        }
+        return;
+      }
+      transactionSale = restatedSale;
+      recognizedAt = restatedSale.recognizedAt;
     }
     // Repeated allocation/price phrases for one purchase comment refine the
     // same pending sale rather than creating another transaction.
@@ -1821,6 +1840,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           } else {
             // 2. 판매 멘트 감지 ("구매확정 됐습니다...")
             const workflowActive = appliedWorkflowRef.current?.mode === 'ACTIVE';
+            if (isProductChangeUtterance(fullText)) voiceSaleBoundaryAtRef.current = new Date().toISOString();
             const transactionAdvance = processingOptions.skipSale || workflowActive ? null
               : advanceVoiceSaleTransaction(voiceSaleTransactionRef.current, {
                 sessionId: targetSessionId, eventId: crypto.randomUUID(), text: fullText,

@@ -375,6 +375,25 @@ function isSafeFourPointClause(text: string): boolean {
   return !isQuestionUtterance(text) && !NON_ALLOCATION.test(text) && !hasTransactionInterruption(text);
 }
 
+const PRICE_LABEL = /(?:가격|금액|단가|판매가)(?:은|는|이|가)?/gu;
+
+/** "가방, 아니, 가격은 1.0 드릴게요. 꼬심이님 드릴게요": a labelled price spoken
+ * right before the allocation belongs to it, when that clause names no buyer. */
+function findLeadingPriceTranscript(clauses: string[], start: number): string | null {
+  let index = start - 1;
+  while (index >= 0 && ALLOCATION_FILLER.test(clauses[index])) index--;
+  const previous = clauses[index];
+  if (!previous || getBuyerNicknameCandidates(previous).length > 0 || PRODUCT_TRANSITION.test(previous)
+    || isQuestionUtterance(previous) || NON_ALLOCATION.test(previous)) return null;
+  // Only the speech after the last label counts; an earlier "아니" is the
+  // seller correcting themselves into the price declaration.
+  const label = [...previous.matchAll(PRICE_LABEL)].at(-1);
+  if (label?.index === undefined) return null;
+  const declaration = previous.slice(label.index).replace(/[.!。\s]+$/u, '')
+    .replace(/\s*(?:에\s*)?(?:드릴[게께]요|드리겠습니다|드립니다)$/u, '').trim();
+  return findExplicitPriceTranscript(declaration);
+}
+
 interface AllocationClause {
   text: string;
   index: number;
@@ -421,6 +440,7 @@ export function findAllocationTranscript(text: string): string | null {
   if (initial !== allocation.text) return initial;
   if (extractSpeechPrice(allocation.text)) return allocation.text;
   const names = new Set(getBuyerNicknameCandidates(allocation.text).map((name) => name.replace(/\s+/gu, '')));
+  const leadingPrice = findLeadingPriceTranscript(clauses, allocation.start);
   // Preserve the existing bounded follow-up price rules for ordinary sales.
   for (let j = allocation.index + 1; j < Math.min(clauses.length, allocation.index + 8); j++) {
     const next = clauses[j];
@@ -432,7 +452,7 @@ export function findAllocationTranscript(text: string): string | null {
       && !extractSpeechPrice(next) && nextNames.every((name) => names.has(name));
     if (!repeatsAllocation && !ALLOCATION_FILLER.test(next)) break;
   }
-  return allocation.text;
+  return leadingPrice ? `${leadingPrice}. ${allocation.text}` : allocation.text;
 }
 
 function findFourPointEvidence(text: string): {
@@ -461,6 +481,11 @@ function findFourPointEvidence(text: string): {
     evidence.hasCapture = true;
   }
   if (initial !== allocation.text) return evidence;
+  const leadingPrice = price ? null : findLeadingPriceTranscript(clauses, allocation.start);
+  if (leadingPrice) {
+    evidence.allocationTranscript = `${leadingPrice}. ${evidence.allocationTranscript}`;
+    price = extractSpeechPrice(leadingPrice);
+  }
   for (let j = allocation.index + 1; j < Math.min(clauses.length, allocation.index + 8); j++) {
     const next = beforeProductChange(clauses[j]);
     if (!next) break;

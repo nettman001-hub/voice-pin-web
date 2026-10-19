@@ -10,7 +10,7 @@ import { parseVoiceCommand } from '../src/services/voiceCommandParser.ts';
 import { splitTranscriptClauses, isQuestionUtterance } from '../src/services/voiceUtteranceService.ts';
 import {replaySalesWorkflow,DEFAULT_WORKFLOW_PROFILE} from '../src/services/salesWorkflowEngine.ts';
 import { hasCaptureInstructionText } from '../src/services/saleCapturePairing.ts';
-import { advanceVoiceSaleTransaction } from '../src/services/voiceSaleTransaction.ts';
+import { advanceVoiceSaleTransaction, isProductChangeUtterance } from '../src/services/voiceSaleTransaction.ts';
 import { collectFourPointWorkflowSales } from '../src/services/fourPointWorkflow.ts';
 
 // Execute the real live callbacks with controlled storage/audio/cloud boundaries.
@@ -49,6 +49,7 @@ function fixture({ sales = [], renderSales = sales, rules = [], pendingCorrectio
   const globals = {
     ...corrections, extractSaleFromTranscript, parseKoreanAmount, parseVoiceCommand, splitTranscriptClauses, isQuestionUtterance,
     crypto: { randomUUID }, console, hasCaptureInstructionText, advanceVoiceSaleTransaction,
+    isProductChangeUtterance, voiceSaleBoundaryAtRef: { current: '' },
     appliedWorkflowRef: {current:workflow},replaySalesWorkflow,collectFourPointWorkflowSales,
     workflowQueueRef:{current:Promise.resolve()},workflowReplayRef:{current:null},workflowObservationAtRef:{current:0},
     workflowFingerprintsRef:{current:new Map()},workflowDecisionsRef:{current:new Set()},

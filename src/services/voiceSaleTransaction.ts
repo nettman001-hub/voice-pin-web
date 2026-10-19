@@ -57,6 +57,10 @@ export interface VoiceSaleTransactionAdvance {
 
 const nameKey = (name: string) => name.replace(/\s/gu, '').toLowerCase();
 const PRODUCT_CHANGE = /(?:다음|새|다른)\s*(?:상품|제품|물건|옷|거(?=[는은\s,.!?]|$))|(?:다음|새)\s*주문/u;
+/** "다음 상품" ends every earlier sale; nothing after it restates them. */
+export function isProductChangeUtterance(text: string): boolean {
+  return PRODUCT_CHANGE.test(text);
+}
 const FILLER = /^(?:네|넵|예|자|아|어|음|이거|요거)(?:[\s,，.!。]*(?:네|넵|예|자|아|어|음|이거|요거))*[.!。\s]*$/u;
 
 function withoutBuyerNames(text: string): string {

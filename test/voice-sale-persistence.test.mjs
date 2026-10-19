@@ -6,7 +6,8 @@ import ts from 'typescript';
 import { extractSaleFromTranscript } from '../src/services/salesExtractor.ts';
 import { extractSpeechPrice } from '../src/services/priceEvidence.ts';
 import { getPurchaseRequests, matchPurchaseRequest, matchCommentAuthor, areSameCommentAuthor } from '../src/services/purchaseFirstSales.ts';
-import { advanceVoiceSaleTransaction } from '../src/services/voiceSaleTransaction.ts';
+import { advanceVoiceSaleTransaction, isProductChangeUtterance } from '../src/services/voiceSaleTransaction.ts';
+import { announcesAdditionalPurchase, findRestatedVoiceSale } from '../src/services/voiceSaleRestatement.ts';
 import { buildPendingReasons, buildEvidenceSnapshot } from '../src/services/pendingSalesService.ts';
 import { getVoiceReviewRequests, shouldReviewVoiceSale, buildVoiceReviewRequest,
   isVoiceReviewReady } from '../src/services/voicePendingReviewService.ts';
@@ -44,16 +45,18 @@ function fixture(comments, activeProduct = undefined, captures = []) {
   const stored = [];
   const reserved = new Set();
   const captureRequests = [];
+  const voiceSaleBoundaryAtRef = { current: '' };
   const globals = {
     extractSaleFromTranscript, extractSpeechPrice, getPurchaseRequests, matchPurchaseRequest, matchCommentAuthor, areSameCommentAuthor,
     resolveConfirmedBuyer, applyConfirmedBuyer, BUYER_LINK_PENDING, mergeBuyerComments, confirmedBuyerAliases: { get: () => [] },
     buildPendingReasons, buildEvidenceSnapshot, getVoiceReviewRequests, generateSequentialProductName, findCaptureForSale,
+    announcesAdditionalPurchase, findRestatedVoiceSale,
     workspaceId: 'workspace', sales: [], currentWorkflowSalesRef: { current: stored },
     productSalesRef: { current: { activeSession: { id: 'broadcast', displayCode: '20261001-1' },
       activeProduct, feed: { comments: [] } } },
     currentSessionIdRef: { current: 'broadcast' }, recentVoiceDecisionsRef: { current: new Map() },
     reservedPurchaseRequestsRef: { current: reserved }, lastSavedSaleRef: { current: null },
-    voiceTransactionSalesRef: {current: new Map()},
+    voiceTransactionSalesRef: {current: new Map()}, voiceSaleBoundaryAtRef,
     storageService: { getCommentRecords: () => comments, getPurchaseRequests: () => [], getCaptures: () => captures,
       linkCaptureToSale: (captureId, saleId) => { captures.find((entry) => entry.id === captureId).saleId = saleId; } },
     setRecentCaptures() {},
@@ -69,6 +72,7 @@ function fixture(comments, activeProduct = undefined, captures = []) {
   let event = 0;
   return { stored, reserved, captureRequests, reconcile: module.exports.reconcile,
     fragment: async (text, at = new Date().toISOString()) => {
+      if (isProductChangeUtterance(text)) voiceSaleBoundaryAtRef.current = at;
       const advanced = advanceVoiceSaleTransaction(transaction, {sessionId:'broadcast',eventId:String(++event),text,recognizedAt:at});
       transaction = advanced.state;
       if (advanced.emission) await module.exports.persistVoiceSale(advanced.emission.result,
@@ -296,16 +300,44 @@ for (const content of ['ㅈㅇ', '네']) {
   });
 }
 
-test('a fresh purchase request preserves a new same-buyer same-price transaction', async () => {
+for (const [gap, expected] of [[2_000, 1], [12_000, 2]]) {
+  test(`a same-buyer same-price restatement ${gap / 1000}s later with a fresh "저요" makes ${expected} sale(s)`, async () => {
+    // 10/17: the seller asked "저요, 한번만 더 해 주세요" and repeated the allocation
+    // ten seconds later. Within 10 seconds that is the same sale, not a second one.
+    const now = Date.now();
+    const comments = [comment('하니', 'first', 'same-account')];
+    const ctx = fixture(comments);
+    await ctx.fragment('하니님 드릴게요 1.2. 캡처해주세요.', new Date(now).toISOString());
+    comments.push({...comment('하니', 'new-purchase', 'same-account'), capturedAt:new Date(now + 1000).toISOString()});
+    await ctx.fragment('하니님 확정이요 1.2. 캡처해주세요.', new Date(now + gap).toISOString());
+    assert.equal(ctx.stored.length, expected);
+    assert.equal(ctx.stored[0].purchaseRequestId, 'broadcast:first');
+    if (expected === 1) assert.ok(ctx.reserved.has('broadcast:new-purchase'), 'The repeated comment is used up');
+    else assert.equal(ctx.stored[1].purchaseRequestId, 'broadcast:new-purchase');
+  });
+}
+
+test('"하나 더" within 10 seconds still makes a new sale for the same buyer', async () => {
   const now = Date.now();
   const comments = [comment('하니', 'first', 'same-account')];
   const ctx = fixture(comments);
   await ctx.fragment('하니님 드릴게요 1.2. 캡처해주세요.', new Date(now).toISOString());
   comments.push({...comment('하니', 'new-purchase', 'same-account'), capturedAt:new Date(now + 1000).toISOString()});
-  await ctx.fragment('하니님 확정이요 1.2. 캡처해주세요.', new Date(now + 2000).toISOString());
+  await ctx.fragment('하니님 하나 더 드릴게요 1.2. 캡처해주세요.', new Date(now + 3000).toISOString());
   assert.equal(ctx.stored.length, 2);
-  assert.equal(ctx.stored[0].purchaseRequestId, 'broadcast:first');
-  assert.equal(ctx.stored[1].purchaseRequestId, 'broadcast:new-purchase');
+});
+
+test('10/17 꽃심이: a price spoken before the nickname, after a reset, stays on the first sale', async () => {
+  const now = Date.now();
+  const comments = [comment('꽃심이', 'first', 'kkot')];
+  const ctx = fixture(comments);
+  await ctx.fragment('가방을 이거 꼬심이님 드릴게요. 1.0', new Date(now).toISOString());
+  await ctx.fragment('저요, 한번만 더 해 주세요.', new Date(now + 4000).toISOString());
+  comments.push({...comment('꽃심이', 'again', 'kkot'), capturedAt:new Date(now + 6000).toISOString()});
+  await ctx.fragment('캡처해 주시고, 가방, 아니, 가격은 1.0 드릴게요. 꼬심이님 드릴게요.', new Date(now + 10_000).toISOString());
+  assert.equal(ctx.stored.length, 1);
+  assert.equal(ctx.stored[0].buyerNickname, '꽃심이');
+  assert.equal(ctx.stored[0].amount, 10000);
 });
 
 test('an exact ordinary commenter never receives another account\'s similar-name purchase request', async () => {
