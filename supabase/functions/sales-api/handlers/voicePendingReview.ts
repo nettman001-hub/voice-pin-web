@@ -1,7 +1,9 @@
 import { admin, successResponse, errorResponse, type AuthContext } from '../../_shared/productSales.ts';
 import type { SaleRecord } from '../../../../src/types/live.ts';
 import { buildVoiceReviewRequest, shouldReviewVoiceSale, validateVoiceReviewResult, voiceReviewFingerprint,
-  isVoiceReviewReady, getVoiceReviewWindows, type ReviewTranscript } from '../../../../src/services/voicePendingReviewService.ts';
+  isVoiceReviewReady, getVoiceReviewWindows, type ReviewTranscript, buildVoiceTextReviewPrompt, shouldReviewVoiceSaleText,
+  isVoiceTextReviewReady, voiceTextReviewFingerprint, validateVoiceTextReviewAnswer,
+  VOICE_TEXT_REVIEW_WINDOW_MS } from '../../../../src/services/voicePendingReviewService.ts';
 import { handleCreateAiTask, handleProcessAiTask } from './aiTasks.ts';
 import { getOperationalAiSetting } from './aiOperationalSettings.ts';
 import { getWorkflowEvents } from './sellerWorkflow.ts';
@@ -63,9 +65,15 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
   }
   const comments = [...commentMap.values()].sort((a, b) => Date.parse(b.capturedAt) - Date.parse(a.capturedAt));
 
-  if (!shouldReviewVoiceSale(sale, comments)) return successResponse({ sale: row, skipped: true,
+  // A held sale without a numbered-order workflow is asked as plain text: the
+  // comments and seller speech one minute either side, in the seller's prompt.
+  const textReview = !sale.workflowEvidence;
+  if (textReview ? !shouldReviewVoiceSaleText(sale, comments) : !shouldReviewVoiceSale(sale, comments)) return successResponse({ sale: row, skipped: true,
     message: '검토 가능한 판매 발화·구매 댓글 근거가 없어 추가 근거를 기다립니다.' });
-  if (!isVoiceReviewReady(sale, comments) && !body.forceReanalyze) return successResponse({ sale: row, skipped: true, waitingForWindow: true,
+  if (textReview && !isVoiceTextReviewReady(sale) && !body.forceReanalyze) return successResponse({ sale: row, skipped: true, waitingForWindow: true,
+    retryAfterMs: Date.parse(sale.recognizedAt) + VOICE_TEXT_REVIEW_WINDOW_MS - Date.now(),
+    message: '보류 판매 뒤 1분의 댓글과 판매자 멘트를 모으고 있습니다.' });
+  if (!textReview && !isVoiceReviewReady(sale, comments) && !body.forceReanalyze) return successResponse({ sale: row, skipped: true, waitingForWindow: true,
     retryAfterMs: Math.max(...getVoiceReviewWindows(sale, comments).map((window) => Date.parse(window.endAt))) - Date.now(),
     message: '구매 댓글 이후 70초의 판매자 멘트를 모으고 있습니다.' });
   const setting = await getOperationalAiSetting();
@@ -91,7 +99,8 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
   for (const l of clientLogs) logMap.set(l.id || `${l.timestamp}:${l.text}`, l);
   for (const l of dbLogs) logMap.set(l.id || `${l.timestamp}:${l.text}`, l);
   const logs = [...logMap.values()].sort((a, b) => Date.parse(a.timestamp || '') - Date.parse(b.timestamp || ''));
-  const fingerprint = voiceReviewFingerprint(sale, comments, followingText, logs);
+  const fingerprint = textReview ? voiceTextReviewFingerprint(sale, comments, logs)
+    : voiceReviewFingerprint(sale, comments, followingText, logs);
   const previous = sale.aiVerification;
   if ((previous?.reviewFingerprint === fingerprint && previous.aiStatus !== 'CHECKING' && !previous.errorMessage && !body.forceReanalyze)
     || (previous?.aiStatus === 'CHECKING' && Date.now() - Date.parse(previous.validatedAt || '') < 60_000)) {
@@ -109,7 +118,12 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
   let task: any = null;
   let processingError: string | undefined;
   try {
-    const request = { ...buildVoiceReviewRequest(sale, comments, followingText, logs), workspaceId };
+    const request = textReview ? {
+      taskType: 'PENDING_RESOLUTION' as const, workspaceId, sessionId: sale.sessionId,
+      currentUtterance: sale.rawTranscript, plainTextPrompt: buildVoiceTextReviewPrompt(sale, comments, logs),
+      saleCandidates: [{ saleId: sale.id, productCode: sale.productCode || '', buyerNickname: sale.buyerNickname,
+        buyerId: sale.buyerId, amount: sale.amount, quantity: sale.quantity || 1, status: sale.status }],
+    } : { ...buildVoiceReviewRequest(sale, comments, followingText, logs), workspaceId };
     const creation = await (await handleCreateAiTask(workspaceId, actorId, auth, {
       saleId: sale.id, sessionId: sale.sessionId, saleRevision: sale.revision,
       settingVersion: setting?.applied_version || 1,
@@ -124,9 +138,16 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
   } catch (err: any) {
     processingError = err.message || 'AI 검토 실행 실패';
   }
-  const meta = validateVoiceReviewResult(sale, comments, task?.resolutionResult || null,
-    task?.activeSlot || 1, task?.taskId || '', fingerprint, followingText, logs);
+  const meta = textReview
+    ? validateVoiceTextReviewAnswer(sale, comments, task?.resolutionResult?.evidenceSummary ?? null,
+      task?.activeSlot || 1, task?.taskId || '', fingerprint)
+    : validateVoiceReviewResult(sale, comments, task?.resolutionResult || null,
+      task?.activeSlot || 1, task?.taskId || '', fingerprint, followingText, logs);
   if (processingError) meta.errorMessage = processingError;
+  // Ordinary chat sent by the browser is not stored; link only stored comments.
+  if (textReview && meta.candidateCommentId && !dbComments.some((c: any) => c.id === meta.candidateCommentId)) {
+    meta.candidateCommentId = undefined;
+  }
   if (meta.nicknameVerified && meta.candidatePurchaseRequestId) {
     const { data: duplicate, error: duplicateError } = await admin.from('sales').select('id')
       .eq('workspace_id', workspaceId).eq('purchase_request_id', meta.candidatePurchaseRequestId)
@@ -155,7 +176,8 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
   const valuesChanged = nextSale.amount !== sale.amount || nextSale.buyerNickname !== sale.buyerNickname
     || nextSale.buyerId !== sale.buyerId || nextSale.purchaseRequestId !== sale.purchaseRequestId;
   nextSale.revision = sale.revision! + (valuesChanged ? 1 : 0);
-  meta.reviewFingerprint = voiceReviewFingerprint(nextSale, comments, followingText, logs);
+  meta.reviewFingerprint = textReview ? voiceTextReviewFingerprint(nextSale, comments, logs)
+    : voiceReviewFingerprint(nextSale, comments, followingText, logs);
   const history = { revision: nextSale.revision, changedAt: new Date().toISOString(), changedBy: 'AI', changeType: 'AI_RESOLVE',
     before: { status: sale.status, buyerNickname: sale.buyerNickname, amount: sale.amount },
     after: { status: rejected ? '취소' : sale.status, buyerNickname: nextSale.buyerNickname, amount: nextSale.amount },

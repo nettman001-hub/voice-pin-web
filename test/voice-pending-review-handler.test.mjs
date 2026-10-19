@@ -4,6 +4,8 @@ import { build } from 'esbuild';
 
 // Execute the real edge handler with an in-memory DB and task transport. This
 // tests the API envelope and register -> execute -> persist connection.
+// A held sale is asked with the seller's plain-text prompt (never JSON), and
+// the model answers "닉네임: …\n가격: …".
 const bundle = await build({ entryPoints: ['supabase/functions/sales-api/handlers/voicePendingReview.ts'],
   bundle: true, write: false, platform: 'node', format: 'esm', plugins: [{ name: 'review-fixtures', setup(builder) {
     builder.onResolve({ filter: /(?:_shared\/productSales|\.\/aiTasks|\.\/aiOperationalSettings)\.ts$/ }, (args) => ({ path: args.path, namespace: 'fixture' }));
@@ -18,6 +20,10 @@ const bundle = await build({ entryPoints: ['supabase/functions/sales-api/handler
       export const handleProcessAiTask = async (...args) => globalThis.voiceReviewFixture.process(...args);
     ` }));
   } }] });
+const answer = (text) => ({ resolvable: /닉네임/u.test(text) && /가격/u.test(text), action: 'UPDATE_SALE',
+  targetSaleId: 's-one', changes: {}, evidenceIds: [], evidenceSummary: text, missingInfo: [], conflictReason: null });
+const answered = (text, task = {}) => async () => new Response(JSON.stringify({ ok: true, data: { task: {
+  taskId: 'task', activeSlot: 2, status: 'RESOLVED', attempts: [{}], resolutionResult: answer(text), ...task } } }));
 const { handleReviewVoicePendingSale } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 
 function fixture(overrides = {}) {
@@ -63,11 +69,8 @@ function fixture(overrides = {}) {
       calls.push('process');
       state.beforeResult?.();
       return new Response(JSON.stringify({ ok: true, data: { task: { taskId: 'task', activeSlot: 1,
-        status: 'RESOLVED', attempts: [{}, {}], switchReason: '3초 경과로 대체', resolutionResult: {
-          resolvable: true, action: 'UPDATE_SALE', targetSaleId: row.id,
-          changes: { buyerNickname: { to: '햇살' }, amount: { to: 15000, quantity: 1 } },
-          evidenceIds: ['voice:s-one', 'comment'], evidenceSummary: '실제 발화 및 댓글 확인', missingInfo: [], conflictReason: null,
-        } } } }));
+        status: 'RESOLVED', attempts: [{}, {}], switchReason: '3초 경과로 대체',
+        resolutionResult: answer('닉네임: 햇살\n가격: 15,000원') } } }));
     },
   };
   globalThis.voiceReviewFixture = state;
@@ -80,7 +83,15 @@ test('pending voice review registers and executes AI, then persists validated ad
   const body = await response.json();
   assert.equal(body.ok, true);
   assert.deepEqual(state.calls, ['create', 'process']);
-  assert.equal(state.current.ai_verification.aiStatus, 'NEEDS_SELLER_CONFIRM');
+  assert.match(state.request.plainTextPrompt, /^아래 내용은 라이브방송에서 판매자의 멘트와 구매자의 댓글 내용이다/u);
+  assert.match(state.request.plainTextPrompt, /<고객댓글>\n시각\t닉네임\t멘트\n2026\. 9\. 15\. 오전 10:00:00\t햇살\tㅈㅇ/u);
+  assert.match(state.request.plainTextPrompt, /<판매자멘트>\n시각 멘트 \n\[오전 10:00:03\] 햇살언니 1\.5/u);
+  assert.doesNotMatch(state.request.plainTextPrompt, /[{}]/u, 'The prompt carries no JSON');
+  assert.equal(state.current.ai_verification.aiStatus, 'RESOLVED');
+  assert.equal(state.current.ai_verification.reviewMode, 'TEXT_PROMPT');
+  assert.equal(state.current.ai_verification.saleConfirmed, true);
+  assert.equal(state.current.ai_verification.nicknameVerified, true);
+  assert.equal(state.current.purchase_request_id, 'session:comment');
   assert.equal(state.current.ai_verification.appliedSlot, 1);
   assert.equal(state.current.status, '보류');
   assert.equal(state.current.history[0].failoverAttempted, true);
@@ -98,9 +109,9 @@ test('a sale edited while AI runs rejects the late result', async () => {
   assert.equal(state.current.history, undefined);
 });
 
-test('measurements, missing purchase comments and disabled AI do not call the models', async () => {
-  for (const kind of ['measurement', 'no-comments', 'disabled']) {
-    const state = fixture(kind === 'measurement' ? { raw_transcript: '햇살언니 1.5 가단 재 드릴게요' } : {});
+test('missing comments and disabled AI do not call the models', async () => {
+  for (const kind of ['no-comments', 'disabled']) {
+    const state = fixture();
     if (kind === 'no-comments') state.comments.length = 0;
     if (kind === 'disabled') state.setting.enabled_pending_resolution = false;
     const body = await (await handleReviewVoicePendingSale('ws', 'actor', {}, state.row, {})).json();
@@ -118,7 +129,7 @@ test('model execution failure is recorded on the pending sale and can be retried
   assert.match(state.current.ai_verification.errorMessage, /unavailable/);
 });
 
-test('the edge handler loads the full purchase window from the scoped transcript archive and stores canonical nickname plus price', async () => {
+test('the edge handler puts archived speech from the minute around the sale in the prompt and stores the answered nickname plus price', async () => {
   const state = fixture({ buyer_nickname: '케이치', amount: 0,
     raw_transcript: '케이치 언니는 연핑 넣어드릴게요', recognized_at: '2026-09-15T12:41:10Z' });
   Object.assign(state.comments[0], { nickname_snapshot: 'KH', content: '연핑 저요', captured_at: '2026-09-15T12:40:19Z' });
@@ -126,17 +137,13 @@ test('the edge handler loads the full purchase window from the scoped transcript
     { id: 'allocation', recognizedAt: '2026-09-15T12:41:10Z', text: 'KH 언니는 연핑 넣어드릴게요', isFinal: true },
     { id: 'price', recognizedAt: '2026-09-15T12:41:26Z', text: 'KH 언니는 연핑 1.5에 넣어드렸어요', isFinal: true },
     { id: 'other-product', recognizedAt: '2026-09-15T12:41:30Z', text: '다음 상품 3.5', isFinal: true },
+    { id: 'too-late', recognizedAt: '2026-09-15T12:42:20Z', text: '이건 1분 뒤 멘트', isFinal: true },
   ];
-  state.process = async () => new Response(JSON.stringify({ ok: true, data: { task: { taskId: 'task', activeSlot: 2,
-    status: 'RESOLVED', attempts: [{}], resolutionResult: {
-      resolvable: true, action: 'UPDATE_SALE', targetSaleId: state.row.id,
-      changes: { buyerNickname: { to: 'KH' }, amount: { to: 15000, quantity: 1 } },
-      evidenceIds: ['comment', 'timeline:allocation', 'timeline:price'], evidenceSummary: '', missingInfo: [], conflictReason: null,
-    },
-  } } }));
+  state.process = answered('닉네임: KH\n가격: 15,000원');
   const body = await (await handleReviewVoicePendingSale('ws', 'actor', {}, state.row, {})).json();
   assert.equal(body.ok, true);
-  assert.deepEqual(state.request.sellerUtterances.map((u) => u.id), ['timeline:allocation', 'timeline:price']);
+  const seller = state.request.plainTextPrompt.split('<판매자멘트>\n')[1];
+  assert.equal(seller, '시각 멘트 \n[오후 9:41:10] KH 언니는 연핑 넣어드릴게요\n[오후 9:41:10] 케이치 언니는 연핑 넣어드릴게요\n[오후 9:41:26] KH 언니는 연핑 1.5에 넣어드렸어요\n[오후 9:41:30] 다음 상품 3.5');
   assert.equal(state.current.buyer_nickname, 'KH');
   assert.equal(state.current.buyer_id, 'account');
   assert.equal(state.current.amount, 15000);
@@ -150,11 +157,7 @@ test('the edge handler loads the full purchase window from the scoped transcript
 
 test('a proven sale with an unmatched nickname remains pending with the verified amount', async () => {
   const state = fixture({ buyer_nickname: '네스트', amount: 0, raw_transcript: '네스트언니 1.5 넣어드릴게요' });
-  state.process = async () => new Response(JSON.stringify({ ok: true, data: { task: { taskId: 'task', activeSlot: 2,
-    resolutionResult: { resolvable: false, action: 'KEEP_PENDING', targetSaleId: state.row.id,
-      changes: { buyerNickname: { to: '네스트' }, amount: { to: 15000 } },
-      evidenceIds: ['voice:s-one'], evidenceSummary: '', missingInfo: ['구매자 확인'], conflictReason: null },
-  } } }));
+  state.process = answered('닉네임: 네스트\n가격: 15,000원');
   await handleReviewVoicePendingSale('ws', 'actor', {}, state.row, {});
   assert.equal(state.current.buyer_nickname, '네스트');
   assert.equal(state.current.amount, 15000);
@@ -164,7 +167,7 @@ test('a proven sale with an unmatched nickname remains pending with the verified
   assert.equal(state.current.purchase_request_id, null);
 });
 
-test('AI waits for the +70s boundary and does not run on an incomplete window', async () => {
+test('AI waits for the minute after the held sale and does not run on an incomplete window', async () => {
   const time = new Date(Date.now() - 1000).toISOString();
   const state = fixture({ recognized_at: time });
   state.comments[0].captured_at = time;
@@ -181,4 +184,27 @@ test('one purchase comment cannot be attached to two separate sales by AI', asyn
   assert.equal(state.current.status, '보류');
   assert.equal(state.current.ai_verification.nicknameVerified, false);
   assert.equal(state.current.purchase_request_id, undefined);
+});
+
+test('an answer without 닉네임/가격 leaves the sale held for the seller', async () => {
+  const state = fixture({ amount: 0 });
+  state.process = answered('판매 확정 근거가 부족합니다.');
+  await handleReviewVoicePendingSale('ws', 'actor', {}, state.row, {});
+  assert.equal(state.current.status, '보류');
+  assert.equal(state.current.amount, 0);
+  assert.equal(state.current.ai_verification.aiStatus, 'INSUFFICIENT_DATA');
+});
+
+test('ordinary chat sent by the browser is in the prompt but only stored comments are linked', async () => {
+  const state = fixture();
+  state.comments.length = 0;
+  state.process = answered('닉네임: 햇살\n가격: 15,000원');
+  await handleReviewVoicePendingSale('ws', 'actor', {}, state.row, { comments: [
+    { id: 'local-1', platformMessageId: 'm1', nickname: '햇살', content: '저요', capturedAt: '2026-09-15T01:00:00Z' },
+    { id: 'local-2', platformMessageId: 'm2', nickname: '구경꾼', content: '예뻐요', capturedAt: '2026-09-15T01:00:20Z' },
+  ] });
+  assert.match(state.request.plainTextPrompt, /구경꾼\t예뻐요/u);
+  assert.equal(state.current.ai_verification.aiStatus, 'RESOLVED');
+  assert.equal(state.current.ai_verification.candidateCommentId, undefined);
+  assert.deepEqual(state.current.source_comment_ids, []);
 });

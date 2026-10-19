@@ -55,6 +55,8 @@ export interface AiResolutionRequest {
   purchaseWindows?: AiPurchaseWindow[];
   sellerUtterances?: AiUtteranceContext[];
   saleCandidates?: AiSaleCandidate[];
+  /** Ask the model this exact text and read a plain "닉네임: / 가격:" answer. */
+  plainTextPrompt?: string;
   activeProduct?: {
     productCode: string;
     productName?: string;

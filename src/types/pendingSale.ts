@@ -56,6 +56,8 @@ export interface AiVerificationMeta {
   reviewDecision?: 'NOT_SALE' | 'NEEDS_CONFIRMATION' | 'INSUFFICIENT_DATA';
   reviewFingerprint?: string;
   errorMessage?: string;
+  /** TEXT_PROMPT: the seller's plain-text prompt; a verified answer confirms the sale. */
+  reviewMode?: 'TEXT_PROMPT';
 }
 
 export interface SaleHistoryRecord {

@@ -90,6 +90,8 @@ export function normalizeCommentIntentForPrompt(text?: string): string {
  * AI에 전달할 시스템 프롬프트 및 사용자 프롬프트 생성
  */
 export function buildResolutionPrompt(req: AiResolutionRequest): { systemPrompt: string; userPrompt: string } {
+  // The seller's own wording is the whole question; nothing is added or wrapped.
+  if (req.plainTextPrompt) return { systemPrompt: '', userPrompt: req.plainTextPrompt };
   const systemPrompt = `당신은 라이브 커머스 실시간 판매 방송의 "판매 보류 해결 및 음성 정정" 전문 분석 AI입니다.
 판매자의 발화 문맥과 방송 댓글, 직전 판매 후보 목록을 면밀히 분석하여 정정 의도와 변경 대상 판매를 특정하고 JSON 규격으로 반환하십시오.
 
@@ -174,6 +176,15 @@ export function parseAndNormalizeAiOutput(
   req: AiResolutionRequest,
   meta: AiExecutionMeta
 ): AiResolutionResult {
+  if (req.plainTextPrompt) {
+    // Plain answer "닉네임: xxx / 가격: 000원"; the review handler reads it.
+    const answer = String(rawText || '').trim();
+    const answered = /닉네임\s*[:：]/u.test(answer) && /가격\s*[:：]/u.test(answer);
+    return { resolvable: answered, targetSaleId: req.saleCandidates?.[0]?.saleId || null,
+      action: answered ? 'UPDATE_SALE' : 'INSUFFICIENT_DATA', changes: null, evidenceIds: [],
+      evidenceSummary: answer, missingInfo: answered ? [] : ['닉네임·가격 답변'], conflictReason: null,
+      execution: { ...meta, rawResponse: rawText } };
+  }
   let cleaned = (rawText || '').trim();
   // 마크다운 ```json ... ``` 블록 제거
   if (cleaned.startsWith('```')) {

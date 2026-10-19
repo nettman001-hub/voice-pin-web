@@ -244,3 +244,156 @@ export function validateVoiceReviewResult(sale: SaleRecord, comments: CommentRec
 export function isRejectedVoiceCandidate(sale: SaleRecord): boolean {
   return sale.aiVerification?.reviewDecision === 'NOT_SALE';
 }
+
+/* ── 보류 판매 AI 질문 (사용자 지정 텍스트 형식, 2026-10-19) ──────────────
+ * 보류 판매 앞뒤 1분의 고객 댓글과 판매자 멘트를 시각순 텍스트로 만들어
+ * 정해진 프롬프트 그대로 묻고, "닉네임: xxx / 가격: 000원" 답이면 판매 확정. */
+
+export const VOICE_TEXT_REVIEW_WINDOW_MS = 60_000;
+
+export const VOICE_TEXT_REVIEW_INSTRUCTIONS = `아래 내용은 라이브방송에서 판매자의 멘트와 구매자의 댓글 내용이다. 
+시간대별로 분석해서 판매가 결정된 구매자를 선정해라.
+구매자는 구매의사표시를 "ㅈㅇ", "저요", "제가살께요", "저주세요" 등의 맥락으로 여러가지 표현을 쓴다는 것을 참고로 해라.
+고객댓글의 닉네임이 정확한 것이고 판매자멘트에서의 고객을 호칭하는 닉네임이 STT가 받아적는 것이기 때문에 약간 틀릴 수 있다.
+두 닉네임의 틀릴 가능성을 염두에 두고 비슷한 닉네임도 찾아서 판단해라.
+가격은 소숫점으로 표현 할 수 있다. 1.5면 곱하기 10000원을 해서 15,000원 이다. 
+답변은 아래와 같은 식으로 한다.
+닉네임: xxx
+가격: 000원`;
+
+const KST = 'Asia/Seoul';
+const oneLine = (text: string) => String(text || '').replace(/\s+/gu, ' ').trim();
+const formatCommentTime = (iso: string) => new Date(iso).toLocaleString('ko-KR', { timeZone: KST });
+const formatSellerTime = (iso: string) => new Date(iso).toLocaleTimeString('ko-KR', { timeZone: KST });
+
+function inTextWindow(sale: Pick<SaleRecord, 'recognizedAt'>, iso?: string): boolean {
+  const when = Date.parse(sale.recognizedAt);
+  const at = Date.parse(iso || '');
+  return Number.isFinite(when) && Number.isFinite(at) && Math.abs(at - when) <= VOICE_TEXT_REVIEW_WINDOW_MS;
+}
+
+export function getVoiceTextReviewComments(sale: Pick<SaleRecord, 'sessionId' | 'recognizedAt'>, comments: CommentRecord[]): CommentRecord[] {
+  return dedupeReviewComments(comments)
+    .filter((c) => (!c.sessionId || c.sessionId === sale.sessionId) && inTextWindow(sale, c.capturedAt) && oneLine(c.nickname))
+    .sort((a, b) => Date.parse(a.capturedAt) - Date.parse(b.capturedAt));
+}
+
+export function getVoiceTextReviewUtterances(sale: Pick<SaleRecord, 'sessionId' | 'recognizedAt'>, logs: ReviewTranscript[]) {
+  const byKey = new Map<string, { at: string; text: string }>();
+  for (const log of logs) {
+    if (!log || log.isFinal === false || typeof log.text !== 'string' || !log.text.trim()
+      || (log.sessionId && log.sessionId !== sale.sessionId)) continue;
+    const at = [log.recognizedAt, log.timestamp].find((value) => typeof value === 'string' && Number.isFinite(Date.parse(value)));
+    if (!at || !inTextWindow(sale, at)) continue;
+    byKey.set(log.id || `${at}:${log.text}`, { at, text: oneLine(log.text) });
+  }
+  return [...byKey.values()].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+}
+
+/** The exact question text: instructions, <고객댓글> and <판매자멘트> lists. */
+export function buildVoiceTextReviewPrompt(sale: SaleRecord, comments: CommentRecord[], logs: ReviewTranscript[]): string {
+  const commentLines = getVoiceTextReviewComments(sale, comments)
+    .map((c) => `${formatCommentTime(c.capturedAt)}\t${oneLine(c.nickname)}\t${oneLine(c.content)}`);
+  const utterances = getVoiceTextReviewUtterances(sale, logs);
+  // The sale's own speech is evidence even when the transcript archive lags.
+  if (sale.rawTranscript && !utterances.some((u) => u.text.includes(oneLine(sale.rawTranscript)))) {
+    utterances.push({ at: sale.recognizedAt, text: oneLine(sale.rawTranscript) });
+    utterances.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  }
+  const sellerLines = utterances.map((u) => `[${formatSellerTime(u.at)}] ${u.text}`);
+  return `${VOICE_TEXT_REVIEW_INSTRUCTIONS}\n\n\n<고객댓글>\n시각\t닉네임\t멘트\n${commentLines.join('\n')}\n\n<판매자멘트>\n시각 멘트 \n${sellerLines.join('\n')}`;
+}
+
+export function shouldReviewVoiceSaleText(sale: SaleRecord, comments: CommentRecord[]): boolean {
+  return sale.source === 'WEB_VOICE' && sale.status === '보류' && sale.recordState !== 'CANCELLED'
+    && !sale.workflowEvidence && getVoiceTextReviewComments(sale, comments).length > 0;
+}
+
+/** Ask once the minute after the held sale has been heard. */
+export function isVoiceTextReviewReady(sale: Pick<SaleRecord, 'recognizedAt'>, now = Date.now()): boolean {
+  const when = Date.parse(sale.recognizedAt);
+  return Number.isFinite(when) && now >= when + VOICE_TEXT_REVIEW_WINDOW_MS;
+}
+
+export function voiceTextReviewFingerprint(sale: SaleRecord, comments: CommentRecord[], logs: ReviewTranscript[]): string {
+  return JSON.stringify(['text-v1', sale.revision || 1, buildVoiceTextReviewPrompt(sale, comments, logs)]);
+}
+
+/** "닉네임: KH\n가격: 15,000원" → { nickname: 'KH', amount: 15000 }. */
+export function parseVoiceTextReviewAnswer(answer: string): { nickname: string; amount: number } | null {
+  const text = String(answer || '').replace(/[*`]/gu, '');
+  const nickname = text.match(/닉네임\s*[:：]\s*([^\n\r]+)/u)?.[1]
+    ?.replace(/^["'“”‘’「」\[\(]+|["'“”‘’「」\]\)]+$/gu, '').replace(/\s*(?:님|언니)$/u, '').trim();
+  const priceText = text.match(/가격\s*[:：]\s*([^\n\r]+)/u)?.[1]?.trim() || '';
+  let amount = 0;
+  const won = priceText.match(/^([\d,]+)\s*원?/u);
+  if (won && !/^\d{1,3}\.\d/u.test(priceText)) amount = Number(won[1].replace(/,/gu, ''));
+  if (!amount) amount = extractSpeechPrice(priceText)?.amount || 0;
+  if (!nickname || /^(?:없음|없습니다|미확인|모름|x+)$/iu.test(nickname) || !Number.isSafeInteger(amount) || amount <= 0) return null;
+  return { nickname, amount };
+}
+
+const accountKeyOf = (c: CommentRecord) => c.buyerId || (c.platformUserId ? `platform:${c.platformUserId}`
+  : c.uniqueId ? `handle:${c.uniqueId.toLowerCase()}` : `nickname:${oneLine(c.nickname).replace(/\s/gu, '').toLowerCase()}`);
+
+/** The comment nickname is the truth: the answer must name exactly one
+ * commenter in the window (exactly, else by a close spelling). */
+export function validateVoiceTextReviewAnswer(sale: SaleRecord, comments: CommentRecord[], answer: string | null,
+  slot: 1 | 2, taskId: string, fingerprint: string): AiVerificationMeta {
+  const base: AiVerificationMeta = { aiStatus: 'INSUFFICIENT_DATA', reviewDecision: 'INSUFFICIENT_DATA',
+    reviewMode: 'TEXT_PROMPT', appliedSlot: slot, aiTaskId: taskId, reviewFingerprint: fingerprint, validatedAt: new Date().toISOString(),
+    resolutionSummary: answer ? `AI 답변에서 닉네임과 가격을 찾지 못했습니다: ${oneLine(answer).slice(0, 120)}`
+      : 'AI 응답을 확인하지 못했습니다. 판매자 확인이 필요합니다.' };
+  const parsed = parseVoiceTextReviewAnswer(answer || '');
+  if (!parsed) return base;
+  const windowComments = getVoiceTextReviewComments(sale, comments);
+  const key = (name: string) => oneLine(name).replace(/\s/gu, '').toLowerCase();
+  let candidates = windowComments.filter((c) => key(c.nickname) === key(parsed.nickname));
+  if (!candidates.length) candidates = windowComments.filter((c) => {
+    const match = compareNicknames(c.nickname, parsed.nickname);
+    return match.isSame || match.isSimilar;
+  });
+  const priced = { ...base, candidateAmount: parsed.amount, suggestedNickname: parsed.nickname, saleConfirmed: true,
+    nicknameVerified: false, aiStatus: 'NEEDS_SELLER_CONFIRM' as const, reviewDecision: 'NEEDS_CONFIRMATION' as const };
+  if (new Set(candidates.map(accountKeyOf)).size !== 1) {
+    return { ...priced, resolutionSummary: candidates.length
+      ? `AI 답변 닉네임 '${parsed.nickname}'과 비슷한 댓글 계정이 여러 개입니다. 닉네임을 확인해 주세요.`
+      : `AI 답변 닉네임 '${parsed.nickname}'이 앞뒤 1분 댓글에 없습니다. 닉네임을 확인해 주세요.` };
+  }
+  const chosen = [...candidates].reverse().find((c) => hasCommentPurchaseIntent(c.content) && !commentWithdrawsPurchase(c.content))
+    || candidates[candidates.length - 1];
+  return { ...priced, aiStatus: 'RESOLVED', reviewDecision: undefined, nicknameVerified: true,
+    resolutionSummary: `AI 판정: 닉네임 ${chosen.nickname}, 가격 ${parsed.amount.toLocaleString('ko-KR')}원으로 판매 확정`,
+    candidateBuyer: { buyerId: chosen.buyerId || '', nickname: chosen.nickname },
+    candidatePurchaseRequestId: `${chosen.sessionId || sale.sessionId}:${chosen.platformMessageId || chosen.id}`,
+    candidateCommentId: chosen.id };
+}
+
+/**
+ * A held sale whose text-prompt answer named one comment account and a price
+ * becomes 확정 (printable), exactly as if the seller had confirmed it.
+ */
+export function confirmVoiceTextReviewSale(sale: SaleRecord, now = new Date().toISOString()): SaleRecord | null {
+  const meta = sale.aiVerification;
+  if (sale.source !== 'WEB_VOICE' || sale.status !== '보류' || sale.recordState === 'CANCELLED'
+    || sale.syncStatus === 'PENDING' || meta?.reviewMode !== 'TEXT_PROMPT' || meta.aiStatus !== 'RESOLVED'
+    || !meta.saleConfirmed || !meta.nicknameVerified || !meta.candidateBuyer || !(meta.candidateAmount! > 0)) return null;
+  const revision = (sale.revision || 1) + 1;
+  const amount = meta.candidateAmount!;
+  return {
+    ...sale,
+    status: '확정',
+    revision,
+    buyerNickname: meta.candidateBuyer.nickname,
+    buyerId: meta.candidateBuyer.buyerId || sale.buyerId,
+    purchaseRequestId: sale.purchaseRequestId || meta.candidatePurchaseRequestId,
+    amount,
+    unitPrice: sale.amount === amount && sale.unitPrice ? sale.unitPrice : amount,
+    history: [...(sale.history || []), {
+      revision, changedAt: now, changedBy: 'AI', changeType: 'AI_RESOLVE',
+      before: { status: sale.status, buyerNickname: sale.buyerNickname, amount: sale.amount },
+      after: { status: '확정', buyerNickname: meta.candidateBuyer.nickname, amount },
+      summary: meta.resolutionSummary || 'AI 판정으로 판매 확정',
+    }],
+  };
+}

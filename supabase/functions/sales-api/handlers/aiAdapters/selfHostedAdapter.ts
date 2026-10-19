@@ -90,6 +90,10 @@ async function runSelfHostedCompletion(request: AiResolutionRequest | AiPromptIn
 
   // 2. 프롬프트 구성
   const { systemPrompt, userPrompt } = 'systemPrompt' in request ? request : buildResolutionPrompt(request);
+  // A plain-text question gets a plain-text answer: no system message, no JSON mode.
+  const plainText = !('systemPrompt' in request) && Boolean(request.plainTextPrompt);
+  const messages = plainText ? [{ role: 'user', content: userPrompt }]
+    : [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }];
 
   // 3. 엔진별 API 엔드포인트 및 페이로드 구성 (Ollama vs vLLM/OpenAI 호환)
   let endpoint = slotConfig.endpointUrl.trim();
@@ -119,10 +123,7 @@ async function runSelfHostedCompletion(request: AiResolutionRequest | AiPromptIn
     endpoint = buildOpenAiChatUrl(endpoint);
     requestBody = {
       model: slotConfig.model || 'default',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
+      messages,
       // Only generic prompts explicitly opting in use LM Studio's documented
       // JSON Schema format. Existing resolution calls and other engines retain
       // their payload, including omission of unsupported json_object formats.
@@ -138,11 +139,8 @@ async function runSelfHostedCompletion(request: AiResolutionRequest | AiPromptIn
     }
     requestBody = {
       model: slotConfig.model || 'qwen2.5:7b',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      format: 'json',
+      messages,
+      ...(plainText ? {} : { format: 'json' }),
       stream: false,
       options: {
         temperature: 0.1,
