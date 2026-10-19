@@ -1,7 +1,12 @@
-/** A spoken capture request ("캡처하세요", "캡처해 주시고요"). Shared by the
+/** "캡처" and the spellings STT produces for it ("캡쳐", "갭처", "켑처", "캡챠"). */
+export const CAPTURE_WORD_SOURCE = '[캡갭켑][처쳐챠]';
+
+/** A spoken capture request ("캡처하세요", "캡처해 주시고요", "캡처해 놓으세요"). Shared by the
  * sale-confirmation and screen-capture patterns so they cannot drift apart. */
 export const CAPTURE_REQUEST_SOURCE =
-  '캡[처쳐]\\s*(?:하세요|해\\s*주세요|해\\s*주시고(?:요)?|해\\s*주시구요|해\\s*주십시오|해\\s*줘요|요|부탁(?:드려요|드립니다|해요)|해\\s*줘|해요|할게요|합니다)';
+  `${CAPTURE_WORD_SOURCE}\\s*(?:하세요|해\\s*주세요|해\\s*주시고(?:요)?|해\\s*주시구요|해\\s*주십시오|해\\s*줘요|요|부탁(?:드려요|드립니다|해요)|해\\s*줘|해요|할게요|합니다`
+  + `|하시고(?:요)?|해\\s*(?:놓으|놓|두)(?:세요|시고(?:요)?|십시오)|해\\s*가세요|찍(?:으세요|어\\s*주세요)`
+  + `|(?:해\\s*주시면|하시면|하셔야)\\s*(?:돼요|되요|됩니다|해요))`;
 
 /** Keep STT sentence boundaries without breaking decimal prices or ellipses. */
 export function splitTranscriptClauses(text: string): string[] {

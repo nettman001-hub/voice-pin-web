@@ -316,7 +316,7 @@ export function findStandalonePriceTranscript(text: string): string | null {
   if (!price || !clause.startsWith(price.quote)) return null;
   const suffix = clause.slice(price.quote.length).trim()
     .replace(/^(?:입니다|이에요|이요|요)(?=$|[\s,，.!。])/u, '').replace(/^[\s,，.!。]+/u, '');
-  if (!suffix || /^(?:화면\s*)?캡[처쳐](?:\s*(?:하세요|해\s*주세요|해\s*주시고(?:요)?|요))?[.!。\s]*$/u.test(suffix)) {
+  if (!suffix || /^(?:화면\s*)?[캡갭켑][처쳐챠](?:\s*(?:하세요|해\s*주세요|해\s*주시고(?:요)?|요))?[.!。\s]*$/u.test(suffix)) {
     return price.quote;
   }
   return null;

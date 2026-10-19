@@ -1,4 +1,4 @@
-import { CAPTURE_REQUEST_SOURCE, isQuestionUtterance, splitTranscriptClauses } from './voiceUtteranceService.ts';
+import { CAPTURE_REQUEST_SOURCE, CAPTURE_WORD_SOURCE, isQuestionUtterance, splitTranscriptClauses } from './voiceUtteranceService.ts';
 
 // 라이브 청취 홈: 판매 저장과 "캡처하세요" 화면 캡처를 시각으로 짝짓는다.
 // 판매 저장 시각과 캡처 시각이 앞뒤 10초 안이면 그 캡처가 판매의 상품 이미지1이 된다.
@@ -29,8 +29,13 @@ export interface PairableSale {
 // "캡처하세요", "캡처해주세요", "캡처해 주시고요", "캡처요", "화면 캡처" 같은 캡처 지시. "캡처할까요?", "캡처하지 마세요"는 제외한다.
 export const CAPTURE_INSTRUCTION_PATTERN = new RegExp(`${CAPTURE_REQUEST_SOURCE}(?![가-힣])`, 'u');
 
+const CAPTURE_CANCELLATION_PATTERN = new RegExp(`(?:안|못)\\s*${CAPTURE_WORD_SOURCE}|${CAPTURE_WORD_SOURCE}(?:는|를|은|을)?\\s*(?:하지\\s*(?:마|않)|안\\s*(?:해|하|할)|못\\s*(?:해|하|할)|취소|말고)|${CAPTURE_WORD_SOURCE}[가-힣\\s]*(?:면|셔도)\\s*안\\s*(?:돼|되)`, 'u');
+const CAPTURE_EXPLANATION_PATTERN = new RegExp(`${CAPTURE_WORD_SOURCE}.*(?:라는|라고|하는\\s*(?:말|거|것)|방법|기능|버튼|설명)`, 'u');
+const SCREEN_CAPTURE_PATTERN = new RegExp(`(?:^|[\\s,，])화면\\s*${CAPTURE_WORD_SOURCE}[.!。\\s]*$`, 'u');
+const BARE_CAPTURE_PATTERN = new RegExp(`(?:^|[\\s,，])${CAPTURE_WORD_SOURCE}[.!。\\s]*$`, 'u');
+
 export function hasCaptureCancellationText(text: string): boolean {
-  return /(?:안|못)\s*캡[처쳐]|캡[처쳐](?:는|를|은|을)?\s*(?:하지\s*(?:마|않)|안\s*(?:해|하|할)|못\s*(?:해|하|할)|취소|말고)/u.test(text);
+  return CAPTURE_CANCELLATION_PATTERN.test(text);
 }
 
 export function hasCaptureInstructionText(text: string, options: { saleContext?: boolean } = {}): boolean {
@@ -38,11 +43,11 @@ export function hasCaptureInstructionText(text: string, options: { saleContext?:
   return splitTranscriptClauses(text).some((clause) => {
     if (isQuestionUtterance(clause) || hasCaptureCancellationText(clause)) return false;
     // A quoted instruction or an explanation of the feature is not a command.
-    if (/캡[처쳐].*(?:라는|라고|하는\s*(?:말|거|것)|방법|기능|버튼|설명)/u.test(clause)) return false;
+    if (CAPTURE_EXPLANATION_PATTERN.test(clause)) return false;
     if (CAPTURE_INSTRUCTION_PATTERN.test(clause)) return true;
-    if (/(?:^|[\s,，])화면\s*캡[처쳐][.!。\s]*$/u.test(clause)) return true;
+    if (SCREEN_CAPTURE_PATTERN.test(clause)) return true;
     // Bare "캡처" is meaningful only while assembling a seller allocation.
-    return Boolean(options.saleContext && /(?:^|[\s,，])캡[처쳐][.!。\s]*$/u.test(clause));
+    return Boolean(options.saleContext && BARE_CAPTURE_PATTERN.test(clause));
   });
 }
 
