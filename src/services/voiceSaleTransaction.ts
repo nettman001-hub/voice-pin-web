@@ -42,6 +42,8 @@ export interface VoiceSaleTransactionState {
    * can distinguish it from a repeated confirmation of the previous sale. */
   precedingTransactionId?: string;
   precedingTransactionAmount?: number;
+  /** Neutral talk arrived after updatedAt; the sale stays open only 15s. */
+  talkSince?: string;
 }
 
 export interface VoiceSaleTransactionEmission {
@@ -112,6 +114,17 @@ function canContinueWith(text: string, incoming: ExtractedSaleResult | null, has
 
 const PRICE_LABEL_ONLY = /^(?:가격|금액|단가|판매가)(?:은|는|이|가)?요?[.!。\s]*$/u;
 
+/** "색깔 너무 예뻐요": talk that adds, ends or corrects nothing in a sale.
+ * Questions, numbers and any capture mention are never neutral. */
+function isNeutralTalk(text: string): boolean {
+  return !FILLER.test(text) && !/\d/u.test(text) && !/[캡갭켑][처쳐챠]/u.test(text)
+    && !splitTranscriptClauses(text).some(isQuestionUtterance)
+    && !getBuyerNicknameCandidates(text).length && !extractSpeechPrice(text)
+    && !extractSaleFromTranscript(text) && !saleInterruption(text) && !softBoundary(text)
+    && !PRODUCT_CHANGE.test(text) && !FOUR_POINT_CONFIRMATION_PATTERN.test(text)
+    && !/(?:드릴|드리|드려|챙겨|넣어|담아|가져가|가격|금액|만\s*원|천\s*원)/u.test(text);
+}
+
 function isPriceAnswer(clause: string): boolean {
   return Boolean(findExplicitPriceTranscript(clause) || findStandalonePriceTranscript(clause));
 }
@@ -148,6 +161,7 @@ export function advanceVoiceSaleTransaction(
     || at < Date.parse(prior.updatedAt)
     || at - Date.parse(prior.startedAt) > VOICE_SALE_TRANSACTION_WINDOW_MS)) prior = null;
   if (prior?.fragments.some((fragment) => fragment.eventId === input.eventId)) return { state: prior, emission: null };
+  if (prior?.talkSince && at - Date.parse(prior.updatedAt) > VOICE_SALE_PRICE_FOLLOWUP_MS) prior = null;
 
   // STT ended the sentence at the seller's pause ("유령님 드릴게요. 가격은.").
   // Read the price that opens the next fragment and ignore the talk after it.
@@ -158,6 +172,13 @@ export function advanceVoiceSaleTransaction(
       const advanced = advanceVoiceSaleTransaction(prior, { ...input, text: priceAnswer.answer });
       return PRODUCT_CHANGE.test(priceAnswer.rest) ? { ...advanced, state: null } : advanced;
     }
+  }
+
+  // Talk between the steps ("1.0이고요." / "색깔 너무 예뻐요." / "캡처하세요.")
+  // keeps the allocation open for 15s (user rule 2026-10-19); it adds nothing.
+  if (prior?.result?.intent === 'ALLOCATION' && !prior.captureSeen
+    && at - Date.parse(prior.updatedAt) <= VOICE_SALE_PRICE_FOLLOWUP_MS && isNeutralTalk(text)) {
+    return { state: { ...prior, talkSince: prior.talkSince || input.recognizedAt }, emission: null };
   }
 
   const incoming = extractSaleFromTranscript(text, input.activeKeywords);

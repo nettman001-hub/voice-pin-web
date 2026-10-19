@@ -136,7 +136,7 @@ for (const boundary of [
   '다음 상품은 니트입니다.', '새 옷 보여드릴게요.', '다른 상품이에요.',
   '이 색상 맞나요?', '하니님 드릴게요?', '하니님 안 드릴게요.',
   '하니님 드릴게요 취소.', '금액 1.2로 정정합니다.', '캡처하지 마세요.',
-  '있으면 드릴게요.', '오늘 날씨가 좋네요.', '캡처해주세요라는 문구를 보세요.',
+  '있으면 드릴게요.', '캡처해주세요라는 문구를 보세요.',
 ]) {
   test(`경계 뒤 가격·캡처를 앞 구매자에게 연결하지 않는다: ${boundary}`, () => {
     const first = advance(null, '하니님 드릴게요', 0);
@@ -275,4 +275,25 @@ test('가격 앞에서 끊긴 4단 멘트는 캡처가 가격 앞뒤 어디에 �
   split = advance(split.state, '드릴게요. 가격은.', 2);
   split = advance(split.state, '1.0. 캡처하세요.', 4);
   assert.equal(split.emission?.result.isFourPointConfirmed, true);
+});
+
+test('가격·캡처 사이 잡담 조각은 15초 동안 거래를 끊지 않는다 (2026-10-19 사용자 결정)', () => {
+  for (const chatter of ['오늘 날씨가 좋네요.', '색깔 너무 예뻐요.', '이거 진짜 부드러워요']) {
+    let step = advance(null, '네, 이거 우아한 유령님 드릴게요. 가격은.', 0);
+    step = advance(step.state, '1.0이고요.', 3);
+    const kept = advance(step.state, chatter, 5);
+    assert.equal(kept.emission, null, chatter);
+    assert.ok(kept.state, chatter);
+    const capture = advance(kept.state, '캡처하세요.', 8);
+    assert.equal(capture.emission?.result.isFourPointConfirmed, true, chatter);
+    assert.equal(capture.emission.result.amount, 10000, chatter);
+    assert.equal(extractSaleFromTranscript(capture.emission.result.rawTranscript)?.isFourPointConfirmed, true, chatter);
+  }
+  // 잡담 뒤 15초가 지나면 끊고, 질문·숫자·다른 구매자는 잡담이 아니다.
+  const priced = advance(advance(null, '루나님 드릴게요.', 0).state, '1.0', 2);
+  assert.equal(advance(advance(priced.state, '색깔 예뻐요.', 4).state, '캡처하세요.', 20).emission, null);
+  for (const boundary of ['이 색상 맞나요?', '가단 60에 총장 89.', '유령님 반가워요.']) {
+    const next = advance(advance(priced.state, boundary, 4).state, '캡처하세요.', 6);
+    assert.notEqual(next.emission?.result.isFourPointConfirmed, true, boundary);
+  }
 });
