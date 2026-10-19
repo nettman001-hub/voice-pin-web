@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as smsNicknameLink from '../src/services/smsNicknameLink.ts';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
@@ -45,7 +46,12 @@ function pageFixture() {
     '../../services/shippingService': { shippingService: {
       getConfig: () => ({ enabled: false }),
       calculateShippingFee: () => ({ fee: 0 }),
+      getOverride: () => null,
+      getOverrideForSales: () => null,
+      fetchRemoteOverrides: async () => {},
     } },
+    '../../services/smsNicknameLink': smsNicknameLink,
+    '../../hooks/useBuyerPhoneLinks': { useBuyerPhoneLinks: () => ({ phoneToNickname: new Map(), rememberLinks() {} }) },
     '../../services/salesExtractor': { formatAmountAsDecimal, formatMultiSaleAmount },
     '../../services/saleRowHistory': { getSalePurchaseHistory },
     '../../services/promiseDefaultService': { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults },

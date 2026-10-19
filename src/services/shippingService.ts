@@ -97,6 +97,45 @@ export const shippingService = {
   },
 
   /**
+   * 여러 판매 건을 묶어 보여 줄 때의 수동 택배비.
+   * 수동 지정은 구매자·회차별이므로 모든 건이 한 회차일 때만 적용합니다.
+   */
+  getOverrideForSales(
+    buyerNickname: string,
+    sales: ReadonlyArray<{ sessionId?: string | null }>,
+    workspaceId?: string | null
+  ): BuyerShippingOverride | null {
+    const sessionIds = Array.from(new Set(sales.map((sale) => sale.sessionId).filter(Boolean))) as string[];
+    if (sessionIds.length !== 1) return null;
+    return this.getOverride(buyerNickname, sessionIds[0], workspaceId);
+  },
+
+  /**
+   * 클라우드에 저장된 수동 택배비를 받아 로컬에 합칩니다 (다른 기기에서 지정한 값 반영).
+   */
+  async fetchRemoteOverrides(workspaceId: string): Promise<void> {
+    if (!workspaceId) return;
+    try {
+      const remote = await remoteWorkspaceService.fetchWorkspaceSettings<Record<string, BuyerShippingOverride>>(
+        workspaceId,
+        'buyer_shipping_overrides'
+      );
+      if (!remote) return;
+      const key = getStorageKey(SHIPPING_OVERRIDES_KEY, workspaceId);
+      const raw = localStorage.getItem(key);
+      const local = (raw ? JSON.parse(raw) : {}) as Record<string, BuyerShippingOverride>;
+      const merged = { ...remote };
+      Object.entries(local).forEach(([overrideKey, value]) => {
+        const other = merged[overrideKey];
+        if (!other || Date.parse(value.updatedAt) >= Date.parse(other.updatedAt)) merged[overrideKey] = value;
+      });
+      localStorage.setItem(key, JSON.stringify(merged));
+    } catch (err) {
+      console.warn('[shippingService] fetchRemoteOverrides failed:', err);
+    }
+  },
+
+  /**
    * 특정 구매자/회차의 수동 택배비를 설정(추가, 면제, 수정)합니다.
    */
   async setOverride(

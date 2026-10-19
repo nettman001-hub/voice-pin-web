@@ -63,6 +63,18 @@ export const InvoiceManagementPage: React.FC = () => {
   const { isRemoteAuth, workspaceId } = useAuth();
 
   const shippingConfig = useMemo(() => shippingService.getConfig(workspaceId), [workspaceId]);
+  // 정산 화면에서 구매자별로 수동 지정한 택배비를 다른 기기 값까지 받아 반영
+  const [shippingOverrideVersion, setShippingOverrideVersion] = useState(0);
+  useEffect(() => {
+    if (!workspaceId) return;
+    let active = true;
+    shippingService.fetchRemoteOverrides(workspaceId).then(() => {
+      if (active) setShippingOverrideVersion((v) => v + 1);
+    });
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
 
   useEffect(() => {
     productSalesApi.listSessions()
@@ -183,7 +195,11 @@ export const InvoiceManagementPage: React.FC = () => {
 
     return Array.from(map.entries()).map(([buyerNickname, list]) => {
       const totalProductAmount = list.reduce((sum, s) => sum + (s.amount || 0), 0);
-      const shippingFee = shippingService.calculateShippingFee(totalProductAmount, shippingConfig).fee;
+      const shippingFee = shippingService.calculateShippingFee(
+        totalProductAmount,
+        shippingConfig,
+        shippingService.getOverrideForSales(buyerNickname, list, workspaceId)
+      ).fee;
       const totalWithShipping = totalProductAmount + shippingFee;
 
       // 구매 n건: 금액1 + 금액2 = 합 N원 형식의 수식 생성
@@ -212,13 +228,17 @@ export const InvoiceManagementPage: React.FC = () => {
         isPartiallySelected,
       };
     });
-  }, [selectableSales, shippingConfig, selectedIds]);
+  }, [selectableSales, shippingConfig, selectedIds, workspaceId, shippingOverrideVersion]);
 
   // 현재 선택된 판매 건들
   const selectedSales = selectableSales.filter((sale) => selectedIds.includes(sale.id));
   const selectedNickname = selectedSales[0]?.buyerNickname || '';
   const selectedAmount = selectedSales.reduce((sum, sale) => sum + sale.amount, 0);
-  const selectedShippingFee = shippingService.calculateShippingFee(selectedAmount, shippingConfig).fee;
+  const selectedShippingFee = shippingService.calculateShippingFee(
+    selectedAmount,
+    shippingConfig,
+    shippingService.getOverrideForSales(selectedNickname, selectedSales, workspaceId)
+  ).fee;
   const selectedTotalWithShipping = selectedAmount + selectedShippingFee;
 
   // 선택된 건들에 대한 수식 생성

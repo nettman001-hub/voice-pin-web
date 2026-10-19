@@ -42,6 +42,8 @@ import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 import { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults } from '../../services/promiseDefaultService';
 import { calculateSalesListRevenue } from '../../services/salesListRevenue';
 import { isBillableSale } from '../../services/billableSales';
+import { findNicknameInMessages, messageMentionsNickname } from '../../services/smsNicknameLink';
+import { useBuyerPhoneLinks } from '../../hooks/useBuyerPhoneLinks';
 
 const getBankBadgeStyle = (bank?: string | null): string => {
   if (!bank) return 'bg-slate-100 text-slate-700 border-slate-200';
@@ -209,6 +211,19 @@ export const SalesListPage: React.FC = () => {
     setShippingConfig(shippingService.getConfig(workspaceId));
   }, [workspaceId, isShippingModalOpen]);
 
+  // 정산 화면에서 구매자별로 수동 지정한 택배비(무료 등)를 다른 기기 값까지 받아 반영
+  const [, setShippingOverrideVersion] = useState(0);
+  useEffect(() => {
+    if (!workspaceId) return;
+    let active = true;
+    shippingService.fetchRemoteOverrides(workspaceId).then(() => {
+      if (active) setShippingOverrideVersion((v) => v + 1);
+    });
+    return () => {
+      active = false;
+    };
+  }, [workspaceId]);
+
   const [viewerModal, setViewerModal] = useState<{
     isOpen: boolean;
     images: string[];
@@ -314,8 +329,11 @@ export const SalesListPage: React.FC = () => {
   }, [sales, sessionFilter, searchTerm, statusFilter]);
 
   // 과거 거래 내역 전화번호 -> 닉네임 맵
+  // 지난 회차 문자로 확인돼 저장된 전화번호 → 닉네임 연결
+  const { phoneToNickname: savedPhoneLinks, rememberLinks } = useBuyerPhoneLinks(workspaceId);
+
   const pastTransactionPhoneMap = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<string, string>(savedPhoneLinks);
     claims.forEach((c) => {
       const norm = normalizePhone(c.phoneNumber);
       if (norm && c.nickname?.trim()) map.set(norm, c.nickname.trim());
@@ -329,7 +347,7 @@ export const SalesListPage: React.FC = () => {
       if (norm && s.recipientName?.trim()) map.set(norm, s.recipientName.trim());
     });
     return map;
-  }, [claims, invoices, shipments]);
+  }, [claims, invoices, shipments, savedPhoneLinks]);
 
   // 전체 구매자 닉네임 목록
   const allBuyerNicknames = useMemo(() => {
@@ -371,18 +389,8 @@ export const SalesListPage: React.FC = () => {
       msgList.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
       const lastMsg = msgList[msgList.length - 1];
       const existingNick = pastTransactionPhoneMap.get(norm) || null;
-      let matchedNick: string | null = null;
-      for (const m of msgList) {
-        if (m.direction === 'INCOMING' && m.body) {
-          for (const nick of allBuyerNicknames) {
-            if (nick.length >= 2 && m.body.includes(nick)) {
-              matchedNick = nick;
-              break;
-            }
-          }
-        }
-        if (matchedNick) break;
-      }
+      const nicknameMatch = findNicknameInMessages(msgList, allBuyerNicknames);
+      const matchedNick = nicknameMatch?.nickname || null;
       list.push({
         phoneKey: norm,
         displayPhone: formatPhone(norm),
@@ -390,11 +398,22 @@ export const SalesListPage: React.FC = () => {
         lastMessage: lastMsg,
         existingNickname: existingNick,
         newMatchedNickname: matchedNick,
+        nicknameMatch,
         isNew: Boolean(matchedNick && !existingNick),
+        // 닉네임이 비슷하기만 한 연결: 화면에는 연결하되 판매자 확인이 필요함
+        needsNicknameCheck: Boolean(nicknameMatch?.kind === 'SIMILAR' && !existingNick),
       });
     });
     return list;
   }, [sessionFilteredMessages, pastTransactionPhoneMap, allBuyerNicknames]);
+
+  // 이번에 문자로 확실히 확인된 번호는 다음 회차에도 자동 연결되도록 저장
+  useEffect(() => {
+    rememberLinks(
+      threads.map((t) => ({ phoneKey: t.phoneKey, knownNickname: t.existingNickname, match: t.nicknameMatch })),
+      sessionFilter === 'ALL' ? null : sessionFilter
+    );
+  }, [threads, rememberLinks, sessionFilter]);
 
   // 구매자 닉네임 -> 일치하는 문자 스레드 매핑
   const buyerToThreadMap = useMemo(() => {
@@ -403,7 +422,7 @@ export const SalesListPage: React.FC = () => {
       if (t.existingNickname) map.set(t.existingNickname.trim().toLowerCase(), t);
       if (t.newMatchedNickname) map.set(t.newMatchedNickname.trim().toLowerCase(), t);
       allBuyerNicknames.forEach((nick) => {
-        if (t.messages.some((m: any) => m.body && m.body.toLowerCase().includes(nick.toLowerCase()))) {
+        if (t.messages.some((m: any) => m.direction === 'INCOMING' && messageMentionsNickname(m.body, nick))) {
           if (!map.has(nick.toLowerCase())) map.set(nick.toLowerCase(), t);
         }
       });
@@ -1008,6 +1027,14 @@ export const SalesListPage: React.FC = () => {
                                       신규
                                     </span>
                                   )}
+                                  {matchedThread.needsNicknameCheck && (
+                                    <span
+                                      className="bg-rose-100 text-rose-700 border border-rose-200 text-[9px] font-black px-1.5 py-0.2 rounded-md"
+                                      title={`문자 속 닉네임이 '${matchedThread.newMatchedNickname}'과(와) 비슷하지만 똑같지는 않습니다.`}
+                                    >
+                                      닉네임 확인필요
+                                    </span>
+                                  )}
                                 </div>
                                 <span className="text-[10px] text-slate-400 font-medium">
                                   {formatDateTime(matchedThread.lastMessage.createdAt)}
@@ -1029,7 +1056,11 @@ export const SalesListPage: React.FC = () => {
                           <span className="text-[10px] text-slate-500">총 구매 합계</span>
                           {(() => {
                             const multi = formatMultiSaleAmount(billableRecords.map((r) => r.amount));
-                            const shippingCalc = shippingService.calculateShippingFee(buyer.totalAmount, shippingConfig);
+                            const shippingCalc = shippingService.calculateShippingFee(
+                              buyer.totalAmount,
+                              shippingConfig,
+                              shippingService.getOverrideForSales(buyer.buyerNickname, buyer.records, workspaceId)
+                            );
                             const totalWithShipping = buyer.totalAmount + shippingCalc.fee;
 
                             if (multi.isMulti) {
@@ -1408,6 +1439,14 @@ export const SalesListPage: React.FC = () => {
                                       신규
                                     </span>
                                   )}
+                                  {matchedThread.needsNicknameCheck && (
+                                    <span
+                                      className="bg-rose-100 text-rose-700 border border-rose-200 text-[9px] font-black px-1.5 py-0.2 rounded-md"
+                                      title={`문자 속 닉네임이 '${matchedThread.newMatchedNickname}'과(와) 비슷하지만 똑같지는 않습니다.`}
+                                    >
+                                      닉네임 확인필요
+                                    </span>
+                                  )}
                                 </div>
                                 <span className="text-[10px] text-slate-400 font-medium">
                                   {formatDateTime(matchedThread.lastMessage.createdAt)}
@@ -1443,7 +1482,11 @@ export const SalesListPage: React.FC = () => {
                               </div>
                               {isBillableSale(sale) && sale.amount > 0 && (
                                 <span className="text-xs font-bold text-slate-600 mt-0.5">
-                                  택비포함 : {(sale.amount + shippingService.calculateShippingFee(sale.amount, shippingConfig).fee).toLocaleString()}원
+                                  택비포함 : {(sale.amount + shippingService.calculateShippingFee(
+                                    sale.amount,
+                                    shippingConfig,
+                                    shippingService.getOverride(sale.buyerNickname, sale.sessionId, workspaceId)
+                                  ).fee).toLocaleString()}원
                                 </span>
                               )}
                             </div>
