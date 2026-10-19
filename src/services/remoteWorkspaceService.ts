@@ -425,6 +425,67 @@ export const remoteWorkspaceService = {
   },
 
   /**
+   * 관리자 전용: 특정 방송 회차의 전체 실시간 고객 댓글을 조회합니다.
+   */
+  async fetchSessionCommentsForAdmin(sessionId: string, workspaceId?: string): Promise<Array<{
+    id: string;
+    sessionId: string;
+    nickname: string;
+    content: string;
+    capturedAt: string;
+  }>> {
+    if (!sessionId || !isSupabaseConfigured) return [];
+    const client = requireSupabase();
+
+    // 1차 시도: Supabase live_comments 테이블 직접 조회
+    try {
+      let query = client
+        .from('live_comments')
+        .select('id, session_id, nickname_snapshot, content, captured_at')
+        .eq('session_id', sessionId)
+        .order('captured_at', { ascending: true })
+        .limit(10000);
+
+      if (workspaceId) {
+        query = query.eq('workspace_id', workspaceId);
+      }
+
+      const { data, error } = await query;
+      if (!error && Array.isArray(data) && data.length > 0) {
+        return data.map((c: any) => ({
+          id: c.id,
+          sessionId: c.session_id,
+          nickname: c.nickname_snapshot || '고객',
+          content: c.content || '',
+          capturedAt: c.captured_at || new Date().toISOString(),
+        }));
+      }
+    } catch (dbErr) {
+      console.warn('[RemoteWorkspace] live_comments 직접 조회 실패:', dbErr);
+    }
+
+    // 2차 시도: sales-api list-live-comments (Edge Function)
+    try {
+      const { data, error } = await client.functions.invoke('sales-api', {
+        body: { action: 'list-live-comments', sessionId, workspaceId, limit: 10000 },
+      });
+      if (!error && data?.comments && Array.isArray(data.comments)) {
+        return data.comments.map((c: any) => ({
+          id: c.id,
+          sessionId: c.sessionId || sessionId,
+          nickname: c.nicknameSnapshot || c.nickname || '고객',
+          content: c.content || '',
+          capturedAt: c.capturedAt || c.created_at || new Date().toISOString(),
+        }));
+      }
+    } catch (efErr) {
+      console.warn('[RemoteWorkspace] Edge Function list-live-comments 실패:', efErr);
+    }
+
+    return [];
+  },
+
+  /**
    * 판매자 라이브 청취 종료 시 클라우드 STT(Deepgram, Soniox) 사용 시간을 Supabase에 기록합니다.
    */
   async recordSttUsage(payload: SttUsageRecordPayload): Promise<void> {

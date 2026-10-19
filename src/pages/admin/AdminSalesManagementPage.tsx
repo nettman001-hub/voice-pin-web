@@ -12,7 +12,12 @@ import {
   Radio,
   Mic,
   Sparkles,
-  X
+  X,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  CheckCircle2,
+  Loader2
 } from 'lucide-react';
 import { remoteWorkspaceService } from '../../services/remoteWorkspaceService';
 import { AdminSaleItem, SellerSalesGroup, SellerSttUsageSummary, SttUsageLogItem } from '../../types/admin';
@@ -33,6 +38,146 @@ export const AdminSalesManagementPage: React.FC = () => {
   const [selectedSttUser, setSelectedSttUser] = useState<SellerSttUsageSummary | null>(null);
   const [sttLogs, setSttLogs] = useState<SttUsageLogItem[]>([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+
+  // 회차별 고객댓글 + 판매자멘트 다운로드 상태
+  const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
+  const [downloadToast, setDownloadToast] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setDownloadToast(msg);
+    setTimeout(() => setDownloadToast(null), 3500);
+  };
+
+  const triggerDownload = (content: string, filename: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadSessionArchive = async (
+    seller: SellerSalesGroup,
+    sess: SellerSalesGroup['sessions'][number],
+    format: 'CSV' | 'TXT'
+  ) => {
+    const key = `${sess.sessionId}:${format}`;
+    setDownloadingKey(key);
+
+    try {
+      // 1. 해당 회차의 고객 댓글 조회
+      const comments = await remoteWorkspaceService.fetchSessionCommentsForAdmin(
+        sess.sessionId,
+        seller.sellerUserId
+      );
+
+      // 2. 해당 회차의 판매자 발화 멘트 (sess.sales)
+      const sales = sess.sales;
+
+      // 3. 타임라인 통합 이벤트 생성
+      interface ArchiveTimelineEvent {
+        time: string;
+        kind: 'COMMENT' | 'SELLER_MENT';
+        author: string;
+        content: string;
+        buyerNickname?: string;
+        amount?: number;
+        status?: string;
+        productName?: string;
+      }
+
+      const timeline: ArchiveTimelineEvent[] = [
+        ...comments.map((c) => ({
+          time: c.capturedAt,
+          kind: 'COMMENT' as const,
+          author: c.nickname,
+          content: c.content,
+        })),
+        ...sales.map((s) => ({
+          time: s.recognizedAt || s.createdAt,
+          kind: 'SELLER_MENT' as const,
+          author: seller.sellerNickname || '판매자',
+          content: s.rawTranscript || '(발화 내용 없음)',
+          buyerNickname: s.buyerNickname,
+          amount: s.amount,
+          status: s.status,
+          productName: s.productName,
+        })),
+      ];
+
+      // 시간 순서대로 정렬 (오름차순)
+      timeline.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+
+      const sessionDisplay = formatSessionDisplay(sess.sessionId, { recognizedAt: sess.sessionTime });
+      const sanitizedSellerName = (seller.sellerNickname || '판매자').replace(/[\\/:*?"<>|]/g, '_');
+      const sanitizedSessionDisplay = sessionDisplay.replace(/[\\/:*?"<>|]/g, '_');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+
+      if (format === 'CSV') {
+        const headers = ['순번', '일시(KST)', '구분', '작성자/호명', '내용', '호명구매자', '판매금액', '판매상태', '상품명'];
+        const escapeCsv = (val: string | number | undefined | null) => {
+          if (val === undefined || val === null) return '""';
+          const str = String(val).replace(/"/g, '""');
+          return `"${str}"`;
+        };
+
+        const rows = timeline.map((e, idx) => [
+          idx + 1,
+          escapeCsv(formatDateTimeKST(e.time)),
+          escapeCsv(e.kind === 'COMMENT' ? '고객댓글' : '판매자음성멘트'),
+          escapeCsv(e.author),
+          escapeCsv(e.content),
+          escapeCsv(e.buyerNickname || ''),
+          escapeCsv(e.amount !== undefined ? `${e.amount.toLocaleString()}원` : ''),
+          escapeCsv(e.status || ''),
+          escapeCsv(e.productName || ''),
+        ].join(','));
+
+        const csvContent = '\uFEFF' + headers.join(',') + '\r\n' + rows.join('\r\n');
+        const filename = `VoiceCAP_회차기록_${sanitizedSellerName}_${sanitizedSessionDisplay}_${dateStr}.csv`;
+        triggerDownload(csvContent, filename, 'text/csv;charset=utf-8;');
+      } else {
+        const headerText = [
+          '================================================================================',
+          '  VoiceCAP 방송 회차 통합 기록 (고객 댓글 & 판매자 음성 멘트)',
+          `  판매자: ${seller.sellerNickname} (${seller.sellerEmail})`,
+          `  작업공간: ${seller.workspaceName}`,
+          `  회차 ID: ${sess.sessionId}`,
+          `  회차 명칭: ${sessionDisplay}`,
+          `  다운로드 일시: ${new Date().toLocaleString('ko-KR')}`,
+          `  총 고객 댓글: ${comments.length.toLocaleString()}건`,
+          `  총 판매 멘트: ${sales.length.toLocaleString()}건`,
+          `  총 타임라인 이벤트: ${timeline.length.toLocaleString()}건`,
+          '================================================================================\n',
+        ].join('\n');
+
+        const bodyLines = timeline.map((e) => {
+          const timeStr = formatTimeKST(e.time);
+          if (e.kind === 'COMMENT') {
+            return `[${timeStr}] 💬 [고객댓글] ${e.author} : ${e.content}`;
+          } else {
+            const saleMeta = `[호명: ${e.buyerNickname || '미확인'} | 금액: ${(e.amount || 0).toLocaleString()}원 | 상태: ${e.status || '-'} | 상품: ${e.productName || '미지정'}]`;
+            return `[${timeStr}] 🎙️ [판매자음성] "${e.content}"\n           └─ ${saleMeta}`;
+          }
+        }).join('\n\n');
+
+        const txtContent = headerText + '\n' + (bodyLines || '(기록된 댓글 및 멘트가 없습니다)');
+        const filename = `VoiceCAP_회차기록_${sanitizedSellerName}_${sanitizedSessionDisplay}_${dateStr}.txt`;
+        triggerDownload(txtContent, filename, 'text/plain;charset=utf-8;');
+      }
+
+      showToast(`'${seller.sellerNickname}' 판매자 [${sessionDisplay}] 회차 기록(${timeline.length}건)이 다운로드되었습니다.`);
+    } catch (err: any) {
+      console.error('[AdminSales] 회차 다운로드 실패:', err);
+      alert(`다운로드 중 오류가 발생했습니다: ${err?.message || err}`);
+    } finally {
+      setDownloadingKey(null);
+    }
+  };
 
   const loadData = async () => {
     setIsLoading(true);
@@ -425,54 +570,130 @@ export const AdminSalesManagementPage: React.FC = () => {
                                 <span className="font-black text-emerald-600">
                                   {sess.totalAmount.toLocaleString()}원
                                 </span>
+
+                                <div className="flex items-center space-x-1 pl-1 border-l border-slate-200">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void handleDownloadSessionArchive(seller, sess, 'CSV');
+                                    }}
+                                    disabled={!!downloadingKey}
+                                    title="고객 댓글과 판매자 멘트가 통합된 엑셀용 CSV 다운로드"
+                                    className="inline-flex items-center space-x-1 px-2 py-1 rounded-lg text-[11px] font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition disabled:opacity-50"
+                                  >
+                                    {downloadingKey === `${sessKey}:CSV` ? (
+                                      <Loader2 className="w-3 h-3 animate-spin text-emerald-600" />
+                                    ) : (
+                                      <FileSpreadsheet className="w-3 h-3 text-emerald-600" />
+                                    )}
+                                    <span>CSV</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void handleDownloadSessionArchive(seller, sess, 'TXT');
+                                    }}
+                                    disabled={!!downloadingKey}
+                                    title="타임라인 순서대로 정리된 텍스트 대화록 TXT 다운로드"
+                                    className="inline-flex items-center space-x-1 px-2 py-1 rounded-lg text-[11px] font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 transition disabled:opacity-50"
+                                  >
+                                    {downloadingKey === `${sessKey}:TXT` ? (
+                                      <Loader2 className="w-3 h-3 animate-spin text-slate-600" />
+                                    ) : (
+                                      <FileText className="w-3 h-3 text-slate-600" />
+                                    )}
+                                    <span>TXT</span>
+                                  </button>
+                                </div>
                               </div>
                             </div>
 
                             {isSessionExpanded && (
-                              <div className="border-t border-slate-100 p-3 overflow-x-auto">
-                                <table className="w-full text-left text-xs">
-                                  <thead>
-                                    <tr className="border-b border-slate-100 text-slate-400 text-[11px]">
-                                      <th className="py-2 px-3">인식 시각</th>
-                                      <th className="py-2 px-3">구매자</th>
-                                      <th className="py-2 px-3">상품명</th>
-                                      <th className="py-2 px-3 text-right">금액</th>
-                                      <th className="py-2 px-3">상태</th>
-                                      <th className="py-2 px-3">음성 멘트</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-slate-100 text-[11px]">
-                                    {sess.sales.map((item) => (
-                                      <tr key={item.id} className="hover:bg-slate-50/80 transition">
-                                        <td className="py-2.5 px-3 font-mono text-slate-400 whitespace-nowrap">
-                                          {formatTimeKST(item.recognizedAt)}
-                                        </td>
-                                        <td className="py-2.5 px-3 font-bold text-slate-900 whitespace-nowrap">
-                                          {item.buyerNickname}
-                                        </td>
-                                        <td className="py-2.5 px-3 text-slate-600">
-                                          {item.productName || '라이브 상품'}
-                                        </td>
-                                        <td className="py-2.5 px-3 font-black text-emerald-600 text-right whitespace-nowrap">
-                                          {item.amount.toLocaleString()}원
-                                        </td>
-                                        <td className="py-2.5 px-3 whitespace-nowrap">
-                                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                            item.status === '확정' ? 'bg-emerald-50 text-emerald-700' :
-                                            item.status === '자동저장' ? 'bg-blue-50 text-blue-700' :
-                                            item.status === '수동수정' ? 'bg-amber-50 text-amber-700' :
-                                            'bg-rose-50 text-rose-700'
-                                          }`}>
-                                            {item.status}
-                                          </span>
-                                        </td>
-                                        <td className="py-2.5 px-3 text-slate-500 max-w-xs truncate" title={item.rawTranscript}>
-                                          {item.rawTranscript || '-'}
-                                        </td>
+                              <div className="border-t border-slate-100 p-3 sm:p-4 bg-slate-50/40 space-y-3">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 bg-white border border-slate-200 rounded-xl shadow-2xs">
+                                  <div className="flex items-center space-x-2 text-xs">
+                                    <Download className="w-4 h-4 text-brand-600 flex-shrink-0" />
+                                    <span className="text-slate-600">
+                                      이 회차의 <strong>고객 댓글</strong>과 <strong>판매자 음성 멘트</strong>를 통합 타임라인으로 다운로드:
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center space-x-2 self-end sm:self-auto">
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleDownloadSessionArchive(seller, sess, 'CSV')}
+                                      disabled={!!downloadingKey}
+                                      className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs transition disabled:opacity-50"
+                                    >
+                                      {downloadingKey === `${sessKey}:CSV` ? (
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      ) : (
+                                        <FileSpreadsheet className="w-3.5 h-3.5" />
+                                      )}
+                                      <span>엑셀 CSV 받기</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleDownloadSessionArchive(seller, sess, 'TXT')}
+                                      disabled={!!downloadingKey}
+                                      className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-white hover:bg-slate-900 shadow-2xs transition disabled:opacity-50"
+                                    >
+                                      {downloadingKey === `${sessKey}:TXT` ? (
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      ) : (
+                                        <FileText className="w-3.5 h-3.5" />
+                                      )}
+                                      <span>대화록 TXT 받기</span>
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <div className="overflow-x-auto bg-white rounded-xl border border-slate-200/80">
+                                  <table className="w-full text-left text-xs">
+                                    <thead>
+                                      <tr className="border-b border-slate-100 text-slate-400 text-[11px]">
+                                        <th className="py-2 px-3">인식 시각</th>
+                                        <th className="py-2 px-3">구매자</th>
+                                        <th className="py-2 px-3">상품명</th>
+                                        <th className="py-2 px-3 text-right">금액</th>
+                                        <th className="py-2 px-3">상태</th>
+                                        <th className="py-2 px-3">음성 멘트</th>
                                       </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 text-[11px]">
+                                      {sess.sales.map((item) => (
+                                        <tr key={item.id} className="hover:bg-slate-50/80 transition">
+                                          <td className="py-2.5 px-3 font-mono text-slate-400 whitespace-nowrap">
+                                            {formatTimeKST(item.recognizedAt)}
+                                          </td>
+                                          <td className="py-2.5 px-3 font-bold text-slate-900 whitespace-nowrap">
+                                            {item.buyerNickname}
+                                          </td>
+                                          <td className="py-2.5 px-3 text-slate-600">
+                                            {item.productName || '라이브 상품'}
+                                          </td>
+                                          <td className="py-2.5 px-3 font-black text-emerald-600 text-right whitespace-nowrap">
+                                            {item.amount.toLocaleString()}원
+                                          </td>
+                                          <td className="py-2.5 px-3 whitespace-nowrap">
+                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                              item.status === '확정' ? 'bg-emerald-50 text-emerald-700' :
+                                              item.status === '자동저장' ? 'bg-blue-50 text-blue-700' :
+                                              item.status === '수동수정' ? 'bg-amber-50 text-amber-700' :
+                                              'bg-rose-50 text-rose-700'
+                                            }`}>
+                                              {item.status}
+                                            </span>
+                                          </td>
+                                          <td className="py-2.5 px-3 text-slate-500 max-w-xs truncate" title={item.rawTranscript}>
+                                            {item.rawTranscript || '-'}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
                               </div>
                             )}
                           </div>
@@ -722,6 +943,14 @@ export const AdminSalesManagementPage: React.FC = () => {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 회차 다운로드 완료 알림 토스트 */}
+      {downloadToast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center space-x-2 bg-slate-900/95 backdrop-blur-xs text-white px-4 py-3 rounded-2xl shadow-2xl text-xs font-bold border border-slate-700 animate-in fade-in slide-in-from-bottom-3 duration-200">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+          <span>{downloadToast}</span>
         </div>
       )}
     </div>
