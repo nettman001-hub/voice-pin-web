@@ -3,15 +3,16 @@
  *
  * - EXACT: 본문에 닉네임이 그대로 들어 있음 (대소문자 무시)
  * - SPACING: 띄어쓰기·문장부호만 다름 ("꽃 심이" ↔ "꽃심이")
- * - SHORT: 1~2글자 닉네임이 한 단어로 따로 쓰임 ("하늘입니다") → "닉네임 확인필요"
+ * - INTRO: 1~2글자 닉네임이 자기소개 맥락으로 쓰임 ("닉네임 하늘이에요", "안녕하세요 하늘입니다") → 확정
+ * - SHORT: 1~2글자 닉네임이 한 단어로 따로 쓰였지만 맥락은 불분명 ("하늘 입금했어요") → "닉네임 확인필요"
  * - SIMILAR: 자모 1~2개 차이 정도로 비슷함 ("꼿심이" ↔ "꽃심이") → "닉네임 확인필요"
  *
- * EXACT/SPACING(3글자 이상)은 확정 연결로 보고 전화번호에 저장할 수 있으며,
+ * EXACT/SPACING(3글자 이상)과 INTRO 는 확정 연결로 보고 전화번호에 저장할 수 있으며,
  * SHORT/SIMILAR 는 화면에만 연결해 보여 주고 판매자 확인 전에는 저장하지 않는다.
  * 짧은 닉네임은 "하늘색", "예쁨 받았어요"처럼 다른 고객의 평범한 문장에도 들어가기 때문이다.
  */
 
-export type SmsNicknameMatchKind = 'EXACT' | 'SPACING' | 'SHORT' | 'SIMILAR';
+export type SmsNicknameMatchKind = 'EXACT' | 'SPACING' | 'INTRO' | 'SHORT' | 'SIMILAR';
 
 /** 판매자 확인 전까지 "닉네임 확인필요"로 보여 줄 연결인지 */
 export const needsNicknameConfirmation = (match: SmsNicknameMatch | null | undefined): boolean =>
@@ -29,6 +30,30 @@ function wordsOf(body: string): string[] {
     .toLocaleLowerCase('ko-KR')
     .split(/[\s\p{P}\p{S}]+/u)
     .filter(Boolean);
+}
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** 닉네임 바로 뒤가 낱말의 끝인지 (호칭·어미는 허용) */
+const NICK_END = '(?=$|[\\s\\p{P}\\p{S}]|님|씨|입니다|이에요|예요|에요|이요|요|임|이고|인데)';
+const INTRO_ENDING = '\\s*(?:님|씨)?\\s*(?:입니다|이에요|예요|에요|이요|임니다|임|이구요|이고요|인데요)';
+
+/**
+ * 짧은 닉네임이 자기소개 맥락에 쓰였는지.
+ * "닉네임 하늘이에요", "닉 하늘", "틱톡 하늘", "안녕하세요 하늘입니다", "저는 하늘이에요",
+ * 문자 맨 앞의 "하늘입니다", 또는 문자 전체가 "하늘(님)" 뿐인 경우.
+ */
+function hasIntroductionContext(body: string, compactNick: string): boolean {
+  const text = String(body).normalize('NFKC').toLocaleLowerCase('ko-KR').trim();
+  const nick = Array.from(compactNick).map(escapeRegExp).join('\\s*');
+  const patterns = [
+    `(?:닉네임|닉넴|닉|아이디|틱톡|이름)\\s*(?:은|는|이|:|=|-)?\\s*["'“‘]?${nick}${NICK_END}`,
+    `(?:안녕하세요|안녕하세용|안녕하십니까|안녕하신가요)[\\s\\p{P}~]*(?:저는|전|저)?\\s*${nick}${NICK_END}`,
+    `(?:^|[\\s\\p{P}])(?:저는|전|저)\\s*${nick}${INTRO_ENDING}`,
+    `^${nick}${INTRO_ENDING}`,
+    `^${nick}\\s*(?:님|씨)?[\\s\\p{P}~]*$`,
+  ];
+  return patterns.some((pattern) => new RegExp(pattern, 'u').test(text));
 }
 
 /** 1~2글자 닉네임이 다른 낱말의 일부가 아니라 한 단어로 따로 쓰였는지 */
@@ -152,6 +177,12 @@ export function findNicknameInText(body: string | null | undefined, nicknames: r
   for (const nickname of longNicks) {
     if (compactBody.includes(compactText(nickname))) {
       return { nickname, kind: 'SPACING' };
+    }
+  }
+
+  for (const nickname of shortNicks) {
+    if (hasIntroductionContext(body, compactText(nickname))) {
+      return { nickname, kind: 'INTRO' };
     }
   }
 

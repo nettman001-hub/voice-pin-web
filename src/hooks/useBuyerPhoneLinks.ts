@@ -13,9 +13,9 @@ export interface AutoLinkCandidate {
   match: SmsNicknameMatch | null;
 }
 
-/** 저장해도 될 만큼 확실한 연결인지: 3글자 이상 닉네임이 띄어쓰기까지만 다르게 들어 있음 */
+/** 저장해도 될 만큼 확실한 연결인지: 3글자 이상 닉네임이 띄어쓰기까지만 다르게 들어 있거나, 짧은 닉네임이 자기소개 맥락으로 쓰임 */
 const isSaveableMatch = (match: SmsNicknameMatch | null): match is SmsNicknameMatch =>
-  Boolean(match && (match.kind === 'EXACT' || match.kind === 'SPACING'));
+  Boolean(match && (match.kind === 'EXACT' || match.kind === 'SPACING' || match.kind === 'INTRO'));
 
 /**
  * 문자로 확인된 전화번호 ↔ 구매자 닉네임 연결을 불러오고,

@@ -24,10 +24,17 @@ test('평범한 문장이나 짧은 닉네임은 비슷함으로 잡지 않음',
   assert.equal(findNicknameInText('하눌', buyers), null);
 });
 
-test('1~2글자 닉네임은 한 단어로 쓰였을 때만 확인필요로 연결', () => {
-  assert.deepEqual(findNicknameInText('하늘입니다 입금했어요', buyers), { nickname: '하늘', kind: 'SHORT' });
-  assert.deepEqual(findNicknameInText('하늘 님', buyers), { nickname: '하늘', kind: 'SHORT' });
-  assert.deepEqual(findNicknameInText('별', ['별']), { nickname: '별', kind: 'SHORT' });
+test('1~2글자 닉네임도 자기소개 맥락이면 확정 연결', () => {
+  for (const body of ['닉네임 하늘이에요', '닉네임은 하늘 입니다', '닉: 하늘', '안녕하세요 하늘입니다', '안녕하세요~ 저는 하늘이에요', '하늘입니다 입금했어요', '하늘님', '틱톡 하늘 주소 보냅니다']) {
+    assert.deepEqual(findNicknameInText(body, buyers), { nickname: '하늘', kind: 'INTRO' }, body);
+  }
+  assert.deepEqual(findNicknameInText('별이에요', ['별']), { nickname: '별', kind: 'INTRO' });
+  assert.equal(findNicknameInText('안녕하세요 하늘색 원피스 주문했어요', buyers), null);
+});
+
+test('1~2글자 닉네임이 맥락 없이 한 단어로만 쓰이면 확인필요로 연결', () => {
+  assert.deepEqual(findNicknameInText('입금했어요 하늘 님', buyers), { nickname: '하늘', kind: 'SHORT' });
+  assert.deepEqual(findNicknameInText('주소는 서울 별 101호', ['별']), { nickname: '별', kind: 'SHORT' });
   assert.equal(findNicknameInText('하늘색 원피스 입금했어요', buyers), null);
   assert.equal(findNicknameInText('별로 안 늦게 보내주세요', ['별']), null);
 });
