@@ -42,6 +42,7 @@ import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 import { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults } from '../../services/promiseDefaultService';
 import { calculateSalesListRevenue } from '../../services/salesListRevenue';
 import { isBillableSale } from '../../services/billableSales';
+import { needsServerReview } from '../../services/serverRejectedSale';
 import { findNicknameInMessages, messageMentionsNickname, needsNicknameConfirmation } from '../../services/smsNicknameLink';
 import { useBuyerPhoneLinks } from '../../hooks/useBuyerPhoneLinks';
 
@@ -1084,7 +1085,7 @@ export const SalesListPage: React.FC = () => {
                           {excludedOrderCount > 0 && (
                             <span
                               className="block text-[10px] text-slate-500 mt-0.5"
-                              title="취소·보류·저장 대기 주문은 합계에서 제외합니다."
+                              title="취소·보류 주문은 합계에서 제외합니다."
                             >
                               합계 제외 {excludedOrderCount}건
                             </span>
@@ -1200,7 +1201,7 @@ export const SalesListPage: React.FC = () => {
                                 )}
                               </div>
                               <div className="min-w-0 flex-1">
-                                <div className="flex items-center space-x-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                   <span
                                     className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
                                       rec.status === '보류'
@@ -1213,6 +1214,22 @@ export const SalesListPage: React.FC = () => {
                                     {rec.status}
                                   </span>
                                   <AiSaleBadge sale={rec} />
+                                  {rec.syncStatus === 'PENDING' && (
+                                    <span
+                                      className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-amber-50 text-amber-700 border border-amber-200"
+                                      title="아직 서버에 저장되지 않아 이 컴퓨터에만 있는 판매입니다. 합계에는 포함됩니다."
+                                    >
+                                      서버 저장 대기
+                                    </span>
+                                  )}
+                                  {needsServerReview(rec) && (
+                                    <span
+                                      className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-orange-50 text-orange-700 border border-orange-200"
+                                      title={rec.note}
+                                    >
+                                      서버 확인 필요
+                                    </span>
+                                  )}
                                   {(rec.productCode || rec.productName) && (
                                     <span className="text-[11px] font-semibold text-slate-700">
                                       상품 {rec.productCode || ''}{rec.productName ? ` · ${rec.productName}` : ''}
@@ -1381,6 +1398,22 @@ export const SalesListPage: React.FC = () => {
                               {sale.status}
                             </span>
                             <AiSaleBadge sale={sale} />
+                            {sale.syncStatus === 'PENDING' && (
+                              <span
+                                className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-amber-50 text-amber-700 border border-amber-200"
+                                title="아직 서버에 저장되지 않아 이 컴퓨터에만 있는 판매입니다. 합계에는 포함됩니다."
+                              >
+                                서버 저장 대기
+                              </span>
+                            )}
+                            {needsServerReview(sale) && (
+                              <span
+                                className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-orange-50 text-orange-700 border border-orange-200"
+                                title={sale.note}
+                              >
+                                서버 확인 필요
+                              </span>
+                            )}
                             <BuyerStatusBadges
                               saleIds={[sale.id]}
                               buyerNickname={sale.buyerNickname}

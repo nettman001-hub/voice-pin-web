@@ -9,6 +9,7 @@ import { AiSaleBadge } from '../../components/sales/AiSaleBadge';
 import { productSalesApi } from '../../services/productSalesApi';
 import { LiveSession } from '../../types/productSales';
 import { formatSessionDisplay } from '../../utils/sessionFormatter';
+import { markServerReviewCompleted, needsServerReview } from '../../services/serverRejectedSale';
 import {
   ShoppingBag,
   ArrowLeft,
@@ -28,7 +29,7 @@ export const SalesDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { sales, updateSale, retrySalePrint, deleteSale } = useSales();
+  const { sales, updateSale, completeServerReview, retrySalePrint, deleteSale } = useSales();
 
   const sale = sales.find((s) => s.id === id);
   const fromLiveHome = (location.state as { returnTo?: unknown } | null)?.returnTo === '/live';
@@ -40,14 +41,29 @@ export const SalesDetailPage: React.FC = () => {
   const [amount, setAmount] = useState(sale?.amount.toString() || '0');
   const [status, setStatus] = useState<SaleStatus>(sale?.status || '자동저장');
   const [note, setNote] = useState(sale?.note || '');
+  const previousNoteRef = useRef({ saleId: sale?.id, note: sale?.note || '' });
   const [productImageUrl, setProductImageUrl] = useState(sale?.productImageUrl || sale?.captureImageUrls?.[0] || '');
   const [captureImages, setCaptureImages] = useState<string[]>(sale?.captureImageUrls || []);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
   useEffect(() => {
     setBuyerNickname(sale?.buyerNickname || '');
   }, [sale?.buyerNickname]);
+  useEffect(() => {
+    const previous = previousNoteRef.current;
+    const incoming = sale?.note || '';
+    setNote((draft) => {
+      if (previous.saleId !== sale?.id || draft === previous.note) return incoming;
+      // Keep unsaved memo edits, but do not restore a review marker completed on another screen.
+      if (needsServerReview(previous) && !needsServerReview({ note: incoming }) && sale) {
+        return markServerReviewCompleted({ ...sale, note: draft }).note || '';
+      }
+      return draft;
+    });
+    previousNoteRef.current = { saleId: sale?.id, note: incoming };
+  }, [sale?.id, sale?.note]);
   const [viewerModal, setViewerModal] = useState<{
     isOpen: boolean;
     images: string[];
@@ -142,6 +158,18 @@ export const SalesDetailPage: React.FC = () => {
     }
   };
 
+  const handleCompleteServerReview = () => {
+    const updated = completeServerReview(sale.id);
+    if (!updated) {
+      setReviewError('표시를 해제하지 못했습니다. 판매 내역을 새로고침한 뒤 다시 시도해 주세요.');
+      return;
+    }
+    setReviewError(null);
+    setNote((draft) => markServerReviewCompleted({ ...updated, note: draft }).note || '');
+    setToastMsg('확인 필요 표시를 해제했습니다. 서버 저장 대기 중에는 자동으로 다시 저장을 시도합니다.');
+    setTimeout(() => setToastMsg(null), 5000);
+  };
+
   return (
     <div className="p-3.5 sm:p-6 max-w-4xl mx-auto space-y-4 sm:space-y-6">
       {/* 상단 네비게이션 */}
@@ -207,6 +235,26 @@ export const SalesDetailPage: React.FC = () => {
             <AiSaleBadge sale={sale} />
           </div>
         </div>
+
+        {needsServerReview(sale) && (
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-orange-50 border border-orange-200 space-y-3">
+            <div className="flex items-center gap-2 text-orange-800 text-xs font-bold">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span>서버 확인 필요</span>
+            </div>
+            <p className="text-xs text-orange-900 break-words whitespace-pre-wrap">{sale.note}</p>
+            <p className="text-xs text-orange-800">판매 내용을 확인했다면 표시를 해제해 주세요. 확인한 사유는 메모에 남습니다.</p>
+            <button
+              type="button"
+              onClick={handleCompleteServerReview}
+              className="px-3 py-2 rounded-xl bg-white border border-orange-300 hover:bg-orange-100 text-orange-900 text-xs font-bold flex items-center gap-1.5 transition"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              확인 완료 · 표시 해제
+            </button>
+            {reviewError && <p role="alert" className="text-xs font-semibold text-rose-700">{reviewError}</p>}
+          </div>
+        )}
 
         {/* 원본 발화 문장 */}
         <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200">

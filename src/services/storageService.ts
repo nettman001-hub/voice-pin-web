@@ -1178,7 +1178,7 @@ export class StorageService {
     const buyerMap = new Map<string, { quantity: number; amount: number; count: number; displayNickname: string }>();
     const totals = new Map<string, { count: number; amount: number }>();
     for (const sale of sales) {
-      if (sale.status === '보류' || sale.status === '취소' || sale.recordState === 'CANCELLED' || sale.syncStatus === 'PENDING') continue;
+      if (sale.status === '보류' || sale.status === '취소' || sale.recordState === 'CANCELLED') continue;
       const key = sale.buyerId || (sale.buyerNickname || '익명').trim();
       const total = totals.get(key) || { count: 0, amount: 0 };
       totals.set(key, { count: total.count + 1, amount: total.amount + (Number(sale.amount) || 0) });
@@ -1186,7 +1186,7 @@ export class StorageService {
 
     for (const sale of sessionSales) {
       // 보류 건 및 취소 건 제외 (서버의 record_state === 'ACTIVE' 및 status !== '보류'와 완벽 일치)
-      if (sale.status === '보류' || sale.status === '취소' || sale.recordState === 'CANCELLED' || sale.syncStatus === 'PENDING') continue;
+      if (sale.status === '보류' || sale.status === '취소' || sale.recordState === 'CANCELLED') continue;
 
       const qty = sale.quantity && sale.quantity > 0 ? sale.quantity : 1;
       const amt = Number(sale.amount) || 0;

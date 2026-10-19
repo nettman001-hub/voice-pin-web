@@ -44,6 +44,7 @@ function controller(options = {}) {
     save: async (record) => { saved.push(clone(record)); await options.save?.(record); },
     remove: async (id) => { removed.push(id); await options.remove?.(id); },
     load: options.load || (async () => []), changed() {}, error: (message) => errors.push(message), active: () => active,
+    fallback: options.fallback,
   });
   return { sync, saved, removed, errors, state: () => state, deactivate() { active = false; } };
 }
@@ -549,11 +550,15 @@ test('invalid voice sale evidence fails locally without sending repeated HTTP 40
   assert.equal(calls, 0);
 });
 
-test('server validation is non-retryable while a comment awaiting upload remains retryable', async () => {
-  for (const [code, retryable] of [['VALIDATION_ERROR', false], ['COMMENT_NOT_SYNCED', true]]) {
+test('server validation stays non-retryable while missing comments, outages and expired authentication can recover', async () => {
+  for (const [code, retryable, status] of [
+    ['VALIDATION_ERROR', false, 400], ['COMMENT_NOT_SYNCED', true, 409],
+    ['DATABASE_ERROR', true, 500], ['TEMPORARILY_UNAVAILABLE', true, 500],
+    ['AUTH_REQUIRED', true, 401], ['CAPABILITY_DENIED', false, 403],
+  ]) {
     const remote = voiceRemoteFixture(async () => ({ data: null, error: {
       message: 'Edge Function returned a non-2xx status code',
-      context: new Response(JSON.stringify({ ok: false, error: { code, message: '서버 확인 필요', retryable: false } }), { status: code === 'VALIDATION_ERROR' ? 400 : 409 }),
+      context: new Response(JSON.stringify({ ok: false, error: { code, message: '서버 확인 필요', retryable: false } }), { status }),
     } }));
     await assert.rejects(remote.saveSale('workspace-1', voiceSale()), (error) => error.code === code && error.retryable === retryable);
   }
@@ -702,7 +707,7 @@ test('SalesProvider receives other-tab changes without losing either offline ope
       '../services/csvExporter': {}, './AuthContext': { useAuth: () => ({ workspaceId: 'workspace-1', isRemoteAuth: true, user: { id: 'user-1' } }) },
       '../services/remoteWorkspaceService': { remoteWorkspaceService: remote },
       '../services/commentStreamService': {}, '../services/aiSettingsApi': {},
-      '../services/salesSyncController': { SalesSyncController },
+      '../services/salesSyncController': { SalesSyncController }, '../services/serverRejectedSale': { heldAfterServerRejection: () => null },
       '../services/workspaceReadSync': workspaceReadSync,
       '../services/salesExtractor': salesExtractor,
     }, { window });
@@ -1040,4 +1045,72 @@ test('bootstrap sale loading paginates beyond the PostgREST row cap', async () =
   const loaded = await remoteWorkspaceService.loadSales('workspace-1');
   assert.equal(loaded.length, 1001);
   assert.deepEqual(requested, [[0, 999], [1000, 1999]]);
+});
+
+const { heldAfterServerRejection } = load('../src/services/serverRejectedSale.ts');
+const rejectedVoiceSale = (id, extra = {}) => ({ ...sale(id, 10000), source: 'WEB_VOICE', status: '자동저장', purchaseRequestId: `req-${id}`,
+  printStatus: 'QUEUED', printRevision: 1, ...extra });
+
+test('a voice sale the server rejects is still saved as shown, marked for review', async () => {
+  const ctx = controller({ fallback: heldAfterServerRejection, save: async (record) => {
+    if (record.purchaseRequestId) throw { code: 'REQUEST_ALREADY_ALLOCATED', message: '자동 판매의 근거가 충돌하여 확인이 필요합니다.', retryable: false };
+  } });
+  ctx.sync.upsert(rejectedVoiceSale('dup')); ctx.sync.upsert(rejectedVoiceSale('next'));
+  await ctx.sync.flush();
+  const held = ctx.state().records.find((row) => row.id === 'dup');
+  assert.equal(held.status, '자동저장');
+  assert.equal(held.syncStatus, 'SYNCED');
+  assert.equal(held.printStatus, 'NOT_REQUESTED');
+  assert.equal(held.purchaseRequestId, undefined);
+  assert.match(held.note, /서버 확인 필요.*REQUEST_ALREADY_ALLOCATED/);
+  assert.equal(ctx.state().pending.length, 0);
+});
+
+test('a sale blocked by an older client is saved on the next flush', async () => {
+  const stuck = { ...rejectedVoiceSale('old'), syncStatus: 'PENDING' };
+  const ctx = controller({ fallback: heldAfterServerRejection, state: { records: [stuck], pending: [
+    { id: 'old', token: 't', kind: 'UPSERT', sale: stuck, blockedError: { code: 'INVALID_EVIDENCE', message: '근거 없음' } },
+  ] } });
+  await ctx.sync.flush();
+  assert.equal(ctx.saved.length, 1);
+  assert.equal(ctx.saved[0].status, '자동저장');
+  assert.match(ctx.saved[0].note, /서버 확인 필요/);
+  assert.equal(ctx.state().records[0].syncStatus, 'SYNCED');
+});
+
+test('network failures keep retrying and a sale the server already holds is never overwritten', () => {
+  const now = Date.parse('2026-09-29T01:05:00Z');
+  assert.equal(heldAfterServerRejection(rejectedVoiceSale('a'), new Error('offline'), now), null);
+  assert.equal(heldAfterServerRejection(rejectedVoiceSale('a'), { code: 'COMMENT_NOT_SYNCED', retryable: true }, now), null);
+  assert.equal(heldAfterServerRejection(rejectedVoiceSale('a'), { code: 'COMMENT_NOT_SYNCED', retryable: true }, now + 10 * 60 * 1000).status, '자동저장');
+  assert.equal(heldAfterServerRejection(rejectedVoiceSale('a'), { code: 'SALE_ALREADY_FINAL', retryable: false }, now), null);
+  assert.equal(heldAfterServerRejection(rejectedVoiceSale('a'), { code: 'OPERATION_PAYLOAD_MISMATCH', retryable: false }, now), null);
+  for (const code of ['DATABASE_ERROR', 'TEMPORARILY_UNAVAILABLE', 'AUTH_REQUIRED', 'CAPABILITY_DENIED']) {
+    assert.equal(heldAfterServerRejection(rejectedVoiceSale('a'), { code, retryable: false }, now), null);
+  }
+  assert.equal(heldAfterServerRejection(rejectedVoiceSale('a', { status: '보류' }), { code: 'X', retryable: false }, now), null);
+  assert.equal(heldAfterServerRejection({ ...rejectedVoiceSale('a'), source: 'MANUAL' }, { code: 'X', retryable: false }, now), null);
+});
+
+test('voice sale retry preserves purchase evidence and queued print through a server outage or expired authentication', async () => {
+  for (const [code, status] of [['TEMPORARILY_UNAVAILABLE', 500], ['AUTH_REQUIRED', 401]]) {
+    let recovered = false;
+    const remote = voiceRemoteFixture(async () => recovered ? { data: { ok: true }, error: null } : {
+      data: null, error: { context: new Response(JSON.stringify({ ok: false, error: { code, message: '잠시 후 재시도' } }), { status }) },
+    });
+    const ctx = controller({ fallback: heldAfterServerRejection, save: (record) => remote.saveSale('workspace-1', record) });
+    const record = voiceSale();
+    ctx.sync.upsert(record);
+    await ctx.sync.flush();
+    const pending = ctx.state().records[0];
+    assert.equal(pending.syncStatus, 'PENDING');
+    assert.equal(pending.purchaseRequestId, record.purchaseRequestId);
+    assert.equal(pending.printStatus, 'QUEUED');
+    assert.equal(pending.note, undefined);
+    assert.equal(ctx.state().pending[0].blockedError, undefined);
+    recovered = true;
+    await ctx.sync.flush();
+    assert.equal(ctx.state().records[0].syncStatus, 'SYNCED');
+    assert.equal(ctx.state().pending.length, 0);
+  }
 });

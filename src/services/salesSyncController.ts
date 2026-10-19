@@ -24,6 +24,8 @@ interface SalesSyncDependencies {
   changed: (records: SaleRecord[]) => void;
   error: (message: string | null) => void;
   active: () => boolean;
+  /** 서버가 거절한 판매를 대신 저장할 형태(예: 검토 표시를 붙인 일반 판매). null 이면 예전처럼 재시도하거나 막아 둔다. */
+  fallback?: (sale: SaleRecord, error: unknown) => SaleRecord | null;
 }
 
 // Survives provider/account remounts: a later writer for the same workspace
@@ -194,8 +196,31 @@ export class SalesSyncController {
     return blocked.length ? `저장 근거 확인이 필요한 판매 ${blocked.length}건: ${blocked[0].blockedError!.message}` : null;
   }
 
+  /** 거절된 판매를 대체 판매로 바꿔 다시 저장 대기열에 넣는다. 바꿨으면 true. */
+  private replaceWithFallback(operation: SaleSyncOperation, error: unknown): boolean {
+    if (operation.kind !== 'UPSERT' || !operation.sale || !this.dependencies.fallback) return false;
+    if (this.pending.get(operation.id)?.token !== operation.token) return false;
+    const replacement = this.dependencies.fallback(operation.sale, error);
+    if (!replacement) return false;
+    const next: SaleRecord = {
+      ...replacement,
+      revision: Math.max((operation.sale.revision || 1) + 1, replacement.revision || 1),
+      syncStatus: 'PENDING',
+    };
+    this.changes.set(next.id, ++this.generation);
+    this.pending.set(next.id, { id: next.id, token: crypto.randomUUID(), kind: 'UPSERT', sale: next });
+    this.records = this.records.map((sale) => sale.id === next.id ? next : sale);
+    return true;
+  }
+
   private async drain(retryBlocked: boolean) {
     if (this.dependencies.update) await this.persistence;
+    // Sales blocked by an older client stay only in this browser; hand them to the fallback first.
+    let replaced = false;
+    for (const operation of [...this.pending.values()]) {
+      if (operation.blockedError && this.replaceWithFallback(operation, { ...operation.blockedError, retryable: false })) replaced = true;
+    }
+    if (replaced) await this.publish();
     if (retryBlocked && [...this.pending.values()].some((operation) => operation.blockedError)) {
       this.pending = new Map([...this.pending].map(([id, operation]) => {
         const { blockedError: _blocked, ...retry } = operation;
@@ -226,6 +251,10 @@ export class SalesSyncController {
         } else await write();
       } catch (error) {
         if (!this.dependencies.active()) return;
+        if (this.replaceWithFallback(operation, error)) {
+          await this.publish();
+          continue; // Save the replacement so every device sees the sale.
+        }
         if ((error as { retryable?: boolean } | null)?.retryable === false) {
           if (this.pending.get(operation.id)?.token === operation.token) {
             this.pending.set(operation.id, {

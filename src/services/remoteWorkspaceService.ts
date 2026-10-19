@@ -610,9 +610,11 @@ export const remoteWorkspaceService = {
           saleId: sale.id,
           invalidFields: serverError?.details?.invalidFields || [],
         });
-        // A comment not yet uploaded can become valid on the next retry. Input
-        // validation failures cannot, and must not block unrelated sales.
-        const retryable = !['VALIDATION_ERROR', 'PRICE_OR_INTENT_UNVERIFIED', 'INVALID_EVIDENCE'].includes(serverError?.code);
+        // Missing comments, transient failures and expired authentication can recover.
+        // Permanent failures stay blocked or are saved with a review marker by the controller.
+        const retryable = !serverError?.code || [
+          'COMMENT_NOT_SYNCED', 'DATABASE_ERROR', 'TEMPORARILY_UNAVAILABLE', 'AUTH_REQUIRED',
+        ].includes(serverError.code);
         throw Object.assign(new Error(serverError?.message || error?.message || '음성 판매 서버 확정 실패'), {
           code: serverError?.code, retryable, details: serverError?.details,
         });

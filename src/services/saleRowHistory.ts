@@ -2,7 +2,7 @@ import type { SaleRecord } from '../types/live.ts';
 
 export function isCountedSale(sale: SaleRecord): boolean {
   return sale.status !== '보류' && sale.status !== '취소'
-    && sale.recordState !== 'CANCELLED' && sale.syncStatus !== 'PENDING'
+    && sale.recordState !== 'CANCELLED'
     && sale.aiVerification?.reviewDecision !== 'NOT_SALE';
 }
 

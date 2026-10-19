@@ -319,7 +319,7 @@ function salesProviderFixture({ autoSubscribe = false, deferredReads = false } =
     react: { ...react, default: react }, '../services/storageService': { storageService },
     '../services/csvExporter': {}, './AuthContext': { useAuth: () => ({ workspaceId: 'workspace-1', user: { id: 'user-1' }, isRemoteAuth: true }) },
     '../services/remoteWorkspaceService': { remoteWorkspaceService }, '../services/commentStreamService': {}, '../services/aiSettingsApi': {},
-    '../services/salesSyncController': { SalesSyncController }, '../services/workspaceReadSync': syncModule,
+    '../services/salesSyncController': { SalesSyncController }, '../services/serverRejectedSale': { heldAfterServerRejection: () => null }, '../services/workspaceReadSync': syncModule,
     '../services/salesExtractor': salesExtractor,
   }, { window, document });
   SalesProvider({ children: null });

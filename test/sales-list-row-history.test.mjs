@@ -9,6 +9,7 @@ import { formatAmountAsDecimal, formatMultiSaleAmount } from '../src/services/sa
 import { getSalePurchaseHistory } from '../src/services/saleRowHistory.ts';
 import { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults } from '../src/services/promiseDefaultService.ts';
 import * as billableSales from '../src/services/billableSales.ts';
+import * as serverRejectedSale from '../src/services/serverRejectedSale.ts';
 import { calculateSalesListRevenue } from '../src/services/salesListRevenue.ts';
 
 const sale = (id, amount, second, extra = {}) => ({
@@ -57,6 +58,7 @@ function pageFixture() {
     '../../services/promiseDefaultService': { getPromiseDefault, promiseDefaultBuyerKey, summarizePromiseDefaults },
     '../../services/salesListRevenue': { calculateSalesListRevenue },
     '../../services/billableSales': billableSales,
+    '../../services/serverRejectedSale': serverRejectedSale,
     '../../utils/textCleaner': { cleanMessageBody: (value) => value },
     '../../utils/sessionFormatter': { formatSessionDisplay: (value) => value },
     '../../components/sales/BuyerReconciliationPanel': { BuyerReconciliationPanel: 'BuyerReconciliationPanel', BuyerStatusBadges: 'BuyerStatusBadges' },
@@ -153,7 +155,7 @@ test('equal or invalid timestamps do not make a newly arrived row part of an old
   for (const id of ['first', 'same-time', 'invalid']) assert.doesNotMatch(cardText(tree, id), /다건/);
 });
 
-test('individual histories exclude another buyer, broadcast, and unresolved or cancelled sales', () => {
+test('individual histories exclude another buyer, broadcast, and held or cancelled sales', () => {
   const ctx = pageFixture();
   ctx.state.sales = [
     sale('current', 10000, 9), sale('prior', 12000, 1, { status: '확정', buyerNickname: '하니 새이름' }),
@@ -165,9 +167,10 @@ test('individual histories exclude another buyer, broadcast, and unresolved or c
     sale('unsynced', 26000, 8, { syncStatus: 'PENDING' }),
   ];
   const tree = ctx.setView('건별 보기');
-  assert.match(cardText(tree, 'current'), /다건 2건/);
-  assert.match(cardText(tree, 'current'), /1\.2 \+ 1\.0 =22,000원/);
-  for (const id of ['prior', 'other-buyer', 'legacy-name', 'other-session', 'pending', 'cancelled', 'server-cancelled', 'unsynced']) {
+  // A sale still waiting for the server counts like any other 자동저장 sale.
+  assert.match(cardText(tree, 'current'), /다건 3건/);
+  assert.match(cardText(tree, 'current'), /1\.2 \+ 2\.6 \+ 1\.0 =48,000원/);
+  for (const id of ['prior', 'other-buyer', 'legacy-name', 'other-session', 'pending', 'cancelled', 'server-cancelled']) {
     assert.doesNotMatch(cardText(tree, id), /다건/, id);
   }
 });

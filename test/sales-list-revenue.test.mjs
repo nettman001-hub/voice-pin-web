@@ -43,13 +43,13 @@ test('a nonfulfillment decision affects only its broadcast and real buyer accoun
   assert.equal(result.confirmedAmount, 13000);
 });
 
-test('pending, cancelled and unsynced sales are not counted in either amount', () => {
+test('held and cancelled sales are not counted, sales awaiting the server are', () => {
   const sales = [
     sale('one', 'buyer-1', '햇살', 'broadcast-1', 13000),
     sale('two', 'buyer-1', '햇살', 'broadcast-1', 5000, { status: '보류' }),
     sale('three', 'buyer-1', '햇살', 'broadcast-1', 7000, { recordState: 'CANCELLED' }),
     sale('four', 'buyer-1', '햇살', 'broadcast-1', 9000, { syncStatus: 'PENDING' }),
   ];
-  assert.equal(calculateSalesListRevenue(sales, []).totalAmount, 13000);
-  assert.equal(calculateSalesListRevenue(sales, []).confirmedAmount, 13000);
+  assert.equal(calculateSalesListRevenue(sales, []).totalAmount, 22000);
+  assert.equal(calculateSalesListRevenue(sales, []).confirmedAmount, 22000);
 });
