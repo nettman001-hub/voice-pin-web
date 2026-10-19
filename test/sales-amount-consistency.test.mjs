@@ -10,6 +10,7 @@ import * as salesExtractor from '../src/services/salesExtractor.ts';
 import * as saleRowHistory from '../src/services/saleRowHistory.ts';
 import * as salesListRevenue from '../src/services/salesListRevenue.ts';
 import * as promiseDefaults from '../src/services/promiseDefaultService.ts';
+import * as smsNicknameLink from '../src/services/smsNicknameLink.ts';
 
 const sessionId = '0becb132-298d-456c-a3a7-e8ca309be508';
 // Reproduction data based on the screenshot amounts, not the customer's live records.
@@ -68,6 +69,8 @@ function fixture(records, configOverrides = {}) {
     '../../services/salesListRevenue': salesListRevenue,
     '../../services/promiseDefaultService': promiseDefaults,
     '../../services/shippingService': { shippingService },
+    '../../services/smsNicknameLink': smsNicknameLink,
+    '../../hooks/useBuyerPhoneLinks': { useBuyerPhoneLinks: () => ({ phoneToNickname: new Map(), rememberLinks() {} }) },
     '../../services/customerKeepingService': { customerKeepingService: {
       getBuyerSummary: () => emptyKeeping, getAllRecords: () => [],
     } },

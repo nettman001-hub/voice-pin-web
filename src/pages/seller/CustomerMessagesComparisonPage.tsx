@@ -15,6 +15,8 @@ import { shippingService } from '../../services/shippingService';
 import { groupSalesByBuyer, BuyerSaleGroup } from '../../services/buyerSaleGrouping';
 import { formatMultiSaleAmount } from '../../services/salesExtractor';
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
+import { findNicknameInMessages, messageMentionsNickname, needsNicknameConfirmation, type SmsNicknameMatch } from '../../services/smsNicknameLink';
+import { useBuyerPhoneLinks } from '../../hooks/useBuyerPhoneLinks';
 import {
   MessageSquare,
   ShoppingBag,
@@ -173,7 +175,9 @@ interface ThreadInfo {
   lastMessage: SmsMessage;
   existingNickname: string | null; // 과거 거래 내역이 있는 번호의 닉네임
   newMatchedNickname: string | null; // 현재 문자 중 닉네임이 포함되어 새로 매칭된 닉네임
+  nicknameMatch: SmsNicknameMatch | null;
   isNew: boolean; // "신규" 아이콘/배지 대상 여부
+  needsNicknameCheck: boolean; // 닉네임이 비슷하기만 해서 판매자 확인이 필요한 연결
 }
 
 const AttachmentItem: React.FC<{
@@ -398,9 +402,12 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     return Array.from(new Set(list)).sort((a, b) => b.length - a.length);
   }, [sales]);
 
+  // 지난 회차 문자로 확인돼 저장된 전화번호 → 닉네임 연결
+  const { phoneToNickname: savedPhoneLinks, rememberLinks, setLink: setSavedPhoneLink } = useBuyerPhoneLinks(workspaceId);
+
   // 3. 과거 거래 내역 및 수동 연결된 전화번호 -> 닉네임 맵 생성
   const pastTransactionPhoneMap = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<string, string>(savedPhoneLinks);
 
     // purchase_claims 에서 수집
     claims.forEach((c) => {
@@ -434,7 +441,7 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     });
 
     return map;
-  }, [claims, invoices, shipments, manualNicknames]);
+  }, [claims, invoices, shipments, manualNicknames, savedPhoneLinks]);
 
   // 4. 문자 메시지들을 전화번호별 스레드(Thread)로 그룹핑 & 요구사항 로직 적용
   // 선택한 회차(selectedSessionId !== 'ALL')의 시작 시각(startedAt) 이전 문자는 완전히 제외
@@ -477,23 +484,14 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
       // A. 과거 거래 내역이 있는 번호인지 확인
       const existingNick = pastTransactionPhoneMap.get(norm) || null;
 
-      // B. 현재 문자들 중에 웹앱 구매자 닉네임이 포함되어 있는지 검사
-      let matchedNick: string | null = null;
-      for (const m of msgList) {
-        if (m.direction === 'INCOMING' && m.body) {
-          for (const nick of allBuyerNicknames) {
-            if (nick.length >= 2 && m.body.includes(nick)) {
-              matchedNick = nick;
-              break;
-            }
-          }
-        }
-        if (matchedNick) break;
-      }
+      // B. 현재 문자들 중에 웹앱 구매자 닉네임이 포함되어 있는지 검사 (띄어쓰기 무시, 비슷한 닉네임은 확인필요)
+      const nicknameMatch = findNicknameInMessages(msgList, allBuyerNicknames);
+      const matchedNick = nicknameMatch?.nickname || null;
 
       // C. 신규 판정:
       // 과거 거래 내역이 없거나, 이번 문자에 웹앱 구매자 닉네임이 명시되어 새로 식별된 경우 "신규" 아이콘 부여
-      const isNew = Boolean(matchedNick && !existingNick);
+      // 비슷하기만 한 닉네임은 "신규" 대신 "닉네임 확인필요"로 표시
+      const isNew = Boolean(matchedNick && !existingNick && !needsNicknameConfirmation(nicknameMatch));
 
       threadList.push({
         phoneKey: norm,
@@ -502,7 +500,9 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
         lastMessage: lastMsg,
         existingNickname: existingNick,
         newMatchedNickname: matchedNick,
+        nicknameMatch,
         isNew,
+        needsNicknameCheck: Boolean(needsNicknameConfirmation(nicknameMatch) && !existingNick),
       });
     });
 
@@ -511,6 +511,14 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
       (a, b) => new Date(b.lastMessage.createdAt).getTime() - new Date(a.lastMessage.createdAt).getTime()
     );
   }, [sessionFilteredMessages, pastTransactionPhoneMap, allBuyerNicknames]);
+
+  // 이번에 문자로 확실히 확인된 번호는 다음 회차에도 자동 연결되도록 저장
+  useEffect(() => {
+    rememberLinks(
+      threads.map((t) => ({ phoneKey: t.phoneKey, knownNickname: t.existingNickname, match: t.nicknameMatch })),
+      selectedSessionId === 'ALL' ? null : selectedSessionId
+    );
+  }, [threads, rememberLinks, selectedSessionId]);
 
   // 4-1. 구매자 닉네임 -> 일치하는 문자 스레드 매핑
   const buyerToThreadMap = useMemo(() => {
@@ -523,7 +531,7 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
         map.set(t.newMatchedNickname.trim().toLowerCase(), t);
       }
       allBuyerNicknames.forEach((nick) => {
-        if (t.messages.some((m) => m.body && m.body.toLowerCase().includes(nick.toLowerCase()))) {
+        if (t.messages.some((m) => m.direction === 'INCOMING' && messageMentionsNickname(m.body, nick))) {
           if (!map.has(nick.toLowerCase())) {
             map.set(nick.toLowerCase(), t);
           }
@@ -904,6 +912,7 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
     nextMap.set(phoneKey, nick);
     setManualNicknames(nextMap);
     saveManualNicknames(nextMap, workspaceId);
+    setSavedPhoneLink(phoneKey, nick, selectedSessionId === 'ALL' ? null : selectedSessionId);
     setNicknameInput('');
 
     // 2. 해당 구매자 닉네임을 가진 판매 건 조회
@@ -965,10 +974,11 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
   // 고객 닉네임 수동 연결 해제 함수
   const handleUnlinkNickname = async (phoneKey: string) => {
     const nextMap = new Map(manualNicknames);
-    const prevNick = nextMap.get(phoneKey);
+    const prevNick = nextMap.get(phoneKey) || savedPhoneLinks.get(phoneKey);
     nextMap.delete(phoneKey);
     setManualNicknames(nextMap);
     saveManualNicknames(nextMap, workspaceId);
+    setSavedPhoneLink(phoneKey, null);
 
     setFeedback(`'${prevNick || ''}' 번호(${formatPhone(phoneKey)}) 연결이 해제되었습니다.`);
     setTimeout(() => setFeedback(null), 3000);
@@ -1499,6 +1509,14 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                               )}
                             </span>
                           )}
+                          {thread.needsNicknameCheck && (
+                            <span
+                              className="text-[10px] font-black text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded border border-rose-200 whitespace-nowrap"
+                              title="문자 속 닉네임이 비슷하지만 똑같지는 않습니다. 맞으면 닉네임을 직접 연결해 주세요."
+                            >
+                              닉네임 확인필요
+                            </span>
+                          )}
                         </div>
 
                         {/* 날짜 및 시각 */}
@@ -1532,6 +1550,8 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                           <span className="text-emerald-600 font-bold flex items-center gap-0.5">
                             <Sparkles className="w-2.5 h-2.5" /> 신규 닉네임 감지
                           </span>
+                        ) : thread.needsNicknameCheck ? (
+                          <span className="text-rose-600 font-bold">닉네임 확인 필요</span>
                         ) : null}
                       </div>
                     </div>
@@ -1564,7 +1584,8 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                             activeThread.newMatchedNickname ||
                             manualNicknames.get(activeThread.phoneKey) ||
                             null;
-                          const isManuallyLinked = manualNicknames.has(activeThread.phoneKey);
+                          const isManuallyLinked = manualNicknames.has(activeThread.phoneKey)
+                            || savedPhoneLinks.has(activeThread.phoneKey);
 
                           if (connectedNickname) {
                             return (
@@ -1578,6 +1599,14 @@ export const CustomerMessagesComparisonPage: React.FC = () => {
                                     </span>
                                   )}
                                 </span>
+                                {activeThread.needsNicknameCheck && (
+                                  <span
+                                    className="text-[10px] font-black text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded-full border border-rose-200"
+                                    title="문자 속 닉네임이 비슷하지만 똑같지는 않습니다. 맞으면 닉네임을 직접 연결해 주세요."
+                                  >
+                                    닉네임 확인필요
+                                  </span>
+                                )}
                                 {isManuallyLinked && (
                                   <button
                                     type="button"
