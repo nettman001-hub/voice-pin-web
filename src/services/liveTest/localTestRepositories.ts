@@ -13,6 +13,7 @@ import { applyCorrectionToSale, rollbackCorrection } from '../voiceCorrectionSer
 import { validateSaleForBatchConfirm } from '../pendingSalesService';
 import { replaySalesWorkflow } from '../salesWorkflowEngine';
 import { LocalTestDatabase } from './localTestDatabase';
+import { confirmedAiRecoveryBaseline, previewConfirmedAiRecovery, applyConfirmedAiRecovery } from '../confirmedVoiceSaleRecovery';
 import type { StorageService } from '../storageService';
 
 export function localOnlyAdapter<T extends object>(methods: Record<string, unknown>): T {
@@ -199,7 +200,7 @@ export function createLocalTestRepositories(db: LocalTestDatabase, storage: Stor
   };
   const review = async (saleId: string, options: any = {}) => {
     const storedSale = (await storedSales()).find(s => s.id === saleId);
-    if (!storedSale || storedSale.status !== '보류') return { skipped: true };
+    if (!storedSale || (!options.confirmedAiRecovery && storedSale.status !== '보류')) return { skipped: true };
     let sale: SaleRecord = storedSale;
     const when = Date.parse(sale.recognizedAt);
     const databaseComments = localComments(sale.sessionId).filter(c => Math.abs(Date.parse(c.capturedAt) - when) <= 180_000);
@@ -210,6 +211,28 @@ export function createLocalTestRepositories(db: LocalTestDatabase, storage: Stor
     }
     const comments = [...byMessage.values()].sort((a, b) => Date.parse(b.capturedAt) - Date.parse(a.capturedAt));
     const logs = storage.getSessionTranscripts(workspaceId, sale.sessionId);
+    if (options.confirmedAiRecovery) {
+      if (!['PREVIEW', 'APPLY'].includes(options.confirmedAiRecovery) || options.expectedRevision !== (sale.revision || 1)
+        || !confirmedAiRecoveryBaseline(sale)) reject('RECOVERY_CONFLICT', '정정 가능한 과거 AI 확정 판매가 아니거나 판매가 변경되었습니다.');
+      const meta = previewConfirmedAiRecovery(sale, databaseComments, logs);
+      const next = options.confirmedAiRecovery === 'APPLY'
+        ? applyConfirmedAiRecovery(sale, meta, String(options.expectedRecoveryFingerprint || '')) : { ...sale, aiVerification: meta };
+      if (!next) reject('RECOVERY_CONFLICT', '재검토한 정정 후보와 현재 근거가 다릅니다. 원본 근거를 다시 검토해 주세요.');
+      let applied: SaleRecord | undefined;
+      await db.update<SaleRecord[]>('sales', [], all => {
+        if (meta.candidatePurchaseRequestId && all.some(s => s.id !== sale.id && s.purchaseRequestId === meta.candidatePurchaseRequestId)) {
+          reject('REQUEST_ALREADY_ALLOCATED', '원본 구매 댓글에 연결된 다른 판매가 있어 정정하지 않았습니다.');
+        }
+        return all.map(current => {
+          if (current.id !== sale.id || JSON.stringify(current) !== JSON.stringify(storedSale)) return current;
+          applied = next!;
+          return next!;
+        });
+      });
+      if (!applied) reject('RECOVERY_CONFLICT', '정정 중 판매가 변경되어 이전 요청을 적용하지 않았습니다.');
+      notify();
+      return { sale: applied, skipped: !meta.nicknameVerified, recoveryApplied: options.confirmedAiRecovery === 'APPLY', message: applied!.aiVerification?.resolutionSummary };
+    }
     if (sale.workflowEvidence) {
       const profile = workflow()?.id === sale.workflowEvidence.profileId ? workflow()!.profile : sale.workflowEvidence.profileSnapshot;
       if (!profile) reject('PROFILE_UNVERIFIED', '판매방식 설정을 확인할 수 없습니다.');

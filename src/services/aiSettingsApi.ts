@@ -809,6 +809,9 @@ export const aiSettingsApi = {
       comments?: any[];
       transcripts?: any[];
       forceReanalyze?: boolean;
+      confirmedAiRecovery?: 'PREVIEW' | 'APPLY';
+      expectedRevision?: number;
+      expectedRecoveryFingerprint?: string;
       workspaceId?: string;
     } = {}
   ): Promise<any> {

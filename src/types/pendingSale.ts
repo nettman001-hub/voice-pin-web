@@ -57,7 +57,9 @@ export interface AiVerificationMeta {
   reviewFingerprint?: string;
   errorMessage?: string;
   /** TEXT_PROMPT: the seller's plain-text prompt; a verified answer confirms the sale. */
-  reviewMode?: 'TEXT_PROMPT';
+  reviewMode?: 'TEXT_PROMPT' | 'TEXT_PROMPT_RECOVERY';
+  /** An explicit seller preview, tied to the unchanged legacy sale and candidate. */
+  recoveryReview?: { sourceFingerprint: string; candidateFingerprint?: string };
   /** Server/test validation of the exact sale, commenter and bounded price speech. */
   textReviewEvidence?: {
     version: 1;

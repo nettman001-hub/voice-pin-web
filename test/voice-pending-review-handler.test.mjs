@@ -46,7 +46,7 @@ function fixture(overrides = {}) {
         neq(key, value) { filters.push((r) => r[key] !== value); return query; },
         gte(key, value) { filters.push((r) => r[key] >= value); return query; },
         lte(key, value) { filters.push((r) => r[key] <= value); return query; },
-        update(value) { update = value; return query; },
+        update(value) { update = value; state.beforeUpdate?.(value); return query; },
         async maybeSingle() { const value = await query; return { ...value, data: value.data[0] || null }; },
         then(resolve, reject) {
           try {
@@ -234,5 +234,66 @@ test('the operating handler never persists another trade buyer or price on the t
     assert.equal(state.current.amount, response.endsWith('12000원') ? 12000 : 0);
     assert.equal(state.current.ai_verification.aiStatus, response.endsWith('12000원') ? 'RESOLVED' : 'NEEDS_SELLER_CONFIRM');
     assert.equal(state.current.status, '보류');
+  }
+});
+
+function recoveryFixture() {
+  const state = fixture({ status: '확정', buyer_nickname: '하늘', buyer_id: 'sky', amount: 50000, unit_price: 50000,
+    revision: 4, print_status: 'PRINTED', print_revision: 1, recognized_at: '2026-10-20T15:49:32Z',
+    raw_transcript: '네, 이거 별이님 드릴게요. 감사합니다.', purchase_request_id: 'session:sky-request', source_comment_ids: ['sky-request'],
+    ai_verification: { reviewMode: 'TEXT_PROMPT', aiStatus: 'RESOLVED' },
+    history: [{ revision: 2, changedBy: 'AI', changeType: 'AI_RESOLVE', before: { buyerNickname: '별이', amount: 0, status: '보류' },
+      after: { buyerNickname: '하늘', amount: 50000, status: '보류' } },
+      { revision: 3, changedBy: 'AI', changeType: 'AI_RESOLVE', before: { buyerNickname: '하늘', amount: 50000, status: '보류' },
+        after: { buyerNickname: '하늘', amount: 50000, status: '확정' } }] });
+  state.comments.splice(0, state.comments.length, { id: 'star-request', session_id: 'session', workspace_id: 'ws', platform_message_id: 'star-request',
+    buyer_id: 'star', nickname_snapshot: '별이', content: '저요', captured_at: '2026-10-20T15:49:27Z' });
+  state.archives[0].value.logs = [{ id: 'star-price', isFinal: true, recognizedAt: '2026-10-20T15:49:35Z', text: '가격 1.2 캡처해주세요.' }];
+  return state;
+}
+
+const recover = (state, options) => handleReviewVoicePendingSale('ws', 'seller', {}, structuredClone(state.current), { expectedRevision: 4, ...options });
+
+test('operating recovery previews unchanged confirmed values, then applies an approved correction without an AI call', async () => {
+  const state = recoveryFixture();
+  const preview = await (await recover(state, { confirmedAiRecovery: 'PREVIEW' })).json();
+  assert.equal(preview.ok, true);
+  assert.equal(state.current.buyer_nickname, '하늘');
+  assert.equal(state.current.amount, 50000);
+  assert.equal(state.current.status, '확정');
+  assert.equal(state.current.revision, 4);
+  assert.equal(state.current.ai_verification.candidateBuyer.nickname, '별이');
+  assert.equal(state.current.ai_verification.candidateAmount, 12000);
+  const result = await (await recover(state, { confirmedAiRecovery: 'APPLY',
+    expectedRecoveryFingerprint: state.current.ai_verification.recoveryReview.candidateFingerprint })).json();
+  assert.equal(result.ok, true);
+  assert.equal(result.data.recoveryApplied, true);
+  assert.equal(state.current.buyer_nickname, '별이');
+  assert.equal(state.current.buyer_id, 'star');
+  assert.equal(state.current.amount, 12000);
+  assert.equal(state.current.unit_price, 12000);
+  assert.equal(state.current.status, '확정');
+  assert.equal(state.current.purchase_request_id, 'session:star-request');
+  assert.deepEqual(state.current.source_comment_ids, ['star-request']);
+  assert.equal(state.current.revision, 5);
+  assert.equal(state.current.print_status, 'NOT_REQUESTED');
+  assert.equal(state.current.print_revision, 2);
+  assert.equal(state.current.history.at(-1).changedBy, 'SELLER');
+  assert.equal(state.calls.length, 0);
+});
+
+test('operating recovery rejects a reused request, changed evidence, missing preview, and concurrent edit', async () => {
+  for (const failure of ['duplicate', 'evidence', 'no-preview', 'concurrent']) {
+    const state = recoveryFixture();
+    if (failure !== 'no-preview') await recover(state, { confirmedAiRecovery: 'PREVIEW' });
+    const fp = state.current.ai_verification.recoveryReview?.candidateFingerprint;
+    if (failure === 'duplicate') state.otherSales.push({ ...state.row, id: 'other', purchase_request_id: 'session:star-request' });
+    if (failure === 'evidence') state.archives[0].value.logs[0].text = '가격 1.3 캡처해주세요.';
+    if (failure === 'concurrent') state.beforeUpdate = () => { state.current.revision = 5; };
+    const response = await recover(state, { confirmedAiRecovery: 'APPLY', expectedRecoveryFingerprint: fp });
+    assert.equal(response.status, 409, failure);
+    assert.equal(state.current.buyer_nickname, '하늘');
+    assert.equal(state.current.amount, 50000);
+    assert.equal(state.current.history.length, 2);
   }
 });

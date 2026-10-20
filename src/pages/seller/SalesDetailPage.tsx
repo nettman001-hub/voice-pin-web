@@ -55,6 +55,9 @@ export const SalesDetailPage: React.FC = () => {
     setBuyerNickname(sale?.buyerNickname || '');
   }, [sale?.buyerNickname]);
   useEffect(() => {
+    setAmount(sale?.amount.toString() || '0');
+  }, [sale?.amount]);
+  useEffect(() => {
     const previous = previousNoteRef.current;
     const incoming = sale?.note || '';
     setNote((draft) => {

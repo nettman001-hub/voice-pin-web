@@ -9,6 +9,7 @@ import { useLive } from '../../context/LiveContext';
 import { useOptionalCommentCapture } from '../../context/CommentCaptureContext';
 
 import { rollbackCorrection } from '../../services/voiceCorrectionService';
+import { confirmedAiRecoveryBaseline } from '../../services/confirmedVoiceSaleRecovery';
 import {
   FileText,
   CheckCircle2,
@@ -43,6 +44,7 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
   const [isRollingBack, setIsRollingBack] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isReviewing, setIsReviewing] = useState(false);
+  const [recoveryMsg, setRecoveryMsg] = useState<string | null>(null);
 
   // 최신 변경 이력 가져오기
   const latestHistory = useMemo(() => {
@@ -56,6 +58,9 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
     const history = sale.history || [];
     const latestCorrection = [...history].reverse().find((h) => h.changeType === 'VOICE_CORRECTION');
     const latestAiResolve = [...history].reverse().find((h) => h.changeType === 'AI_RESOLVE');
+    if (sale.aiVerification?.reviewMode === 'TEXT_PROMPT_RECOVERY' && aiStatus === 'RESOLVED') return {
+      text: '원본 근거 정정 완료', className: 'bg-emerald-100 text-emerald-800 border border-emerald-300',
+    };
 
     // 1. AI 확인 중
     if (aiStatus === 'CHECKING') {
@@ -137,6 +142,30 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
   const candidateAmount = sale.aiVerification?.candidateAmount;
   const hasCandidate = Boolean(candidate?.nickname && candidateAmount && candidateAmount > 0
     && sale.aiVerification?.nicknameVerified !== false);
+  const canRecoverConfirmed = Boolean(confirmedAiRecoveryBaseline(sale));
+  const hasRecoveryCandidate = canRecoverConfirmed && sale.aiVerification?.reviewMode === 'TEXT_PROMPT_RECOVERY'
+    && hasCandidate && Boolean(sale.aiVerification.recoveryReview?.candidateFingerprint);
+
+  const handleConfirmedRecovery = async (mode: 'PREVIEW' | 'APPLY') => {
+    setErrorMsg(null); setRecoveryMsg(null);
+    if (mode === 'PREVIEW') setIsReviewing(true); else setIsApplyingCandidate(true);
+    try {
+      if (!canRecoverConfirmed || sale.syncStatus === 'PENDING' || !workspaceId) throw new Error('판매 저장 확인 후 원본 근거를 다시 검토해 주세요.');
+      if (mode === 'PREVIEW') {
+        await flushPendingComments(workspaceId);
+        await syncCurrentTranscriptsToCloud(sale.sessionId);
+      }
+      const result = await aiSettingsApi.triggerPendingAiResolution(sale.id, {
+        workspaceId, confirmedAiRecovery: mode, expectedRevision: sale.revision || 1,
+        expectedRecoveryFingerprint: mode === 'APPLY' ? sale.aiVerification?.recoveryReview?.candidateFingerprint : undefined,
+        transcripts: storageService.getSessionTranscripts(workspaceId, sale.sessionId),
+      });
+      if (result.skipped) setErrorMsg(result.message || '원본 근거가 부족해 정정하지 않았습니다.');
+      else setRecoveryMsg(result.message || (mode === 'APPLY' ? '원본 근거로 판매를 정정했습니다.' : '정정 후보를 확인하고 정정 적용을 눌러 주세요.'));
+      await refreshSales(); onRefresh?.();
+    } catch (error: any) { setErrorMsg(error?.message || '원본 근거 정정에 실패했습니다.'); }
+    finally { setIsReviewing(false); setIsApplyingCandidate(false); }
+  };
 
   // 되돌리기(롤백) 가능 여부 확인: 이전 정정 이력이 존재하는지
   const canRollback = useMemo(() => {
@@ -229,6 +258,14 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
     <div className={`flex flex-col gap-1.5 ${className}`}>
       {/* 상태 배지 및 전후 값 Diff */}
       <div className="flex items-center gap-1.5 flex-wrap">
+        {canRecoverConfirmed && (
+          <button type="button" disabled={isReviewing || isApplyingCandidate}
+            className="px-2.5 py-1 bg-amber-50 text-amber-900 text-[11px] font-bold rounded-lg border border-amber-300 disabled:opacity-50"
+            title="원본 발화와 실제 구매 댓글·가격을 확인해 정정 후보를 보여줍니다"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); void handleConfirmedRecovery('PREVIEW'); }}>
+            {isReviewing ? '원본 근거 확인 중' : '원본 근거 재검토'}
+          </button>
+        )}
         {sale.status === '보류' && sale.source === 'WEB_VOICE' && (
           <button type="button" disabled={isReviewing || sale.syncStatus === 'PENDING' || sale.aiVerification?.aiStatus === 'CHECKING'}
             className="px-2.5 py-1 bg-sky-50 text-sky-800 text-[11px] font-bold rounded-lg border border-sky-200 flex items-center gap-1 disabled:opacity-50"
@@ -308,10 +345,11 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
           ⚠️ {errorMsg}
         </span>
       )}
+      {recoveryMsg && <span role="status" className="text-[11px] text-emerald-800">{recoveryMsg}</span>}
 
       {(candidate || candidateAmount) && (
         <span className="text-[11px] font-bold text-slate-700">
-          AI 검토 결과: {candidate?.nickname || sale.aiVerification?.suggestedNickname || '구매자 미확인'}
+          {sale.aiVerification?.reviewMode === 'TEXT_PROMPT_RECOVERY' ? '원본 근거 검토 결과: ' : 'AI 검토 결과: '}{candidate?.nickname || sale.aiVerification?.suggestedNickname || '구매자 미확인'}
           {' · '}{candidateAmount ? `${candidateAmount.toLocaleString()}원` : '금액 미확인'}
           {sale.aiVerification?.nicknameVerified === false ? ' · 닉네임 확인 필요' : ''}
         </span>
@@ -319,6 +357,14 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
 
       {/* 핵심 액션 3종 버튼: 근거 보기, 후보 적용, 되돌리기 */}
       <div className="flex items-center gap-1.5 flex-wrap">
+        {hasRecoveryCandidate && (
+          <button type="button" disabled={isApplyingCandidate || isReviewing || sale.syncStatus === 'PENDING'}
+            className="px-2.5 py-1 bg-brand-50 text-brand-800 text-[11px] font-bold rounded-lg border border-brand-300 disabled:opacity-50"
+            title={`${sale.buyerNickname} ${sale.amount.toLocaleString()}원 → ${candidate?.nickname} ${candidateAmount?.toLocaleString()}원`}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); void handleConfirmedRecovery('APPLY'); }}>
+            {isApplyingCandidate ? '정정 저장 중' : '정정 적용'}
+          </button>
+        )}
         {/* 1. 근거 보기 버튼 */}
         {!hideEvidence && (
           <button

@@ -9,6 +9,7 @@ import { handleCreateAiTask, handleProcessAiTask } from './aiTasks.ts';
 import { getOperationalAiSetting } from './aiOperationalSettings.ts';
 import { getWorkflowEvents } from './sellerWorkflow.ts';
 import { replaySalesWorkflow } from '../../../../src/services/salesWorkflowEngine.ts';
+import { confirmedAiRecoveryBaseline, previewConfirmedAiRecovery, applyConfirmedAiRecovery } from '../../../../src/services/confirmedVoiceSaleRecovery.ts';
 
 export async function handleReviewVoicePendingSale(workspaceId: string, actorId: string, auth: AuthContext, row: any, body: any) {
   const sale: SaleRecord = {
@@ -18,7 +19,12 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
     productCode: row.product_code_snapshot, quantity: row.quantity, unitPrice: row.unit_price, history: row.history || [], aiVerification: row.ai_verification,
     purchaseRequestId: row.purchase_request_id, sourceCommentIds: row.source_comment_ids || [],
     workflowEvidence: row.workflow_evidence,
+    evidenceSnapshot: row.evidence_snapshot, printStatus: row.print_status, printRevision: row.print_revision,
+    printedAt: row.printed_at, printError: row.print_error,
   };
+  const recovery = body.confirmedAiRecovery;
+  if (recovery && (!['PREVIEW', 'APPLY'].includes(recovery) || body.expectedRevision !== sale.revision
+    || !confirmedAiRecoveryBaseline(sale))) return errorResponse('RECOVERY_CONFLICT', '정정 가능한 과거 AI 확정 판매가 아니거나 판매가 변경되었습니다. 새로고침 후 확인해 주세요.', 409);
   if(sale.workflowEvidence){
     const {data:ws,error:we}=await admin.from('workspaces').select('owner_id').eq('id',workspaceId).single();
     if(we) throw we;
@@ -69,15 +75,15 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
   // A held sale without a numbered-order workflow is asked as plain text: the
   // comments and seller speech one minute either side, in the seller's prompt.
   const textReview = !sale.workflowEvidence;
-  if (textReview ? !shouldReviewVoiceSaleText(sale, comments) : !shouldReviewVoiceSale(sale, comments)) return successResponse({ sale: row, skipped: true,
+  if (!recovery && (textReview ? !shouldReviewVoiceSaleText(sale, comments) : !shouldReviewVoiceSale(sale, comments))) return successResponse({ sale: row, skipped: true,
     message: '검토 가능한 판매 발화·구매 댓글 근거가 없어 추가 근거를 기다립니다.' });
-  if (textReview && !isVoiceTextReviewReady(sale) && !body.forceReanalyze) return successResponse({ sale: row, skipped: true, waitingForWindow: true,
+  if (!recovery && textReview && !isVoiceTextReviewReady(sale) && !body.forceReanalyze) return successResponse({ sale: row, skipped: true, waitingForWindow: true,
     retryAfterMs: Date.parse(sale.recognizedAt) + VOICE_TEXT_REVIEW_WINDOW_MS - Date.now(),
     message: '보류 판매 뒤 1분의 댓글과 판매자 멘트를 모으고 있습니다.' });
   if (!textReview && !isVoiceReviewReady(sale, comments) && !body.forceReanalyze) return successResponse({ sale: row, skipped: true, waitingForWindow: true,
     retryAfterMs: Math.max(...getVoiceReviewWindows(sale, comments).map((window) => Date.parse(window.endAt))) - Date.now(),
     message: '구매 댓글 이후 70초의 판매자 멘트를 모으고 있습니다.' });
-  const setting = await getOperationalAiSetting();
+  const setting = recovery ? null : await getOperationalAiSetting();
   if (setting?.enabled_pending_resolution === false) return successResponse({ sale: row, skipped: true,
     message: '관리자 설정에서 보류 AI 검토가 비활성화되어 있습니다.' });
   const followingText = String(body.followingUtterance || body.followUpUtterance || '').slice(0, 600);
@@ -100,6 +106,32 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
   for (const l of clientLogs) logMap.set(l.id || `${l.timestamp}:${l.text}`, l);
   for (const l of dbLogs) logMap.set(l.id || `${l.timestamp}:${l.text}`, l);
   const logs = [...logMap.values()].sort((a, b) => Date.parse(a.timestamp || '') - Date.parse(b.timestamp || ''));
+  if (recovery) {
+    // Existing confirmed sales are repaired only by an explicit two-step seller
+    // request. Canonical stored comments, not submitted buyer/price values, win.
+    const meta = previewConfirmedAiRecovery(sale, dbComments, logs);
+    if (meta.candidatePurchaseRequestId) {
+      const { data: duplicate, error: duplicateError } = await admin.from('sales').select('id')
+        .eq('workspace_id', workspaceId).eq('purchase_request_id', meta.candidatePurchaseRequestId)
+        .eq('source', 'WEB_VOICE').neq('id', sale.id).maybeSingle();
+      if (duplicateError) return errorResponse('DATABASE_ERROR', duplicateError.message, 500);
+      if (duplicate) return errorResponse('REQUEST_ALREADY_ALLOCATED', '원본 구매 댓글에 연결된 다른 판매가 있어 정정하지 않았습니다.', 409);
+    }
+    const next = recovery === 'APPLY'
+      ? applyConfirmedAiRecovery(sale, meta, String(body.expectedRecoveryFingerprint || '')) : { ...sale, aiVerification: meta };
+    if (!next) return errorResponse('RECOVERY_CONFLICT', '재검토한 정정 후보와 현재 근거가 다릅니다. 원본 근거를 다시 검토해 주세요.', 409);
+    const update: any = { ai_verification: next.aiVerification, updated_at: new Date().toISOString() };
+    if (recovery === 'APPLY') Object.assign(update, { buyer_nickname: next.buyerNickname, buyer_id: next.buyerId || null,
+      amount: next.amount, unit_price: next.unitPrice, purchase_request_id: next.purchaseRequestId,
+      source_comment_ids: next.sourceCommentIds, revision: next.revision, history: next.history,
+      print_status: next.printStatus, print_revision: next.printRevision, printed_at: null, print_error: null });
+    const { data: updated, error: updateError } = await admin.from('sales').update(update)
+      .eq('id', sale.id).eq('workspace_id', workspaceId).eq('revision', sale.revision).eq('status', '확정')
+      .eq('updated_at', row.updated_at).select('*').maybeSingle();
+    if (updateError) return errorResponse(updateError.code === '23505' ? 'REQUEST_ALREADY_ALLOCATED' : 'DATABASE_ERROR', updateError.message, updateError.code === '23505' ? 409 : 500);
+    if (!updated) return errorResponse('RECOVERY_CONFLICT', '정정 중 판매가 변경되어 이전 요청을 적용하지 않았습니다.', 409);
+    return successResponse({ sale: updated, skipped: !meta.nicknameVerified, recoveryApplied: recovery === 'APPLY', message: next.aiVerification?.resolutionSummary });
+  }
   const { fingerprint, request } = prepareVoicePendingReview(sale, comments, logs, followingText, workspaceId);
   const previous = sale.aiVerification;
   if ((previous?.reviewFingerprint === fingerprint && previous.aiStatus !== 'CHECKING' && !previous.errorMessage && !body.forceReanalyze)

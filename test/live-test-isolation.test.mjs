@@ -248,3 +248,49 @@ test('test-mode AI cannot replace a star trade with sky; the correct split price
   assert.equal(confirmVoiceTextReviewSale({ ...accepted.sale, syncStatus: 'SYNCED' }).status, '확정');
   assert.equal(forbidden.length, 0);
 });
+
+test('a legacy confirmed test sale is previewed and corrected locally without calling AI or changing production', async () => {
+  let inferenceCalls = 0;
+  const f = await fixture(async () => { inferenceCalls++; throw new Error('Recovery must not call AI'); });
+  const when = Date.now() - 10_000;
+  f.comment = { ...f.comment, nickname: '별이', capturedAt: new Date(when - 1000).toISOString() };
+  const star = await ingest(f);
+  const sky = await ingest(f, { ...f.comment, nickname: '하늘', platformUserId: 'sky-account', platformMessageId: 'sky-request' });
+  const original = sale(f, { status: '보류', amount: 0, buyerNickname: '별이', rawTranscript: '네, 이거 별이님 드릴게요. 감사합니다.',
+    recognizedAt: new Date(when).toISOString() });
+  await f.repo.commitSale(original);
+  const history = [{ revision: 2, changedBy: 'AI', changeType: 'AI_RESOLVE',
+    before: { buyerNickname: '별이', amount: 0, status: '보류' }, after: { buyerNickname: '하늘', amount: 50000, status: '보류' } },
+    { revision: 3, changedBy: 'AI', changeType: 'AI_RESOLVE', before: { buyerNickname: '하늘', amount: 50000, status: '보류' },
+      after: { buyerNickname: '하늘', amount: 50000, status: '확정' } }];
+  await f.db.update('sales', [], records => records.map(s => ({ ...s, status: '확정', revision: 4, buyerNickname: '하늘', buyerId: sky.buyerId,
+    amount: 50000, unitPrice: 50000, purchaseRequestId: `${f.session.id}:sky-request`, sourceCommentIds: [sky.id],
+    printStatus: 'PRINTED', printRevision: 1, history, aiVerification: { reviewMode: 'TEXT_PROMPT', aiStatus: 'RESOLVED' } })));
+  await f.repo.remote.saveCloudSessionTranscripts(f.workspaceId, f.session.id, [{ id: 'star-price', text: '가격 1.2 캡처해주세요.',
+    timestamp: new Date(when + 3000).toISOString(), isFinal: true }]);
+  const reviewed = await f.repo.ai.triggerPendingAiResolution(original.id, { confirmedAiRecovery: 'PREVIEW', expectedRevision: 4 });
+  assert.equal(reviewed.sale.buyerNickname, '하늘');
+  assert.equal(reviewed.sale.amount, 50000);
+  assert.equal(reviewed.sale.status, '확정');
+  assert.equal(reviewed.sale.aiVerification.candidateBuyer.nickname, '별이');
+  assert.equal(reviewed.sale.aiVerification.candidateAmount, 12000);
+  const fp = reviewed.sale.aiVerification.recoveryReview.candidateFingerprint;
+  // The candidate survives a local DB reload before seller approval.
+  const restored = await fixture(undefined, f.owner);
+  const corrected = await restored.repo.ai.triggerPendingAiResolution(original.id, { confirmedAiRecovery: 'APPLY', expectedRevision: 4,
+    expectedRecoveryFingerprint: fp });
+  assert.equal(corrected.sale.id, original.id);
+  assert.equal(corrected.sale.buyerNickname, '별이');
+  assert.equal(corrected.sale.buyerId, star.buyerId);
+  assert.equal(corrected.sale.amount, 12000);
+  assert.equal(corrected.sale.purchaseRequestId, original.purchaseRequestId);
+  assert.deepEqual(corrected.sale.sourceCommentIds, [star.id]);
+  assert.equal(corrected.sale.status, '확정');
+  assert.equal(corrected.sale.revision, 5);
+  assert.equal(corrected.sale.history.at(-1).changedBy, 'SELLER');
+  assert.equal((await restored.repo.storedSales()).length, 1);
+  await assert.rejects(restored.repo.ai.triggerPendingAiResolution(original.id, { confirmedAiRecovery: 'APPLY', expectedRevision: 4,
+    expectedRecoveryFingerprint: fp }), error => error.code === 'RECOVERY_CONFLICT');
+  assert.equal(inferenceCalls, 0);
+  assert.equal(forbidden.length, 0);
+});
