@@ -58,6 +58,12 @@ export const SalesDetailPage: React.FC = () => {
     setAmount(sale?.amount.toString() || '0');
   }, [sale?.amount]);
   useEffect(() => {
+    setProductName(sale?.productName || '');
+  }, [sale?.productName]);
+  useEffect(() => {
+    setStatus(sale?.status || '자동저장');
+  }, [sale?.status]);
+  useEffect(() => {
     const previous = previousNoteRef.current;
     const incoming = sale?.note || '';
     setNote((draft) => {

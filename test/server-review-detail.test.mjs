@@ -133,6 +133,24 @@ for (const syncStatus of ['SYNCED', 'PENDING']) {
   });
 }
 
+test('a late-loaded or recovered sale fills amount, product and confirmed status before an ordinary save', () => {
+  const f = fixture(record({ status: '자동저장', productName: '', amount: 0 }));
+  f.render();
+  f.setSale(record({ status: '확정', productName: '005-20261020-5회차', buyerNickname: '하늘', amount: 50000 }));
+  let tree = f.render();
+  assert.equal(nodes(tree).find(node => node.type === 'select').props.value, '확정');
+  assert.ok(nodes(tree).some(node => node.type === 'input' && node.props.value === '005-20261020-5회차'));
+  assert.equal(f.field('amount').props.value, '50000');
+  f.setSale({ ...f.sale, buyerNickname: '별이', amount: 12000 });
+  tree = f.render();
+  assert.equal(f.field('amount').props.value, '12000');
+  f.save();
+  assert.equal(f.updated.at(-1).buyerNickname, '별이');
+  assert.equal(f.updated.at(-1).amount, 12000);
+  assert.equal(f.updated.at(-1).status, '확정');
+  assert.equal(f.updated.at(-1).productName, '005-20261020-5회차');
+});
+
 test('completion preserves unsaved amount and memo edits without restoring the badge on later save', () => {
   const original = record();
   const f = fixture(original);

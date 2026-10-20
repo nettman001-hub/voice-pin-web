@@ -39,7 +39,9 @@ export function createLocalTestRepositories(db: LocalTestDatabase, storage: Stor
     activeSession: storage.getActiveSession(workspaceId), activeProduct: storage.getActiveProduct(workspaceId),
     printerStatus: { outputDeviceId: null, outputDeviceName: '테스트 전표', online: true, queuedJobsCount: 0 },
     permissions: ['SALES_READ', 'SALES_WRITE', 'PRODUCT_WRITE', 'COMMENT_INGEST'] });
-  const storedSales = async () => (await db.read<StoredTestSale[]>('sales', [])).map(({ testVoiceReceipt: _receipt, ...sale }) => sale);
+  // The saved repository row is authoritative. PENDING belongs to the client
+  // outbox and may still be present in the originally submitted payload.
+  const storedSales = async () => (await db.read<StoredTestSale[]>('sales', [])).map(({ testVoiceReceipt: _receipt, ...sale }) => ({ ...sale, syncStatus: 'SYNCED' as const }));
   const localComments = (sessionId: string) => db.get<CommentRecord[]>('comments', []).filter(c => c.sessionId === sessionId);
   const commitSale = async (sale: SaleRecord) => {
     await db.update<StoredTestSale[]>('sales', [], records => {
@@ -224,9 +226,10 @@ export function createLocalTestRepositories(db: LocalTestDatabase, storage: Stor
           reject('REQUEST_ALREADY_ALLOCATED', '원본 구매 댓글에 연결된 다른 판매가 있어 정정하지 않았습니다.');
         }
         return all.map(current => {
-          if (current.id !== sale.id || JSON.stringify(current) !== JSON.stringify(storedSale)) return current;
+          const { testVoiceReceipt, ...visible } = current as StoredTestSale;
+          if (current.id !== sale.id || JSON.stringify({ ...visible, syncStatus: 'SYNCED' }) !== JSON.stringify(storedSale)) return current;
           applied = next!;
-          return next!;
+          return { ...next!, testVoiceReceipt };
         });
       });
       if (!applied) reject('RECOVERY_CONFLICT', '정정 중 판매가 변경되어 이전 요청을 적용하지 않았습니다.');
