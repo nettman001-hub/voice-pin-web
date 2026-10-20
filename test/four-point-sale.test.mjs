@@ -48,6 +48,42 @@ test('2. extractSaleFromTranscript - 4단 멘트 일치 시 즉시 확정(status
   assert.equal(sale.isFourPointConfirmed, true);
 });
 
+test('배정과 가격·캡처 사이의 짧은 감사 인사는 4단 확정을 끊지 않는다', () => {
+  for (const courtesy of ['감사합니다', '감사 합니다', '네, 감사합니다', '고맙습니다', '감사해요', '고마워요']) {
+    for (const transcript of [
+      `네, 이거 별이님 드릴게요. ${courtesy}.\n가격 1.2 캡처해주세요.`,
+      `별이님 드릴게요. 가격 1.2. ${courtesy}. 캡처해주세요.`,
+      `별이님 드릴게요. 캡처해주세요. ${courtesy}. 가격 1.2.`,
+      `가격 1.2. ${courtesy}. 캡처해주세요. 별이님 드릴게요.`,
+    ]) {
+      const sale = extractSaleFromTranscript(transcript);
+      assert.equal(sale?.buyerNickname, '별이', transcript);
+      assert.equal(sale?.amount, 12000, transcript);
+      assert.equal(sale?.status, '확정', transcript);
+      assert.equal(sale?.isFourPointConfirmed, true, transcript);
+      assert.equal(sale?.rawTranscript, transcript, '인사도 원본에 보존한다');
+      assert.equal(extractSpeechPrice(sale.allocationTranscript)?.amount, 12000, transcript);
+    }
+  }
+  const noCapture = extractSaleFromTranscript('별이님 드릴게요. 감사합니다. 가격 1.2.');
+  assert.equal(noCapture?.amount, 12000);
+  assert.equal(noCapture?.status, '자동저장');
+  assert.equal(noCapture?.isFourPointConfirmed, false);
+});
+
+test('감사 인사가 있어도 다른 거래·질문·정정 뒤의 가격과 캡처를 앞 판매에 붙이지 않는다', () => {
+  for (const boundary of [
+    '하늘님 드릴게요', '다음 상품', '새 상품', '이 가격 맞나요?',
+    '감사합니다?', '감사합니다라는 문구를 보세요', '감사합니다 하늘님',
+    '감사합니다 다음 상품', '취소할게요', '가격 정정할게요',
+  ]) {
+    const transcript = `별이님 드릴게요. 감사합니다. ${boundary}. 가격 5.0 캡처해주세요.`;
+    const sale = extractSaleFromTranscript(transcript);
+    assert.notEqual(sale?.buyerNickname === '별이' && sale?.amount === 50000, true, transcript);
+    assert.equal(checkFourPointSaleCriteria(transcript).isFourPointSale, false, transcript);
+  }
+});
+
 test('3. 4대 조건 중 하나라도 누락되면 4단 확정되지 않고 기존 로직으로 안전 폴백', () => {
   // 캡처 멘트 누락
   const noCap = checkFourPointSaleCriteria('러블리님 이거 드릴게요 1.5');

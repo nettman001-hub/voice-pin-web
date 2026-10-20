@@ -28,6 +28,12 @@ export function splitTranscriptClauses(text: string): string[] {
   return clauses;
 }
 
+/** A standalone thank-you adds no sale fact and may sit between its steps.
+ * Keep questions, quoted instructions and buyer/product names as boundaries. */
+export function isSaleCourtesyUtterance(text: string): boolean {
+  return /^(?:(?:네|넵|예|자|아|어|음)[\s,，]+)*(?:감사\s*합니다|감사\s*해요|고맙\s*습니다|고마워요)[.!。…\s]*$/u.test(text.trim());
+}
+
 export function isQuestionUtterance(text: string): boolean {
   const clean = text.trim();
   if (/[?？]\s*$/u.test(clean)) return true;

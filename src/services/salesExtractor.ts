@@ -1,6 +1,6 @@
 import type { SaleRecord, SaleStatus } from '../types/live.ts';
 import { extractSpeechPrice } from './priceEvidence.ts';
-import { isQuestionUtterance, splitTranscriptClauses } from './voiceUtteranceService.ts';
+import { isQuestionUtterance, isSaleCourtesyUtterance, splitTranscriptClauses } from './voiceUtteranceService.ts';
 import { CAPTURE_INSTRUCTION_PATTERN, hasCaptureCancellationText, hasCaptureInstructionText } from './saleCapturePairing.ts';
 
 /**
@@ -292,7 +292,7 @@ const UNORDERED_CONFIRMATION = /(?:드릴[게께]요|드리겠습니다|확정(?
  * 루나님 드릴게요." Exactly one buyer and one price, and nothing in the window may
  * ask, demonstrate, correct, cancel or move to another product. */
 function findUnorderedFourPoint(text: string): { buyerNickname: string; amount: number; allocationTranscript: string } | null {
-  const clauses = allocationClauses(text).filter((clause) => !ALLOCATION_FILLER.test(clause));
+  const clauses = allocationClauses(text).filter((clause) => !ALLOCATION_FILLER.test(clause) && !isSaleCourtesyUtterance(clause));
   if (!clauses.length || clauses.length > 8) return null;
   const names = new Map<string, string>();
   const amounts = new Set<number>();
@@ -502,7 +502,7 @@ export function findAllocationTranscript(text: string): string | null {
     if (priceClause) return `${allocation.text}. ${priceClause}`;
     // "유령님 드릴게요. 가격은. 캡처하세요. 1.0": the label the STT cut off and
     // a capture instruction do not end the allocation before its price.
-    if (isPendingPriceStep(next)) continue;
+    if (isPendingPriceStep(next) || isSaleCourtesyUtterance(next)) continue;
     const nextNames = getBuyerNicknameCandidates(next).map((name) => name.replace(/\s+/gu, ''));
     const repeatsAllocation = ALLOCATION_ACTION.test(next) && !NON_ALLOCATION.test(next) && !isQuestionUtterance(next)
       && !extractSpeechPrice(next) && nextNames.every((name) => names.has(name));
@@ -552,7 +552,10 @@ function findFourPointEvidence(text: string): {
       break;
     }
     if (!isSafeFourPointClause(next)) break;
-    if (PRICE_LABEL_ONLY.test(next)) continue;
+    // A short thank-you between steps adds no fact; keep looking for this
+    // allocation's price/capture without dropping it from the raw transcript.
+    // Test the entire clause so "감사합니다 다음 상품" still closes the sale.
+    if (PRICE_LABEL_ONLY.test(next) || isSaleCourtesyUtterance(clauses[j])) continue;
     const priceClause = findExplicitPriceTranscript(next) || findStandalonePriceTranscript(next);
     const nextPrice = extractSpeechPrice(priceClause || next);
     // Preserve the existing rejection of an ambiguous first price declaration

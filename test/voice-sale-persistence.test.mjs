@@ -128,6 +128,29 @@ test('four-point confirmation consumes the matched purchase comment across repea
   assert.equal(live.captureRequests.length, 1);
 });
 
+test('감사 인사로 나뉜 별이 4단 멘트는 같은 보류 행을 12,000원 확정으로 저장한다', async () => {
+  const startedAt = Date.now();
+  const star = comment('별이', 'star-comment', 'star-account');
+  const sky = comment('하늘', 'sky-comment', 'sky-account');
+  const ctx = fixture([sky, star]);
+  const allocation = '네, 이거 별이님 드릴게요. 감사합니다.';
+  await ctx.fragment(allocation, new Date(startedAt).toISOString());
+  assert.equal(ctx.stored.length, 1);
+  assert.equal(ctx.stored[0].status, '보류');
+  const id = ctx.stored[0].id;
+  await ctx.fragment('가격 1.2 캡처해주세요.', new Date(startedAt + 2750).toISOString());
+  assert.equal(ctx.stored.length, 1);
+  assert.equal(ctx.stored[0].id, id);
+  assert.equal(ctx.stored[0].buyerNickname, '별이');
+  assert.equal(ctx.stored[0].buyerId, star.buyerId);
+  assert.equal(ctx.stored[0].amount, 12000);
+  assert.equal(ctx.stored[0].unitPrice, 12000);
+  assert.equal(ctx.stored[0].status, '확정');
+  assert.equal(ctx.stored[0].purchaseRequestId, 'broadcast:star-comment');
+  assert.equal(ctx.stored[0].rawTranscript, `${allocation}\n가격 1.2 캡처해주세요.`);
+  assert.equal(ctx.captureRequests.length, 1);
+});
+
 test('four-point speech resolves the original nickname from a general comment anywhere in the same broadcast', async () => {
   const buyer = comment('꽃순이', 'flower-comment', 'flower-account', '안녕하세요');
   buyer.capturedAt = new Date(Date.now() - 60 * 60_000).toISOString();

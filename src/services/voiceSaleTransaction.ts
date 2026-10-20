@@ -5,7 +5,7 @@ import {
 } from './salesExtractor.ts';
 import { extractSpeechPrice } from './priceEvidence.ts';
 import { hasCaptureCancellationText, hasCaptureInstructionText } from './saleCapturePairing.ts';
-import { isQuestionUtterance, isStandaloneBuyerAddress, splitTranscriptClauses } from './voiceUtteranceService.ts';
+import { isQuestionUtterance, isSaleCourtesyUtterance, isStandaloneBuyerAddress, splitTranscriptClauses } from './voiceUtteranceService.ts';
 
 export const VOICE_SALE_TRANSACTION_WINDOW_MS = 30_000;
 /** A price-less allocation takes the seller's next price answer even when
@@ -112,7 +112,7 @@ function withoutLeadingFiller(clause: string): string {
 function canContinueWith(text: string, incoming: ExtractedSaleResult | null, hasSaleContext: boolean): boolean {
   if (incoming || standaloneAddress(text) || FILLER.test(text)) return true;
   return splitTranscriptClauses(text).map(withoutLeadingFiller).every((clause) =>
-    FILLER.test(clause) || standaloneAddress(clause) || PRICE_LABEL_ONLY.test(clause)
+    FILLER.test(clause) || isSaleCourtesyUtterance(clause) || standaloneAddress(clause) || PRICE_LABEL_ONLY.test(clause)
     || Boolean(findExplicitPriceTranscript(clause) || findStandalonePriceTranscript(clause))
     || FOUR_POINT_CONFIRMATION_PATTERN.test(clause)
     || hasCaptureInstructionText(clause, { saleContext: hasSaleContext }));
