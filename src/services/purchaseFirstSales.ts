@@ -173,6 +173,13 @@ export function areSameCommentAuthor(left: CommentRecord, right: CommentRecord, 
   return !a.identityConflict && !b.identityConflict && a.accountKey === b.accountKey;
 }
 
+/** One account key per comment, joining records that share an ID (server buyer,
+ * platform user, handle or message), e.g. an uploaded "ㅈㅇ" and the same
+ * viewer's local-only comments. Conflicting IDs stay separate. */
+export function linkedCommentAccountKeys(comments: CommentRecord[]): Map<string, string> {
+  return new Map(commentAuthorCandidates(comments).map((candidate) => [candidate.id, candidate.accountKey]));
+}
+
 function commentAuthorCandidates(comments: CommentRecord[]) {
   const parents = new Map<string, string>();
   const find = (key: string): string => {

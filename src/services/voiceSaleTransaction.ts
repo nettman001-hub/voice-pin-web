@@ -104,9 +104,14 @@ function sameResult(left: ExtractedSaleResult | null, right: ExtractedSaleResult
     && Boolean(left.isFourPointConfirmed) === Boolean(right.isFourPointConfirmed));
 }
 
+/** "어, 가격은 1.8" → "가격은 1.8": an interjection before a step is not a new topic. */
+function withoutLeadingFiller(clause: string): string {
+  return clause.replace(/^(?:(?:네|넵|예|자|아|어|음)[\s,，]+)+(?=\S)/u, '');
+}
+
 function canContinueWith(text: string, incoming: ExtractedSaleResult | null, hasSaleContext: boolean): boolean {
   if (incoming || standaloneAddress(text) || FILLER.test(text)) return true;
-  return splitTranscriptClauses(text).every((clause) =>
+  return splitTranscriptClauses(text).map(withoutLeadingFiller).every((clause) =>
     FILLER.test(clause) || standaloneAddress(clause) || PRICE_LABEL_ONLY.test(clause)
     || Boolean(findExplicitPriceTranscript(clause) || findStandalonePriceTranscript(clause))
     || FOUR_POINT_CONFIRMATION_PATTERN.test(clause)
