@@ -265,6 +265,7 @@ test('a legacy confirmed test sale is previewed and corrected locally without ca
       after: { buyerNickname: '하늘', amount: 50000, status: '확정' } }];
   await f.db.update('sales', [], records => records.map(s => ({ ...s, status: '확정', revision: 4, buyerNickname: '하늘', buyerId: sky.buyerId,
     amount: 50000, unitPrice: 50000, purchaseRequestId: `${f.session.id}:sky-request`, sourceCommentIds: [sky.id],
+    syncStatus: 'PENDING', testVoiceReceipt: 'legacy-voice-receipt',
     printStatus: 'PRINTED', printRevision: 1, history, aiVerification: { reviewMode: 'TEXT_PROMPT', aiStatus: 'RESOLVED' } })));
   await f.repo.remote.saveCloudSessionTranscripts(f.workspaceId, f.session.id, [{ id: 'star-price', text: '가격 1.2 캡처해주세요.',
     timestamp: new Date(when + 3000).toISOString(), isFinal: true }]);
@@ -289,6 +290,8 @@ test('a legacy confirmed test sale is previewed and corrected locally without ca
   assert.equal(corrected.sale.revision, 5);
   assert.equal(corrected.sale.history.at(-1).changedBy, 'SELLER');
   assert.equal((await restored.repo.storedSales()).length, 1);
+  assert.equal((await restored.repo.storedSales())[0].syncStatus, 'SYNCED');
+  assert.equal((await restored.db.read('sales', []))[0].testVoiceReceipt, 'legacy-voice-receipt');
   await assert.rejects(restored.repo.ai.triggerPendingAiResolution(original.id, { confirmedAiRecovery: 'APPLY', expectedRevision: 4,
     expectedRecoveryFingerprint: fp }), error => error.code === 'RECOVERY_CONFLICT');
   assert.equal(inferenceCalls, 0);
