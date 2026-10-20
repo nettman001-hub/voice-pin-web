@@ -34,6 +34,22 @@ test('legacy sky/50000 can preview star/12000 without changing the confirmed sal
     'Normal review keeps its existing identity protection');
 });
 
+test('the real 8ms/9ms STT timeline copies do not cut the target off from its 12000 price', () => {
+  const record = { ...legacy, recognizedAt: '2026-10-20T15:49:32.870Z' };
+  const transcript = [
+    { id: 'copy-one', text: record.rawTranscript, recognizedAt: '2026-10-20T15:49:32.878Z', isFinal: true, workflowEligible: false },
+    { id: 'copy-two', text: record.rawTranscript, recognizedAt: '2026-10-20T15:49:32.879Z', isFinal: true, workflowEligible: true },
+    { id: 'price', text: '가격 1.2 캡처해주세요.', recognizedAt: '2026-10-20T15:49:35.626Z', isFinal: true },
+  ];
+  const meta = preview(record, transcript);
+  assert.equal(meta.candidateBuyer.nickname, '별이');
+  assert.equal(meta.candidateAmount, 12000);
+  const reviewed = { ...record, aiVerification: meta };
+  assert.equal(applyConfirmedAiRecovery(reviewed, preview(reviewed, transcript), meta.recoveryReview.candidateFingerprint).amount, 12000);
+  const laterTrade = [...transcript.slice(0, 2), { id: 'new-sale', text: record.rawTranscript, recognizedAt: '2026-10-20T15:49:34.000Z', isFinal: true }, transcript[2]];
+  assert.equal(preview(record, laterTrade).candidateAmount, undefined, 'A real later allocation still ends the target');
+});
+
 test('seller application updates the same sale, account and amount with a full before/after audit', () => {
   const reviewed = { ...legacy, aiVerification: preview() };
   const corrected = applyConfirmedAiRecovery(reviewed, preview(reviewed), reviewed.aiVerification.recoveryReview.candidateFingerprint);

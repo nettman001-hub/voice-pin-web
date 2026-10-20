@@ -252,6 +252,9 @@ export function isRejectedVoiceCandidate(sale: SaleRecord): boolean {
  * 정해진 프롬프트 그대로 묻고, "닉네임: xxx / 가격: 000원" 답이면 판매 확정. */
 
 export const VOICE_TEXT_REVIEW_WINDOW_MS = 60_000;
+// A sale is created just before its STT timeline entries are written. Those
+// copies may differ by a few milliseconds and are still the target utterance.
+const VOICE_TEXT_REVIEW_ANCHOR_JITTER_MS = 250;
 
 export const VOICE_TEXT_REVIEW_INSTRUCTIONS = `아래 내용은 라이브방송에서 판매자의 멘트와 구매자의 댓글 내용이다. 
 <검토 대상 판매>에 지정된 판매 ID·발화 시각·원본 발화의 거래 하나만 검토해라.
@@ -293,7 +296,14 @@ export function getVoiceTextReviewUtterances(sale: Pick<SaleRecord, 'sessionId' 
     if (!at || !inTextWindow(sale, at)) continue;
     byKey.set(`${Date.parse(at)}:${oneLine(log.text)}`, { at, text: oneLine(log.text) });
   }
-  return [...byKey.values()].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  const sorted = [...byKey.values()].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  const distinct: typeof sorted = [];
+  for (const utterance of sorted) {
+    const previous = distinct.at(-1);
+    if (previous?.text === utterance.text && Date.parse(utterance.at) - Date.parse(previous.at) <= VOICE_TEXT_REVIEW_ANCHOR_JITTER_MS) continue;
+    distinct.push(utterance);
+  }
+  return distinct;
 }
 
 const matchesSpokenName = (spoken: string, nickname: string) => {
@@ -324,6 +334,7 @@ export function getVoiceTextReviewTargetPrice(sale: SaleRecord, logs: ReviewTran
     if (age <= 0) continue;
     if (age > VOICE_SALE_TRANSACTION_WINDOW_MS) break;
     const next = utterance.text;
+    if (age <= VOICE_TEXT_REVIEW_ANCHOR_JITTER_MS && next === oneLine(sale.rawTranscript)) continue;
     const nextNames = getBuyerNicknameCandidates(next);
     if (isProductChangeUtterance(next)
       || /취소|정정|수정|변경|말고|아니라|아니고/u.test(next)
