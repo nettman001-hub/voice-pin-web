@@ -55,6 +55,15 @@ test('the prompt pins one sale ID, session, time and raw speech before the surro
   assert.match(VOICE_TEXT_REVIEW_INSTRUCTIONS, /답변은 아래와 같은 식으로 한다\.\n닉네임: xxx\n가격: 000원$/u);
 });
 
+test('the prompt removes STT copies with millisecond timestamp jitter but preserves later repeats', () => {
+  const jittered = [logs[0], { ...logs[0], id: 'copy', recognizedAt: new Date(Date.parse(logs[0].recognizedAt) + 9).toISOString() },
+    { ...logs[0], id: 'copy-200', recognizedAt: new Date(Date.parse(logs[0].recognizedAt) + 200).toISOString() },
+    { ...logs[0], id: 'repeat-400', recognizedAt: new Date(Date.parse(logs[0].recognizedAt) + 400).toISOString() },
+    { ...logs[0], id: 'repeat', recognizedAt: new Date(Date.parse(logs[0].recognizedAt) + 1500).toISOString() }];
+  const prompt = buildVoiceTextReviewPrompt(sale, comments, jittered).split('<판매자멘트>')[1];
+  assert.equal(prompt.split(sale.rawTranscript).length - 1, 3);
+});
+
 test('the answer "닉네임: KH / 가격: 15,000원" is read in the usual model spellings', () => {
   assert.deepEqual(parseVoiceTextReviewAnswer('닉네임: KH\n가격: 15,000원'), { nickname: 'KH', amount: 15000 });
   assert.deepEqual(parseVoiceTextReviewAnswer('분석 결과입니다.\n\n**닉네임:** KH님\n**가격:** 15000원'), { nickname: 'KH', amount: 15000 });
