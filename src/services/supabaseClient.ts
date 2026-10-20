@@ -1,34 +1,17 @@
 import { createClient, Session, SupabaseClient } from '@supabase/supabase-js';
+import { authSessionStorage, takeLegacyRefreshToken } from './authSessionStorage';
 
 const url = import.meta.env.VITE_SUPABASE_URL?.trim();
 const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim();
 
 export const isSupabaseConfigured = Boolean(url && publishableKey);
 
-const REFRESH_TOKEN_SESSION_KEY = 'voicecap_session_refresh_token';
-
-const readRefreshToken = () => {
-  try {
-    return window.sessionStorage.getItem(REFRESH_TOKEN_SESSION_KEY);
-  } catch {
-    return null;
-  }
-};
-
-export const rememberSessionRefreshToken = (refreshToken?: string | null) => {
-  try {
-    if (refreshToken) window.sessionStorage.setItem(REFRESH_TOKEN_SESSION_KEY, refreshToken);
-    else window.sessionStorage.removeItem(REFRESH_TOKEN_SESSION_KEY);
-  } catch {
-    // 저장소 접근이 차단된 브라우저에서는 현재 메모리 세션만 사용한다.
-  }
-};
-
 export const supabase: SupabaseClient | null = isSupabaseConfigured
   ? createClient(url!, publishableKey!, {
       auth: {
-        // Supabase의 전체 세션/회원 객체는 브라우저 저장소에 남기지 않는다.
-        persistSession: false,
+        // 자동 로그인을 켜면 localStorage(브라우저를 닫아도 유지), 끄면 sessionStorage(탭을 닫으면 로그아웃).
+        persistSession: true,
+        storage: authSessionStorage,
         autoRefreshToken: true,
         detectSessionInUrl: true,
       },
@@ -37,30 +20,22 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
 
 let sessionRestorePromise: Promise<Session | null> | null = null;
 
-// 새로고침 시에는 탭 단위 sessionStorage의 refresh token만 사용해 서버에서 세션을 다시 받는다.
-// 이메일, 이름, 권한 등 회원 정보는 브라우저 저장소에 기록하지 않는다.
+// 저장된 세션은 Supabase 클라이언트가 읽고, 만료됐으면 서버에서 갱신한다.
+// 예전 버전이 탭에 남긴 refresh token이 있으면 한 번 이어받는다.
 export const restoreSupabaseSession = async (): Promise<Session | null> => {
   const client = requireSupabase();
-  const refreshToken = readRefreshToken();
-  if (!refreshToken) {
-    const { data } = await client.auth.getSession();
-    return data.session;
-  }
-
   if (!sessionRestorePromise) {
-    sessionRestorePromise = client.auth.refreshSession({ refresh_token: refreshToken })
-      .then(({ data, error }) => {
-        if (error || !data.session) {
-          rememberSessionRefreshToken(null);
-          return null;
-        }
-        rememberSessionRefreshToken(data.session.refresh_token);
+    sessionRestorePromise = (async () => {
+      const { data } = await client.auth.getSession();
+      if (data.session) {
+        takeLegacyRefreshToken();
         return data.session;
-      })
-      .catch(() => {
-        rememberSessionRefreshToken(null);
-        return null;
-      });
+      }
+      const legacyToken = takeLegacyRefreshToken();
+      if (!legacyToken) return null;
+      const { data: refreshed, error } = await client.auth.refreshSession({ refresh_token: legacyToken });
+      return error ? null : refreshed.session;
+    })().catch(() => null);
   }
   return sessionRestorePromise;
 };
