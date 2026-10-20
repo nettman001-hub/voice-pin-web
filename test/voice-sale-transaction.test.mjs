@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { advanceVoiceSaleTransaction } from '../src/services/voiceSaleTransaction.ts';
 import { extractSaleFromTranscript } from '../src/services/salesExtractor.ts';
 import { extractSpeechPrice } from '../src/services/priceEvidence.ts';
+import { shouldReviewVoiceSaleText } from '../src/services/voicePendingReviewService.ts';
 
 const at = (seconds) => new Date(Date.UTC(2026, 9, 17, 11, 11, 0) + seconds * 1000).toISOString();
 const advance = (state, text, seconds, eventId = `event-${seconds}`, sessionId = 'session') =>
@@ -49,6 +50,73 @@ test('짧은 추임새가 끼어든 STT 조각도 호명·배정·가격·캡처
   assert.equal(step.emission.result.amount, 12000);
   assert.equal(step.emission.result.isFourPointConfirmed, true);
   assert.equal(step.emission.evidenceText, '하니님\n네\n드릴게요\n네\n자\n가격은 1.2\n캡처');
+});
+
+test('실제 별이 발화의 감사 인사 뒤 가격·캡처는 같은 판매를 확정하고 보류 AI에서 제외한다', () => {
+  const sky = advance(null, '하늘님 드릴게요. 가격 5.0 캡처해주세요.', 0);
+  const allocation = '네, 이거 별이님 드릴게요. 감사합니다.';
+  const star = advance(sky.state, allocation, 14);
+  assert.equal(star.emission.result.status, '보류');
+  assert.equal(star.emission.result.amount, 0);
+  const confirmed = advance(star.state, '가격 1.2 캡처해주세요.', 16.75);
+  assert.ok(confirmed.emission, '판매 사실이 바뀌었으므로 기존 보류를 갱신한다');
+  assert.equal(confirmed.emission.transactionId, star.emission.transactionId);
+  assert.equal(confirmed.emission.continuation, true);
+  assert.equal(confirmed.emission.result.buyerNickname, '별이');
+  assert.equal(confirmed.emission.result.amount, 12000);
+  assert.equal(confirmed.emission.result.status, '확정');
+  assert.equal(confirmed.emission.result.isFourPointConfirmed, true);
+  assert.equal(confirmed.emission.captureRequested, true);
+  assert.equal(confirmed.emission.evidenceText, `${allocation}\n가격 1.2 캡처해주세요.`);
+  assert.equal(extractSaleFromTranscript(confirmed.emission.result.rawTranscript).amount, 12000);
+  assert.equal(sky.emission.result.buyerNickname, '하늘');
+  assert.equal(sky.emission.result.amount, 50000);
+  const anchor = { source: 'WEB_VOICE', sessionId: 'session', recognizedAt: at(14) };
+  const comments = [{ id: 'star-comment', sessionId: 'session', nickname: '별이', content: '저요', capturedAt: at(12) }];
+  assert.equal(shouldReviewVoiceSaleText({ ...star.emission.result, ...anchor }, comments), true);
+  assert.equal(shouldReviewVoiceSaleText({ ...confirmed.emission.result, ...anchor }, comments), false);
+});
+
+test('가격과 인사와 캡처가 한 STT 조각으로 오거나 나뉘어 와도 같은 거래로 확정한다', () => {
+  for (const fragments of [
+    ['별이님 드릴게요.', '가격 1.2. 감사합니다. 캡처해주세요.'],
+    ['별이님 드릴게요.', '가격 1.2. 감사합니다.', '캡처해주세요.'],
+    ['별이님 드릴게요.', '감사합니다.', '가격 1.2 캡처해주세요.'],
+    ['별이님 드릴게요. 감사합니다.', '가격 1.2.', '감사합니다. 캡처해주세요.'],
+  ]) {
+    let state = null;
+    let transactionId;
+    let step;
+    let captures = 0;
+    for (const [index, text] of fragments.entries()) {
+      step = advance(state, text, index * 2);
+      state = step.state;
+      transactionId ||= state?.id;
+      if (step.emission?.captureRequested) captures++;
+    }
+    assert.equal(step.emission?.transactionId, transactionId, fragments.join('\n'));
+    assert.equal(step.emission?.result.status, '확정', fragments.join('\n'));
+    assert.equal(step.emission?.result.amount, 12000, fragments.join('\n'));
+    assert.equal(step.emission?.result.buyerNickname, '별이', fragments.join('\n'));
+    assert.equal(captures, 1);
+  }
+});
+
+test('독립된 감사 인사는 거래 대기 시간을 연장하거나 다른 구매자·상품을 합치지 않는다', () => {
+  const first = () => advance(null, '별이님 드릴게요.', 0);
+  const thanked = advance(first().state, '감사합니다.', 3);
+  assert.equal(thanked.emission, null);
+  assert.notEqual(advance(thanked.state, '가격 1.2 캡처해주세요.', 16).emission?.result.isFourPointConfirmed, true);
+  for (const boundary of ['하늘님 드릴게요.', '다음 상품입니다.', '이 가격 맞나요?', '취소할게요.']) {
+    const interrupted = advance(thanked.state, boundary, 4);
+    const next = advance(interrupted.state, '가격 5.0 캡처해주세요.', 5);
+    assert.notEqual(next.emission?.result.buyerNickname === '별이' && next.emission?.result.amount === 50000, true, boundary);
+    if (boundary.startsWith('하늘')) {
+      assert.equal(next.emission.result.buyerNickname, '하늘');
+      assert.equal(next.emission.result.amount, 50000);
+      assert.notEqual(next.emission.transactionId, thanked.state.id);
+    }
+  }
 });
 
 test('가격 전 캡처는 보존하고 후속 가격에서 다시 캡처하지 않는다', () => {

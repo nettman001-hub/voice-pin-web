@@ -106,6 +106,20 @@ test('voice sale commit rejects mismatched or unverified prices before accessing
   }
 });
 
+test('voice sale commit validates the original 별이 allocation through thanks to its 12,000원 price', async () => {
+  const state = fixture();
+  state.comments[0].nickname_snapshot = '별이';
+  const rawTranscript = '네, 이거 별이님 드릴게요. 감사합니다.\n가격 1.2 캡처해주세요.';
+  const response = await handleCommitVoiceSale('workspace', 'actor', {
+    operationId, sale: { ...sale, buyerNickname: '별이', amount: 12000, unitPrice: 12000, rawTranscript },
+  });
+  assert.equal(response.status, 200, JSON.stringify(await response.json()));
+  assert.equal(state.calls.length, 1);
+  assert.equal(state.calls[0].p_raw_transcript, rawTranscript);
+  assert.equal(state.calls[0].p_amount, 12000);
+  assert.equal(state.calls[0].p_price_quote, '1.2');
+});
+
 test('a casual allocation uses the canonical decorated nickname only when its comment and price are verified', async () => {
   const state = fixture();
   state.comments[0].nickname_snapshot = '가윤♡예준맘';
