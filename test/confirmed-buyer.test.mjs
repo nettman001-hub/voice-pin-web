@@ -247,3 +247,61 @@ test('seller workflow recognizes complete and split four-point speech using the 
   assert.deepEqual(split[0].transcriptIds, ['allocation', 'price', 'capture']);
   assert.equal(collectFourPointWorkflowSales([t('one', '꼬순이님 1.0 드릴게요.', 0)]).length, 0);
 });
+
+// 2026-10-20 2회차 판매 001: "이거 하니님 드릴게요. 캡처해 주시고요. 가격은 1.8." → 구매자 연결 대기.
+// 업로드된 "ㅈㅇ"은 서버 buyerId를, 같은 시청자의 다른 댓글은 플랫폼 ID만 가져 한 사람이 두 계정으로 갈렸다.
+test('4단 멘트: 서버 buyerId 댓글과 플랫폼 ID 댓글이 같은 시청자면 한 구매자로 연결한다 (모든 순서·조각·말끝)', async () => {
+  const { extractSaleFromTranscript } = await import('../src/services/salesExtractor.ts');
+  const { advanceVoiceSaleTransaction } = await import('../src/services/voiceSaleTransaction.ts');
+  const spokeAt = Date.parse('2026-10-20T14:25:04Z');
+  const iso = (offsetSeconds) => new Date(spokeAt + offsetSeconds * 1000).toISOString();
+  const viewer = (jyAgoSeconds) => {
+    const feed = { id: 'uuid-jy', sessionId: 'broadcast', platformMessageId: 'm-jy', buyerId: 'buyer-hani',
+      nickname: '하니', content: 'ㅈㅇ', capturedAt: iso(-jyAgoSeconds) };
+    const local = [{ ...feed, platformUserId: 'tt-777', uniqueId: 'hani_' },
+      { id: 'stream-m-hi', sessionId: 'broadcast', platformMessageId: 'm-hi', platformUserId: 'tt-777', uniqueId: 'hani_',
+        nickname: '하니', content: '색깔 예뻐요', capturedAt: iso(-jyAgoSeconds - 30) }];
+    return mergeBuyerComments([feed, ...local]);
+  };
+  const check = (spokenNickname, label) => {
+    for (const ago of [20, 120, 299, 400]) {
+      const comments = viewer(ago);
+      const result = resolveConfirmedBuyer({ spokenNickname, comments, sessionId: 'broadcast', recognizedAt: iso(0),
+        requests: getPurchaseRequests(comments, 'broadcast') });
+      assert.equal(result.status, 'MATCHED', `${label} / ㅈㅇ ${ago}초 전`);
+      assert.equal(result.candidates.length, 1, `${label} / ㅈㅇ ${ago}초 전`);
+      assert.equal(result.candidates[0].nickname, '하니');
+      assert.equal(result.candidates[0].buyerId, 'buyer-hani');
+      if (ago < 300) assert.equal(result.candidates[0].purchaseRequestId, 'broadcast:m-jy', label);
+    }
+  };
+  for (const price of ['가격은 1.8', '가격은 1.8이에요', '가격은 1.8이고요', '가격은 1.8 할게요', '어, 가격은 1.8', '어, 1.8', '1.8 받을게요']) {
+    const parts = ['이거 하니님', price.startsWith('어') ? '네, 드릴게요' : '드릴게요', '캡처해 주시고요', price];
+    const orders = [];
+    const permute = (rest, acc = []) => rest.length ? rest.forEach((part, i) =>
+      permute([...rest.slice(0, i), ...rest.slice(i + 1)], [...acc, part])) : orders.push(acc);
+    permute(parts);
+    assert.equal(orders.length, 24);
+    for (const order of orders) {
+      const sentence = `${order.join('. ')}.`;
+      const whole = extractSaleFromTranscript(sentence);
+      assert.equal(whole?.isFourPointConfirmed, true, sentence);
+      assert.equal(whole.amount, 18000, sentence);
+      check(whole.buyerNicknamePhrase || whole.buyerNickname, sentence);
+      let step = { state: null, emission: null };
+      let last = null;
+      order.forEach((part, i) => {
+        step = advanceVoiceSaleTransaction(step.state, { sessionId: 'broadcast', eventId: `e${i}`, text: `${part}.`, recognizedAt: iso(i * 2) });
+        last = step.emission || last;
+      });
+      assert.equal(last?.result.isFourPointConfirmed, true, `조각: ${sentence}`);
+      check(last.result.buyerNicknamePhrase || last.result.buyerNickname, `조각: ${sentence}`);
+    }
+  }
+});
+
+test('4단 멘트: 공유 ID가 없는 동명이인 "하니" 두 계정은 여전히 확인 필요로 남긴다', () => {
+  const comments = [comment('하니', { id: 'a', platformMessageId: 'a', buyerId: undefined, platformUserId: 'tt-1' }),
+    comment('하니', { id: 'b', platformMessageId: 'b', buyerId: undefined, platformUserId: 'tt-2' })];
+  assert.equal(resolve('하니', comments).status, 'AMBIGUOUS');
+});
