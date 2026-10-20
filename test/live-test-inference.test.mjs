@@ -4,7 +4,7 @@ import { build } from 'esbuild';
 
 // Execute the real inference endpoint, prompt adapter, task engine and failover.
 // Its Supabase client offers SELECT/auth only; a mutation fails the test.
-const bundle = await build({ entryPoints: ['api/live-test-inference.ts'], bundle: true, write: false, platform: 'node', format: 'esm',
+const bundle = await build({ entryPoints: ['serverless/liveTestInference.ts'], bundle: true, write: false, platform: 'node', format: 'esm',
   plugins: [{ name: 'read-only-client', setup(builder) {
     builder.onResolve({ filter: /^@supabase\/supabase-js$/ }, () => ({ path: 'client', namespace: 'read-only-client' }));
     builder.onLoad({ filter: /.*/, namespace: 'read-only-client' }, () => ({ contents: 'export const createClient = (...args) => globalThis.testInferenceClient(...args);' }));

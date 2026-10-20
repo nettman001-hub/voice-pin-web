@@ -22,7 +22,7 @@ export default defineConfig({
               chunks.push(Buffer.from(chunk));
             }
             const body = JSON.parse(Buffer.concat(chunks).toString() || '{}');
-            const { default: handler } = await import('./api/live-test-inference.ts');
+            const { default: handler } = await import('./serverless/liveTestInference.ts');
             const response = {
               statusCode: 200,
               setHeader(key: string, value: string) { res.setHeader(key, value); return this; },

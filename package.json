@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build:api": "esbuild serverless/liveTestInference.ts --bundle --platform=node --format=esm --packages=external --target=node22 --outfile=api/live-test-inference.js",
+    "build": "npm run build:api && tsc && vite build",
     "preview": "vite preview",
     "test:contracts": "node --test contracts/product-sales/v1/validate-contracts.test.mjs",
     "test:api": "node --test test/sales-api-auth.test.mjs",
@@ -31,6 +32,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "esbuild": "^0.25.12",
     "fake-indexeddb": "^6.2.6",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.16",
