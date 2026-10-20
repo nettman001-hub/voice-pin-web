@@ -9,7 +9,7 @@ import {
 } from '../../services/authCredentialsService';
 
 export const LoginPage: React.FC = () => {
-  const { login, isLocked, lockUntil, loginAttempts, isRemoteAuth } = useAuth();
+  const { login, isLocked, lockUntil, loginAttempts, isRemoteAuth, isAuthenticated, isInitialized, user } = useAuth();
   const navigate = useNavigate();
 
   const [email, setEmail] = useState('');
@@ -26,6 +26,12 @@ export const LoginPage: React.FC = () => {
       setAutoLogin(true);
     }
   }, []);
+
+  // 자동 로그인으로 이미 로그인된 상태면 로그인 화면을 건너뛴다.
+  useEffect(() => {
+    if (!isInitialized || !isAuthenticated || isSubmitting) return;
+    navigate(user?.role === '관리자' ? '/admin' : '/live', { replace: true });
+  }, [isInitialized, isAuthenticated, isSubmitting, user, navigate]);
 
   const handleAutoLoginChange = (checked: boolean) => {
     setAutoLogin(checked);
@@ -164,14 +170,14 @@ export const LoginPage: React.FC = () => {
               </span>
             </label>
             <span className="text-[11px] text-slate-400">
-              {autoLogin ? '다음 로그인 시 정보 자동 입력' : ''}
+              {autoLogin ? '브라우저를 닫아도 로그인 유지' : ''}
             </span>
           </div>
 
           <p className="text-[11px] text-slate-500">
             {autoLogin
-              ? '자동 로그인이 켜져 있어 다음 로그인 시 아이디와 비밀번호가 자동으로 채워집니다.'
-              : '자동 로그인 체크 시 다음부터 아이디와 비밀번호가 입력 폼에 미리 채워집니다.'}
+              ? '자동 로그인이 켜져 있어 브라우저를 닫았다 열어도 로그인이 유지됩니다. 공용 PC에서는 끄세요.'
+              : '자동 로그인 체크 시 브라우저를 닫았다 열어도 로그인이 유지됩니다. 체크하지 않으면 브라우저를 닫을 때 로그아웃됩니다.'}
           </p>
 
           <button
