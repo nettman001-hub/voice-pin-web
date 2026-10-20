@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import * as confirmedRecovery from '../src/services/confirmedVoiceSaleRecovery.ts';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const sale = (extra = {}) => ({
@@ -144,6 +145,7 @@ function actionFixture({ blocked = false, failure = null, skipped = false } = {}
       },
     } },
     '../../services/voiceCorrectionService': { rollbackCorrection() {} },
+    '../../services/confirmedVoiceSaleRecovery': confirmedRecovery,
   });
   return { ...ctx, calls, renderAction(record = sale()) { return ctx.render('SaleAiActionButtons', { sale: record }); } };
 }
@@ -187,6 +189,46 @@ test('failed and skipped reviews finish the viewer with their actual explanation
     assert.equal(ctx.calls.filter((entry) => entry.action === 'finish').length, 1);
     assert.equal(ctx.calls.find((entry) => entry.action === 'finish').message, expected);
   }
+});
+
+function oldConfirmedSale() {
+  return sale({ status: '확정', revision: 4, buyerNickname: '하늘', buyerId: 'sky', amount: 50000, unitPrice: 50000,
+    recognizedAt: '2026-10-20T15:49:32Z', rawTranscript: '네, 이거 별이님 드릴게요. 감사합니다.',
+    purchaseRequestId: 'broadcast-1:sky-comment', sourceCommentIds: ['sky-comment'],
+    aiVerification: { aiStatus: 'RESOLVED', reviewMode: 'TEXT_PROMPT' },
+    history: [{ revision: 2, changedBy: 'AI', changeType: 'AI_RESOLVE', before: { buyerNickname: '별이', amount: 0, status: '보류' },
+      after: { buyerNickname: '하늘', amount: 50000, status: '보류' } },
+      { revision: 3, changedBy: 'AI', changeType: 'AI_RESOLVE', before: { buyerNickname: '하늘', amount: 50000, status: '보류' },
+        after: { buyerNickname: '하늘', amount: 50000, status: '확정' } }] });
+}
+
+test('a legacy confirmed sale has an explicit original-evidence preview action without changing sale values', async () => {
+  const ctx = actionFixture(), record = oldConfirmedSale();
+  buttonWithText(ctx.renderAction(record), '원본 근거 재검토').props.onClick(clickEvent());
+  await tick();
+  const request = ctx.calls.find(call => call.action === 'review');
+  assert.equal(request.options.confirmedAiRecovery, 'PREVIEW');
+  assert.equal(request.options.expectedRevision, 4);
+  assert.equal(ctx.calls.some(call => call.action === 'open'), false, 'No model request or conversation window is needed');
+  assert.equal(record.buyerNickname, '하늘');
+  assert.equal(record.amount, 50000);
+});
+
+test('the approved correction action sends the exact preview fingerprint and never uses a generic sale edit', async () => {
+  const ctx = actionFixture(), record = oldConfirmedSale();
+  record.aiVerification = confirmedRecovery.previewConfirmedAiRecovery(record, [
+    { id: 'star-comment', platformMessageId: 'star-comment', sessionId: record.sessionId, nickname: '별이', buyerId: 'star', content: '저요', capturedAt: '2026-10-20T15:49:27Z' },
+  ], [{ id: 'price', text: '가격 1.2 캡처해주세요.', recognizedAt: '2026-10-20T15:49:35Z', isFinal: true }]);
+  const tree = ctx.renderAction(record);
+  assert.match(visibleText(tree), /별이/u);
+  assert.match(visibleText(tree), /12,000/u);
+  buttonWithText(tree, '정정 적용').props.onClick(clickEvent());
+  await tick();
+  const request = ctx.calls.find(call => call.action === 'review');
+  assert.equal(request.options.confirmedAiRecovery, 'APPLY');
+  assert.equal(request.options.expectedRevision, 4);
+  assert.equal(request.options.expectedRecoveryFingerprint, record.aiVerification.recoveryReview.candidateFingerprint);
+  assert.equal(ctx.calls.filter(call => call.action === 'refresh').length, 1);
 });
 
 function conversationFixture({ getAiTasks = async () => ({ tasks: [] }), blocked = false } = {}) {

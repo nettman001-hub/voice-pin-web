@@ -430,6 +430,9 @@ export async function handleTriggerPendingAiResolution(
     return errorResponse('NOT_FOUND', `판매 내역을 찾을 수 없습니다: ${saleId}`, 404);
   }
 
+  if (sale.source === 'WEB_VOICE' && body.confirmedAiRecovery) {
+    return await handleReviewVoicePendingSale(workspaceId, actorId, auth, sale, body);
+  }
   if (sale.status !== '보류') {
     return successResponse({
       message: '이미 보류 상태가 아닌 판매 건입니다.',
