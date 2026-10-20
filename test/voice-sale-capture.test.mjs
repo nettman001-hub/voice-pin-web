@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { diagnosticGlobals } from './runtime-fixture.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -39,6 +40,7 @@ function fixture(records, lastSaved = records[0] ?? null) {
   const listeningGenerationRef = { current: 1 };
   const module = { exports: {} };
   vm.runInNewContext(compiled, {
+    ...diagnosticGlobals,
     module, findSaleForCapture, currentWorkflowSalesRef, lastSavedSaleRef,
     currentUserIdRef, listeningGenerationRef,
     authBoundaryGenerationRef: { current: 1 },

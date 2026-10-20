@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { diagnosticGlobals } from './runtime-fixture.mjs';
 
 function fixture(onStatus) {
   const sockets = [], transcripts = [], statuses = [], errors = [];
@@ -82,6 +83,8 @@ function liveStatusFixture(mode, engine = 'CLOUD') {
   const module = { exports: {} };
   vm.runInNewContext(compiled, {
     module, ...refs, listeningGeneration: 1, requestedUserId: 'seller', mode, Uint8Array,
+    diagnosticSink: diagnosticGlobals.sttDiagnostics.sink(),
+    activeSttProvider: 'SONIOX',
     runtime: { isTest: false }, pendingStartupRef: { current: null }, startupFailureMessage: '',
     setSttEngineStatus: (value) => { state.status = value; },
     setSttEngineMessage: (value) => { state.message = value; },

@@ -18,6 +18,7 @@ export interface VoiceSaleTransactionInput {
   text: string;
   recognizedAt: string;
   activeKeywords?: string[];
+  diagnostics?: import('./sttDiagnostics.ts').SttDiagnosticSink;
 }
 
 export interface VoiceSaleTransactionFragment {
@@ -153,15 +154,27 @@ export function advanceVoiceSaleTransaction(
 ): VoiceSaleTransactionAdvance {
   const text = input.text.trim();
   const at = Date.parse(input.recognizedAt);
+  const boundaries: string[] = [];
+  const finish = (reason: string, advance: VoiceSaleTransactionAdvance): VoiceSaleTransactionAdvance => {
+    if (input.diagnostics) try {
+      input.diagnostics({ stage: 'transaction.decision', detail: { eventId: input.eventId, text,
+        reason, boundaries, previousTransactionId: previous?.id, transactionId: advance.state?.id || advance.emission?.transactionId,
+        price: { detected: extractSpeechPrice(text), explicit: findExplicitPriceTranscript(text), standalone: findStandalonePriceTranscript(text) },
+        capture: { detected: hasCaptureInstructionText(text, { saleContext: Boolean(previous?.result) }),
+          previouslySeen: previous?.captureSeen, requested: advance.emission?.captureRequested || false },
+        before: previous, after: advance.state, emission: advance.emission } });
+    } catch { /* Observation never changes transaction behavior. */ }
+    return advance;
+  };
   if (!text || !input.eventId || !input.sessionId || !Number.isFinite(at)) {
-    return { state: previous, emission: null };
+    return finish('INVALID_INPUT', { state: previous, emission: null });
   }
   let prior = previous;
   if (prior && (prior.sessionId !== input.sessionId
     || at < Date.parse(prior.updatedAt)
-    || at - Date.parse(prior.startedAt) > VOICE_SALE_TRANSACTION_WINDOW_MS)) prior = null;
-  if (prior?.fragments.some((fragment) => fragment.eventId === input.eventId)) return { state: prior, emission: null };
-  if (prior?.talkSince && at - Date.parse(prior.updatedAt) > VOICE_SALE_PRICE_FOLLOWUP_MS) prior = null;
+    || at - Date.parse(prior.startedAt) > VOICE_SALE_TRANSACTION_WINDOW_MS)) { prior = null; boundaries.push('SESSION_OR_TIME_BOUNDARY'); }
+  if (prior?.fragments.some((fragment) => fragment.eventId === input.eventId)) return finish('DUPLICATE_EVENT', { state: prior, emission: null });
+  if (prior?.talkSince && at - Date.parse(prior.updatedAt) > VOICE_SALE_PRICE_FOLLOWUP_MS) { prior = null; boundaries.push('FOLLOWUP_TIMEOUT'); }
 
   // STT ended the sentence at the seller's pause ("유령님 드릴게요. 가격은.").
   // Read the price that opens the next fragment and ignore the talk after it.
@@ -170,7 +183,7 @@ export function advanceVoiceSaleTransaction(
     const priceAnswer = leadingPriceAnswer(text);
     if (priceAnswer?.rest && !FILLER.test(priceAnswer.rest)) {
       const advanced = advanceVoiceSaleTransaction(prior, { ...input, text: priceAnswer.answer });
-      return PRODUCT_CHANGE.test(priceAnswer.rest) ? { ...advanced, state: null } : advanced;
+      return finish('LEADING_PRICE_WITH_FOLLOWING_TALK', PRODUCT_CHANGE.test(priceAnswer.rest) ? { ...advanced, state: null } : advanced);
     }
   }
 
@@ -178,7 +191,7 @@ export function advanceVoiceSaleTransaction(
   // keeps the allocation open for 15s (user rule 2026-10-19); it adds nothing.
   if (prior?.result?.intent === 'ALLOCATION' && !prior.captureSeen
     && at - Date.parse(prior.updatedAt) <= VOICE_SALE_PRICE_FOLLOWUP_MS && isNeutralTalk(text)) {
-    return { state: { ...prior, talkSince: prior.talkSince || input.recognizedAt }, emission: null };
+    return finish('NEUTRAL_TALK_NOT_APPENDED', { state: { ...prior, talkSince: prior.talkSince || input.recognizedAt }, emission: null });
   }
 
   const incoming = extractSaleFromTranscript(text, input.activeKeywords);
@@ -188,7 +201,7 @@ export function advanceVoiceSaleTransaction(
   const otherBuyer = Boolean(priorName && names.some((name) => nameKey(name) !== nameKey(priorName)));
   // Corrections and cancellations are handled by their own command path. They
   // must not reopen the canceled transaction as a new pending allocation.
-  if (saleInterruption(text)) return { state: null, emission: null };
+  if (saleInterruption(text)) return finish('CORRECTION_OR_CANCELLATION', { state: null, emission: null });
   const hard = PRODUCT_CHANGE.test(text);
   // "맞으시면 ㅇ 한번만. 하니님 드릴게요. 가격은 1.2" supplies its own
   // complete evidence; the conditional prelude supplies no missing sale fact.
@@ -210,6 +223,8 @@ export function advanceVoiceSaleTransaction(
     || (pricedAllocation && (newAllocation || standaloneAddress(text)))
     || differentPrice || !canContinueWith(text, incoming, Boolean(prior.result
       || (priorName && FOUR_POINT_CONFIRMATION_PATTERN.test(text)))))) {
+    boundaries.push(hard ? 'PRODUCT_CHANGED' : otherBuyer ? 'BUYER_CHANGED' : differentPrice ? 'PRICE_CHANGED'
+      : softBoundary(text) ? 'QUESTION_OR_CONDITIONAL' : 'CONTINUATION_REJECTED');
     prior = null;
     if (!repeatedAllocation) {
       precedingTransactionId = undefined;
@@ -221,8 +236,8 @@ export function advanceVoiceSaleTransaction(
   // recipient alive for a later price/capture. A different buyer can start anew.
   // A 4-step confirmation may start with any step ("캡처하세요." / "가격은 1.0.").
   const fourPointStep = !incoming && !FILLER.test(text) && canContinueWith(text, null, true);
-  if (!prior && (!incoming && !standaloneAddress(text) && !fourPointStep)) return { state: null, emission: null };
-  if (!prior && (softBoundary(text) || hard) && !incoming) return { state: null, emission: null };
+  if (!prior && (!incoming && !standaloneAddress(text) && !fourPointStep)) return finish('NO_VALID_SALE_STEP', { state: null, emission: null });
+  if (!prior && (softBoundary(text) || hard) && !incoming) return finish('QUESTION_OR_PRODUCT_BOUNDARY', { state: null, emission: null });
 
   const fragment = { eventId: input.eventId, text, recognizedAt: input.recognizedAt };
   const fragments = prior ? [...prior.fragments, fragment] : [fragment];
@@ -257,12 +272,12 @@ export function advanceVoiceSaleTransaction(
   const productChange = PRODUCT_CHANGE.exec(text);
   const closesTransaction = Boolean((productChange && extractSaleFromTranscript(text.slice(0, productChange.index)))
     || (result?.buyerNickname && names.some((name) => nameKey(name) !== nameKey(result.buyerNickname))));
-  return {
+  return finish(changed ? 'SALE_RESULT_EMITTED' : result ? 'SALE_FACTS_UNCHANGED' : 'WAITING_FOR_SALE_FACTS', {
     state: closesTransaction ? null : state,
     emission: changed && result ? {
       transactionId: state.id, startedAt: state.startedAt, evidenceText, result,
       continuation: Boolean(prior?.result), captureRequested: capturesNow && !Boolean(prior?.captureSeen),
       precedingTransactionId: state.precedingTransactionId,
     } : null,
-  };
+  });
 }

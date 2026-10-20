@@ -26,6 +26,7 @@ interface SalesSyncDependencies {
   active: () => boolean;
   /** 서버가 거절한 판매를 대신 저장할 형태(예: 검토 표시를 붙인 일반 판매). null 이면 예전처럼 재시도하거나 막아 둔다. */
   fallback?: (sale: SaleRecord, error: unknown) => SaleRecord | null;
+  diagnostic?: (event: { stage: string; sessionId?: string; detail: unknown }) => void;
 }
 
 // Survives provider/account remounts: a later writer for the same workspace
@@ -33,6 +34,13 @@ interface SalesSyncDependencies {
 const writesByScope = new Map<string, Promise<void>>();
 
 export class SalesSyncController {
+  private trace(stage: string, operation: SaleSyncOperation, error?: unknown) {
+    try { this.dependencies.diagnostic?.({ stage, sessionId: operation.sale?.sessionId, detail: {
+      saleId: operation.id, operationId: operation.token, kind: operation.kind, revision: operation.sale?.revision,
+      rawTranscript: operation.sale?.rawTranscript, amount: operation.sale?.amount, status: operation.sale?.status,
+      error: error instanceof Error ? { message: error.message, code: (error as any).code, retryable: (error as any).retryable } : error,
+    } }); } catch { /* Logging must not affect persistence. */ }
+  }
   records: SaleRecord[];
   private pending = new Map<string, SaleSyncOperation>();
   private changes = new Map<string, number>();
@@ -100,6 +108,7 @@ export class SalesSyncController {
         this.publishedState = state;
         this.dependencies.changed(this.records);
       }).catch((error) => {
+        for (const operation of this.pending.values()) this.trace('sale.local_save.failed', operation, error);
         if (this.dependencies.active()) this.dependencies.error(error instanceof Error ? error.message : '로컬 저장 실패');
       });
     }
@@ -136,6 +145,7 @@ export class SalesSyncController {
     };
     this.changes.set(next.id, ++this.generation);
     this.pending.set(next.id, { id: next.id, token: crypto.randomUUID(), kind: 'UPSERT', sale: next });
+    this.trace('sale.queued', this.pending.get(next.id)!);
     this.records = [next, ...this.records.filter((item) => item.id !== next.id)];
     this.publish();
     void this.flush();
@@ -209,6 +219,7 @@ export class SalesSyncController {
     };
     this.changes.set(next.id, ++this.generation);
     this.pending.set(next.id, { id: next.id, token: crypto.randomUUID(), kind: 'UPSERT', sale: next });
+    this.trace('sale.fallback.applied', this.pending.get(next.id)!, error);
     this.records = this.records.map((sale) => sale.id === next.id ? next : sale);
     return true;
   }
@@ -237,6 +248,7 @@ export class SalesSyncController {
       try {
         const write = async () => {
           if (!this.dependencies.active()) return;
+          this.trace('sale.save.started', operation);
           if (operation.kind === 'DELETE') await this.dependencies.remove(operation.id);
           else if (operation.sale) await this.dependencies.save(operation.sale);
         };
@@ -250,6 +262,7 @@ export class SalesSyncController {
           await next;
         } else await write();
       } catch (error) {
+        this.trace('sale.save.failed', operation, error);
         if (!this.dependencies.active()) return;
         if (this.replaceWithFallback(operation, error)) {
           await this.publish();
@@ -272,6 +285,7 @@ export class SalesSyncController {
         return; // The durable pending entry remains available for reconnect/retry.
       }
       if (!this.dependencies.active()) return; // An obsolete controller must not rewrite a restored outbox.
+      this.trace(this.pending.get(operation.id)?.token === operation.token ? 'sale.save.acknowledged' : 'sale.save.stale_acknowledgement', operation);
       if (this.pending.get(operation.id)?.token === operation.token) {
         // The snapshot may have started while this operation was pending. Its
         // ACK must protect the committed row (or deletion) from that snapshot.

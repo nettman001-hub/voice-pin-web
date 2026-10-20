@@ -104,6 +104,7 @@ export const LiveHomePage: React.FC = () => {
     transcriptLogs,
     totalSessionTranscriptCount,
     downloadSessionTranscripts,
+    downloadSttDiagnostics,
     recentCaptures,
     isVoiceEditing,
     editingFieldInfo,
@@ -154,6 +155,8 @@ export const LiveHomePage: React.FC = () => {
   const [showSessionChoice, setShowSessionChoice] = useState(false);
   const [isSessionStarting, setIsSessionStarting] = useState(false);
   const [startError, setStartError] = useState('');
+  const [diagnosticDownloading, setDiagnosticDownloading] = useState(false);
+  const [diagnosticDownloadError, setDiagnosticDownloadError] = useState('');
   const [hasTestStopped, setHasTestStopped] = useState(false);
   const startAttemptRef = React.useRef(0);
   const [isSalesRefreshing, setIsSalesRefreshing] = useState(false);
@@ -986,7 +989,21 @@ export const LiveHomePage: React.FC = () => {
                   </span>
                 )}
               </div>
-              <div className="flex items-center space-x-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={diagnosticDownloading}
+                  onClick={() => {
+                    setDiagnosticDownloading(true);
+                    setDiagnosticDownloadError('');
+                    void downloadSttDiagnostics().catch(() => setDiagnosticDownloadError('진단 로그를 내려받지 못했습니다. 다시 시도해 주세요.'))
+                      .finally(() => setDiagnosticDownloading(false));
+                  }}
+                  className="px-2 py-0.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-[10px] sm:text-[11px] font-bold border border-blue-200 disabled:opacity-40"
+                  title="이 회차의 STT 원본 응답·문장 조립·판매 판정·저장 결과를 JSON 파일 하나로 저장합니다."
+                >
+                  {diagnosticDownloading ? '진단 로그 준비 중…' : 'STT 진단 로그 저장'}
+                </button>
                 <button
                   onClick={() => downloadSessionTranscripts('txt')}
                   disabled={(totalSessionTranscriptCount || transcriptLogs.length) === 0}
@@ -1008,6 +1025,7 @@ export const LiveHomePage: React.FC = () => {
               </div>
             </div>
 
+            {diagnosticDownloadError && <p role="alert" className="mb-2 text-xs text-rose-700">{diagnosticDownloadError}</p>}
             <div className="space-y-1.5 max-h-[140px] sm:max-h-[160px] overflow-y-auto pr-1">
               {/* 실시간 타이핑 중인 중간 자막 표시 */}
               {effectiveInterimTranscript && (

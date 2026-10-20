@@ -8,6 +8,7 @@ import type { BatchConfirmResult, SaleHistoryRecord } from '../types/pendingSale
 
 import { heldAfterServerRejection, markServerReviewCompleted } from '../services/serverRejectedSale';
 import { SalesSyncController } from '../services/salesSyncController';
+import { sttDiagnostics } from '../services/sttDiagnostics';
 import { checkFourPointSaleCriteria } from '../services/salesExtractor';
 import type { PromiseDefaultRecord } from '../services/promiseDefaultService';
 import { createWorkspaceReadSync, workspaceReadsAvailable, type WorkspaceReadSync } from '../services/workspaceReadSync';
@@ -106,6 +107,8 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       },
       error: (message) => setSyncError(message),
+      diagnostic: event => sttDiagnostics.record({ workspaceId, sessionId: event.sessionId || '',
+        mode: runtime.isTest ? 'TEST' : 'PRODUCTION' }, event.stage, event.detail),
       // A voice sale the server will not accept is still saved (marked for review) instead of staying in this browser only.
       fallback: (sale, error) => isRemoteAuth ? heldAfterServerRejection(sale, error) : null,
       active: () => identityGenerationRef.current === generation && identityRef.current === workspaceId && controllerRef.current?.controller === controller,

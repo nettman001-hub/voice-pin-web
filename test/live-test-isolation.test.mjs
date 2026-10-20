@@ -27,6 +27,7 @@ const bundle = await build({ stdin: { contents: `
   export { SalesSyncController } from './src/services/salesSyncController';
   export { heldAfterServerRejection } from './src/services/serverRejectedSale';
   export { extractSaleFromTranscript } from './src/services/salesExtractor';
+  export { SttDiagnostics } from './src/services/sttDiagnostics';
 `, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, platform: 'node', format: 'esm',
   plugins: [{ name: 'deny-cloud', setup(builder) {
     builder.onResolve({ filter: /supabaseClient$/ }, args => ({ path: args.path, namespace: 'deny-cloud' }));
@@ -36,7 +37,7 @@ const bundle = await build({ stdin: { contents: `
     ` }));
   } }] });
 const { LocalTestDatabase, StorageService, createLocalTestRepositories, localOnlyAdapter, createCommentSyncService,
-  SimulatedCommentSource, prepareVoicePendingReview, SalesSyncController, heldAfterServerRejection, extractSaleFromTranscript } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+  SimulatedCommentSource, prepareVoicePendingReview, SalesSyncController, heldAfterServerRejection, extractSaleFromTranscript, SttDiagnostics } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 
 async function fixture(infer = async () => { throw new Error('No AI answer configured'); }, owner = crypto.randomUUID()) {
   const db = new LocalTestDatabase(owner);
@@ -111,12 +112,14 @@ test('a successful voice commit is idempotent and a changed retry cannot rewrite
 
 test('the existing sync controller marks rejected test sales for review using the operating fallback', async () => {
   const f = await fixture();
+  const diagnostics = new SttDiagnostics();
+  const diagnosticScope = { workspaceId: f.workspaceId, sessionId: f.session.id, mode: 'TEST' };
   const controller = new SalesSyncController({ scope: f.workspaceId,
     read: () => f.storage.getSalesLocalState(f.workspaceId), persist: state => f.storage.saveSalesLocalState(f.workspaceId, state),
     update: change => f.storage.updateSalesLocalState(f.workspaceId, change),
     save: record => f.repo.remote.saveSale(f.workspaceId, record), load: f.repo.storedSales,
     remove: id => f.repo.remote.deleteSale(f.workspaceId, id), changed() {}, error() {},
-    fallback: heldAfterServerRejection, active: () => true });
+    fallback: heldAfterServerRejection, active: () => true, diagnostic: diagnostics.sink(diagnosticScope) });
   controller.upsert(sale(f));
   await controller.flush();
   const saved = (await f.repo.storedSales())[0];
@@ -124,6 +127,12 @@ test('the existing sync controller marks rejected test sales for review using th
   assert.equal(saved.printStatus, 'NOT_REQUESTED');
   assert.equal(saved.purchaseRequestId, undefined);
   assert.match(saved.note, /서버|검토|확인/);
+  const report = await diagnostics.export(diagnosticScope);
+  assert.equal(report.scope.mode, 'TEST');
+  assert.ok(report.events.some(event => event.stage === 'sale.save.failed'));
+  assert.ok(report.events.some(event => event.stage === 'sale.fallback.applied'));
+  assert.equal(report.events.find(event => event.stage === 'sale.save.acknowledged').detail.saleId, saved.id);
+  assert.equal((await diagnostics.export({ ...diagnosticScope, mode: 'PRODUCTION' })).eventCount, 0);
   assert.equal(forbidden.length, 0);
 });
 

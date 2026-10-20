@@ -16,6 +16,7 @@ export class LocalSttService {
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
 
   private onTranscriptCallback: OnTranscriptCallback | null = null;
+  private diagnostics?: import('./sttDiagnostics.ts').SttDiagnosticSink;
   private onErrorCallback: OnErrorCallback | null = null;
   private onStatusCallback: OnStatusCallback | null = null;
   private statusListeners: Set<(status: LocalSttStatusPayload) => void> = new Set();
@@ -97,6 +98,7 @@ export class LocalSttService {
       });
 
       this.socket.on('stt:transcript', (data: LocalSttTranscriptEvent) => {
+        const diagnosticEventId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         // 이전 세션이나 종료된 세션의 지연된 전사는 폐기
         if (
           !this.isListening ||
@@ -106,12 +108,16 @@ export class LocalSttService {
           return;
         }
 
+        try { this.diagnostics?.({ stage: 'stt.response', detail: { responseId: diagnosticEventId,
+          provider: 'LOCAL_WHISPER', response: data } }); } catch { /* Independent of STT. */ }
+
         if (this.onTranscriptCallback && data.text) {
           this.onTranscriptCallback({
             text: data.text,
             isFinal: data.is_final ?? true,
             confidence: data.confidence ?? 0.9,
             provider: 'LOCAL_WHISPER' as any,
+            diagnosticEventId,
             isAbnormal: data.is_abnormal,
             abnormalReason: data.abnormal_reason
           });
@@ -206,7 +212,8 @@ export class LocalSttService {
     onTranscript: OnTranscriptCallback,
     onError: OnErrorCallback,
     onStatus?: OnStatusCallback,
-    model?: LocalSttModel | string
+    model?: LocalSttModel | string,
+    diagnostics?: import('./sttDiagnostics.ts').SttDiagnosticSink
   ): void {
     this.connect();
     this.clearStartupTimer();
@@ -214,6 +221,7 @@ export class LocalSttService {
     this.currentGeneration = generation;
     this.isListening = true;
     this.onTranscriptCallback = onTranscript;
+    this.diagnostics = diagnostics;
     this.onErrorCallback = onError;
     this.onStatusCallback = onStatus ?? null;
 
