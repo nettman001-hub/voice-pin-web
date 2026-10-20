@@ -30,6 +30,7 @@ function pageFixture(testMode = false) {
     activeSession: null,
     sales: [],
     refreshedSales: [],
+    commentStops: 0,
   };
   const same = (left, right) => left && right && left.length === right.length
     && left.every((value, i) => Object.is(value, right[i]));
@@ -61,7 +62,8 @@ function pageFixture(testMode = false) {
     '../../context/AuthContext': { useAuth: () => state.auth },
     '../../context/LiveContext': { useLive: () => state.live },
     '../../context/CommentCaptureContext': {
-      useCommentCapture: () => ({ liveComments: [], config: {}, isActive: false, isRunning: false }),
+      useCommentCapture: () => ({ liveComments: [], config: {}, isActive: false, isRunning: false,
+        stopCapture: () => { state.commentStops++; } }),
     },
     '../../context/SalesContext': { useSales: () => ({
       sales: state.sales,
@@ -102,7 +104,7 @@ function pageFixture(testMode = false) {
   });
   const module = { exports: {} };
   vm.runInNewContext(outputText, {
-    module, exports: module.exports, Uint8Array,
+    module, exports: module.exports, Uint8Array, Error,
     window: { location: { search: '' }, setTimeout: () => 1, clearTimeout() {} },
     require(name) { if (name.endsWith('WorkspaceRuntimeContext')) {
         const bound = runtimeFixture(dependencies);
@@ -390,4 +392,41 @@ test('test home resumes the same session and keeps sales detail and review navig
   const card = nodes(tree).find(node => node.type === 'link' && node.props.to === '/live-test/sales/sold');
   assert.equal(card.props.state.returnTo, '/live-test');
   assert.ok(nodes(tree).some(node => node.type === 'link' && node.props.to === '/live-test/sales/review'));
+});
+
+test('test home reports startup failure at the top and can cancel pending microphone startup', async () => {
+  const ctx = pageFixture(true);
+  ctx.state.live.sttMode = 'LOCAL';
+  let rejectStartup;
+  let stops = 0;
+  ctx.state.live.startListening = () => new Promise((_resolve, reject) => { rejectStartup = reject; });
+  ctx.state.live.stopListening = () => { stops++; };
+  ctx.state.product = { startNewSession: async () => ({ id: 'test-broadcast' }) };
+  nodes(ctx.settle()).find(node => node.type === 'button' && textContent(node) === '방송시작').props.onClick();
+  await tick();
+  const preparing = ctx.settle();
+  assert.ok(nodes(preparing).some(node => node.type === 'button' && textContent(node) === '준비 취소'));
+  assert.ok(nodes(preparing).some(node => node.props.role === 'status' && /방송 시작 준비 중/u.test(textContent(node))));
+  nodes(preparing).find(node => node.type === 'button' && textContent(node) === '준비 취소').props.onClick();
+  assert.equal(stops, 1);
+  rejectStartup(new Error('마이크 권한이 거부되었습니다.'));
+  await tick();
+  assert.equal(nodes(ctx.settle()).some(node => node.props.role === 'alert' && /마이크 권한/u.test(textContent(node))), false);
+
+  ctx.state.live.startListening = async () => { throw new Error('내 PC STT에 연결할 수 없습니다.'); };
+  nodes(ctx.settle()).find(node => node.type === 'button' && textContent(node) === '방송시작').props.onClick();
+  await tick();
+  const failed = ctx.settle();
+  assert.ok(nodes(failed).some(node => node.props.role === 'alert' && /내 PC STT에 연결할 수 없습니다/u.test(textContent(node))), textContent(failed).slice(0, 800));
+});
+
+test('test broadcast stop keeps comment capture enabled for a restart', () => {
+  const ctx = pageFixture(true);
+  let stops = 0;
+  ctx.state.live.isListening = true;
+  ctx.state.live.stopListening = () => { stops++; };
+  const button = nodes(ctx.settle()).find(node => node.type === 'button' && textContent(node) === '방송중지');
+  button.props.onClick();
+  assert.equal(stops, 1);
+  assert.equal(ctx.state.commentStops, 0);
 });

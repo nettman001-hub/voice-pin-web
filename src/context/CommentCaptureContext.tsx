@@ -421,7 +421,8 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     if (!isActive) return;
 
     if (isListening && serverStatus === 'CONNECTED') {
-      const username = configRef.current.tiktokUsername.trim();
+      // 가상 댓글은 실제 틱톡 계정 설정과 무관하게 생성된다.
+      const username = runtime.isTest ? 'live-test' : configRef.current.tiktokUsername.trim();
       if (!username) {
         setServerMessage('틱톡 ID 미설정 - "캡처 영역 & 단어 규칙" 페이지에서 설정하세요');
         return;

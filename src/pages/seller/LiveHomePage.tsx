@@ -153,6 +153,9 @@ export const LiveHomePage: React.FC = () => {
   const [showSellerSettingsModal, setShowSellerSettingsModal] = useState<boolean>(false);
   const [showSessionChoice, setShowSessionChoice] = useState(false);
   const [isSessionStarting, setIsSessionStarting] = useState(false);
+  const [startError, setStartError] = useState('');
+  const [hasTestStopped, setHasTestStopped] = useState(false);
+  const startAttemptRef = React.useRef(0);
   const [isSalesRefreshing, setIsSalesRefreshing] = useState(false);
   const [viewerModal, setViewerModal] = useState<{
     isOpen: boolean;
@@ -360,9 +363,19 @@ export const LiveHomePage: React.FC = () => {
   }, [effectiveComments]);
 
   const handleToggleListening = () => {
+    if (runtime.isTest && isSessionStarting) {
+      startAttemptRef.current += 1;
+      stopListening();
+      setIsSessionStarting(false);
+      setStartError('');
+      setHasTestStopped(false);
+      return;
+    }
     if (isListening) {
       stopListening();
-      stopCommentCapture();
+      if (!runtime.isTest) stopCommentCapture();
+      setStartError('');
+      if (runtime.isTest) setHasTestStopped(true);
       return;
     }
 
@@ -387,6 +400,9 @@ export const LiveHomePage: React.FC = () => {
   const handleStartWithSession = async (choice: 'CONTINUE' | 'NEW') => {
     if (isSessionStarting) return;
 
+    const attempt = ++startAttemptRef.current;
+    setStartError('');
+    setHasTestStopped(false);
     setIsSessionStarting(true);
     const captureMode = runtime.isTest ? 'MIC' : audioSourceMode;
     try {
@@ -413,6 +429,7 @@ export const LiveHomePage: React.FC = () => {
           }))();
 
       const [hasTabAudio, session] = await Promise.all([tabAudioReady, selectedSession]);
+      if (attempt !== startAttemptRef.current) return;
       if (!hasTabAudio) {
         alert('방송 탭 오디오 공유를 취소했거나 오디오를 선택하지 않았습니다. 다시 시도해 주세요.');
         return;
@@ -421,9 +438,13 @@ export const LiveHomePage: React.FC = () => {
       setShowSessionChoice(false);
       await startListening(captureMode, session.id);
     } catch (error) {
-      alert(error instanceof Error ? error.message : '청취를 시작하지 못했습니다. 다시 시도해 주세요.');
+      if (attempt === startAttemptRef.current) {
+        const message = error instanceof Error ? error.message : '청취를 시작하지 못했습니다. 다시 시도해 주세요.';
+        if (runtime.isTest) setStartError(message);
+        else alert(message);
+      }
     } finally {
-      setIsSessionStarting(false);
+      if (attempt === startAttemptRef.current) setIsSessionStarting(false);
     }
   };
 
@@ -445,6 +466,8 @@ export const LiveHomePage: React.FC = () => {
     }
   };
 
+  const testStartFailure = startError || (!isSessionStarting && !isListening && sttEngineStatus === 'ERROR' ? sttEngineMessage : '');
+
   return (
     <div className="p-3.5 sm:p-6 max-w-7xl mx-auto space-y-3 sm:space-y-5">
       {workflowProcessingError&&<p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">판매방식 처리를 재시도하고 있습니다. 원본 전사는 유지됩니다. {workflowProcessingError}</p>}
@@ -461,10 +484,10 @@ export const LiveHomePage: React.FC = () => {
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
               <h1 className="text-sm sm:text-base font-black text-slate-900 tracking-tight whitespace-nowrap">{runtime.isTest ? '라이브 청취 홈 테스트' : '라이브 청취 홈'}</h1>
-              <span className={`hidden sm:inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-bold whitespace-nowrap ${
-                isListening ? 'bg-rose-50 text-rose-600 border border-rose-200' : 'bg-slate-100 text-slate-600'
+              <span className={`${runtime.isTest ? 'inline-flex' : 'hidden sm:inline-flex'} px-1.5 py-0.5 rounded-full text-[9px] font-bold whitespace-nowrap ${
+                isListening ? 'bg-rose-50 text-rose-600 border border-rose-200' : isSessionStarting ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-600'
               }`}>
-                {isListening ? 'ON AIR' : '대기 중'}
+                {isListening ? 'ON AIR' : isSessionStarting ? '연결 준비 중' : '대기 중'}
               </span>
               {salesWorkflow && <span className="text-[10px] text-brand-700">판매방식 v{salesWorkflow.version} · {salesWorkflow.mode==='SHADOW'?'관찰':'적용'}</span>}
             </div>
@@ -530,18 +553,18 @@ export const LiveHomePage: React.FC = () => {
           <ListeningStopControl />
 
           <button
-            disabled={isSessionStarting}
+            disabled={isSessionStarting && !runtime.isTest}
             onClick={handleToggleListening}
             className={`h-8 min-w-16 px-2.5 rounded-lg font-black text-xs shadow-sm flex items-center justify-center gap-1.5 transition active:scale-95 ${
-              isListening
+              isListening || (runtime.isTest && isSessionStarting)
                 ? 'bg-slate-100 hover:bg-slate-200 text-rose-600 border border-rose-200'
                 : 'bg-gradient-to-r from-brand-600 via-brand-500 to-rose-500 text-white shadow-brand-500/20'
             }`}
           >
-            {isListening ? (
+            {isListening || (runtime.isTest && isSessionStarting) ? (
               <>
                 <Square className="w-3 h-3 fill-current" />
-                <span>{runtime.isTest ? '방송중지' : '중지'}</span>
+                <span>{runtime.isTest ? isSessionStarting ? '준비 취소' : '방송중지' : '중지'}</span>
               </>
             ) : (
               <>
@@ -552,6 +575,17 @@ export const LiveHomePage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {runtime.isTest && (isSessionStarting || isListening || testStartFailure || hasTestStopped) && (
+        <div role={testStartFailure ? 'alert' : 'status'}
+          className={`rounded-xl border px-3 py-2 text-sm font-semibold ${testStartFailure
+            ? 'border-rose-300 bg-rose-50 text-rose-800'
+            : isSessionStarting ? 'border-amber-300 bg-amber-50 text-amber-900'
+              : isListening ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-slate-300 bg-slate-50 text-slate-700'}`}>
+          {testStartFailure || (isSessionStarting ? '방송 시작 준비 중 · 마이크와 음성인식을 연결하고 있습니다.'
+            : isListening ? '방송 중 · 마이크와 음성인식이 연결되었습니다.' : '방송이 중지되었습니다.')}
+        </div>
+      )}
 
       <ListeningStopStatus />
 

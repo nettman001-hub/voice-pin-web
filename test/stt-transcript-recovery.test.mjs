@@ -82,6 +82,7 @@ function liveStatusFixture(mode, engine = 'CLOUD') {
   const module = { exports: {} };
   vm.runInNewContext(compiled, {
     module, ...refs, listeningGeneration: 1, requestedUserId: 'seller', mode, Uint8Array,
+    runtime: { isTest: false }, pendingStartupRef: { current: null }, startupFailureMessage: '',
     setSttEngineStatus: (value) => { state.status = value; },
     setSttEngineMessage: (value) => { state.message = value; },
     setIsListening: (value) => { state.listening = value; },

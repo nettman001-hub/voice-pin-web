@@ -317,6 +317,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const listeningGenerationRef = useRef(0);
   const activeListeningUserIdRef = useRef<string | null>(null);
   const startInFlightRef = useRef(false);
+  const pendingStartupRef = useRef<{ generation: number; finish: (ready: boolean) => void } | null>(null);
   const cloudSttStartTimeRef = useRef<number | null>(null);
   const activeCloudProviderRef = useRef<'DEEPGRAM' | 'SONIOX' | null>(null);
   const activeCloudSttConfigRef = useRef<SttConfig | null>(null);
@@ -2199,11 +2200,15 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!isAuthenticatedRef.current || !currentUserIdRef.current) {
       setSttEngineStatus('ERROR');
       setSttEngineMessage('로그인 후 라이브 청취를 시작해 주세요.');
+      if (runtime.isTest) throw new Error('로그인 후 라이브 청취를 시작해 주세요.');
       return;
     }
 
     // 빠른 이중 클릭이나 아직 닫히지 않은 공유 선택창으로 중복 시작하지 않는다.
-    if (startInFlightRef.current || isListeningRef.current) return;
+    if (startInFlightRef.current || isListeningRef.current) {
+      if (runtime.isTest) throw new Error('이전 방송의 연결 준비가 끝날 때까지 기다려 주세요.');
+      return;
+    }
 
     const requestedUserId = currentUserIdRef.current;
     const requestedAuthGeneration = authBoundaryGenerationRef.current;
@@ -2221,6 +2226,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       inputReleaseRef.current = releaseInput || null;
       appliedWorkflowRef.current = isRemoteAuth ? await sellerAnalysisApi.currentWorkflow(salesSessionId) : null;
+      if (listeningGenerationRef.current !== listeningGeneration || currentUserIdRef.current !== requestedUserId) return;
       setWorkflowProcessingError('');
       workflowDecisionsRef.current.clear();
       workflowFingerprintsRef.current.clear();workflowReplayRef.current=null;
@@ -2284,7 +2290,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       setCurrentInterimTranscript('');
       interimStreamChunkerRef.current.reset();
-      setIsListening(true);
+      // 테스트 댓글은 실제 마이크와 STT가 준비된 뒤에만 생성한다.
+      if (!runtime.isTest) setIsListening(true);
       setSttEngineStatus('CONNECTING');
       setSttEngineMessage(mode === 'TAB_AUDIO' ? '방송 탭 오디오 연결 확인 중' : '마이크 연결 확인 중');
 
@@ -2363,6 +2370,33 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // 2. 실시간 STT 엔진 시작
+      let startupFailureMessage = '';
+      const startupReady = runtime.isTest ? new Promise<boolean>((resolve) => {
+        const timeout = window.setTimeout(() => {
+          if (listeningGenerationRef.current !== listeningGeneration) return;
+          startupFailureMessage = sttModeRef.current === 'LOCAL'
+            ? '내 PC STT가 청취 준비를 완료하지 못했습니다. 댓글 도우미의 엔진 상태를 확인해 주세요.'
+            : '클라우드 음성인식 연결 시간이 초과되었습니다. 연결 상태를 확인하고 다시 시작해 주세요.';
+          listeningGenerationRef.current += 1;
+          activeListeningUserIdRef.current = null;
+          isListeningRef.current = false;
+          setIsListening(false);
+          setSttEngineStatus('ERROR');
+          setSttEngineMessage(startupFailureMessage);
+          audioCaptureService.stopCapture();
+          localSttService.stopListening();
+          deepgramService.stopLiveStream();
+          pendingStartupRef.current?.finish(false);
+        }, sttModeRef.current === 'LOCAL' ? 65_000 : 20_000);
+        pendingStartupRef.current = {
+          generation: listeningGeneration,
+          finish: (ready) => {
+            window.clearTimeout(timeout);
+            if (pendingStartupRef.current?.generation === listeningGeneration) pendingStartupRef.current = null;
+            resolve(ready);
+          },
+        };
+      }) : null;
       if (sttModeRef.current === 'LOCAL') {
         // [내 PC 무료 STT] faster-whisper 로컬 브리지 시작
         const activeLocalModel = localSttModel || storageService.getLocalSttModel();
@@ -2386,7 +2420,12 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             setSttEngineStatus(status);
             if (message) setSttEngineMessage(message);
+            if (runtime.isTest && status === 'CONNECTED') {
+              setIsListening(true);
+              pendingStartupRef.current?.finish(true);
+            }
             if (status === 'ERROR' || status === 'DISCONNECTED') {
+              startupFailureMessage = message || '내 PC STT 연결이 종료되었습니다.';
               listeningGenerationRef.current += 1;
               activeListeningUserIdRef.current = null;
               isListeningRef.current = false;
@@ -2396,6 +2435,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
               setAudioLevel(0);
               setWaveform(new Uint8Array(128));
               resetSonioxBusinessAccumulator();
+              pendingStartupRef.current?.finish(false);
             }
           },
           activeLocalModel
@@ -2416,6 +2456,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           audioCaptureService.stopCapture();
           isListeningRef.current = false;
           setIsListening(false);
+          if (runtime.isTest) throw new Error('관리자의 STT API 키 이용 승인이 필요합니다.');
           return;
         }
 
@@ -2425,6 +2466,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           audioCaptureService.stopCapture();
           isListeningRef.current = false;
           setIsListening(false);
+          if (runtime.isTest) throw new Error('관리자가 등록한 기본 STT API Key가 없습니다.');
           return;
         }
 
@@ -2465,7 +2507,14 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             setSttEngineStatus(status);
             if (message) setSttEngineMessage(message);
-            if (status === 'DISCONNECTED' || (status === 'ERROR' && mode === 'TAB_AUDIO')) {
+            if (runtime.isTest && status === 'CONNECTED') {
+              setIsListening(true);
+              pendingStartupRef.current?.finish(true);
+            }
+            const browserFallbackPending = runtime.isTest && mode === 'MIC' && status === 'ERROR'
+              && /^(Deepgram|Soniox) 연결/u.test(message || '');
+            if (status === 'DISCONNECTED' || (status === 'ERROR' && (mode === 'TAB_AUDIO' || (runtime.isTest && !browserFallbackPending)))) {
+              startupFailureMessage = message || '클라우드 음성인식 연결이 종료되었습니다.';
               listeningGenerationRef.current += 1;
               activeListeningUserIdRef.current = null;
               isListeningRef.current = false;
@@ -2478,11 +2527,21 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
               setAudioLevel(0);
               setWaveform(new Uint8Array(128));
               resetSonioxBusinessAccumulator();
+              pendingStartupRef.current?.finish(false);
             }
           }
         );
       }
+      if (startupReady && !await startupReady && startupFailureMessage) {
+        throw new Error(startupFailureMessage);
+      }
     } catch (err) {
+      const errorName = err && typeof err === 'object' && 'name' in err ? String(err.name) : '';
+      const failureMessage = runtime.isTest && errorName === 'NotAllowedError'
+        ? '마이크 권한이 거부되었습니다. 브라우저 주소창 왼쪽에서 마이크 사용을 허용해 주세요.'
+        : runtime.isTest && errorName === 'NotFoundError'
+          ? '사용할 수 있는 마이크가 없습니다. PC 마이크 연결을 확인해 주세요.'
+          : err instanceof Error ? err.message : '라이브 청취 시작 실패';
       // 이미 stop/logout으로 무효화된 시작의 늦은 실패는 현재 UI를 덮지 않는다.
       if (listeningGenerationRef.current === listeningGeneration) {
         console.error('[Live] 라이브 청취 시작 실패:', err);
@@ -2498,9 +2557,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localSttService.stopListening();
         deepgramService.stopLiveStream();
         setSttEngineStatus('ERROR');
-        setSttEngineMessage(err instanceof Error ? err.message : '라이브 청취 시작 실패');
+        setSttEngineMessage(failureMessage);
       }
+      if (runtime.isTest) throw new Error(failureMessage);
     } finally {
+      if (pendingStartupRef.current?.generation === listeningGeneration) pendingStartupRef.current.finish(false);
       if (!isListeningRef.current) { inputReleaseRef.current?.(); inputReleaseRef.current = null; }
       startInFlightRef.current = false;
     }
@@ -2617,6 +2678,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 라이브 청취 중지 (TAB_AUDIO는 파이프라인을 일시정지해 공유 연결을 유지한다)
   const stopListening = useCallback(() => {
+    pendingStartupRef.current?.finish(false);
     inputReleaseRef.current?.();
     inputReleaseRef.current = null;
     persistCurrentSessionTranscripts();
