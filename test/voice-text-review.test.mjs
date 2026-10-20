@@ -5,12 +5,13 @@ import {
   buildVoiceTextReviewPrompt, parseVoiceTextReviewAnswer, validateVoiceTextReviewAnswer,
   confirmVoiceTextReviewSale, VOICE_TEXT_REVIEW_INSTRUCTIONS, isVoiceTextReviewReady, shouldReviewVoiceSaleText,
 } from '../src/services/voicePendingReviewService.ts';
+import { applyVoicePendingReview } from '../src/services/voicePendingReviewCore.ts';
 
 // 2026-09-15 오후 9:41:10 KST, the seller's example broadcast.
 const kst = (hms) => new Date(`2026-09-15T${hms}+09:00`).toISOString();
 const sale = { id: 'held', sessionId: 'broadcast', source: 'WEB_VOICE', status: '보류', syncStatus: 'SYNCED',
-  buyerNickname: '케이치', amount: 0, revision: 1, recognizedAt: kst('21:41:10'),
-  rawTranscript: '케이치 언니는 연핑 넣어드릴게요' };
+  buyerNickname: '케이에이치', amount: 0, revision: 1, recognizedAt: kst('21:41:10'),
+  rawTranscript: '케이에이치 언니는 연핑 넣어드릴게요' };
 const comment = (id, hms, nickname, content, extra = {}) => ({ id, platformMessageId: id, sessionId: 'broadcast',
   nickname, content, capturedAt: kst(hms), ...extra });
 const comments = [
@@ -21,17 +22,25 @@ const comments = [
   comment('c4', '21:42:20', '너무늦은', '1분 넘게 뒤 댓글'),
 ];
 const logs = [
-  { id: 'l1', recognizedAt: kst('21:41:10'), text: '케이치 언니는 연핑 넣어드릴게요', isFinal: true },
+  { id: 'l1', recognizedAt: kst('21:41:10'), text: '케이에이치 언니는 연핑 넣어드릴게요', isFinal: true },
   { id: 'l2', recognizedAt: kst('21:41:26'), text: '가격은 1.5', isFinal: true },
   { id: 'l3', recognizedAt: kst('21:41:30'), text: '말하는 중', isFinal: false },
   { id: 'l4', recognizedAt: kst('21:42:30'), text: '1분 넘게 뒤 멘트', isFinal: true },
 ];
 
-test('the prompt is the seller\'s exact text plus the two lists from one minute either side, never JSON', () => {
+test('the prompt pins one sale ID, session, time and raw speech before the surrounding minute', () => {
   const prompt = koreanPeriod(buildVoiceTextReviewPrompt(sale, comments, logs));
   assert.ok(prompt.startsWith(VOICE_TEXT_REVIEW_INSTRUCTIONS));
   assert.equal(prompt.slice(VOICE_TEXT_REVIEW_INSTRUCTIONS.length), [
-    '', '', '',
+    '', '',
+    '<검토 대상 판매>',
+    '판매 ID: held',
+    '방송 회차 ID: broadcast',
+    `발화 시각: 2026. 9. 15. 오후 9:41:10 (${sale.recognizedAt})`,
+    `원본 발화: ${sale.rawTranscript}`,
+    '현재 연결된 구매자: 케이에이치',
+    '이 판매 하나의 구매자·가격만 답해라.',
+    '',
     '<고객댓글>',
     '시각\t닉네임\t멘트',
     '2026. 9. 15. 오후 9:40:13\t하늘\t예뻐요',
@@ -40,7 +49,7 @@ test('the prompt is the seller\'s exact text plus the two lists from one minute 
     '',
     '<판매자멘트>',
     '시각 멘트 ',
-    '[오후 9:41:10] 케이치 언니는 연핑 넣어드릴게요',
+    '[오후 9:41:10] 케이에이치 언니는 연핑 넣어드릴게요',
     '[오후 9:41:26] 가격은 1.5',
   ].join('\n'));
   assert.match(VOICE_TEXT_REVIEW_INSTRUCTIONS, /답변은 아래와 같은 식으로 한다\.\n닉네임: xxx\n가격: 000원$/u);
@@ -55,7 +64,7 @@ test('the answer "닉네임: KH / 가격: 15,000원" is read in the usual model 
 });
 
 test('a nickname from the comment list with a price confirms the sale for that comment account', () => {
-  const meta = validateVoiceTextReviewAnswer(sale, comments, '닉네임: KH\n가격: 15,000원', 2, 'task', 'fp');
+  const meta = validateVoiceTextReviewAnswer(sale, comments, '닉네임: KH\n가격: 15,000원', 2, 'task', 'fp', logs);
   assert.equal(meta.aiStatus, 'RESOLVED');
   assert.equal(meta.reviewMode, 'TEXT_PROMPT');
   assert.equal(meta.saleConfirmed, true);
@@ -64,7 +73,8 @@ test('a nickname from the comment list with a price confirms the sale for that c
   assert.equal(meta.candidateAmount, 15000);
   assert.equal(meta.candidatePurchaseRequestId, 'broadcast:c2');
 
-  const confirmed = confirmVoiceTextReviewSale({ ...sale, revision: 2, aiVerification: meta }, kst('21:42:11'));
+  const applied = applyVoicePendingReview(sale, comments, logs, '', meta, null);
+  const confirmed = confirmVoiceTextReviewSale(applied, kst('21:42:11'));
   assert.equal(confirmed.status, '확정');
   assert.equal(confirmed.buyerNickname, 'KH');
   assert.equal(confirmed.amount, 15000);
@@ -76,7 +86,8 @@ test('a nickname from the comment list with a price confirms the sale for that c
 });
 
 test('a nickname spelled differently by the model still finds the comment account; spaces are ignored', () => {
-  const meta = validateVoiceTextReviewAnswer(sale, [...comments, comment('c5', '21:41:00', '성훈 맘', '저요')],
+  const named = { ...sale, buyerNickname: '성훈 맘', rawTranscript: '성훈 맘 언니 1.2 넣어드릴게요' };
+  const meta = validateVoiceTextReviewAnswer(named, [...comments, comment('c5', '21:41:00', '성훈 맘', '저요')],
     '닉네임: 성훈맘\n가격: 12,000원', 1, 'task', 'fp');
   assert.equal(meta.aiStatus, 'RESOLVED');
   assert.equal(meta.candidateBuyer.nickname, '성훈 맘');
@@ -91,7 +102,7 @@ test('an unknown nickname, an empty answer or a non-text review never confirms',
   const empty = validateVoiceTextReviewAnswer(sale, comments, '모르겠습니다', 1, 'task', 'fp');
   assert.equal(empty.aiStatus, 'INSUFFICIENT_DATA');
   assert.equal(confirmVoiceTextReviewSale({ ...sale, aiVerification: empty }), null);
-  const resolved = validateVoiceTextReviewAnswer(sale, comments, '닉네임: KH\n가격: 15,000원', 1, 'task', 'fp');
+  const resolved = validateVoiceTextReviewAnswer(sale, comments, '닉네임: KH\n가격: 15,000원', 1, 'task', 'fp', logs);
   assert.equal(confirmVoiceTextReviewSale({ ...sale, aiVerification: { ...resolved, reviewMode: undefined } }), null);
   assert.equal(confirmVoiceTextReviewSale({ ...sale, syncStatus: 'PENDING', aiVerification: resolved }), null);
 });

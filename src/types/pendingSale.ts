@@ -58,6 +58,21 @@ export interface AiVerificationMeta {
   errorMessage?: string;
   /** TEXT_PROMPT: the seller's plain-text prompt; a verified answer confirms the sale. */
   reviewMode?: 'TEXT_PROMPT';
+  /** Server/test validation of the exact sale, commenter and bounded price speech. */
+  textReviewEvidence?: {
+    version: 1;
+    saleId: string;
+    sessionId: string;
+    recognizedAt: string;
+    rawTranscript: string;
+    buyerNickname: string;
+    buyerId: string;
+    purchaseRequestId: string;
+    amount: number;
+    priceQuote: string;
+    priceTranscript: string;
+    appliedRevision?: number;
+  };
 }
 
 export interface SaleHistoryRecord {
