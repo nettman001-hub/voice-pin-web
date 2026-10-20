@@ -1,3 +1,4 @@
+import { runtimeFixture } from './runtime-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -72,7 +73,7 @@ function componentFixture(relativePath, imports, globals = {}) {
   const module = { exports: {} };
   vm.runInNewContext(compiled, {
     module, exports: module.exports, console,
-    require(name) { assert.ok(name in modules, `Unexpected import: ${name}`); return modules[name]; },
+    require(name) { if (name.endsWith('WorkspaceRuntimeContext')) return runtimeFixture(modules);  assert.ok(name in modules, `Unexpected import: ${name}`); return modules[name]; },
     ...globals,
   }, { filename: relativePath });
   return {

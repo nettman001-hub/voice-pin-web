@@ -1,12 +1,15 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from '../../context/WorkspaceRuntimeContext';
 import React, { useState } from 'react';
 import type { SaleRecord } from '../../types/live';
 import type { ConfirmedBuyerCandidate } from '../../types/confirmedBuyer';
 import { useSales } from '../../context/SalesContext';
-import { useAuth } from '../../context/AuthContext';
+
 import { applyConfirmedBuyer } from '../../services/confirmedBuyerResolver';
-import { confirmedBuyerAliases } from '../../services/confirmedBuyerAliases';
+
 
 export const ConfirmedBuyerCard: React.FC<{ sale: SaleRecord }> = ({ sale }) => {
+  const runtime = useWorkspaceRuntime();
+  const { confirmedBuyerAliases } = runtime;
   const { updateSale } = useSales();
   const { workspaceId } = useAuth();
   const [message, setMessage] = useState('');

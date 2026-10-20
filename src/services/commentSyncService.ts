@@ -1,5 +1,5 @@
-import { productSalesApi } from './productSalesApi';
-import { storageService } from './storageService';
+import { productSalesApi as productionProductApi } from './productSalesApi';
+import { storageService as productionStorage } from './storageService';
 import { isTemporarySessionId } from './storageService';
 import type { CommentRecord } from '../types/comment';
 
@@ -14,23 +14,24 @@ export interface QueuedCloudComment {
   ingestSequence: number;
 }
 
+export function createCommentSyncService(storageService = productionStorage, productSalesApi = productionProductApi) {
 const flights = new Map<string, Promise<void>>();
 const key = (comment: QueuedCloudComment) => `${comment.sessionId}:${comment.platformMessageId}`;
 
-export function enqueueCloudComment(workspaceId: string, comment: QueuedCloudComment) {
+function enqueueCloudComment(workspaceId: string, comment: QueuedCloudComment) {
   const queue = storageService.getCommentOutbox<QueuedCloudComment>(workspaceId);
   if (!queue.some((item) => key(item) === key(comment))) {
     storageService.saveCommentOutbox(workspaceId, [...queue, comment]);
   }
 }
 
-export function promoteCommentOutbox(workspaceId: string, from: string, to: string) {
+function promoteCommentOutbox(workspaceId: string, from: string, to: string) {
   if (!isTemporarySessionId(from) || isTemporarySessionId(to)) return;
   const queue = storageService.getCommentOutbox<QueuedCloudComment>(workspaceId);
   storageService.saveCommentOutbox(workspaceId, queue.map((item) => item.sessionId === from ? { ...item, sessionId: to } : item));
 }
 
-export function flushPendingComments(workspaceId: string): Promise<void> {
+function flushPendingComments(workspaceId: string): Promise<void> {
   const existing = flights.get(workspaceId);
   if (existing) return existing;
   const report = (failed: boolean) => {
@@ -80,3 +81,8 @@ async function drain(workspaceId: string) {
     if (sent.size !== batch.length) throw new Error('댓글 저장 확인을 기다리고 있습니다. 연결 후 다시 전송합니다.');
   }
 }
+
+return { enqueueCloudComment, promoteCommentOutbox, flushPendingComments };
+}
+
+export const { enqueueCloudComment, promoteCommentOutbox, flushPendingComments } = createCommentSyncService();

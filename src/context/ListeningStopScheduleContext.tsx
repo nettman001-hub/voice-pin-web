@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { useAuth } from './AuthContext';
+import { useRuntimeAuth as useAuth } from './WorkspaceRuntimeContext';
 import { useLive } from './LiveContext';
 import { useCommentCapture } from './CommentCaptureContext';
 import {

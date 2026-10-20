@@ -1,3 +1,4 @@
+import { runtimeFixture } from './runtime-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -20,6 +21,7 @@ function loadModule(relativePath, dependencies = {}) {
     filename: relativePath,
   });
   execute((name) => {
+    if (name.endsWith('WorkspaceRuntimeContext')) return runtimeFixture(dependencies);
     if (!(name in dependencies)) throw new Error(`Unexpected dependency: ${name}`);
     return dependencies[name];
   }, module, module.exports);

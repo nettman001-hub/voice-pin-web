@@ -1,7 +1,7 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from '../../context/WorkspaceRuntimeContext';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useAuth } from '../../context/AuthContext';
-import { aiSettingsApi } from '../../services/aiSettingsApi';
+
 import type { SaleRecord } from '../../types/live';
 import type { AiTask, AiTaskAttempt } from '../../types/aiTask';
 
@@ -156,6 +156,8 @@ export const AiAttemptConversation: React.FC<{ attempt: AiTaskAttempt }> = ({ at
 };
 
 export const SaleAiConversationView: React.FC<{ entry: ConversationEntry }> = ({ entry }) => {
+  const runtime = useWorkspaceRuntime();
+  const { aiSettingsApi } = runtime;
   const [tasks, setTasks] = useState<AiTask[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [limit, setLimit] = useState(PAGE_SIZE);

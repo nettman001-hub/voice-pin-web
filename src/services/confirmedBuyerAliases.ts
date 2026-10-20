@@ -1,6 +1,6 @@
 import type { ConfirmedBuyerAlias } from '../types/confirmedBuyer';
 import { normalizeNickname } from './nicknameMatcher';
-import { remoteWorkspaceService } from './remoteWorkspaceService';
+import { remoteWorkspaceService as productionRemote } from './remoteWorkspaceService';
 
 const namespace = 'confirmed_buyer_aliases';
 const storageKey = (workspaceId: string) => `voicecap_${namespace}_${workspaceId}`;
@@ -16,7 +16,8 @@ function mergeAliases(...lists: ConfirmedBuyerAlias[][]): ConfirmedBuyerAlias[] 
   return [...merged.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 500);
 }
 
-export const confirmedBuyerAliases = {
+export function createConfirmedBuyerAliases(remoteWorkspaceService = productionRemote, localStorage: Storage = globalThis.localStorage) {
+return {
   get(workspaceId?: string | null): ConfirmedBuyerAlias[] {
     if (!workspaceId) return [];
     try {
@@ -39,3 +40,6 @@ export const confirmedBuyerAliases = {
     await remoteWorkspaceService.saveWorkspaceSettings(workspaceId, namespace, aliases);
   },
 };
+}
+
+export const confirmedBuyerAliases = createConfirmedBuyerAliases();

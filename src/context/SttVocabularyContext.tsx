@@ -1,7 +1,6 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from './WorkspaceRuntimeContext';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { useAuth } from './AuthContext';
-import { storageService } from '../services/storageService';
-import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
+
 import { isSupabaseConfigured } from '../services/supabaseClient';
 import { normalizeSttVocabulary } from '../services/sttVocabularyService';
 
@@ -23,6 +22,8 @@ interface SttVocabularyContextValue {
 const SttVocabularyContext = createContext<SttVocabularyContextValue | null>(null);
 
 export const SttVocabularyProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const runtime = useWorkspaceRuntime();
+  const { storageService, remoteWorkspaceService } = runtime;
   const { workspaceId } = useAuth();
   const [state, setState] = useState<VocabularyState>({
     workspaceId: null, words: [], isLoading: false, saveError: null,

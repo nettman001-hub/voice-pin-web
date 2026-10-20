@@ -14,6 +14,7 @@ import {
 import { Link } from 'react-router-dom';
 
 export interface SellerSettingsModalProps {
+  isTest?: boolean;
   isOpen: boolean;
   onClose: () => void;
   isDemoActive: boolean;
@@ -31,6 +32,7 @@ export interface SellerSettingsModalProps {
 }
 
 export const SellerSettingsModal: React.FC<SellerSettingsModalProps> = ({
+  isTest = false,
   isOpen,
   onClose,
   isDemoActive,
@@ -89,7 +91,7 @@ export const SellerSettingsModal: React.FC<SellerSettingsModalProps> = ({
         {/* 모달 본문 스크롤 영역 */}
         <div className="p-5 space-y-4 overflow-y-auto flex-1">
           {/* 핵심: 실제 판매 데모보기 카드 */}
-          <div className="rounded-2xl border-2 border-purple-200 bg-gradient-to-br from-purple-50/80 via-indigo-50/50 to-white p-4 sm:p-5 shadow-xs">
+          {!isTest && <div className="rounded-2xl border-2 border-purple-200 bg-gradient-to-br from-purple-50/80 via-indigo-50/50 to-white p-4 sm:p-5 shadow-xs">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-start space-x-3">
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center flex-shrink-0 shadow-sm shadow-purple-500/30">
@@ -159,6 +161,7 @@ export const SellerSettingsModal: React.FC<SellerSettingsModalProps> = ({
             </div>
           </div>
 
+          }
           {/* 방송 음성 입력 방식 설정 */}
           <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
             <div className="flex items-center justify-between">
@@ -173,6 +176,7 @@ export const SellerSettingsModal: React.FC<SellerSettingsModalProps> = ({
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
+                disabled={isTest || isListening}
                 onClick={() => onChangeAudioSourceMode?.('TAB_AUDIO')}
                 className={`p-2.5 rounded-xl border text-left transition flex items-center space-x-2 ${
                   audioSourceMode === 'TAB_AUDIO'

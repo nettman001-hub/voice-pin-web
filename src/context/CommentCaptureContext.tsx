@@ -1,16 +1,13 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from './WorkspaceRuntimeContext';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
-import { useAuth } from './AuthContext';
+
 import { useLive } from './LiveContext';
-import { storageService, isTemporarySessionId } from '../services/storageService';
-import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
-import { enqueueCloudComment, flushPendingComments, promoteCommentOutbox, QueuedCloudComment } from '../services/commentSyncService';
+import { isTemporarySessionId } from '../services/storageService';
+
+import { QueuedCloudComment } from '../services/commentSyncService';
 import { useProductSales } from './ProductSalesContext';
-import {
-  commentDedupeKey,
-  commentStreamService,
-  StreamedComment
-} from '../services/commentStreamService';
+import { commentDedupeKey, StreamedComment } from '../services/commentStreamService';
 import type { CommentStreamStatus } from '../services/commentStreamService';
 import { CommentCaptureConfig, CommentRecord, DEFAULT_COMMENT_CAPTURE_CONFIG, DEFAULT_COMMENT_SERVER_URL } from '../types/comment';
 import { commentWithdrawsPurchase, purchaseRequestFromComment } from '../services/purchaseFirstSales';
@@ -42,6 +39,8 @@ interface CommentCaptureContextType {
 const CommentCaptureContext = createContext<CommentCaptureContextType | undefined>(undefined);
 
 export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const runtime = useWorkspaceRuntime();
+  const { storageService, remoteWorkspaceService, commentStreamService, enqueueCloudComment, flushPendingComments, promoteCommentOutbox } = runtime;
   const { workspaceId } = useAuth();
   const { isListening, currentSessionId, transcriptLogs } = useLive();
   const { activeSession, feed, pollFeed } = useProductSales();
@@ -412,6 +411,10 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     // 과거 버전에서 저장된 사설 IP 주소가 있어도 판매자에게 수동 수정을 요구하지 않는다.
     commentStreamService.connect(DEFAULT_COMMENT_SERVER_URL);
   }, [isActive]);
+
+  useEffect(() => {
+    if (runtime.isTest && (!isListening || !isActive)) commentStreamService.stopCollecting();
+  }, [isListening, isActive]);
 
   // 수집 시작 조건 충족 시 틱톡 수집 요청: 토글 ON + 라이브 청취 중 + 서버 소켓 연결됨
   useEffect(() => {

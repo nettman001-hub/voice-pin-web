@@ -1,3 +1,5 @@
+import * as voiceSaleCommitEvidence from '../src/services/voiceSaleCommitEvidence.ts';
+import { runtimeFixture } from './runtime-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -12,7 +14,7 @@ import * as workspaceReadSync from '../src/services/workspaceReadSync.ts';
 
 const quiet = { log() {}, warn() {}, error() {} };
 function load(path, dependencies = {}, globals = {}) {
-  dependencies = { '../../../../src/services/salesWorkflowEngine.ts': {}, './sellerWorkflow.ts': {}, '../utils/textCleaner': { cleanMessageBody: (t) => t }, ...dependencies };
+  dependencies = { '../../../../src/services/voiceSaleCommitEvidence.ts': voiceSaleCommitEvidence, '../../../../src/services/salesWorkflowEngine.ts': {}, './sellerWorkflow.ts': {}, '../utils/textCleaner': { cleanMessageBody: (t) => t }, ...dependencies };
   const source = fs.readFileSync(new URL(path, import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
@@ -20,7 +22,7 @@ function load(path, dependencies = {}, globals = {}) {
   const module = { exports: {} };
   vm.runInNewContext(outputText, {
     module, exports: module.exports, console: quiet, crypto: globalThis.crypto, Event, ...globals,
-    require(name) { if (!(name in dependencies)) throw new Error(`Unexpected import ${name}`); return dependencies[name]; },
+    require(name) { if (name.endsWith('WorkspaceRuntimeContext')) return runtimeFixture(dependencies);  if (!(name in dependencies)) throw new Error(`Unexpected import ${name}`); return dependencies[name]; },
   }, { filename: path });
   return module.exports;
 }

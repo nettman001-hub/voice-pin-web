@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime } from '../../context/WorkspaceRuntimeContext';
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -24,6 +25,7 @@ interface MobileTabItem {
 }
 
 export const MobileBottomNav: React.FC = () => {
+  const runtime = useWorkspaceRuntime();
   const { user, isAuthenticated } = useAuth();
   const { isListening } = useLive();
   const location = useLocation();

@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from '../../context/WorkspaceRuntimeContext';
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
@@ -15,11 +16,13 @@ import {
   ArrowLeft,
   Sparkles
 } from 'lucide-react';
-import { productSalesApi } from '../../services/productSalesApi';
+
 import { LiveSession } from '../../types/productSales';
 import { formatSessionDisplay } from '../../utils/sessionFormatter';
 
 export const SalesReviewPage: React.FC = () => {
+  const runtime = useWorkspaceRuntime();
+  const { productSalesApi } = runtime;
   const { sales, confirmBatchSales, updateSale, deleteSale } = useSales();
   const { currentSessionId } = useLive();
   const navigate = useNavigate();
@@ -254,7 +257,7 @@ export const SalesReviewPage: React.FC = () => {
 
                     {sale.captureImageUrls && sale.captureImageUrls.length > 0 && (
                       <Link
-                        to={`/sales/${sale.id}/capture`}
+                        to={runtime.path(`/sales/${sale.id}/capture`)}
                         className="p-2 rounded-xl bg-white border border-slate-200 text-cyan-600 hover:bg-slate-50 active:scale-95"
                         title="캡처 이미지 보기"
                       >

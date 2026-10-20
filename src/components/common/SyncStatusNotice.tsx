@@ -1,10 +1,11 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from '../../context/WorkspaceRuntimeContext';
 import React, { useEffect, useRef, useState } from 'react';
 import { useSales } from '../../context/SalesContext';
-import { storageService } from '../../services/storageService';
-import { flushPendingComments } from '../../services/commentSyncService';
-import { useAuth } from '../../context/AuthContext';
+
 
 export const SyncStatusNotice: React.FC = () => {
+  const runtime = useWorkspaceRuntime();
+  const { storageService, flushPendingComments } = runtime;
   const { syncError, retrySync } = useSales();
   const { workspaceId } = useAuth();
   const [commentError, setCommentError] = useState(false);
@@ -56,8 +57,8 @@ export const SyncStatusNotice: React.FC = () => {
   return (
     <div role="status" className="m-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex flex-wrap items-center gap-3">
       {(storageError || syncError || commentError) && <span>{storageError
-        ? '이 기기에 데이터를 안전하게 보관하지 못했습니다. 클라우드 저장 완료 전에는 창을 닫지 말고 저장공간을 확보해 주세요.'
-        : syncError || '댓글 클라우드 저장 대기 중입니다. 연결되면 자동으로 재전송합니다.'}</span>}
+        ? (runtime.isTest ? '테스트 DB에 기록을 보관하지 못했습니다. 저장 공간을 확인해 주세요.' : '이 기기에 데이터를 안전하게 보관하지 못했습니다. 클라우드 저장 완료 전에는 창을 닫지 말고 저장공간을 확보해 주세요.')
+        : syncError || (runtime.isTest ? '댓글 테스트 DB 저장을 기다리고 있습니다.' : '댓글 클라우드 저장 대기 중입니다. 연결되면 자동으로 재전송합니다.')}</span>}
       <button type="button" disabled={isRetrying} onClick={() => { void retry(); }}
         className="font-bold underline disabled:cursor-wait disabled:opacity-60">
         {isRetrying ? '저장 재시도 중…' : '저장 재시도'}

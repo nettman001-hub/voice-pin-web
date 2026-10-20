@@ -1,3 +1,4 @@
+import { runtimeFixture } from './runtime-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -77,7 +78,7 @@ function fixture(initial = record(), options = {}) {
   const module = { exports: {} };
   vm.runInNewContext(outputText, {
     module, exports: module.exports, console,
-    require(name) { assert.ok(name in imports, `Unexpected import ${name}`); return imports[name]; },
+    require(name) { if (name.endsWith('WorkspaceRuntimeContext')) return runtimeFixture(imports);  assert.ok(name in imports, `Unexpected import ${name}`); return imports[name]; },
     alert: (message) => alerts.push(message), setTimeout: () => 1,
     window: { scrollTo() {}, requestAnimationFrame: () => 1, cancelAnimationFrame() {} },
     document: { scrollingElement: { scrollTop: 0 } },

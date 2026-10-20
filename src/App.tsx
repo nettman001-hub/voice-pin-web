@@ -1,3 +1,4 @@
+import { WorkspaceRuntimeBoundary, useWorkspaceRuntime } from './context/WorkspaceRuntimeContext';
 import React, { useState, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -62,6 +63,7 @@ const SellerLogicAnalysis04ArgonPage = lazy(() => import('./pages/admin/SellerLo
 const SellerLogicOpusPage = lazy(() => import('./pages/admin/SellerLogicOpusPage'));
 
 const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const runtime = useWorkspaceRuntime();
   const { isAuthenticated } = useAuth();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -120,6 +122,10 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         )}
         <main className={`flex-1 overflow-x-hidden min-h-[calc(100vh-4rem)] ${showNav ? 'pb-20 lg:pb-0' : ''}`}>
           {showNav && <SyncStatusNotice />}
+          {runtime.isTest && <div role="status" className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            <strong>라이브 청취 홈 테스트 · 이 PC에만 저장</strong>
+            <p className="mt-1 text-xs">방송시작을 누르고 가상 댓글을 보면서 PC 마이크로 말씀하세요. STT·AI는 운영 설정을 사용하며 호출 비용이 발생할 수 있습니다. 전표는 가상 출력됩니다.</p>
+          </div>}
           {children}
         </main>
       </div>
@@ -180,6 +186,7 @@ export const App: React.FC = () => {
     <BrowserRouter>
       <ScrollToTop />
       <AuthProvider>
+        <WorkspaceRuntimeBoundary>
         <SaleAiConversationProvider>
         <SalesProvider>
           <CommerceProvider>
@@ -205,6 +212,12 @@ export const App: React.FC = () => {
                         <Route element={<ProtectedRoute />}>
                           {/* 2. 판매자 핵심 기능 (PG-006 ~ PG-013) */}
                           <Route path="/live" element={<LiveHomePage />} />
+                          <Route path="/live-test" element={<LiveHomePage />} />
+                          <Route path="/live-test/sales" element={<SalesListPage />} />
+                          <Route path="/live-test/sales/review" element={<SalesReviewPage />} />
+                          <Route path="/live-test/sales/:id" element={<SalesDetailPage />} />
+                          <Route path="/live-test/sales/:id/capture" element={<CaptureViewerModal />} />
+                          <Route path="/live-test/comments" element={<CommentRecordsPage />} />
                           <Route path="/seller/product-sales" element={<ProductSalesPage />} />
                           <Route path="/sales/product" element={<ProductSalesPage />} />
                           <Route path="/stt-vocabulary" element={<SttVocabularyPage />} />
@@ -278,6 +291,7 @@ export const App: React.FC = () => {
           </CommerceProvider>
         </SalesProvider>
         </SaleAiConversationProvider>
+        </WorkspaceRuntimeBoundary>
       </AuthProvider>
     </BrowserRouter>
   );

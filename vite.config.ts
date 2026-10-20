@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
@@ -7,6 +7,35 @@ export default defineConfig({
     {
       name: 'local-api-ai-models-proxy',
       configureServer(server) {
+        // Server-only credentials are not injected into the browser bundle.
+        const env = loadEnv(server.config.mode, server.config.root, '');
+        for (const key of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_PUBLISHABLE_KEY', 'DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY']) {
+          if (!process.env[key] && env[key]) process.env[key] = env[key];
+        }
+        server.middlewares.use('/api/live-test-inference', async (req, res) => {
+          try {
+            const chunks: Buffer[] = [];
+            let bytes = 0;
+            for await (const chunk of req) {
+              bytes += chunk.length;
+              if (bytes > 1_000_000) { res.statusCode = 413; res.end(); return; }
+              chunks.push(Buffer.from(chunk));
+            }
+            const body = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+            const { default: handler } = await import('./api/live-test-inference.ts');
+            const response = {
+              statusCode: 200,
+              setHeader(key: string, value: string) { res.setHeader(key, value); return this; },
+              status(code: number) { this.statusCode = code; return this; },
+              json(value: unknown) { res.statusCode = this.statusCode; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(value)); },
+            };
+            await handler({ method: req.method, headers: req.headers, body }, response);
+          } catch {
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ ok: false, error: '테스트 AI 요청을 처리하지 못했습니다.' }));
+          }
+        });
         server.middlewares.use('/api/ai-models', async (req, res) => {
           try {
             const urlObj = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);

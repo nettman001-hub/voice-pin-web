@@ -1,11 +1,10 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from '../../context/WorkspaceRuntimeContext';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
+
 import { useCommentCapture } from '../../context/CommentCaptureContext';
 import { useLive } from '../../context/LiveContext';
-import { productSalesApi } from '../../services/productSalesApi';
-import { remoteWorkspaceService } from '../../services/remoteWorkspaceService';
-import { storageService } from '../../services/storageService';
+
 import { CommentRecord } from '../../types/comment';
 import { SellerTranscriptRecord } from '../../types/live';
 import { LiveSession } from '../../types/productSales';
@@ -24,6 +23,8 @@ import {
 } from 'lucide-react';
 
 export const CommentRecordsPage: React.FC = () => {
+  const runtime = useWorkspaceRuntime();
+  const { storageService, productSalesApi, remoteWorkspaceService } = runtime;
   const { workspaceId, user } = useAuth();
   const recordWorkspaceId = workspaceId || user?.id || '';
   const ownerRef = useRef(recordWorkspaceId);

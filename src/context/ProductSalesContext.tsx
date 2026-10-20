@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from './WorkspaceRuntimeContext';
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
@@ -11,13 +12,11 @@ import {
   ImageKind,
   LiveComment,
 } from '../types/productSales';
-import { productSalesApi } from '../services/productSalesApi';
-import { storageService } from '../services/storageService';
-import { resolvePrivateImageUrl } from '../services/remoteWorkspaceService';
-import { createNumberProductImage, uploadProductImageDataUrl } from '../services/productImageService';
-import { useAuth } from './AuthContext';
+
+import { createNumberProductImage } from '../services/productImageService';
+
 import { useSales } from './SalesContext';
-import { flushPendingComments } from '../services/commentSyncService';
+
 import type { SaleRecord } from '../types/live';
 import {
   VoiceSaleCandidate,
@@ -71,7 +70,7 @@ interface ProductSalesContextType {
 const ProductSalesContext = createContext<ProductSalesContextType | null>(null);
 
 const SALES_FEED_POLL_INTERVAL_MS = 2_000;
-const SALES_FEED_POLL_PATHS = new Set(['/live']);
+const SALES_FEED_POLL_PATHS = new Set(['/live', '/live-test']);
 
 function isSameProduct(left: ProductSalesProduct | null, right: ProductSalesProduct | null) {
   if (left === right) return true;
@@ -89,7 +88,7 @@ function isSameProduct(left: ProductSalesProduct | null, right: ProductSalesProd
     && left.salesRevision === right.salesRevision;
 }
 
-async function hydrateProduct(product: ProductSalesProduct | null): Promise<ProductSalesProduct | null> {
+async function hydrateProductWithResolver(product: ProductSalesProduct | null, resolvePrivateImageUrl: (path: string) => Promise<string>): Promise<ProductSalesProduct | null> {
   if (!product) return null;
   const imagePath = product.imagePath || product.imageUrl || '';
   return {
@@ -100,6 +99,9 @@ async function hydrateProduct(product: ProductSalesProduct | null): Promise<Prod
 }
 
 export const ProductSalesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const runtime = useWorkspaceRuntime();
+  const { storageService, productSalesApi, resolvePrivateImageUrl, uploadProductImageDataUrl, flushPendingComments } = runtime;
+  const hydrateProduct = useCallback((product: ProductSalesProduct | null) => hydrateProductWithResolver(product, resolvePrivateImageUrl), [resolvePrivateImageUrl]);
   const { isAuthenticated, user, workspaceId } = useAuth();
   const { applyCommittedSales } = useSales();
   const location = useLocation();

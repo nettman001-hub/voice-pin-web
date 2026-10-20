@@ -1,3 +1,4 @@
+import { runtimeFixture } from './runtime-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -15,7 +16,7 @@ function load(path, dependencies = {}, globals = {}) {
   const module = { exports: {} };
   vm.runInNewContext(outputText, {
     module, exports: module.exports, console: { log() {}, warn() {}, error() {} }, Event, Error, ...globals,
-    require(name) { if (!(name in dependencies)) throw new Error(`Unexpected import ${name}`); return dependencies[name]; },
+    require(name) { if (name.endsWith('WorkspaceRuntimeContext')) return runtimeFixture(dependencies);  if (!(name in dependencies)) throw new Error(`Unexpected import ${name}`); return dependencies[name]; },
   }, { filename: path });
   return module.exports;
 }

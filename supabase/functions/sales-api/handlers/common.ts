@@ -1,3 +1,4 @@
+import { DEFAULT_PRODUCT_SALES_SETTINGS } from '../../../../src/services/productSalesDefaults.ts';
 import { admin } from '../../_shared/productSales.ts'
 
 export async function getWorkspaceSettings(workspaceId: string) {
@@ -7,24 +8,7 @@ export async function getWorkspaceSettings(workspaceId: string) {
     .eq('workspace_id', workspaceId)
     .eq('namespace', 'product_sales')
     .maybeSingle()
-
-  const defaultSettings = {
-    revision: 1,
-    productRegistrationEnabled: true,
-    captureProductImageEnabled: true,
-    productNameInputEnabled: true,
-    voicePreviewMs: 2500,
-    voiceCommands: {
-      registerProduct: ['상품등록'],
-      captureProduct: ['상품캡처'],
-      setProductName: ['상품번호', '상품명'],
-      setPrice: ['금액', '가격'],
-      confirmSale: ['판매완료', '구매확정'],
-      setBuyer: ['닉네임'],
-    },
-  }
-
-  return data?.value ? { ...defaultSettings, ...data.value } : defaultSettings
+  return data?.value ? { ...DEFAULT_PRODUCT_SALES_SETTINGS, ...data.value } : DEFAULT_PRODUCT_SALES_SETTINGS
 }
 
 export async function calculateSummary(workspaceId: string, sessionId: string) {

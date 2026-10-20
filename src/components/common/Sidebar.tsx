@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime } from '../../context/WorkspaceRuntimeContext';
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -54,6 +55,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isCollapsed = false,
   onToggleCollapse
 }) => {
+  const runtime = useWorkspaceRuntime();
   const { user } = useAuth();
   const { isListening } = useLive();
 
@@ -62,7 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       groupName: '라이브 방송 관제',
       items: [
-        { name: '라이브 청취 홈', path: '/live', icon: Radio, badge: isListening ? 'ON AIR' : undefined },
+        { name: '라이브 청취 홈', path: '/live', icon: Radio, badge: isListening && !runtime.isTest ? 'ON AIR' : undefined },
         { name: '상품 판매 관리', path: '/seller/product-sales', icon: ShoppingBag },
         { name: '음성인식 발음 힌트', path: '/stt-vocabulary', icon: BookOpenText },
         { name: '캡처 영역 & 단어 규칙', path: '/recognition-rules', icon: Sliders },
@@ -119,7 +121,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   ];
 
-  const currentGroups = user?.role === '관리자' ? adminGroups : sellerGroups;
+  const currentGroups: NavGroup[] = [...(user?.role === '관리자' ? adminGroups : sellerGroups), { groupName: '테스트', items: [{ name: '라이브 청취 홈 테스트', path: '/live-test', icon: Radio }] }];
 
   const content = (
     <div className="flex flex-col h-full select-none">
@@ -184,7 +186,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 return (
                   <NavLink
                     key={item.path}
-                    to={item.path}
+                    to={runtime.isTest && ['/sales', '/sales/review', '/comments'].includes(item.path || '') ? runtime.path(item.path!) : item.path!}
                     onClick={() => onCloseMobile && onCloseMobile()}
                     end={item.path === '/live' || item.path === '/admin' || item.path === '/sales'}
                     className={({ isActive }) =>

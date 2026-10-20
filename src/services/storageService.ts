@@ -7,7 +7,7 @@ import { CommentRecord, CommentCaptureConfig, DEFAULT_COMMENT_CAPTURE_CONFIG, DE
 import { CommerceState } from '../types/commerce';
 import type { ProductSalesProduct, ProductSalesSession, ProductSalesBootstrapData, BuyerStats, SessionSummary } from '../types/productSales';
 import type { SalesLocalState } from './salesSyncController';
-import { durableStorage } from './durableStorage';
+import { durableStorage, type DurableStorage } from './durableStorage';
 import { normalizeSttVocabulary } from './sttVocabularyService';
 import type { PurchaseRequest } from './purchaseFirstSales';
 import type { PromiseDefaultRecord } from './promiseDefaultService';
@@ -276,10 +276,15 @@ export class StorageService {
   private writeVersion = 0;
   private latestWrites = new Map<string, number>();
   private pendingWrites = new Map<string, Promise<void>>();
-  private channel = typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined'
-    ? new BroadcastChannel('voicecap-local-sync') : null;
+  private channel: BroadcastChannel | null;
+  private readonly webStorage: Storage;
+  private readonly durable: DurableStorage;
 
-  constructor() {
+  constructor(options: { webStorage?: Storage; durable?: DurableStorage; channelName?: string } = {}) {
+    this.webStorage = options.webStorage || localStorage;
+    this.durable = options.durable || durableStorage;
+    this.channel = typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined'
+      ? new BroadcastChannel(options.channelName || 'voicecap-local-sync') : null;
     if (this.channel) this.channel.onmessage = (event) => {
       const owner = event.data?.workspaceId;
       if (owner && owner === this.currentWorkspaceId) {
@@ -343,7 +348,7 @@ export class StorageService {
     }
     // Mirror critical data even on a successful Web Storage write. This gives
     // reloads a complete recovery copy and preserves the pending operation log.
-    void Promise.resolve().then(() => durableStorage.set(key, envelope)).then(() => {
+    void Promise.resolve().then(() => this.durable.set(key, envelope)).then(() => {
       if (this.latestWrites.get(key) !== version) return;
       this.failures.delete(key);
       this.notifyPersistence();
@@ -370,8 +375,8 @@ export class StorageService {
     const envelope = { __voicecapRecovery: 1, updatedAt: version, data: value };
     this.memoryFallback.set(key, value);
     let previousWebCopy: string | null = null;
-    try { previousWebCopy = localStorage.getItem(key); } catch {}
-    const write = Promise.resolve().then(() => durableStorage.update<typeof envelope>(key, (current) =>
+    try { previousWebCopy = this.webStorage.getItem(key); } catch {}
+    const write = Promise.resolve().then(() => this.durable.update<typeof envelope>(key, (current) =>
       current && current.updatedAt > version ? current : envelope
     )).then((committed) => {
       if (this.latestWrites.get(key) !== version) return;
@@ -383,7 +388,7 @@ export class StorageService {
       // Remove only this key's old Web Storage copy after the new copy has
       // committed. This frees quota without discarding unsynced records.
       try {
-        if (localStorage.getItem(key) === previousWebCopy) localStorage.removeItem(key);
+        if (this.webStorage.getItem(key) === previousWebCopy) this.webStorage.removeItem(key);
       } catch {}
       this.failures.delete(key);
       this.notifyPersistence();
@@ -419,21 +424,21 @@ export class StorageService {
       const key = this.scopedKey(baseKey, workspaceId);
       const beforeVersion = this.latestWrites.get(key) || 0;
       let before: string | null = null;
-      try { before = localStorage.getItem(key); } catch {}
+      try { before = this.webStorage.getItem(key); } catch {}
       try {
-        const recovered = await durableStorage.get<any>(key);
+        const recovered = await this.durable.get<any>(key);
         let current: string | null = null;
-        try { current = localStorage.getItem(key); } catch {}
+        try { current = this.webStorage.getItem(key); } catch {}
         if ((this.latestWrites.get(key) || 0) !== beforeVersion || current !== before) continue;
         const parsed = current ? JSON.parse(current) : null;
         const local = parsed === null ? null : parsed?.__voicecapRecovery === 1
           ? parsed : { __voicecapRecovery: 1, updatedAt: 0, data: parsed };
         const latest = local && (!recovered || (local.updatedAt || 0) >= (recovered.updatedAt || 0))
-          ? await durableStorage.update<typeof local>(key, (existing) =>
+          ? await this.durable.update<typeof local>(key, (existing) =>
             existing && (existing.updatedAt || 0) > (local.updatedAt || 0) ? existing : local)
           : recovered;
         let after: string | null = null;
-        try { after = localStorage.getItem(key); } catch {}
+        try { after = this.webStorage.getItem(key); } catch {}
         if ((this.latestWrites.get(key) || 0) !== beforeVersion || after !== current) continue;
         if (latest !== null) {
           // A failed in-flight write may exist only in memory. Never replace it
@@ -441,39 +446,39 @@ export class StorageService {
           if (this.memoryFallback.has(key) && beforeVersion > (latest.updatedAt || 0)) continue;
           this.memoryFallback.set(key, latest.__voicecapRecovery === 1 ? latest.data : latest);
           this.latestWrites.set(key, latest.updatedAt || 0);
-          if (current !== null) localStorage.removeItem(key);
+          if (current !== null) this.webStorage.removeItem(key);
         }
       } catch { /* Empty/new databases can still operate from Web Storage. */ }
     }
     const transcriptPrefix = `voicecap_transcripts:${encodeURIComponent(workspaceId)}:`;
     const legacyTranscriptKeys: string[] = [];
     try {
-      for (let index = 0; index < localStorage.length; index += 1) {
-        const key = localStorage.key(index);
+      for (let index = 0; index < this.webStorage.length; index += 1) {
+        const key = this.webStorage.key(index);
         if (key?.startsWith(transcriptPrefix)) legacyTranscriptKeys.push(key);
       }
     } catch {}
     for (const key of legacyTranscriptKeys) {
       try {
-        const raw = localStorage.getItem(key);
+        const raw = this.webStorage.getItem(key);
         if (!raw) continue;
         const beforeVersion = this.latestWrites.get(key) || 0;
         const parsed = JSON.parse(raw);
         const envelope = parsed?.__voicecapRecovery === 1
           ? parsed : { __voicecapRecovery: 1, updatedAt: 0, data: parsed };
-        const latest = await durableStorage.update<typeof envelope>(key, (existing) =>
+        const latest = await this.durable.update<typeof envelope>(key, (existing) =>
           existing && (existing.updatedAt || 0) > (envelope.updatedAt || 0) ? existing : envelope
         );
-        if ((this.latestWrites.get(key) || 0) !== beforeVersion || localStorage.getItem(key) !== raw) continue;
+        if ((this.latestWrites.get(key) || 0) !== beforeVersion || this.webStorage.getItem(key) !== raw) continue;
         this.memoryFallback.set(key, latest.data);
         this.latestWrites.set(key, latest.updatedAt || 0);
-        localStorage.removeItem(key);
+        this.webStorage.removeItem(key);
       } catch (error) {
         console.warn('[Storage] 판매 멘트 로컬 기록 이전 실패:', error);
       }
     }
     try {
-      const transcripts = await durableStorage.entries<{ __voicecapRecovery?: number; updatedAt?: number; data?: SttTranscriptLog[] }>(transcriptPrefix);
+      const transcripts = await this.durable.entries<{ __voicecapRecovery?: number; updatedAt?: number; data?: SttTranscriptLog[] }>(transcriptPrefix);
       for (const [key, envelope] of transcripts) {
         if (this.latestWrites.has(key)) continue;
         this.memoryFallback.set(key, envelope?.__voicecapRecovery === 1 ? envelope.data || [] : envelope);
@@ -499,9 +504,9 @@ export class StorageService {
     const update = async () => {
       let envelope: { __voicecapRecovery: number; updatedAt: number; data: SalesLocalState };
       try {
-        envelope = await durableStorage.update<typeof envelope>(key, (recovered) => {
+        envelope = await this.durable.update<typeof envelope>(key, (recovered) => {
           let local: typeof envelope | null = null;
-          try { const raw = localStorage.getItem(key); if (raw) local = JSON.parse(raw); } catch {}
+          try { const raw = this.webStorage.getItem(key); if (raw) local = JSON.parse(raw); } catch {}
           const memoryVersion = this.memoryFallback.has(key) ? this.latestWrites.get(key) || 0 : 0;
           const latest = recovered && (!local || recovered.updatedAt >= local.updatedAt) ? recovered : local;
           const current = memoryVersion > (latest?.updatedAt || 0)
@@ -533,9 +538,9 @@ export class StorageService {
       this.latestWrites.set(key, envelope.updatedAt);
       this.memoryFallback.set(key, envelope.data);
       try {
-        const raw = localStorage.getItem(key);
-        if (raw && (JSON.parse(raw)?.updatedAt || 0) <= envelope.updatedAt && localStorage.getItem(key) === raw) {
-          localStorage.removeItem(key);
+        const raw = this.webStorage.getItem(key);
+        if (raw && (JSON.parse(raw)?.updatedAt || 0) <= envelope.updatedAt && this.webStorage.getItem(key) === raw) {
+          this.webStorage.removeItem(key);
         }
       } catch {}
       this.failures.delete(key); // The transaction completed durably, even if Web Storage failed.
@@ -573,7 +578,7 @@ export class StorageService {
   private getItem<T>(key: string, defaultValue: T): T {
     if (this.memoryFallback.has(key)) return this.memoryFallback.get(key) as T;
     try {
-      const data = localStorage.getItem(key);
+      const data = this.webStorage.getItem(key);
       if (!data) return defaultValue;
       const parsed = JSON.parse(data);
       return parsed?.__voicecapRecovery === 1 ? parsed.data : parsed;
@@ -584,7 +589,7 @@ export class StorageService {
 
   private setItem<T>(key: string, value: T, options?: { allowEviction?: boolean }): boolean {
     try {
-      localStorage.setItem(key, JSON.stringify(value));
+      this.webStorage.setItem(key, JSON.stringify(value));
       return true;
     } catch (e) {
       console.error(`[Storage] Failed to save key: ${key}`, e);
@@ -593,7 +598,7 @@ export class StorageService {
       if (options?.allowEviction && Array.isArray(value) && value.length > 50) {
         try {
           const trimmed = value.slice(0, Math.floor(value.length / 2));
-          localStorage.setItem(key, JSON.stringify(trimmed));
+          this.webStorage.setItem(key, JSON.stringify(trimmed));
           console.warn(`[Storage] 비필수 캐시 용량 초과 자동 대응: ${key} 데이터 50% 절삭 저장 완료`);
           return true;
         } catch {
@@ -624,8 +629,8 @@ export class StorageService {
     const prefix = this.transcriptSessionKey(workspaceId, '');
     const keys = new Set<string>();
     try {
-      for (let index = 0; index < localStorage.length; index += 1) {
-        const key = localStorage.key(index);
+      for (let index = 0; index < this.webStorage.length; index += 1) {
+        const key = this.webStorage.key(index);
         if (key?.startsWith(prefix)) keys.add(key);
       }
     } catch { /* Live in-memory transcripts can still be downloaded. */ }
@@ -644,64 +649,64 @@ export class StorageService {
   // 초기화 및 시딩
   public init() {
     this.clearLegacyMemberData();
-    if (!localStorage.getItem(KEYS.RULES)) {
+    if (!this.webStorage.getItem(KEYS.RULES)) {
       this.setItem(KEYS.RULES, DEFAULT_RULES);
     }
-    if (!localStorage.getItem(KEYS.SALES)) {
+    if (!this.webStorage.getItem(KEYS.SALES)) {
       this.setItem(KEYS.SALES, INITIAL_SALES);
     }
-    if (!localStorage.getItem(KEYS.PAYMENTS)) {
+    if (!this.webStorage.getItem(KEYS.PAYMENTS)) {
       this.setItem(KEYS.PAYMENTS, INITIAL_PAYMENTS);
     }
-    if (!localStorage.getItem(KEYS.REPORTS)) {
+    if (!this.webStorage.getItem(KEYS.REPORTS)) {
       this.setItem(KEYS.REPORTS, INITIAL_REPORTS);
     }
-    if (!localStorage.getItem(KEYS.LOGS)) {
+    if (!this.webStorage.getItem(KEYS.LOGS)) {
       this.setItem(KEYS.LOGS, INITIAL_ERROR_LOGS);
     }
-    if (!localStorage.getItem(KEYS.COMMERCE_STATE)) {
+    if (!this.webStorage.getItem(KEYS.COMMERCE_STATE)) {
       this.setItem(KEYS.COMMERCE_STATE, INITIAL_COMMERCE_STATE);
     }
   }
 
   // 회원/인증 데이터는 Supabase만 원본으로 사용한다. 과거 버전이 남긴 로컬 데이터도 즉시 제거한다.
   public clearLegacyMemberData() {
-    localStorage.removeItem('dadryeo_users');
-    localStorage.removeItem('dadryeo_current_user');
-    localStorage.removeItem('dadryeo_token');
-    localStorage.removeItem('dadryeo_deepgram_api_key');
-    localStorage.removeItem('voicecap_soniox_api_key');
-    localStorage.removeItem('voicecap_stt_provider');
-    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
-      const key = localStorage.key(index);
-      if (key?.startsWith('sb-') && key.endsWith('-auth-token')) localStorage.removeItem(key);
+    this.webStorage.removeItem('dadryeo_users');
+    this.webStorage.removeItem('dadryeo_current_user');
+    this.webStorage.removeItem('dadryeo_token');
+    this.webStorage.removeItem('dadryeo_deepgram_api_key');
+    this.webStorage.removeItem('voicecap_soniox_api_key');
+    this.webStorage.removeItem('voicecap_stt_provider');
+    for (let index = this.webStorage.length - 1; index >= 0; index -= 1) {
+      const key = this.webStorage.key(index);
+      if (key?.startsWith('sb-') && key.endsWith('-auth-token')) this.webStorage.removeItem(key);
     }
   }
 
   // STT 모드: 'CLOUD' (기존 API) | 'LOCAL' (내 PC 무료 faster-whisper)
   public getSttMode(): 'CLOUD' | 'LOCAL' {
-    return localStorage.getItem(KEYS.STT_MODE) === 'LOCAL' ? 'LOCAL' : 'CLOUD';
+    return this.webStorage.getItem(KEYS.STT_MODE) === 'LOCAL' ? 'LOCAL' : 'CLOUD';
   }
   public setSttMode(mode: 'CLOUD' | 'LOCAL'): void {
-    localStorage.setItem(KEYS.STT_MODE, mode);
+    this.webStorage.setItem(KEYS.STT_MODE, mode);
   }
 
   // 로컬 STT 모델 선택: 'base' | 'small' | 'large-v3-turbo'
   public getLocalSttModel(): 'large-v3-turbo' | 'small' | 'base' {
-    const m = localStorage.getItem(KEYS.LOCAL_STT_MODEL);
+    const m = this.webStorage.getItem(KEYS.LOCAL_STT_MODEL);
     if (m === 'small' || m === 'base' || m === 'large-v3-turbo') return m;
     return 'base'; // 저사양/보통 PC 안정성을 위한 기본값: base
   }
   public setLocalSttModel(model: 'large-v3-turbo' | 'small' | 'base'): void {
-    localStorage.setItem(KEYS.LOCAL_STT_MODEL, model);
+    this.webStorage.setItem(KEYS.LOCAL_STT_MODEL, model);
   }
 
   // 판매자 라이브 음성 입력 방식
   public getAudioSourceMode(): 'TAB_AUDIO' | 'MIC' {
-    return localStorage.getItem(KEYS.AUDIO_SOURCE_MODE) === 'MIC' ? 'MIC' : 'TAB_AUDIO';
+    return this.webStorage.getItem(KEYS.AUDIO_SOURCE_MODE) === 'MIC' ? 'MIC' : 'TAB_AUDIO';
   }
   public setAudioSourceMode(mode: 'TAB_AUDIO' | 'MIC'): void {
-    localStorage.setItem(KEYS.AUDIO_SOURCE_MODE, mode);
+    this.webStorage.setItem(KEYS.AUDIO_SOURCE_MODE, mode);
   }
 
   // 전체 데이터 백업 (JSON 파일 다운로드용)
@@ -729,14 +734,14 @@ export class StorageService {
     try {
       const data = JSON.parse(jsonString);
       if (data.sales) this.saveSales(data.sales);
-      if (data.captures) localStorage.setItem(KEYS.CAPTURES, JSON.stringify(data.captures));
+      if (data.captures) this.webStorage.setItem(KEYS.CAPTURES, JSON.stringify(data.captures));
       if (data.rules) this.saveRules(data.rules);
       if (data.trainingSentences) this.saveTrainingSentences(data.trainingSentences);
       if (Array.isArray(data.sttVocabulary) && this.currentWorkspaceId) {
         this.saveSttVocabulary(this.currentWorkspaceId, data.sttVocabulary, true);
       }
-      if (data.payments) localStorage.setItem(KEYS.PAYMENTS, JSON.stringify(data.payments));
-      if (data.notifications) localStorage.setItem(KEYS.NOTIFICATIONS, JSON.stringify(data.notifications));
+      if (data.payments) this.webStorage.setItem(KEYS.PAYMENTS, JSON.stringify(data.payments));
+      if (data.notifications) this.webStorage.setItem(KEYS.NOTIFICATIONS, JSON.stringify(data.notifications));
       if (data.commerce) this.saveCommerceState(data.commerce);
       if (data.sttMode === 'CLOUD' || data.sttMode === 'LOCAL') {
         this.setSttMode(data.sttMode);
@@ -934,7 +939,7 @@ export class StorageService {
     // 메뉴 이동 후에는 저장 용량과 관계없이 메모리 캐시에서 즉시 복원한다.
     this.captureAreaSnapshotCache = snapshot;
     try {
-      localStorage.setItem(KEYS.CAPTURE_AREA_SNAPSHOT, JSON.stringify(snapshot));
+      this.webStorage.setItem(KEYS.CAPTURE_AREA_SNAPSHOT, JSON.stringify(snapshot));
       return true;
     } catch (e) {
       console.error('[Storage] Failed to save capture area snapshot', e);
@@ -1051,7 +1056,7 @@ export class StorageService {
       }
     }
 
-    // 최신순 정렬 후 최대 1,000건 제한 (localStorage 5MB 쿼터 안전 방어)
+    // 최신순 정렬 후 최대 1,000건 제한 (this.webStorage 5MB 쿼터 안전 방어)
     const merged = Array.from(map.values())
       .sort((a, b) => new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime())
       .slice(0, 1000);
@@ -1128,7 +1133,7 @@ export class StorageService {
     if (product) {
       this.setItem(key, product);
     } else {
-      localStorage.removeItem(key);
+      this.webStorage.removeItem(key);
     }
   }
 
@@ -1141,7 +1146,7 @@ export class StorageService {
     if (session) {
       this.setItem(key, session);
     } else {
-      localStorage.removeItem(key);
+      this.webStorage.removeItem(key);
     }
   }
 
@@ -1154,15 +1159,15 @@ export class StorageService {
     if (data) {
       this.setItem(key, data);
     } else {
-      localStorage.removeItem(key);
+      this.webStorage.removeItem(key);
     }
   }
 
   // 계정 변경/로그아웃 시 세션 캐시 정리
   public clearWorkspaceSessionData(workspaceIdOverride?: string | null): void {
-    localStorage.removeItem(this.scopedKey(KEYS.ACTIVE_PRODUCT, workspaceIdOverride));
-    localStorage.removeItem(this.scopedKey(KEYS.ACTIVE_SESSION, workspaceIdOverride));
-    localStorage.removeItem(this.scopedKey(KEYS.BOOTSTRAP, workspaceIdOverride));
+    this.webStorage.removeItem(this.scopedKey(KEYS.ACTIVE_PRODUCT, workspaceIdOverride));
+    this.webStorage.removeItem(this.scopedKey(KEYS.ACTIVE_SESSION, workspaceIdOverride));
+    this.webStorage.removeItem(this.scopedKey(KEYS.BOOTSTRAP, workspaceIdOverride));
   }
 
   // 3. 방송 누적 판매 통계 로컬 SUM / COUNT 집계 (서버 record_state === 'ACTIVE' 규칙과 100% 일치)

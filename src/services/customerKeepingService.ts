@@ -1,7 +1,7 @@
 import { CustomerKeepingRecord, BuyerKeepingSummary } from '../types/keeping';
 import { SaleRecord } from '../types/live';
 import { areNicknamesSimilar } from './nicknameMatcher';
-import { remoteWorkspaceService } from './remoteWorkspaceService';
+import { remoteWorkspaceService as productionRemote } from './remoteWorkspaceService';
 
 const KEEPING_STORAGE_KEY = 'voicecap_customer_keeping_records';
 
@@ -9,7 +9,8 @@ const getStorageKey = (workspaceId?: string | null): string => {
   return workspaceId ? `${KEEPING_STORAGE_KEY}_${workspaceId}` : KEEPING_STORAGE_KEY;
 };
 
-export const customerKeepingService = {
+export function createCustomerKeepingService(remoteWorkspaceService = productionRemote, localStorage: Storage = globalThis.localStorage) {
+return {
   /**
    * 로컬 스토리지에서 모든 키핑 기록을 불러옵니다.
    */
@@ -230,3 +231,6 @@ export const customerKeepingService = {
     }
   }
 };
+}
+
+export const customerKeepingService = createCustomerKeepingService();

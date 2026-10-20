@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime } from '../../context/WorkspaceRuntimeContext';
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -42,6 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleSidebar,
   isSidebarCollapsed
 }) => {
+  const runtime = useWorkspaceRuntime();
   const { user, isAuthenticated, logout, switchUserRole } = useAuth();
   const {
     isListening,
@@ -63,12 +65,12 @@ export const Header: React.FC<HeaderProps> = ({
   const [helperStatus, setHelperStatus] = useState<CommentHelperStatus | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || runtime.isTest) return;
     const unsubscribe = commentHelperService.subscribeStatus((st) => {
       setHelperStatus(st);
     });
     return () => unsubscribe();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, runtime.isTest]);
 
   const handleLogoutKeepingShare = () => {
     setShowUserMenu(false);
@@ -127,7 +129,7 @@ export const Header: React.FC<HeaderProps> = ({
             </>
           )}
 
-          <Link to={isAuthenticated ? (user?.role === '관리자' ? '/admin' : '/live') : '/onboarding'} className="flex items-center space-x-2 group">
+          <Link to={isAuthenticated ? (runtime.isTest ? '/live-test' : user?.role === '관리자' ? '/admin' : '/live') : '/onboarding'} className="flex items-center space-x-2 group">
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-brand-600 via-brand-500 to-rose-500 flex items-center justify-center shadow-md shadow-brand-500/20 group-hover:scale-105 transition-transform flex-shrink-0">
               <Mic className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
@@ -184,7 +186,7 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
           {/* 댓글 도우미 내장 관제 버튼 */}
-          {isAuthenticated && (
+          {isAuthenticated && !runtime.isTest && (
             <button
               type="button"
               onClick={() => setShowHelperModal(true)}
@@ -264,7 +266,7 @@ export const Header: React.FC<HeaderProps> = ({
                   {user?.role === '판매자' ? (
                     <>
                       <Link
-                        to="/live"
+                        to={runtime.path('/live')}
                         onClick={() => setShowUserMenu(false)}
                         className="flex items-center px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600"
                       >
@@ -328,7 +330,7 @@ export const Header: React.FC<HeaderProps> = ({
                     type="button"
                     onClick={() => {
                       setShowUserMenu(false);
-                      setShowHelperModal(true);
+                      if (!runtime.isTest) setShowHelperModal(true);
                     }}
                     className="w-full flex items-center px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-brand-600 font-medium"
                   >
@@ -465,7 +467,7 @@ export const Header: React.FC<HeaderProps> = ({
       </Modal>
 
       <CommentHelperModal
-        isOpen={showHelperModal}
+        isOpen={!runtime.isTest && showHelperModal}
         onClose={() => setShowHelperModal(false)}
       />
     </header>

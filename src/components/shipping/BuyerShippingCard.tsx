@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from '../../context/WorkspaceRuntimeContext';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Truck,
@@ -15,11 +16,10 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+
 import { SaleRecord } from '../../types/live';
 import { ShippingConfig, BuyerShippingOverride, CalculatedShipping } from '../../types/shipping';
-import { shippingService } from '../../services/shippingService';
-import { customerKeepingService } from '../../services/customerKeepingService';
+
 import { BuyerKeepingSummary, CustomerKeepingRecord } from '../../types/keeping';
 import { calculateBillableAmount, isBillableSale } from '../../services/billableSales';
 
@@ -42,6 +42,8 @@ export const BuyerShippingCard: React.FC<BuyerShippingCardProps> = ({
   onShippingChanged,
   onKeepingChanged
 }) => {
+  const runtime = useWorkspaceRuntime();
+  const { shippingService, customerKeepingService } = runtime;
   const { workspaceId } = useAuth();
 
   // 1. 배송비 설정 & 수동 오버라이드 상태

@@ -1,3 +1,4 @@
+const koreanPeriod = value => value.replace(/\bAM\b/gu, '오전').replace(/\bPM\b/gu, '오후');
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -27,7 +28,7 @@ const logs = [
 ];
 
 test('the prompt is the seller\'s exact text plus the two lists from one minute either side, never JSON', () => {
-  const prompt = buildVoiceTextReviewPrompt(sale, comments, logs);
+  const prompt = koreanPeriod(buildVoiceTextReviewPrompt(sale, comments, logs));
   assert.ok(prompt.startsWith(VOICE_TEXT_REVIEW_INSTRUCTIONS));
   assert.equal(prompt.slice(VOICE_TEXT_REVIEW_INSTRUCTIONS.length), [
     '', '', '',

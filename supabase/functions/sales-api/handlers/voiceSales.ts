@@ -1,3 +1,4 @@
+import { verifyVoiceSalePrice, verifyVoiceSaleBuyer, verifyWorkflowSale } from '../../../../src/services/voiceSaleCommitEvidence.ts';
 import { admin, errorResponse, successResponse } from '../../_shared/productSales.ts'
 import { extractSpeechPrice } from '../../../../src/services/priceEvidence.ts'
 import { extractSaleFromTranscript } from '../../../../src/services/salesExtractor.ts'
@@ -36,10 +37,8 @@ export async function handleCommitVoiceSale(workspaceId: string, actorId: string
       return successResponse(receipt.response_json);
     }
     const events=await getWorkflowEvents(workspaceId,sale.sessionId,{profile:profile.profile,endAt:new Date(Date.parse(sale.recognizedAt)+70_000).toISOString()});
-    const decision=replaySalesWorkflow({sessionId:sale.sessionId,profile:profile.profile,...events})
-      .find((d)=>d.id===proof.decisionId && d.requestId===sale.purchaseRequestId);
-    if(!decision || decision.status!=='CONFIRMED' || decision.amount!==sale.amount || decision.unitPrice!==sale.unitPrice
-      || decision.quantity!==(sale.quantity || 1) || decision.nickname!==sale.buyerNickname) {
+    const { decision, valid } = verifyWorkflowSale(sale, profile.profile, events.comments, events.transcripts);
+    if (!valid || !decision) {
       return errorResponse('WORKFLOW_EVIDENCE_UNVERIFIED','방송 근거에서 동일한 판매를 검증하지 못했습니다.',409);
     }
     const canonicalEvidence={...proof,profileSnapshot:profile.profile,orderCode:decision.orderCode,offerId:decision.offerId,transcripts:events.transcripts.filter((t)=>t.id===decision.transcriptId || t.id===decision.priceTranscriptId)};
@@ -49,10 +48,8 @@ export async function handleCommitVoiceSale(workspaceId: string, actorId: string
     if(!data?.ok) return errorResponse(data?.code || 'WORKFLOW_REJECTED','판매 근거 또는 재고 충돌을 확인해 주세요.',409);
     return successResponse(data);
   }
-  const extracted = extractSaleFromTranscript(sale.rawTranscript)
-  const evidence = extracted?.allocationTranscript ? extractSpeechPrice(extracted.allocationTranscript) : null
-  if (!evidence || evidence.amount !== sale.amount || sale.unitPrice !== sale.amount
-      || !extracted || extracted.intent !== 'ALLOCATION' || extracted.amount !== sale.amount) {
+  const { extracted, evidence, valid: validPrice } = verifyVoiceSalePrice(sale);
+  if (!validPrice || !evidence) {
     return errorResponse('PRICE_OR_INTENT_UNVERIFIED', '판매 확정 발화와 음성 가격 근거를 확인할 수 없습니다.', 422)
   }
 
@@ -70,13 +67,11 @@ export async function handleCommitVoiceSale(workspaceId: string, actorId: string
   if ((commentCount || 0) > 1000) {
     return errorResponse('COMMENT_WINDOW_TOO_LARGE', '댓글 후보가 많아 자동 배정을 보류합니다.', 409)
   }
-  const requestCandidates = getPurchaseRequests((comments || []).map((comment: any) => ({
+  const { valid: validBuyer } = verifyVoiceSaleBuyer(sale, (comments || []).map((comment: any) => ({
     id: comment.id, sessionId: comment.session_id, platformMessageId: comment.platform_message_id,
-    buyerId: comment.buyer_id, nickname: comment.nickname_snapshot, content: comment.content,
-    capturedAt: comment.captured_at,
-  })), sale.sessionId)
-  const match = matchPurchaseRequest(extracted.buyerNicknamePhrase || extracted.buyerNickname, requestCandidates, sale.recognizedAt)
-  if (match.kind !== 'MATCH' || match.request.id !== sale.purchaseRequestId) {
+    buyerId: comment.buyer_id, nickname: comment.nickname_snapshot, content: comment.content, capturedAt: comment.captured_at,
+  })));
+  if (!validBuyer) {
     return errorResponse('BUYER_AMBIGUOUS', '판매자 호칭과 실제 구매 댓글의 계정 연결을 확인할 수 없습니다.', 409)
   }
 

@@ -1,12 +1,11 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from './WorkspaceRuntimeContext';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { SaleRecord, SaleStatus } from '../types/live';
-import { storageService, getNextProductCodeForSession } from '../services/storageService';
+import { getNextProductCodeForSession } from '../services/storageService';
 import { exportSalesToCsv } from '../services/csvExporter';
-import { useAuth } from './AuthContext';
-import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
-import { commentStreamService } from '../services/commentStreamService';
+
 import type { BatchConfirmResult, SaleHistoryRecord } from '../types/pendingSale';
-import { aiSettingsApi } from '../services/aiSettingsApi';
+
 import { heldAfterServerRejection, markServerReviewCompleted } from '../services/serverRejectedSale';
 import { SalesSyncController } from '../services/salesSyncController';
 import { checkFourPointSaleCriteria } from '../services/salesExtractor';
@@ -55,6 +54,8 @@ interface SalesContextType {
 const SalesContext = createContext<SalesContextType | undefined>(undefined);
 
 export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const runtime = useWorkspaceRuntime();
+  const { storageService, remoteWorkspaceService, commentStreamService, aiSettingsApi } = runtime;
   const { workspaceId, isRemoteAuth, user } = useAuth();
   const [sales, setSales] = useState<SaleRecord[]>(() => workspaceId ? storageService.getSales(workspaceId) : []);
   const [promiseDefaultsState, setPromiseDefaultsState] = useState<{ workspaceId: string; records: PromiseDefaultRecord[] }>(

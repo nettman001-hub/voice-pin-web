@@ -1,12 +1,12 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from './WorkspaceRuntimeContext';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { RecognitionWordRule, CaptureAreaConfig, CaptureAreaPreset } from '../types/rules';
 import { PlanTier, PlanInfo, PaymentHistoryItem, PaymentCard } from '../types/subscription';
 import { AdminKpis, ReportItem, SystemErrorLog, NotificationSetting } from '../types/admin';
 import { User } from '../types/auth';
-import { storageService } from '../services/storageService';
-import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
+
 import { isSupabaseConfigured } from '../services/supabaseClient';
-import { useAuth } from './AuthContext';
+
 import confetti from 'canvas-confetti';
 
 export const SUBSCRIPTION_PLANS: PlanInfo[] = [
@@ -93,6 +93,8 @@ interface AppDataContextType {
 const AppDataContext = createContext<AppDataContextType | undefined>(undefined);
 
 export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const runtime = useWorkspaceRuntime();
+  const { storageService, remoteWorkspaceService } = runtime;
   const { user, workspaceId, updateProfile } = useAuth();
 
   // 규칙 상태

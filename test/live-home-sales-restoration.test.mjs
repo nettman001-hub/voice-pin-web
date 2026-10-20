@@ -1,3 +1,4 @@
+import { runtimeFixture } from './runtime-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -14,7 +15,7 @@ const sale = (id, extra = {}) => ({
 });
 
 // Render the real page with controlled provider restoration and React hook lifecycles.
-function pageFixture() {
+function pageFixture(testMode = false) {
   const cells = [], effects = [];
   let index = 0;
   const state = {
@@ -67,7 +68,7 @@ function pageFixture() {
       refreshSales: async () => { state.sales = state.refreshedSales; return state.sales; },
     }) },
     '../../context/ProductSalesContext': { useProductSales: () => ({
-      activeSession: state.activeSession, activeProduct: null,
+      activeSession: state.activeSession, activeProduct: null, ...state.product,
     }) },
     '../../services/storageService': { storageService: {
       getAudioSourceMode: () => 'TAB_AUDIO', getPurchaseRequests: () => [],
@@ -103,7 +104,11 @@ function pageFixture() {
   vm.runInNewContext(outputText, {
     module, exports: module.exports, Uint8Array,
     window: { location: { search: '' }, setTimeout: () => 1, clearTimeout() {} },
-    require(name) {
+    require(name) { if (name.endsWith('WorkspaceRuntimeContext')) {
+        const bound = runtimeFixture(dependencies);
+        return { ...bound, useWorkspaceRuntime: () => ({ ...bound.useWorkspaceRuntime(), isTest: testMode,
+          path: path => testMode ? (path === '/live' ? '/live-test' : `/live-test${path}`) : path }) };
+      }
       assert.ok(name in dependencies, `Unexpected import ${name}`);
       return dependencies[name];
     },
@@ -350,4 +355,39 @@ test('equal timestamps and list reordering cannot add a later row to an earlier 
     assert.match(cardText(tree, 'second'), /12,000원/);
     assert.doesNotMatch(cardText(tree, 'second'), /다건|22,000원/);
   }
+});
+
+
+test('test home starts a new microphone broadcast from 방송시작 without product or session setup', async () => {
+  const ctx = pageFixture(true), calls = [];
+  ctx.state.live.sttMode = 'LOCAL';
+  ctx.state.live.startListening = async (...args) => calls.push(['listen', ...args]);
+  ctx.state.product = {
+    startNewSession: async () => { calls.push(['new']); return { id: 'test-broadcast' }; },
+    loadBootstrap: async () => { throw new Error('An initial test must create its own session'); },
+  };
+  const tree = ctx.settle();
+  const start = nodes(tree).find(node => node.type === 'button' && textContent(node) === '방송시작');
+  assert.ok(start);
+  start.props.onClick();
+  await tick();
+  assert.deepEqual(calls, [['new'], ['listen', 'MIC', 'test-broadcast']]);
+  assert.equal(nodes(ctx.settle()).some(node => node.type === 'button' && textContent(node) === '🎬 데모보기'), false);
+});
+
+test('test home resumes the same session and keeps sales detail and review navigation in the test scope', async () => {
+  const ctx = pageFixture(true), calls = [];
+  ctx.state.live.sttMode = 'LOCAL';
+  ctx.state.live.startListening = async (...args) => calls.push(args);
+  ctx.state.activeSession = { id: 'broadcast-1', status: 'ACTIVE' };
+  ctx.state.sales = [sale('sold'), sale('pending', { status: '보류' })];
+  ctx.state.product = { loadBootstrap: async () => ({ activeSession: ctx.state.activeSession }),
+    startNewSession: async () => { throw new Error('Stop/start must not create another session'); } };
+  const tree = ctx.settle();
+  nodes(tree).find(node => node.type === 'button' && textContent(node) === '방송시작').props.onClick();
+  await tick();
+  assert.deepEqual(calls, [['MIC', 'broadcast-1']]);
+  const card = nodes(tree).find(node => node.type === 'link' && node.props.to === '/live-test/sales/sold');
+  assert.equal(card.props.state.returnTo, '/live-test');
+  assert.ok(nodes(tree).some(node => node.type === 'link' && node.props.to === '/live-test/sales/review'));
 });

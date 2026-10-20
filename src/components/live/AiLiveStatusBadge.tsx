@@ -1,12 +1,13 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from '../../context/WorkspaceRuntimeContext';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { aiSettingsApi, normalizeAiSettings } from '../../services/aiSettingsApi';
+import { normalizeAiSettings } from '../../services/aiSettingsApi';
 import { aiStatusCache } from '../../services/aiStatusCache';
 import { startVisibleRefresh } from '../../services/visibleRefresh';
 import { AiSlotHealth } from '../../types/aiHealth';
 import { DEFAULT_AI_SETTINGS } from '../../types/aiSettings';
 import type { AiStatusSummaryResponse } from '../../types/aiStatusSummary';
-import { useAuth } from '../../context/AuthContext';
+
 import { maskEndpointUrl } from '../../utils/maskingUtils';
 import { useSales } from '../../context/SalesContext';
 import {
@@ -29,6 +30,8 @@ interface AiLiveStatusBadgeProps {
 }
 
 export const AiLiveStatusBadge: React.FC<AiLiveStatusBadgeProps> = ({ compact = false }) => {
+  const runtime = useWorkspaceRuntime();
+  const { aiSettingsApi } = runtime;
   const { sales } = useSales();
   const { user, workspaceId, isRemoteAuth } = useAuth();
   const cacheKey = user && workspaceId ? `${user.id}:${workspaceId}` : null;

@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from '../../context/WorkspaceRuntimeContext';
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
@@ -6,7 +7,7 @@ import { BuyerReconciliationPanel } from '../../components/sales/BuyerReconcilia
 import { CustomerStatsBadge } from '../../components/sales/CustomerStatsBadge';
 import { SaleAiActionButtons } from '../../components/sales/SaleAiActionButtons';
 import { AiSaleBadge } from '../../components/sales/AiSaleBadge';
-import { productSalesApi } from '../../services/productSalesApi';
+
 import { LiveSession } from '../../types/productSales';
 import { formatSessionDisplay } from '../../utils/sessionFormatter';
 import { markServerReviewCompleted, needsServerReview } from '../../services/serverRejectedSale';
@@ -26,14 +27,16 @@ import {
 import { ImageViewerModal } from '../../components/common/ImageViewerModal';
 
 export const SalesDetailPage: React.FC = () => {
+  const runtime = useWorkspaceRuntime();
+  const { productSalesApi } = runtime;
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
   const { sales, updateSale, completeServerReview, retrySalePrint, deleteSale } = useSales();
 
   const sale = sales.find((s) => s.id === id);
-  const fromLiveHome = (location.state as { returnTo?: unknown } | null)?.returnTo === '/live';
-  const returnPath = fromLiveHome ? '/live' : `/sales${location.search}`;
+  const fromLiveHome = (location.state as { returnTo?: unknown } | null)?.returnTo === runtime.path('/live');
+  const returnPath = fromLiveHome ? runtime.path('/live') : runtime.path(`/sales${location.search}`);
   const returnLabel = fromLiveHome ? '라이브 청취 홈으로 돌아가기' : '판매 목록으로 돌아가기';
 
   const [buyerNickname, setBuyerNickname] = useState(sale?.buyerNickname || '');
@@ -183,7 +186,7 @@ export const SalesDetailPage: React.FC = () => {
             <span>{returnLabel}</span>
           </button>
           {!fromLiveHome && (
-            <Link to="/live" className="text-xs font-bold text-brand-600 hover:underline">
+            <Link to={runtime.path('/live')} className="text-xs font-bold text-brand-600 hover:underline">
               라이브 청취 홈
             </Link>
           )}

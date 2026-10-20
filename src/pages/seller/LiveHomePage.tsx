@@ -1,12 +1,13 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from '../../context/WorkspaceRuntimeContext';
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
+
 import { useLive } from '../../context/LiveContext';
 import { useCommentCapture, getCommentStatusBadge } from '../../context/CommentCaptureContext';
 import { useSales } from '../../context/SalesContext';
 import { AudioVisualizer } from '../../components/common/AudioVisualizer';
 import { screenCaptureService } from '../../services/screenCaptureService';
-import { storageService } from '../../services/storageService';
+
 import { getPurchaseRequests } from '../../services/purchaseFirstSales';
 import {
   Radio,
@@ -48,7 +49,7 @@ import { salesDemoService } from '../../services/salesDemoService';
 import { CommentRecord } from '../../types/comment';
 import { SaleRecord, SttTranscriptLog } from '../../types/live';
 import { MatchedRuleItem } from '../../context/LiveContext';
-import { customerKeepingService } from '../../services/customerKeepingService';
+
 import { KeepingBadge } from '../../components/shipping/KeepingBadge';
 
 const SILENCE_WARNING_DELAY_MS = 5 * 60 * 1000;
@@ -90,6 +91,8 @@ function getBuyerPurchaseIntentWord(
 }
 
 export const LiveHomePage: React.FC = () => {
+  const runtime = useWorkspaceRuntime();
+  const { storageService, customerKeepingService } = runtime;
   const {
     isListening,
     currentSessionId,
@@ -182,7 +185,7 @@ export const LiveHomePage: React.FC = () => {
   const canUseAdminKey = isAdmin || isAllowedByAdmin;
   const hasAdminSttKey = Boolean(selectedSttApiKey);
   const [keyInput, setKeyInput] = useState<string>(selectedSttApiKey || '');
-  const [audioSourceMode, setAudioSourceMode] = useState<'TAB_AUDIO' | 'MIC'>(() => storageService.getAudioSourceMode());
+  const [audioSourceMode, setAudioSourceMode] = useState<'TAB_AUDIO' | 'MIC'>(() => runtime.isTest ? 'MIC' : storageService.getAudioSourceMode());
   const handleAudioSourceModeChange = (mode: 'TAB_AUDIO' | 'MIC') => {
     storageService.setAudioSourceMode(mode);
     setAudioSourceMode(mode);
@@ -196,6 +199,7 @@ export const LiveHomePage: React.FC = () => {
 
   // 실제 판매 데모 시작 / 데모 중지 토글
   const handleToggleDemo = () => {
+    if (runtime.isTest) return;
     if (isDemoActive) {
       salesDemoService.stop();
       setIsDemoActive(false);
@@ -373,6 +377,10 @@ export const LiveHomePage: React.FC = () => {
       }
     }
 
+    if (runtime.isTest) {
+      void handleStartWithSession(activeSession?.status === 'ACTIVE' ? 'CONTINUE' : 'NEW');
+      return;
+    }
     setShowSessionChoice(true);
   };
 
@@ -380,10 +388,11 @@ export const LiveHomePage: React.FC = () => {
     if (isSessionStarting) return;
 
     setIsSessionStarting(true);
+    const captureMode = runtime.isTest ? 'MIC' : audioSourceMode;
     try {
       // getDisplayMedia는 버튼 클릭의 사용자 동작 안에서 요청해야 한다.
       // 회차 API와 병렬로 준비해 새 회차 선택 시에도 탭 공유 창이 차단되지 않게 한다.
-      const tabAudioReady = audioSourceMode !== 'TAB_AUDIO'
+      const tabAudioReady = captureMode !== 'TAB_AUDIO'
         ? Promise.resolve(true)
         : (() => {
             const activeAudioTrack = screenCaptureService.getActiveAudioTrack();
@@ -410,7 +419,7 @@ export const LiveHomePage: React.FC = () => {
       }
 
       setShowSessionChoice(false);
-      await startListening(audioSourceMode, session.id);
+      await startListening(captureMode, session.id);
     } catch (error) {
       alert(error instanceof Error ? error.message : '청취를 시작하지 못했습니다. 다시 시도해 주세요.');
     } finally {
@@ -451,7 +460,7 @@ export const LiveHomePage: React.FC = () => {
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <h1 className="text-sm sm:text-base font-black text-slate-900 tracking-tight whitespace-nowrap">라이브 청취 홈</h1>
+              <h1 className="text-sm sm:text-base font-black text-slate-900 tracking-tight whitespace-nowrap">{runtime.isTest ? '라이브 청취 홈 테스트' : '라이브 청취 홈'}</h1>
               <span className={`hidden sm:inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-bold whitespace-nowrap ${
                 isListening ? 'bg-rose-50 text-rose-600 border border-rose-200' : 'bg-slate-100 text-slate-600'
               }`}>
@@ -467,7 +476,7 @@ export const LiveHomePage: React.FC = () => {
 
         <div className="flex flex-wrap items-center justify-end gap-1.5 ml-auto">
           {/* 실제 판매 데모보기 버튼 (상단 헤더 직접 노출) */}
-          <button
+          {!runtime.isTest && <button
             type="button"
             onClick={handleToggleDemo}
             className={`h-8 px-2.5 sm:px-3 rounded-lg text-[11px] font-black border flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs ${
@@ -479,7 +488,7 @@ export const LiveHomePage: React.FC = () => {
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-300" />
             <span>{isDemoActive ? `데모 중지 (${Math.floor(demoElapsedSeconds / 60).toString().padStart(2, '0')}:${(demoElapsedSeconds % 60).toString().padStart(2, '0')})` : '🎬 데모보기'}</span>
-          </button>
+          </button>}
 
           {/* 판매자 설정 버튼 (모달 열기) */}
           <button
@@ -515,9 +524,13 @@ export const LiveHomePage: React.FC = () => {
               )}
             </label>
 
+          {runtime.isTest && !isListening && activeSession && <button type="button"
+            disabled={isSessionStarting} onClick={() => setShowSessionChoice(true)}
+            className="h-8 px-2 rounded-lg border border-amber-300 bg-amber-50 text-xs font-bold text-amber-900">새 테스트 회차</button>}
           <ListeningStopControl />
 
           <button
+            disabled={isSessionStarting}
             onClick={handleToggleListening}
             className={`h-8 min-w-16 px-2.5 rounded-lg font-black text-xs shadow-sm flex items-center justify-center gap-1.5 transition active:scale-95 ${
               isListening
@@ -528,12 +541,12 @@ export const LiveHomePage: React.FC = () => {
             {isListening ? (
               <>
                 <Square className="w-3 h-3 fill-current" />
-                <span>중지</span>
+                <span>{runtime.isTest ? '방송중지' : '중지'}</span>
               </>
             ) : (
               <>
                 <Play className="w-3 h-3 fill-current" />
-                <span>시작</span>
+                <span>{runtime.isTest ? '방송시작' : '시작'}</span>
               </>
             )}
           </button>
@@ -676,7 +689,7 @@ export const LiveHomePage: React.FC = () => {
                   <RefreshCw className={`h-3.5 w-3.5 ${isSalesRefreshing ? 'animate-spin' : ''}`} />
                   <span>새로고침</span>
                 </button>
-                <Link to="/sales/review" className="text-xs text-brand-600 hover:underline font-bold flex items-center">
+                <Link to={runtime.path('/sales/review')} className="text-xs text-brand-600 hover:underline font-bold flex items-center">
                   <span>일괄 검토</span>
                   <ArrowRight className="w-3.5 h-3.5 ml-1" />
                 </Link>
@@ -709,8 +722,8 @@ export const LiveHomePage: React.FC = () => {
                   return (
                   <Link
                     key={sale.id}
-                    to={isDemoActive ? '#' : `/sales/${sale.id}`}
-                    state={{ returnTo: '/live' }}
+                    to={isDemoActive ? '#' : runtime.path(`/sales/${sale.id}`)}
+                    state={{ returnTo: runtime.path('/live') }}
                     onClick={(e) => { if (isDemoActive) e.preventDefault(); }}
                     className={`block p-2 sm:p-2.5 rounded-xl border transition active:scale-[0.99] hover:shadow-xs ${
                       sale.status === '보류'
@@ -838,11 +851,11 @@ export const LiveHomePage: React.FC = () => {
                               ? 'bg-purple-100 text-purple-700'
                               : 'bg-emerald-50 text-emerald-700'
                           }`}>
-                            {sale.syncStatus === 'PENDING' ? '서버 저장 대기' : sale.status}
+                            {sale.syncStatus === 'PENDING' ? (runtime.isTest ? '테스트 DB 저장 대기' : '서버 저장 대기') : sale.status}
                           </span>
                           {sale.printStatus === 'PRINTED' && (
                             <span className="text-[9px] px-1.5 py-0.2 rounded-full font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              전표 출력 완료
+                              {runtime.isTest ? '가상 전표 완료' : '전표 출력 완료'}
                             </span>
                           )}
                           {sale.printStatus === 'QUEUED' && sale.syncStatus !== 'PENDING' && (
@@ -929,13 +942,13 @@ export const LiveHomePage: React.FC = () => {
                 {cloudSyncStatus === 'saving' && (
                   <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-full animate-pulse">
                     <Cloud className="w-3 h-3 animate-spin" />
-                    <span>Supabase 저장 중...</span>
+                    <span>{runtime.isTest ? '테스트 DB 저장 중…' : 'Supabase 저장 중...'}</span>
                   </span>
                 )}
                 {cloudSyncStatus === 'saved' && (
-                  <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full" title="방송 발화 전체 로그가 Supabase 클라우드에 안전하게 영구 보관되었습니다.">
+                  <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full" title={runtime.isTest ? '방송 발화 로그를 이 PC의 테스트 DB에 보관했습니다.' : '방송 발화 전체 로그가 Supabase 클라우드에 안전하게 영구 보관되었습니다.'}>
                     <Cloud className="w-3 h-3 text-emerald-600" />
-                    <span>Supabase 보관됨</span>
+                    <span>{runtime.isTest ? '테스트 DB 보관됨' : 'Supabase 보관됨'}</span>
                   </span>
                 )}
               </div>
@@ -1043,11 +1056,11 @@ export const LiveHomePage: React.FC = () => {
                 )}
               </h3>
               <div className="flex items-center space-x-2.5">
-                <Link to="/seller/helper" className="text-xs text-slate-500 hover:text-brand-600 font-bold flex items-center transition">
+                <Link to={runtime.isTest ? '/live-test/comments' : '/seller/helper'} className="text-xs text-slate-500 hover:text-brand-600 font-bold flex items-center transition">
                   <Bot className="w-3.5 h-3.5 mr-1 text-brand-600" />
-                  <span>도우미 설정</span>
+                  <span>{runtime.isTest ? '테스트 댓글 기록' : '도우미 설정'}</span>
                 </Link>
-                <Link to="/comments" className="text-xs text-brand-600 hover:underline font-bold flex items-center">
+                <Link to={runtime.path('/comments')} className="text-xs text-brand-600 hover:underline font-bold flex items-center">
                   <span>전체 기록</span>
                   <ArrowRight className="w-3.5 h-3.5 ml-1" />
                 </Link>
@@ -1081,8 +1094,8 @@ export const LiveHomePage: React.FC = () => {
               {effectiveComments.length === 0 ? (
                 <div className="py-2.5 sm:py-3 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl min-h-[38px] flex items-center justify-center">
                   {isCommentCaptureRunning
-                    ? `@${commentConfig.tiktokUsername || '?'} 라이브 댓글을 실시간 수집 중입니다...`
-                    : '"댓글캡처" 체크 후 라이브 청취를 시작하면 틱톡 댓글이 실시간 표시됩니다.'}
+                    ? (runtime.isTest ? '가상 댓글을 실시간 생성하고 있습니다…' : `@${commentConfig.tiktokUsername || '?'} 라이브 댓글을 실시간 수집 중입니다...`)
+                    : (runtime.isTest ? '방송시작을 누르면 가상 댓글이 실시간으로 표시됩니다.' : '"댓글캡처" 체크 후 라이브 청취를 시작하면 틱톡 댓글이 실시간 표시됩니다.')}
                 </div>
               ) : (
                 effectiveComments.map((c) => (
@@ -1164,7 +1177,7 @@ export const LiveHomePage: React.FC = () => {
                 <Sparkles className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
                 <span>빠른 시연 & 테스트 멘트 주입 버튼</span>
               </p>
-              <button
+              {!runtime.isTest && <button
                 type="button"
                 onClick={handleToggleDemo}
                 className={`px-2.5 py-0.5 rounded-lg text-[11px] font-black whitespace-nowrap active:scale-95 transition flex items-center gap-1 shadow-xs ${
@@ -1184,7 +1197,7 @@ export const LiveHomePage: React.FC = () => {
                     <span>🎬 실시간 전체 데모</span>
                   </>
                 )}
-              </button>
+              </button>}
             </div>
             <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar pb-0.5">
               <button
@@ -1554,10 +1567,11 @@ export const LiveHomePage: React.FC = () => {
       )}
 
       {/* 댓글 도우미 및 장치 설정 모달 */}
-      <CommentHelperModal isOpen={showHelperModal} onClose={() => setShowHelperModal(false)} />
+      <CommentHelperModal isOpen={!runtime.isTest && showHelperModal} onClose={() => setShowHelperModal(false)} />
 
       {/* 판매자 설정 및 실제 판매 데모보기 모달 */}
       <SellerSettingsModal
+        isTest={runtime.isTest}
         isOpen={showSellerSettingsModal}
         onClose={() => setShowSellerSettingsModal(false)}
         isDemoActive={isDemoActive}

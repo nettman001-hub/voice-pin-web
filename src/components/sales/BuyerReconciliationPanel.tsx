@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from '../../context/WorkspaceRuntimeContext';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -25,7 +26,7 @@ import { useCommerce } from '../../context/CommerceContext';
 import { useSales } from '../../context/SalesContext';
 import { CustomerPurchaseClaim, MatchStatus } from '../../types/commerce';
 import { SaleRecord } from '../../types/live';
-import { productSalesApi } from '../../services/productSalesApi';
+
 import { formatSessionDisplay, SessionInfoLike } from '../../utils/sessionFormatter';
 import { cleanMessageBody } from '../../utils/textCleaner';
 import { ImageViewerModal } from '../common/ImageViewerModal';
@@ -73,7 +74,7 @@ const DEFAULT_QUICK_TEMPLATES: QuickSmsTemplate[] = [
   }
 ];
 
-const loadQuickTemplates = (): QuickSmsTemplate[] => {
+const loadQuickTemplates = (localStorage: Storage = globalThis.localStorage): QuickSmsTemplate[] => {
   try {
     const raw = localStorage.getItem(QUICK_TEMPLATES_STORAGE_KEY);
     if (raw) {
@@ -84,7 +85,7 @@ const loadQuickTemplates = (): QuickSmsTemplate[] => {
   return DEFAULT_QUICK_TEMPLATES;
 };
 
-const saveQuickTemplates = (templates: QuickSmsTemplate[]) => {
+const saveQuickTemplates = (templates: QuickSmsTemplate[], localStorage: Storage = globalThis.localStorage) => {
   try {
     localStorage.setItem(QUICK_TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
   } catch {}
@@ -303,6 +304,7 @@ const QuickTemplateManagerModal: React.FC<{
   templates: QuickSmsTemplate[];
   onSaveTemplates: (next: QuickSmsTemplate[]) => void;
 }> = ({ isOpen, onClose, templates, onSaveTemplates }) => {
+  const runtime = useWorkspaceRuntime();
   const [list, setList] = useState<QuickSmsTemplate[]>(templates);
   const [selectedId, setSelectedId] = useState<string>(templates[0]?.id || '');
 
@@ -352,7 +354,7 @@ const QuickTemplateManagerModal: React.FC<{
 
   const handleSave = () => {
     onSaveTemplates(list);
-    saveQuickTemplates(list);
+    saveQuickTemplates(list, runtime.webStorage);
     onClose();
   };
 
@@ -496,6 +498,8 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
   sessionStartTime,
   sessionId,
 }) => {
+  const runtime = useWorkspaceRuntime();
+  const { productSalesApi } = runtime;
   const [internalSessions, setInternalSessions] = useState<SessionInfoLike[]>([]);
 
   useEffect(() => {
@@ -581,7 +585,7 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
     });
 
     try {
-      const raw = localStorage.getItem('voicecap_manual_phone_nicknames');
+      const raw = runtime.webStorage.getItem('voicecap_manual_phone_nicknames');
       if (raw) {
         const obj = JSON.parse(raw);
         for (const [phone, nick] of Object.entries(obj)) {
@@ -683,7 +687,7 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
   const [isSending, setIsSending] = useState(false);
 
   // 자주 쓰는 문자 템플릿 관리 상태
-  const [templates, setTemplates] = useState<QuickSmsTemplate[]>(() => loadQuickTemplates());
+  const [templates, setTemplates] = useState<QuickSmsTemplate[]>(() => loadQuickTemplates(runtime.webStorage));
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
 
   // 전화번호 자동 채우기
@@ -763,7 +767,7 @@ export const BuyerReconciliationPanel: React.FC<BuyerReconciliationPanelProps> =
               <Camera className="h-4 w-4" /> 자동 생성 판매정보
             </h4>
             {records.length === 1 && (
-              <Link to={`/sales/${records[0].id}`} className="flex items-center gap-1 text-[10px] font-bold text-brand-700 hover:underline">
+              <Link to={runtime.path(`/sales/${records[0].id}`)} className="flex items-center gap-1 text-[10px] font-bold text-brand-700 hover:underline">
                 <Edit3 className="h-3 w-3" /> 수정
               </Link>
             )}

@@ -1,8 +1,9 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from '../../context/WorkspaceRuntimeContext';
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
 import { useCommerce } from '../../context/CommerceContext';
-import { productSalesApi } from '../../services/productSalesApi';
+
 import { LiveSession } from '../../types/productSales';
 import { SaleRecord } from '../../types/live';
 import { BuyerReconciliationPanel, BuyerStatusBadges } from '../../components/sales/BuyerReconciliationPanel';
@@ -30,7 +31,7 @@ import {
   Trash2,
   RotateCcw
 } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+
 import { ShippingConfigModal } from '../../components/shipping/ShippingConfigModal';
 import { shippingService } from '../../services/shippingService';
 import { KeepingBadge } from '../../components/shipping/KeepingBadge';
@@ -110,6 +111,8 @@ interface BuyerGroupedSale {
 }
 
 export const SalesListPage: React.FC = () => {
+  const runtime = useWorkspaceRuntime();
+  const { productSalesApi } = runtime;
   const { workspaceId } = useAuth();
   const { sales, promiseDefaults, setPromiseDefault, exportCsv, refreshSales, deleteSale, restoreSales } = useSales();
   const { messages, payments, claims, invoices, shipments } = useCommerce();
@@ -664,7 +667,7 @@ export const SalesListPage: React.FC = () => {
             <span>택배비 설정</span>
           </button>
           <Link
-            to="/sales/review"
+            to={runtime.path('/sales/review')}
             className="h-8 px-2.5 sm:px-3 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold flex items-center justify-center space-x-1 transition active:scale-95 text-center flex-1 sm:flex-initial"
           >
             <CheckSquare className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
@@ -1168,7 +1171,7 @@ export const SalesListPage: React.FC = () => {
                             className="p-3 rounded-xl bg-white border border-slate-200 hover:border-brand-400 flex items-center justify-between text-xs transition shadow-sm group"
                           >
                             <Link
-                              to={`/sales/${rec.id}${sessionQuery}`}
+                              to={runtime.path(`/sales/${rec.id}${sessionQuery}`)}
                               className="flex items-center space-x-3 min-w-0 flex-1 mr-2 cursor-pointer"
                             >
                               <div
@@ -1255,7 +1258,7 @@ export const SalesListPage: React.FC = () => {
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
                               <Link
-                                to={`/sales/${rec.id}${sessionQuery}`}
+                                to={runtime.path(`/sales/${rec.id}${sessionQuery}`)}
                                 className="text-slate-400 group-hover:text-brand-600 transition p-1"
                                 title="상세 보기 및 수정"
                               >
@@ -1292,7 +1295,7 @@ export const SalesListPage: React.FC = () => {
                 return (
                   <Link
                     key={sale.id}
-                    to={`/sales/${sale.id}${sessionQuery}`}
+                    to={runtime.path(`/sales/${sale.id}${sessionQuery}`)}
                     className="block p-4 rounded-2xl bg-white border border-slate-200 hover:border-brand-400 transition shadow-sm group"
                   >
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">

@@ -1,3 +1,4 @@
+import { runtimeFixture } from './runtime-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -43,7 +44,7 @@ function fixture({ save = async () => {}, comments = async () => {}, persistence
   const module = { exports: {} };
   vm.runInNewContext(outputText, {
     module, exports: module.exports,
-    require(name) { assert.ok(name in dependencies, name); return dependencies[name]; },
+    require(name) { if (name.endsWith('WorkspaceRuntimeContext')) return runtimeFixture(dependencies);  assert.ok(name in dependencies, name); return dependencies[name]; },
   });
   const text = (node) => Array.isArray(node) ? node.map(text).join('')
     : node && typeof node === 'object' ? text(node.props.children)

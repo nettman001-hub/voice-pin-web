@@ -1,3 +1,4 @@
+const koreanPeriod = value => value.replace(/\bAM\b/gu, '오전').replace(/\bPM\b/gu, '오후');
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -83,9 +84,9 @@ test('pending voice review registers and executes AI, then persists validated ad
   const body = await response.json();
   assert.equal(body.ok, true);
   assert.deepEqual(state.calls, ['create', 'process']);
-  assert.match(state.request.plainTextPrompt, /^아래 내용은 라이브방송에서 판매자의 멘트와 구매자의 댓글 내용이다/u);
-  assert.match(state.request.plainTextPrompt, /<고객댓글>\n시각\t닉네임\t멘트\n2026\. 9\. 15\. 오전 10:00:00\t햇살\tㅈㅇ/u);
-  assert.match(state.request.plainTextPrompt, /<판매자멘트>\n시각 멘트 \n\[오전 10:00:03\] 햇살언니 1\.5/u);
+  assert.match(koreanPeriod(state.request.plainTextPrompt), /^아래 내용은 라이브방송에서 판매자의 멘트와 구매자의 댓글 내용이다/u);
+  assert.match(koreanPeriod(state.request.plainTextPrompt), /<고객댓글>\n시각\t닉네임\t멘트\n2026\. 9\. 15\. 오전 10:00:00\t햇살\tㅈㅇ/u);
+  assert.match(koreanPeriod(state.request.plainTextPrompt), /<판매자멘트>\n시각 멘트 \n\[오전 10:00:03\] 햇살언니 1\.5/u);
   assert.doesNotMatch(state.request.plainTextPrompt, /[{}]/u, 'The prompt carries no JSON');
   assert.equal(state.current.ai_verification.aiStatus, 'RESOLVED');
   assert.equal(state.current.ai_verification.reviewMode, 'TEXT_PROMPT');
@@ -143,7 +144,7 @@ test('the edge handler puts archived speech from the minute around the sale in t
   const body = await (await handleReviewVoicePendingSale('ws', 'actor', {}, state.row, {})).json();
   assert.equal(body.ok, true);
   const seller = state.request.plainTextPrompt.split('<판매자멘트>\n')[1];
-  assert.equal(seller, '시각 멘트 \n[오후 9:41:10] KH 언니는 연핑 넣어드릴게요\n[오후 9:41:10] 케이치 언니는 연핑 넣어드릴게요\n[오후 9:41:26] KH 언니는 연핑 1.5에 넣어드렸어요\n[오후 9:41:30] 다음 상품 3.5');
+  assert.equal(koreanPeriod(seller), '시각 멘트 \n[오후 9:41:10] KH 언니는 연핑 넣어드릴게요\n[오후 9:41:10] 케이치 언니는 연핑 넣어드릴게요\n[오후 9:41:26] KH 언니는 연핑 1.5에 넣어드렸어요\n[오후 9:41:30] 다음 상품 3.5');
   assert.equal(state.current.buyer_nickname, 'KH');
   assert.equal(state.current.buyer_id, 'account');
   assert.equal(state.current.amount, 15000);
@@ -203,7 +204,7 @@ test('ordinary chat sent by the browser is in the prompt but only stored comment
     { id: 'local-1', platformMessageId: 'm1', nickname: '햇살', content: '저요', capturedAt: '2026-09-15T01:00:00Z' },
     { id: 'local-2', platformMessageId: 'm2', nickname: '구경꾼', content: '예뻐요', capturedAt: '2026-09-15T01:00:20Z' },
   ] });
-  assert.match(state.request.plainTextPrompt, /구경꾼\t예뻐요/u);
+  assert.match(koreanPeriod(state.request.plainTextPrompt), /구경꾼\t예뻐요/u);
   assert.equal(state.current.ai_verification.aiStatus, 'RESOLVED');
   assert.equal(state.current.ai_verification.candidateCommentId, undefined);
   assert.deepEqual(state.current.source_comment_ids, []);

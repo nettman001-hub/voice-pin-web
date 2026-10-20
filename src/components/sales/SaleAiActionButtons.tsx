@@ -1,14 +1,13 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from '../../context/WorkspaceRuntimeContext';
 import React, { useState, useMemo } from 'react';
 import { SaleRecord } from '../../types/live';
 import { SaleAiEvidenceModal } from './SaleAiEvidenceModal';
 import { useSaleAiConversationWindow } from './SaleAiConversationWindow';
 import { useSales } from '../../context/SalesContext';
 import { useLive } from '../../context/LiveContext';
-import { useAuth } from '../../context/AuthContext';
+
 import { useOptionalCommentCapture } from '../../context/CommentCaptureContext';
-import { storageService } from '../../services/storageService';
-import { flushPendingComments } from '../../services/commentSyncService';
-import { aiSettingsApi } from '../../services/aiSettingsApi';
+
 import { rollbackCorrection } from '../../services/voiceCorrectionService';
 import {
   FileText,
@@ -32,6 +31,8 @@ export const SaleAiActionButtons: React.FC<SaleAiActionButtonsProps> = ({
   onRefresh,
   hideEvidence = false,
 }) => {
+  const runtime = useWorkspaceRuntime();
+  const { storageService, aiSettingsApi, flushPendingComments } = runtime;
   const { updateSale, refreshSales } = useSales();
   const { syncCurrentTranscriptsToCloud } = useLive();
   const { workspaceId } = useAuth();

@@ -1,3 +1,4 @@
+import { runtimeFixture } from './runtime-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -94,7 +95,7 @@ function providerFixture() {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
   }).outputText;
   vm.runInNewContext(compiled, { module, exports: module.exports, Error, Date: class extends Date { static now() { return now; } },
-    require: (name) => { assert.ok(name in dependencies, `Unexpected import ${name}`); return dependencies[name]; },
+    require: (name) => { if (name.endsWith('WorkspaceRuntimeContext')) return runtimeFixture(dependencies);  assert.ok(name in dependencies, `Unexpected import ${name}`); return dependencies[name]; },
     document: eventTarget('document'), window: { ...eventTarget('window'),
       setInterval(callback) { intervals.set(++timerId, callback); return timerId; }, clearInterval(id) { intervals.delete(id); } },
   });
@@ -240,7 +241,7 @@ function controlFixture() {
   vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/components/live/ListeningStopControl.tsx', 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React },
   }).outputText, { module, exports: module.exports, Error, Date: class extends Date { static now() { return now; } },
-    require: (name) => { assert.ok(name in dependencies, `Unexpected import ${name}`); return dependencies[name]; },
+    require: (name) => { if (name.endsWith('WorkspaceRuntimeContext')) return runtimeFixture(dependencies);  assert.ok(name in dependencies, `Unexpected import ${name}`); return dependencies[name]; },
     window: { addEventListener(name, callback) { events.set(name, callback); }, removeEventListener(name) { events.delete(name); } },
   });
   return { state, now, reservations, get cancelled() { return cancelled; },

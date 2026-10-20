@@ -1,10 +1,10 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from './WorkspaceRuntimeContext';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { useAuth } from './AuthContext';
+
 import { useSales } from './SalesContext';
 import { buildClaimFromMessage, compareClaimWithSales } from '../services/customerMessageParser';
-import { smsBridgeService } from '../services/smsBridgeService';
-import { storageService } from '../services/storageService';
-import { COMMERCE_TABLES, remoteWorkspaceService, type CommerceTable } from '../services/remoteWorkspaceService';
+
+import { COMMERCE_TABLES, type CommerceTable } from '../services/remoteWorkspaceService';
 import { areCommerceValuesEqual, getCommerceChanges, hasCommerceChanges, mergeRemoteCommerce } from '../services/commerceChanges';
 import { createWorkspaceReadSync, workspaceReadsAvailable } from '../services/workspaceReadSync';
 import { confirmPaymentInvoices, generateDepositCode, matchPayment } from '../services/paymentMatching';
@@ -80,6 +80,8 @@ const mergeById = <T extends { id: string }>(local: T[], remote: T[]): T[] => {
 };
 
 export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const runtime = useWorkspaceRuntime();
+  const { storageService, remoteWorkspaceService, smsBridgeService } = runtime;
   const { user, workspaceId, isRemoteAuth } = useAuth();
   const { sales } = useSales();
   const [state, setState] = useState<CommerceState>(() => storageService.getCommerceState());

@@ -1,3 +1,4 @@
+import { prepareVoicePendingReview, evaluateVoicePendingReview, applyVoicePendingReview } from '../../../../src/services/voicePendingReviewCore.ts';
 import { admin, successResponse, errorResponse, type AuthContext } from '../../_shared/productSales.ts';
 import type { SaleRecord } from '../../../../src/types/live.ts';
 import { buildVoiceReviewRequest, shouldReviewVoiceSale, validateVoiceReviewResult, voiceReviewFingerprint,
@@ -14,7 +15,7 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
     id: row.id, sessionId: row.session_id, buyerNickname: row.buyer_nickname, buyerId: row.buyer_id,
     amount: Number(row.amount), recognizedAt: row.recognized_at, rawTranscript: row.raw_transcript || '',
     status: row.status, source: row.source, revision: row.revision || 1, recordState: row.record_state,
-    productCode: row.product_code_snapshot, quantity: row.quantity, aiVerification: row.ai_verification,
+    productCode: row.product_code_snapshot, quantity: row.quantity, unitPrice: row.unit_price, history: row.history || [], aiVerification: row.ai_verification,
     purchaseRequestId: row.purchase_request_id, sourceCommentIds: row.source_comment_ids || [],
     workflowEvidence: row.workflow_evidence,
   };
@@ -99,8 +100,7 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
   for (const l of clientLogs) logMap.set(l.id || `${l.timestamp}:${l.text}`, l);
   for (const l of dbLogs) logMap.set(l.id || `${l.timestamp}:${l.text}`, l);
   const logs = [...logMap.values()].sort((a, b) => Date.parse(a.timestamp || '') - Date.parse(b.timestamp || ''));
-  const fingerprint = textReview ? voiceTextReviewFingerprint(sale, comments, logs)
-    : voiceReviewFingerprint(sale, comments, followingText, logs);
+  const { fingerprint, request } = prepareVoicePendingReview(sale, comments, logs, followingText, workspaceId);
   const previous = sale.aiVerification;
   if ((previous?.reviewFingerprint === fingerprint && previous.aiStatus !== 'CHECKING' && !previous.errorMessage && !body.forceReanalyze)
     || (previous?.aiStatus === 'CHECKING' && Date.now() - Date.parse(previous.validatedAt || '') < 60_000)) {
@@ -118,12 +118,6 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
   let task: any = null;
   let processingError: string | undefined;
   try {
-    const request = textReview ? {
-      taskType: 'PENDING_RESOLUTION' as const, workspaceId, sessionId: sale.sessionId,
-      currentUtterance: sale.rawTranscript, plainTextPrompt: buildVoiceTextReviewPrompt(sale, comments, logs),
-      saleCandidates: [{ saleId: sale.id, productCode: sale.productCode || '', buyerNickname: sale.buyerNickname,
-        buyerId: sale.buyerId, amount: sale.amount, quantity: sale.quantity || 1, status: sale.status }],
-    } : { ...buildVoiceReviewRequest(sale, comments, followingText, logs), workspaceId };
     const creation = await (await handleCreateAiTask(workspaceId, actorId, auth, {
       saleId: sale.id, sessionId: sale.sessionId, saleRevision: sale.revision,
       settingVersion: setting?.applied_version || 1,
@@ -138,12 +132,7 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
   } catch (err: any) {
     processingError = err.message || 'AI 검토 실행 실패';
   }
-  const meta = textReview
-    ? validateVoiceTextReviewAnswer(sale, comments, task?.resolutionResult?.evidenceSummary ?? null,
-      task?.activeSlot || 1, task?.taskId || '', fingerprint)
-    : validateVoiceReviewResult(sale, comments, task?.resolutionResult || null,
-      task?.activeSlot || 1, task?.taskId || '', fingerprint, followingText, logs);
-  if (processingError) meta.errorMessage = processingError;
+  const meta = evaluateVoicePendingReview(sale, comments, logs, followingText, task, fingerprint, processingError);
   // Ordinary chat sent by the browser is not stored; link only stored comments.
   if (textReview && meta.candidateCommentId && !dbComments.some((c: any) => c.id === meta.candidateCommentId)) {
     meta.candidateCommentId = undefined;
@@ -161,29 +150,10 @@ export async function handleReviewVoicePendingSale(workspaceId: string, actorId:
       meta.resolutionSummary = '이 구매 댓글에 연결된 다른 판매가 있습니다. 중복 여부를 판매자가 확인해 주세요.';
     }
   }
-  const rejected = meta.reviewDecision === 'NOT_SALE';
-  const nextSale = { ...sale };
-  if (!rejected && meta.candidateAmount && meta.saleConfirmed) {
-    nextSale.amount = meta.candidateAmount;
-    nextSale.unitPrice = meta.candidateAmount;
-  }
-  if (!rejected && meta.nicknameVerified && meta.candidateBuyer) {
-    nextSale.buyerNickname = meta.candidateBuyer.nickname;
-    nextSale.buyerId = meta.candidateBuyer.buyerId || undefined;
-    nextSale.purchaseRequestId = meta.candidatePurchaseRequestId;
-    nextSale.sourceCommentIds = meta.candidateCommentId ? [meta.candidateCommentId] : [];
-  }
-  const valuesChanged = nextSale.amount !== sale.amount || nextSale.buyerNickname !== sale.buyerNickname
-    || nextSale.buyerId !== sale.buyerId || nextSale.purchaseRequestId !== sale.purchaseRequestId;
-  nextSale.revision = sale.revision! + (valuesChanged ? 1 : 0);
-  meta.reviewFingerprint = textReview ? voiceTextReviewFingerprint(nextSale, comments, logs)
-    : voiceReviewFingerprint(nextSale, comments, followingText, logs);
-  const history = { revision: nextSale.revision, changedAt: new Date().toISOString(), changedBy: 'AI', changeType: 'AI_RESOLVE',
-    before: { status: sale.status, buyerNickname: sale.buyerNickname, amount: sale.amount },
-    after: { status: rejected ? '취소' : sale.status, buyerNickname: nextSale.buyerNickname, amount: nextSale.amount },
-    summary: meta.resolutionSummary, appliedSlot: task?.activeSlot, switchReason: task?.switchReason,
-    failoverAttempted: Boolean(task?.attempts?.length > 1), evidenceIds: task?.resolutionResult?.evidenceIds || [],
-  };
+  const nextSale = applyVoicePendingReview(sale, comments, logs, followingText, meta, task);
+  const rejected = nextSale.status === '취소';
+  const valuesChanged = nextSale.revision !== sale.revision;
+  const history = nextSale.history![nextSale.history!.length - 1];
   const update: any = { ai_verification: meta, history: [...(row.history || []), history], updated_at: new Date().toISOString() };
   if (valuesChanged) Object.assign(update, { revision: nextSale.revision, buyer_nickname: nextSale.buyerNickname,
     buyer_id: nextSale.buyerId || null, purchase_request_id: nextSale.purchaseRequestId || null,

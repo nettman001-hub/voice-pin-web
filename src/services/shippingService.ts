@@ -1,5 +1,5 @@
 import { ShippingConfig, BuyerShippingOverride, CalculatedShipping } from '../types/shipping';
-import { remoteWorkspaceService } from './remoteWorkspaceService';
+import { remoteWorkspaceService as productionRemote } from './remoteWorkspaceService';
 
 const SHIPPING_CONFIG_KEY = 'voicecap_shipping_config';
 const SHIPPING_OVERRIDES_KEY = 'voicecap_buyer_shipping_overrides';
@@ -17,7 +17,8 @@ const getStorageKey = (base: string, workspaceId?: string | null): string => {
   return workspaceId ? `${base}_${workspaceId}` : base;
 };
 
-export const shippingService = {
+export function createShippingService(remoteWorkspaceService = productionRemote, localStorage: Storage = globalThis.localStorage) {
+return {
   /**
    * 로컬 및 클라우드에서 배송비 정책을 가져옵니다.
    */
@@ -236,3 +237,6 @@ export const shippingService = {
     };
   },
 };
+}
+
+export const shippingService = createShippingService();

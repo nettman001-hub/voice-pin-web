@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from './WorkspaceRuntimeContext';
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { LiveSession, SttTranscriptLog, CaptureItem, SaleRecord } from '../types/live';
 import { deepgramService } from '../services/deepgramService';
@@ -11,13 +12,13 @@ import { getPurchaseRequests, matchPurchaseRequest, matchCommentAuthor, areSameC
 import { advanceVoiceSaleTransaction, isProductChangeUtterance, type VoiceSaleTransactionState } from '../services/voiceSaleTransaction';
 import { announcesAdditionalPurchase, findRestatedVoiceSale } from '../services/voiceSaleRestatement';
 import { resolveConfirmedBuyer, applyConfirmedBuyer, BUYER_LINK_PENDING, mergeBuyerComments } from '../services/confirmedBuyerResolver';
-import { confirmedBuyerAliases } from '../services/confirmedBuyerAliases';
+
 import { collectFourPointWorkflowSales } from '../services/fourPointWorkflow';
 import type { CommentRecord } from '../types/comment';
-import { storageService, generateSessionId, getNextProductCodeForSession } from '../services/storageService';
+import { generateSessionId, getNextProductCodeForSession } from '../services/storageService';
 import { generateSequentialProductName, formatSequentialProductName } from '../utils/productNaming';
 import { useSales } from './SalesContext';
-import { useAuth } from './AuthContext';
+
 import { CaptureAreaConfig } from '../types/rules';
 import { findCaptureForSale, findSaleForCapture, hasCaptureInstructionText } from '../services/saleCapturePairing';
 import { SttConfig, SttProvider } from '../types/deepgram';
@@ -25,9 +26,9 @@ import { localSttService } from '../services/localSttService';
 import { LocalSttModel, LocalSttStatusPayload, SttMode } from '../types/stt';
 import { User } from '../types/auth';
 import { isSupabaseConfigured } from '../services/supabaseClient';
-import { remoteWorkspaceService } from '../services/remoteWorkspaceService';
+
 import { useProductSales } from './ProductSalesContext';
-import { productSalesApi } from '../services/productSalesApi';
+
 import { InterimStreamChunker } from '../services/captionStreamService';
 import { buildPendingReasons, buildEvidenceSnapshot, evaluatePendingRules } from '../services/pendingSalesService';
 import {
@@ -40,7 +41,7 @@ import {
   rollbackCorrection,
 } from '../services/voiceCorrectionService';
 import type { PendingCorrectionRequest } from '../types/voiceCorrection';
-import { aiSettingsApi } from '../services/aiSettingsApi';
+
 import { useSttVocabulary } from './SttVocabularyContext';
 import { buildCloudSttTerms, getRecentCommentNicknames } from '../services/sttVocabularyService';
 import { getVoiceReviewRequests, shouldReviewVoiceSale, voiceReviewFingerprint, isVoiceReviewReady,
@@ -58,7 +59,7 @@ import {
 import { HintRotationScheduler } from '../services/logicOpus/opusHintPlanner';
 import type { AudioCaptureDiagnostics } from '../services/audioCaptureService';
 import type { SttStreamDiagnostics } from '../services/deepgramService';
-import { sellerAnalysisApi } from '../services/sellerAnalysisApi';
+
 import { replaySalesWorkflow } from '../services/salesWorkflowEngine';
 import type { AppliedSalesWorkflow } from '../types/salesWorkflow';
 
@@ -180,12 +181,18 @@ interface LiveContextType {
 const LiveContext = createContext<LiveContextType | undefined>(undefined);
 
 export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const runtime = useWorkspaceRuntime();
+  const { storageService, remoteWorkspaceService, productSalesApi, aiSettingsApi, sellerAnalysisApi, confirmedBuyerAliases } = runtime;
   const { addSale, updateSale, updateSaleCapture, deleteSale, sales, refreshSales } = useSales();
   const { isAuthenticated, user, workspaceId, isRemoteAuth } = useAuth();
   const { getWordsForConnection } = useSttVocabulary();
   const productSales = useProductSales();
 
   const [isListening, setIsListening] = useState<boolean>(false);
+  const inputReleaseRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (!isListening) { inputReleaseRef.current?.(); inputReleaseRef.current = null; }
+  }, [isListening]);
   const [currentSessionId, setCurrentSessionId] = useState<string>(generateSessionId());
   const [sessionStartTime, setSessionStartTime] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState<number>(0);
@@ -379,6 +386,22 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const logs = sessionTranscriptsRef.current.get(sessionId) || allSessionTranscriptsRef.current;
     if (logs.length > 0) storageService.saveSessionTranscripts(transcriptWorkspaceIdRef.current, sessionId, logs);
   }, []);
+
+  // Bootstrap may restore a session after this provider mounts. Restore its
+  // transcript before the next start too, so a reload still permits TXT export.
+  useEffect(() => {
+    const restoredSessionId = productSales.activeSession?.id;
+    if (!restoredSessionId || isListeningRef.current || restoredSessionId === currentSessionIdRef.current) return;
+    persistCurrentSessionTranscripts();
+    const logs = storageService.getSessionTranscripts(workspaceId || user?.id || 'local', restoredSessionId);
+    currentSessionIdRef.current = restoredSessionId;
+    allSessionTranscriptsRef.current = logs;
+    sessionTranscriptsRef.current.set(restoredSessionId, logs);
+    setCurrentSessionId(restoredSessionId);
+    setTranscriptLogs([...logs].reverse().slice(0, 300));
+    setTotalSessionTranscriptCount(logs.length);
+    setLiveTranscriptFlow([]);
+  }, [productSales.activeSession?.id, workspaceId, user?.id, persistCurrentSessionTranscripts]);
 
   /**
    * 방송 세션의 전체 발화 로그(SttTranscriptLog[])를 Supabase 클라우드(workspace_settings)에 저장합니다.
@@ -1291,8 +1314,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!isCurrentReview() || !result) return;
         // Another request may still be processing when fresh following context
         // arrives. Retry that context after the current review has finished.
-        if (result.waitingForWindow || result.sale?.ai_verification?.errorMessage
-          || (result.skipped && result.sale?.ai_verification?.aiStatus === 'CHECKING')) attempt.failed = true;
+        if (result.waitingForWindow || (result.sale?.ai_verification?.errorMessage || result.sale?.aiVerification?.errorMessage)
+          || (result.skipped && (result.sale?.ai_verification?.aiStatus || result.sale?.aiVerification?.aiStatus) === 'CHECKING')) attempt.failed = true;
         return refreshSales();
       })
       .catch((error) => {
@@ -2191,6 +2214,12 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       const newSessionId = salesSessionId || generateSessionId();
+      const releaseInput = await runtime.acquireListeningInput?.();
+      if (listeningGenerationRef.current !== listeningGeneration || currentUserIdRef.current !== requestedUserId) {
+        releaseInput?.();
+        return;
+      }
+      inputReleaseRef.current = releaseInput || null;
       appliedWorkflowRef.current = isRemoteAuth ? await sellerAnalysisApi.currentWorkflow(salesSessionId) : null;
       setWorkflowProcessingError('');
       workflowDecisionsRef.current.clear();
@@ -2472,6 +2501,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setSttEngineMessage(err instanceof Error ? err.message : '라이브 청취 시작 실패');
       }
     } finally {
+      if (!isListeningRef.current) { inputReleaseRef.current?.(); inputReleaseRef.current = null; }
       startInFlightRef.current = false;
     }
   };
@@ -2587,6 +2617,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 라이브 청취 중지 (TAB_AUDIO는 파이프라인을 일시정지해 공유 연결을 유지한다)
   const stopListening = useCallback(() => {
+    inputReleaseRef.current?.();
+    inputReleaseRef.current = null;
     persistCurrentSessionTranscripts();
     // 방송 종료 시 전체 멘트 이력을 Supabase 클라우드에 강제 전송
     const stoppedWorkflow=appliedWorkflowRef.current;
@@ -2643,6 +2675,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setEditingFieldInfo(null);
     if (editTimeoutRef.current) clearTimeout(editTimeoutRef.current);
   }, [persistCurrentSessionTranscripts, syncSessionTranscriptsToCloud]);
+
+  const stopOnUnmountRef = useRef(stopListening);
+  stopOnUnmountRef.current = stopListening;
+  useEffect(() => () => { stopOnUnmountRef.current(); }, []);
 
   const disconnectScreenShare = useCallback(() => {
     stopListening();

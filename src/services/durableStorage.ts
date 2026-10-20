@@ -4,11 +4,13 @@ export class DurableStorage {
   private database: Promise<IDBDatabase> | null = null;
   private queue: Promise<unknown> = Promise.resolve();
 
+  constructor(private readonly databaseName = 'voicecap-local-recovery') {}
+
   private open(): Promise<IDBDatabase> {
     if (typeof indexedDB === 'undefined') return Promise.reject(new Error('IndexedDB unavailable'));
     if (!this.database) {
       this.database = new Promise((resolve, reject) => {
-        const request = indexedDB.open('voicecap-local-recovery', 1);
+        const request = indexedDB.open(this.databaseName, 1);
         request.onupgradeneeded = () => request.result.createObjectStore('entries');
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);

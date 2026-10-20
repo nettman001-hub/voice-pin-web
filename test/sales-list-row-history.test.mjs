@@ -1,3 +1,4 @@
+import { runtimeFixture } from './runtime-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as smsNicknameLink from '../src/services/smsNicknameLink.ts';
@@ -75,7 +76,7 @@ function pageFixture() {
   } });
   const module = { exports: {} };
   vm.runInNewContext(outputText, { module, exports: module.exports, URLSearchParams,
-    require(name) { assert.ok(name in dependencies, `Unexpected import ${name}`); return dependencies[name]; },
+    require(name) { if (name.endsWith('WorkspaceRuntimeContext')) return runtimeFixture(dependencies);  assert.ok(name in dependencies, `Unexpected import ${name}`); return dependencies[name]; },
   });
   const render = () => { index = 0; return module.exports.SalesListPage(); };
   const setView = (label) => {

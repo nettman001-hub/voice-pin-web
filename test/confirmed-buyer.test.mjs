@@ -1,3 +1,4 @@
+import { runtimeFixture } from './runtime-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -162,6 +163,7 @@ test('manual candidate selection uses the real comment account and remembers its
   } }).outputText;
   const module = { exports: {} };
   vm.runInNewContext(compiled, { module, exports: module.exports, require: (name) => {
+    if (name.endsWith('WorkspaceRuntimeContext')) return runtimeFixture(dependencies);
     assert.ok(name in dependencies, name); return dependencies[name];
   } });
   const tree = module.exports.ConfirmedBuyerCard({ sale: record });
@@ -211,6 +213,7 @@ test('confirmed nickname aliases survive cloud reload and stay isolated by works
   vm.runInNewContext(compiled, { module, exports: module.exports, Event,
     localStorage: { getItem: (key) => entries.get(key) || null, setItem: (key, value) => entries.set(key, value) },
     window: { dispatchEvent() {} }, require: (name) => {
+    if (name.endsWith('WorkspaceRuntimeContext')) return runtimeFixture(dependencies);
       if (name === './nicknameMatcher') return { normalizeNickname: (value) => value };
       assert.equal(name, './remoteWorkspaceService');
       return { remoteWorkspaceService: {
