@@ -12,6 +12,8 @@ export type OnTranscriptCallback = (data: {
   provider?: ActiveSttEngine;
   confirmedTextDelta?: string;
   rawResponse?: DeepgramResponse | SonioxResponse;
+  diagnosticEventId?: string;
+  connectionId?: string;
   isAbnormal?: boolean;
   abnormalReason?: string;
 }) => void;
@@ -47,6 +49,12 @@ export class DeepgramSttService {
   private onTranscript: OnTranscriptCallback | null = null;
   private onError: OnErrorCallback | null = null;
   private onStatus: OnStatusCallback | null = null;
+  private diagnosticSink?: import('./sttDiagnostics.ts').SttDiagnosticSink;
+  private diagnosticConnectionId?: string;
+  private trace(stage: string, detail: object) {
+    try { this.diagnosticSink?.({ stage, detail: { connectionId: this.diagnosticConnectionId, ...detail } }); }
+    catch { /* Diagnostics cannot affect the stream. */ }
+  }
   private currentEngine: ActiveSttEngine = 'NONE';
   private socketProvider: SttProvider | null = null;
   private sonioxFinalText: string = '';
@@ -169,6 +177,8 @@ export class DeepgramSttService {
     this.onTranscript = null;
     this.onError = null;
     this.onStatus = null;
+    this.diagnosticSink = undefined;
+    this.diagnosticConnectionId = undefined;
     this.lastFinalText = '';
     this.sonioxFinalText = '';
     this.sonioxHasSpeechSinceFinalize = false;
@@ -206,11 +216,28 @@ export class DeepgramSttService {
   ) {
     // 중복 start나 직전 stop의 비동기 이벤트가 새 세션을 오염시키지 않도록 먼저 조용히 정리한다.
     const generation = this.resetSessionSilently();
+    const connectionId = `stt-${Date.now()}-${generation}-${Math.random().toString(36).slice(2, 8)}`;
+    let responseSequence = 0;
+    const responseIds = new Map<string, string[]>();
+    const diagnostic = (stage: string, detail: unknown) => {
+      try { config.diagnostics?.({ stage, detail: { connectionId, ...(detail as object) } }); } catch { /* Diagnostics cannot interrupt STT. */ }
+    };
+    const receive = (raw: string) => {
+      const responseId = `${connectionId}:${++responseSequence}`;
+      let response: unknown = raw;
+      try { response = JSON.parse(raw); } catch { /* Preserve malformed responses for diagnosis. */ }
+      diagnostic('stt.response', { responseId, provider: config.provider, response });
+      return responseId;
+    };
+    diagnostic('stt.connection.start', { provider: config.provider, model: config.provider === 'SONIOX' ? 'stt-rt-v5' : config.model,
+      sampleRate: 16000, endpointDelayMs: config.provider === 'SONIOX' ? 2000 : 300 });
     const sessionOnStatus = onStatus || null;
 
     this.onTranscript = onTranscript;
     this.onError = onError;
     this.onStatus = sessionOnStatus;
+    this.diagnosticSink = config.diagnostics;
+    this.diagnosticConnectionId = connectionId;
     this.isRecognitionActive = true;
     this.lastFinalText = '';
 
@@ -282,6 +309,8 @@ export class DeepgramSttService {
           const processSonioxMessage = (raw: string) => {
             if (!this.isActiveSession(generation) || this.ws !== socket) return;
 
+            const diagnosticEventId = responseIds.get(raw)?.shift();
+            if (!responseIds.get(raw)?.length) responseIds.delete(raw);
             try {
               const data: SonioxResponse = JSON.parse(raw);
               this.receivedResponses++;
@@ -298,6 +327,9 @@ export class DeepgramSttService {
               }
 
               const tokens = this.filterRotationTokens(data.tokens || []);
+              diagnostic('stt.tokens.filtered', { responseId: diagnosticEventId, originalCount: data.tokens?.length || 0,
+                keptCount: tokens.length, tokens, keepTokensEndingBeforeMs: this.keepTokensEndingBeforeMs,
+                keepTokensStartingFromMs: this.keepTokensStartingFromMs });
               this.receivedTextCharacters += tokens.filter((token) => token.text !== '<end>' && token.text !== '<fin>')
                 .reduce((count, token) => count + token.text.length, 0);
               const finalizationReached = tokens.some((token) => (
@@ -322,6 +354,7 @@ export class DeepgramSttService {
                 // purchase evidence. Ask for a boundary instead of dropping words.
                 if (!finalizationReached && this.sonioxFinalText.length >= 1200 && !this.sonioxFinalizeRequested) {
                   this.sonioxFinalizeRequested = true;
+                  diagnostic('stt.finalize.requested', { reason: 'LONG_UTTERANCE', audioMs: this.sentAudioMs });
                   socket.send(JSON.stringify({ type: 'finalize' }));
                 }
               }
@@ -349,7 +382,8 @@ export class DeepgramSttService {
                     confidence,
                     provider: 'SONIOX',
                     confirmedTextDelta,
-                    rawResponse: data
+                    rawResponse: data,
+                    diagnosticEventId, connectionId
                   });
                 }
               } else if (interimText || confirmedTextDelta) {
@@ -359,7 +393,8 @@ export class DeepgramSttService {
                   confidence,
                   provider: 'SONIOX',
                   confirmedTextDelta,
-                  rawResponse: data
+                  rawResponse: data,
+                  diagnosticEventId, connectionId
                 });
               }
               if (data.finished) this.drainWaiter?.();
@@ -369,6 +404,8 @@ export class DeepgramSttService {
           };
 
           socket.onmessage = (event) => {
+            const responseId = receive(event.data);
+            responseIds.set(event.data, [...(responseIds.get(event.data) || []), responseId]);
             if (!this.isActiveSession(generation) || this.ws !== socket) return;
             // 교체 중인 새 세션은 옛 세션이 끝날 때까지 결과를 모아 두었다가 겹친 부분을 빼고 처리한다
             if (this.heldMessages) {
@@ -435,6 +472,7 @@ export class DeepgramSttService {
         };
 
         socket.onmessage = (event) => {
+          const diagnosticEventId = receive(event.data);
           if (!this.isActiveSession(generation) || this.ws !== socket) return;
 
           try {
@@ -456,7 +494,8 @@ export class DeepgramSttService {
                   text: alt.transcript.trim(),
                   isFinal: !!data.is_final,
                   confidence: alt.confidence || 0.95,
-                  rawResponse: data
+                  rawResponse: data,
+                  diagnosticEventId, connectionId
                 });
               }
             }
@@ -560,6 +599,11 @@ export class DeepgramSttService {
 
       recognition.onresult = (event: any) => {
         if (!isCurrentRecognition()) return;
+        const diagnosticEventId = `webspeech-${generation}-${Date.now()}`;
+        try { this.diagnosticSink?.({ stage: 'stt.response', detail: { responseId: diagnosticEventId, provider: 'WEB_SPEECH',
+          response: { resultIndex: event.resultIndex, results: Array.from(event.results, (result: any) => ({
+            isFinal: result.isFinal, alternatives: Array.from(result, (alternative: any) => ({ text: alternative.transcript, confidence: alternative.confidence })),
+          })) } } }); } catch { /* Independent of recognition. */ }
 
         let interimText = '';
 
@@ -576,7 +620,7 @@ export class DeepgramSttService {
               onTranscript({
                 text: transcript.trim(),
                 isFinal: true,
-                confidence
+                confidence, diagnosticEventId
               });
             }
           } else {
@@ -588,7 +632,7 @@ export class DeepgramSttService {
           onTranscript({
             text: interimText.trim(),
             isFinal: false,
-            confidence: 0.85
+            confidence: 0.85, diagnosticEventId
           });
         }
       };
@@ -752,6 +796,7 @@ export class DeepgramSttService {
         this.shouldFinalizeSonioxAfterChunk(chunk)
       ) {
         this.ws.send(JSON.stringify({ type: 'finalize' }));
+        this.trace('stt.finalize.requested', { reason: 'PCM_SILENCE', silenceMs: this.sonioxSilenceMs, audioMs: this.sentAudioMs });
       }
     }
   }
@@ -1057,6 +1102,7 @@ export class DeepgramSttService {
       try {
         if (socket && socket.readyState === WebSocket.OPEN) {
           socket.send(JSON.stringify({ type: 'finalize' }));
+          this.trace('stt.finalize.requested', { reason: 'CONNECTION_ROTATION', audioMs: this.sentAudioMs });
           socket.send(new ArrayBuffer(0));
         } else {
           done();

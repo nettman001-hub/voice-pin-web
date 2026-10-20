@@ -3,6 +3,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { webcrypto } from 'node:crypto';
 import test from 'node:test';
+import { diagnosticGlobals } from './runtime-fixture.mjs';
 import assert from 'node:assert/strict';
 
 function loadClass(path, globals = {}) {
@@ -40,6 +41,7 @@ async function scenario(mode, micFailure = false) {
     },
   });
   const globals = {
+    ...diagnosticGlobals,
     console: { error() {} }, Uint8Array, Date, Map,
     isAuthenticatedRef: { current: true }, currentUserIdRef: { current: 'seller' }, authBoundaryGenerationRef: { current: 0 },
     listeningGenerationRef: { current: 0 }, activeListeningUserIdRef: { current: null }, startInFlightRef: { current: false },

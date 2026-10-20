@@ -5,3 +5,6 @@ export function runtimeFixture(modules) {
   const runtime = Object.assign({ isTest: false, path: path => path }, ...Object.values(modules).filter(value => value && typeof value === 'object'));
   return { useWorkspaceRuntime: () => runtime, useRuntimeAuth: auth?.useAuth || (() => ({})) };
 }
+
+export const diagnosticGlobals = { recordDiagnostic() {}, diagnosticScopeRef: { current: null },
+  sttDiagnostics: { record() {}, sink: () => () => {}, flush: async () => {}, export: async () => ({ events: [] }) } };

@@ -1,4 +1,6 @@
 import test from 'node:test';
+import { diagnosticGlobals } from './runtime-fixture.mjs';
+import { extractSpeechPrice } from '../src/services/priceEvidence.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -12,6 +14,32 @@ import {replaySalesWorkflow,DEFAULT_WORKFLOW_PROFILE} from '../src/services/sale
 import { hasCaptureInstructionText } from '../src/services/saleCapturePairing.ts';
 import { advanceVoiceSaleTransaction, isProductChangeUtterance } from '../src/services/voiceSaleTransaction.ts';
 import { collectFourPointWorkflowSales } from '../src/services/fourPointWorkflow.ts';
+
+test('diagnostics explain split capture suffix exclusion with the original response ID', () => {
+  const ctx = fixture();
+  ctx.send('네, 민트님. 민트님 드릴게요. 가격은 0.5. 자, 캡.', { diagnosticEventId: 'raw-1' });
+  ctx.send('쳐해주세요.', { diagnosticEventId: 'raw-2' });
+  const event = ctx.state.diagnostics.find(event => event.stage === 'transaction.decision'
+    && event.detail.sourceEventId === 'raw-2');
+  assert.equal(event.detail.reason, 'NEUTRAL_TALK_NOT_APPENDED');
+  assert.equal(event.detail.emission, null);
+  assert.equal(event.detail.capture.detected, false);
+  assert.ok(!event.detail.after.evidenceText.includes('쳐해주세요'));
+});
+
+test('diagnostics expose duplicated price rejection and a later independent capture', () => {
+  const ctx = fixture();
+  ctx.send('네, 이 제품 돈이 언니 드릴게요. 돈이 언니, 가격은.', { diagnosticEventId: 'raw-1' });
+  ctx.send('3.8, 3.8이고요.', { diagnosticEventId: 'raw-2' });
+  ctx.send('캡쳐해주세요.', { diagnosticEventId: 'raw-3' });
+  const event = ctx.state.diagnostics.find(event => event.stage === 'transaction.decision' && event.detail.sourceEventId === 'raw-2');
+  assert.ok(event.detail.boundaries.includes('CONTINUATION_REJECTED'));
+  assert.equal(event.detail.price.detected.amount, 38000);
+  assert.equal(event.detail.price.standalone, null);
+  assert.equal(event.detail.emission, null);
+  assert.ok(ctx.state.diagnostics.some(event => event.stage === 'sale.evaluation'
+    && event.detail.sourceEventId === 'raw-3' && event.detail.reason === 'STANDALONE_CAPTURE'));
+});
 
 // Execute the real live callbacks with controlled storage/audio/cloud boundaries.
 const source = fs.readFileSync(new URL('../src/context/LiveContext.tsx', import.meta.url), 'utf8');
@@ -43,10 +71,12 @@ const pending = (candidateSaleIds = ['sale-1']) => ({
 });
 
 function fixture({ sales = [], renderSales = sales, rules = [], pendingCorrection = null, failProductProcessing = false, workflow=null, comments=[] } = {}) {
-  const state = { sales, rules, deleted: [], logs: [], events: [], beeps: [], saves: [], captures: [], cloud: [], captions: [], productCalls: [] };
+  const state = { sales, rules, deleted: [], logs: [], events: [], beeps: [], saves: [], captures: [], cloud: [], captions: [], productCalls: [], diagnostics: [] };
   const timers = new Map();
   let nextTimerId = 1;
   const globals = {
+    ...diagnosticGlobals, extractSpeechPrice,
+    recordDiagnostic: (stage, detail) => state.diagnostics.push({ stage, detail }),
     ...corrections, extractSaleFromTranscript, parseKoreanAmount, parseVoiceCommand, splitTranscriptClauses, isQuestionUtterance,
     crypto: { randomUUID }, console, hasCaptureInstructionText, advanceVoiceSaleTransaction,
     isProductChangeUtterance, voiceSaleBoundaryAtRef: { current: '' },

@@ -13,6 +13,7 @@ export type SttProvider = 'DEEPGRAM' | 'SONIOX';
 
 export interface SttConfig extends DeepgramConfig {
   provider: SttProvider;
+  diagnostics?: import('../services/sttDiagnostics.ts').SttDiagnosticSink;
 }
 
 export interface DeepgramWord {

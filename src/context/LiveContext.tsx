@@ -59,6 +59,7 @@ import {
 import { HintRotationScheduler } from '../services/logicOpus/opusHintPlanner';
 import type { AudioCaptureDiagnostics } from '../services/audioCaptureService';
 import type { SttStreamDiagnostics } from '../services/deepgramService';
+import { sttDiagnostics, type SttDiagnosticScope } from '../services/sttDiagnostics';
 
 import { replaySalesWorkflow } from '../services/salesWorkflowEngine';
 import type { AppliedSalesWorkflow } from '../types/salesWorkflow';
@@ -143,6 +144,7 @@ interface LiveContextType {
   totalSessionTranscriptCount: number;
   getCurrentSessionTranscripts: () => SttTranscriptLog[];
   downloadSessionTranscripts: (format?: 'txt' | 'csv') => void;
+  downloadSttDiagnostics: () => Promise<void>;
   recentCaptures: CaptureItem[];
   isVoiceEditing: boolean;
   editingFieldInfo: string | null;
@@ -187,6 +189,13 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const { isAuthenticated, user, workspaceId, isRemoteAuth } = useAuth();
   const { getWordsForConnection } = useSttVocabulary();
   const productSales = useProductSales();
+  const diagnosticScopeRef = useRef<SttDiagnosticScope | null>(null);
+  if (diagnosticScopeRef.current?.workspaceId !== workspaceId) diagnosticScopeRef.current = null;
+  const recordDiagnostic = (stage: string, detail: unknown, sessionId?: string) => {
+    const scope = diagnosticScopeRef.current?.workspaceId === workspaceId ? diagnosticScopeRef.current : { workspaceId: workspaceId || '',
+      sessionId: productSales.activeSession?.id || currentSessionIdRef.current, mode: runtime.isTest ? 'TEST' as const : 'PRODUCTION' as const };
+    sttDiagnostics.record(sessionId ? { ...scope, sessionId } : scope, stage, detail);
+  };
 
   const [isListening, setIsListening] = useState<boolean>(false);
   const inputReleaseRef = useRef<(() => void) | null>(null);
@@ -581,6 +590,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const requestedUserId = currentUserIdRef.current;
     const requestedAuthGeneration = authBoundaryGenerationRef.current;
 
+    recordDiagnostic('capture.requested', { targetSaleId, triggerWord, requiredListeningGeneration });
     if (!isAuthenticatedRef.current || !requestedUserId) {
       console.warn('[Live] 로그인되지 않은 상태의 화면 캡처 요청을 차단했습니다.');
       return '';
@@ -651,6 +661,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     if (!imageUrl) {
+      recordDiagnostic('capture.excluded', { reason: 'EMPTY_CAPTURE_IMAGE', targetSaleId, triggerWord });
       console.warn('[Live] 캡처 이미지가 비어있습니다.');
       return '';
     }
@@ -680,6 +691,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 이미지 디코딩 중 판매 정보가 바뀔 수 있으므로 최신 판매에 이미지만 추가한다.
     const updatedSale = targetSale ? updateSaleCapture(targetSale.id, imageUrl) : undefined;
+    recordDiagnostic('capture.completed', { requestedSaleId: targetSaleId, linkedSaleId: updatedSale?.id,
+      reason: updatedSale ? 'LINKED_TO_SALE' : targetSaleId === null ? 'PRODUCT_CAPTURE' : 'NO_ELIGIBLE_SALE', capturedAt });
     const newCapture: CaptureItem = {
       id: `cap-${Date.now()}`,
       saleId: updatedSale?.id,
@@ -833,15 +846,21 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let recognizedAt = transaction?.startedAt || workflowContinuation?.recognizedAt || new Date().toISOString();
     const sales = currentWorkflowSalesRef.current;
     const sessionSnapshot = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
+    recordDiagnostic('sale.proposed', { transactionId: transaction?.id, rawTranscript: fullText,
+      result: saleResult, hasCaptureInstruction, workflowContinuation }, sessionSnapshot);
+    const excluded = (reason: string) => recordDiagnostic('sale.excluded', { reason, transactionId: transaction?.id,
+      rawTranscript: fullText, buyerNickname: saleResult.buyerNickname, amount: saleResult.amount }, sessionSnapshot);
     if (workflowContinuation && sales.some((sale) => sale.sessionId === sessionSnapshot && sale.recognizedAt === recognizedAt
-      && sale.rawTranscript === fullText && sale.evidenceSnapshot?.buyerResolution?.saleConfirmed)) return;
+      && sale.rawTranscript === fullText && sale.evidenceSnapshot?.buyerResolution?.saleConfirmed)) { excluded('WORKFLOW_ALREADY_SAVED'); return; }
     const linkedSale = transaction?.continuation ? voiceTransactionSalesRef.current.get(transaction.id) : undefined;
     let transactionSale = linkedSale
       ? sales.find((sale) => sale.id === linkedSale.id) || linkedSale : undefined;
     if (transactionSale) recognizedAt = transactionSale.recognizedAt;
     if (transactionSale && (transactionSale.sessionId !== sessionSnapshot || transactionSale.status === '취소'
-      || transactionSale.recordState === 'CANCELLED' || transactionSale.status === '수동수정')) return;
+      || transactionSale.recordState === 'CANCELLED' || transactionSale.status === '수동수정')) { excluded('SALE_CANCELLED_EDITED_OR_SESSION_CHANGED'); return; }
     const rememberSale = (sale: SaleRecord) => {
+      recordDiagnostic('sale.linked', { transactionId: transaction?.id, saleId: sale.id, revision: sale.revision,
+        status: sale.status, amount: sale.amount, rawTranscript: sale.rawTranscript, syncStatus: sale.syncStatus }, sessionSnapshot);
       lastSavedSaleRef.current = sale;
       if (transaction) {
         voiceTransactionSalesRef.current.set(transaction.id, sale);
@@ -852,7 +871,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     const decisionKey = `${sessionSnapshot}:${transaction?.id || ''}:${fullText.replace(/\s+/gu, '')}`;
     const previousDecisionAt = recentVoiceDecisionsRef.current.get(decisionKey) || 0;
-    if (Date.now() - previousDecisionAt < 5_000) return;
+    if (Date.now() - previousDecisionAt < 5_000) { excluded('DUPLICATE_DECISION_WITHIN_5_SECONDS'); return; }
     recentVoiceDecisionsRef.current.set(decisionKey, Date.now());
     for (const [key, at] of recentVoiceDecisionsRef.current) {
       if (Date.now() - at > 30_000) recentVoiceDecisionsRef.current.delete(key);
@@ -900,7 +919,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let request = match.kind === 'MATCH' ? match.request : null;
     if (saleResult.intent === 'UNCERTAIN' && !getVoiceReviewRequests({
       sessionId: sessionSnapshot, recognizedAt, rawTranscript: fullText,
-    }, cloudComments).length) return;
+    }, cloudComments).length) { excluded('UNCERTAIN_WITHOUT_PURCHASE_COMMENT'); return; }
     const isFourPoint = Boolean(saleResult.isFourPointConfirmed);
     const previousAuthor = transactionSale?.sourceCommentIds?.map((id) => identityComments.find((comment) => comment.id === id))
       .find((comment): comment is CommentRecord => Boolean(comment));
@@ -923,7 +942,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (request && !matchesAuthor(request)) request = null;
     if (match.kind === 'NO_REQUEST' && !transactionSale && !(transaction && isFourPoint)) {
       const priorMatch = matchPurchaseRequest(spokenBuyer, requests, recognizedAt);
-      if (priorMatch.kind === 'MATCH' && matchesAuthor(priorMatch.request) && consumed.has(priorMatch.request.id)) return;
+      if (priorMatch.kind === 'MATCH' && matchesAuthor(priorMatch.request) && consumed.has(priorMatch.request.id)) { excluded('PURCHASE_COMMENT_ALREADY_CONSUMED'); return; }
     }
     const identityConflict = !isFourPoint && (authorMatch.kind === 'AMBIGUOUS' || authorMatch.kind === 'DIGIT_CONFLICT');
     if (identityConflict) request = null;
@@ -931,7 +950,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // A newly arriving exact name must not transfer an already linked sale to
     // a different account while retaining the first buyer's purchase request.
     if (transactionSale && author && ((transactionSale.buyerId && author.buyerId && transactionSale.buyerId !== author.buyerId)
-      || (previousAuthor && !areSameCommentAuthor(previousAuthor, author, identityComments)))) return;
+      || (previousAuthor && !areSameCommentAuthor(previousAuthor, author, identityComments)))) { excluded('COMMENT_AUTHOR_CHANGED'); return; }
     const commentNickname = isFourPoint ? linkedBuyer?.nickname || BUYER_LINK_PENDING
       : !identityConflict ? author?.nickname || request?.nickname : undefined;
     // 판매 확정 시 고객 댓글에 있는 닉네임을 최우선으로 저장하고,
@@ -968,7 +987,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       && precedingSale.status !== '취소' && precedingSale.status !== '수동수정'
       && precedingSale.recordState !== 'CANCELLED') {
       rememberSale(precedingSale);
-      if (precedingSale.status === '확정' || !isFourPoint) return;
+      if (precedingSale.status === '확정' || !isFourPoint) { excluded('PRECEDING_SALE_ALREADY_ALLOCATED'); return; }
       transactionSale = precedingSale;
       recognizedAt = precedingSale.recognizedAt;
     }
@@ -984,6 +1003,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (hasCaptureInstruction && !restatedSale.captureImageUrls?.length) {
           await captureCurrentScreen(undefined, '캡처하세요 (판매 자동 연동)', requiredListeningGeneration, restatedSale.id);
         }
+        excluded('RESTATEMENT_OF_EXISTING_SALE');
         return;
       }
       transactionSale = restatedSale;
@@ -1014,7 +1034,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (buyerResolution) updated = applyConfirmedBuyer(updated, buyerResolution);
         const saved = updateSale(updated, { voiceAllocationContinuation: true,
           voiceTransactionContinuation: Boolean(transactionSale) });
-        if (!saved) return;
+        if (!saved) { excluded('SALE_UPDATE_REJECTED'); return; }
         if (saved.purchaseRequestId && status !== '보류') reservedPurchaseRequestsRef.current.add(saved.purchaseRequestId);
         rememberSale(saved);
         if (hasCaptureInstruction) {
@@ -1378,6 +1398,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sonioxSaleBufferRef.current = '';
 
       if (!pendingText) return;
+      recordDiagnostic('assembly.soniox.flush', { reason: 'BUSINESS_BUFFER_TIMEOUT', text: pendingText });
       handleTranscript(
         { text: pendingText, isFinal: true, confidence },
         requiredListeningGeneration,
@@ -1431,8 +1452,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     confidence: number,
     requiredListeningGeneration?: number,
     requiredUserId?: string,
-    isFinalized = false
+    isFinalized = false,
+    sourceEventId?: string
   ) {
+    recordDiagnostic('assembly.soniox.input', { sourceEventId, confirmedTextDelta, isFinalized, bufferBefore: sonioxSaleBufferRef.current });
     if (!confirmedTextDelta && !isFinalized) return;
 
     scanSonioxCommands(
@@ -1484,8 +1507,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         sessionId: productSalesRef.current.activeSession?.id || currentSessionIdRef.current,
         eventId: crypto.randomUUID(), text: buffer, recognizedAt: new Date().toISOString(),
         activeKeywords: storageService.getRules().filter((rule) => rule.isEnabled).map((rule) => rule.word),
+        diagnostics: event => recordDiagnostic(event.stage, { sourceEventId, ...event.detail as object }),
       });
       if (!preview.emission && !hasCaptureInstructionText(buffer)) {
+        recordDiagnostic('assembly.soniox.excluded', { reason: 'NO_SALE_EMISSION_OR_CAPTURE', buffer, preview });
         voiceSaleTransactionRef.current = preview.state;
         clearSonioxSaleTimeout();
         sonioxSaleBufferRef.current = '';
@@ -1502,6 +1527,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Confirmed tokens are not necessarily a complete statement. In particular,
     // "금액은 1.0" may still end with "인가요?" or a different fractional digit.
     if (!isFinalized && !/[.!?？。\n]$/u.test(sonioxSaleBufferRef.current.trim())) {
+      recordDiagnostic('assembly.soniox.waiting', { reason: 'WAITING_FOR_PUNCTUATION_OR_ENDPOINT', buffer: sonioxSaleBufferRef.current });
       scheduleSonioxSaleTimeout(confidence, requiredListeningGeneration, requiredUserId);
       return;
     }
@@ -1516,8 +1542,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         sessionId: productSalesRef.current.activeSession?.id || currentSessionIdRef.current,
         eventId: crypto.randomUUID(), text: sonioxSaleBufferRef.current,
         recognizedAt: new Date().toISOString(), activeKeywords: rules.map((rule) => rule.word),
+        diagnostics: event => recordDiagnostic(event.stage, { sourceEventId, ...event.detail as object }),
       });
       if (!preview.emission && !hasCaptureInstructionText(sonioxSaleBufferRef.current)) {
+        recordDiagnostic('assembly.soniox.excluded', { reason: 'FINAL_WITHOUT_SALE_EMISSION_OR_CAPTURE', buffer: sonioxSaleBufferRef.current, preview });
         voiceSaleTransactionRef.current = preview.state;
         clearSonioxSaleTimeout();
         sonioxSaleBufferRef.current = '';
@@ -1533,10 +1561,12 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if ((saleResult && !saleResult.isPending) || isFinalized) {
       const completeSaleText = sonioxSaleBufferRef.current.trim();
+      recordDiagnostic('assembly.soniox.flush', { sourceEventId, reason: isFinalized ? 'STT_FINALIZED' : 'SALE_READY_BEFORE_ENDPOINT',
+        text: completeSaleText, saleResult });
       clearSonioxSaleTimeout();
       sonioxSaleBufferRef.current = '';
       handleTranscript(
-        { text: completeSaleText, isFinal: true, confidence },
+        { text: completeSaleText, isFinal: true, confidence, diagnosticEventId: sourceEventId },
         requiredListeningGeneration,
         requiredUserId,
         { skipCommands: true, skipCorrections: true, skipProductCommands: true }
@@ -1553,6 +1583,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isFinal: boolean;
       confidence: number;
       confirmedTextDelta?: string;
+      diagnosticEventId?: string;
     },
     requiredListeningGeneration?: number,
     requiredUserId?: string
@@ -1564,10 +1595,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           data.confidence,
           requiredListeningGeneration,
           requiredUserId,
-          data.isFinal
+          data.isFinal, data.diagnosticEventId
         );
       } else if (data.isFinal) {
-        consumeSonioxConfirmedText('', data.confidence, requiredListeningGeneration, requiredUserId, true);
+        consumeSonioxConfirmedText('', data.confidence, requiredListeningGeneration, requiredUserId, true, data.diagnosticEventId);
       }
     } catch (error) {
       console.error('[Live] Soniox 판매·명령 처리 실패. 원본 전사는 계속 표시합니다:', error);
@@ -1586,7 +1617,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Sales/capture/edit commands use confirmed tokens. Automatic corrections
     // and product registration use the complete utterance exactly once.
     handleTranscript(
-      { text: data.text, isFinal: true, confidence: data.confidence },
+      { text: data.text, isFinal: true, confidence: data.confidence, diagnosticEventId: data.diagnosticEventId },
       requiredListeningGeneration,
       requiredUserId,
       { skipCommands: true, skipSale: true, skipCapture: true, workflowFinal: true }
@@ -1603,6 +1634,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       confirmedTextDelta?: string;
       isAbnormal?: boolean;
       abnormalReason?: string;
+      diagnosticEventId?: string;
+      connectionId?: string;
     },
     requiredListeningGeneration?: number,
     requiredUserId?: string,
@@ -1623,6 +1656,9 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     if (!data.text) return;
+    recordDiagnostic('stt.transcript', { eventId: data.diagnosticEventId, connectionId: data.connectionId,
+      provider: data.provider, text: data.text, isFinal: data.isFinal, confidence: data.confidence,
+      confirmedTextDelta: data.confirmedTextDelta, processingOptions });
 
     // [로컬 STT 비정상 반복 생성 방어] 동일 글자/어절 반복 등 환각 시 업무 파이프라인(판매/캡처) 진입 원천 차단
     if (data.isAbnormal) {
@@ -1659,6 +1695,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCurrentInterimTranscript('');
     const fullText = data.text.trim();
     const nowTime = new Date().toLocaleTimeString('ko-KR');
+    const diagnosticEventId = data.diagnosticEventId || `utterance-${crypto.randomUUID()}`;
 
     // 윗부분 자막 스트림에 추가 (최대 2줄 분할 및 순차 시간표시 적용)
     const finalizedFlowItems = interimStreamChunkerRef.current.finalize(fullText);
@@ -1691,6 +1728,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const command = processingOptions.skipCommands
           ? { type: 'NONE' as const, rawText: fullText }
           : parseVoiceCommand(fullText, isVoiceEditingRef.current);
+        recordDiagnostic('pipeline.routing', { sourceEventId: diagnosticEventId, text: fullText, commandType: command.type,
+          correctionIntent, ruleActionName, processingOptions, isVoiceEditing: isVoiceEditingRef.current });
         if (!processingOptions.skipSale && (command.type !== 'NONE' || correctionIntent.isCorrection
           || correctionIntent.isQuestion || correctionIntent.isNegativeCommand || ruleActionName)) {
           voiceSaleTransactionRef.current = null;
@@ -1893,6 +1932,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
               : advanceVoiceSaleTransaction(voiceSaleTransactionRef.current, {
                 sessionId: targetSessionId, eventId: crypto.randomUUID(), text: fullText,
                 recognizedAt: new Date().toISOString(), activeKeywords,
+                diagnostics: event => recordDiagnostic(event.stage, { sourceEventId: diagnosticEventId, ...event.detail as object }),
               });
             if (transactionAdvance) voiceSaleTransactionRef.current = transactionAdvance.state;
             const emission = transactionAdvance?.emission;
@@ -1909,6 +1949,11 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   (r.word.includes('캡처하세요') || r.word.includes('캡쳐하세요')) &&
                   fullText.includes(r.word)
               ));
+          recordDiagnostic('sale.evaluation', { sourceEventId: diagnosticEventId, text: fullText, processingOptions,
+            workflowActive, transactionId: transactionAdvance?.state?.id || emission?.transactionId,
+            price: extractSpeechPrice(fullText), hasCaptureInstruction, saleResult,
+            reason: workflowActive ? 'WORKFLOW_OWNS_SALE_PROCESSING' : processingOptions.skipSale ? 'SALE_PROCESSING_SKIPPED'
+              : saleResult ? 'SALE_RESULT_EMITTED' : hasCaptureInstruction ? 'STANDALONE_CAPTURE' : 'NO_SALE_EMISSION' });
 
           if (saleResult) {
             const isFourPoint = Boolean(saleResult.isFourPointConfirmed);
@@ -2032,6 +2077,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Captured speech is independent of product/sale processing. Keep its
       // original evidence even if a rule, command or correction handler fails.
       console.error('[Live] 판매·규칙 처리 실패. 원본 전사는 계속 보관합니다:', error);
+      recordDiagnostic('pipeline.failed', { sourceEventId: diagnosticEventId, error });
     }
 
     // 전사 로그 적재
@@ -2058,6 +2104,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setTotalSessionTranscriptCount(nextSessionLogs.length);
     setTranscriptLogs((prev) => [newLog, ...prev.slice(0, 299)]);
     scheduleTranscriptPersistence();
+    recordDiagnostic('transcript.archived', { sourceEventId: diagnosticEventId, log: newLog });
     const workflow = appliedWorkflowRef.current;
     if (workflow && newLog.workflowEligible) {
       const generation = authBoundaryGenerationRef.current;
@@ -2095,6 +2142,12 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           .filter((decision) => !fourPointIds.has(decision.transcriptId));
         const pending = decisions.filter(d => workflowFingerprintsRef.current.get(d.id)!==JSON.stringify(d)
           && !currentWorkflowSalesRef.current.some(s => s.status!=='보류' && (s.workflowEvidence?.decisionId === d.id || (d.requestId && s.purchaseRequestId === d.requestId))));
+        recordDiagnostic('workflow.evaluation', { workflowId: workflow.id, version: workflow.version,
+          fourPoints, decisions, pendingDecisionIds: pending.map(decision => decision.id),
+          excludedDecisionIds: decisions.filter(decision => !pending.includes(decision)).map(decision => ({
+            id: decision.id, reason: workflowFingerprintsRef.current.get(decision.id) === JSON.stringify(decision)
+              ? 'UNCHANGED_WORKFLOW_DECISION' : 'SALE_ALREADY_ALLOCATED',
+          })) }, sessionId);
         if (!pending.length) return;
         // Upload original speech before the server independently replays it.
         if (isRemoteAuth && !await syncSessionTranscriptsToCloud(sessionId)) throw new Error('판매방식 검증을 위한 발화 저장을 기다립니다.');
@@ -2192,6 +2245,35 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const downloadSttDiagnostics = async () => {
+    const sessionId = productSalesRef.current.activeSession?.id || currentSessionIdRef.current;
+    const owner = workspaceId || user?.id || '';
+    const report = await sttDiagnostics.export({ workspaceId: owner, sessionId, mode: runtime.isTest ? 'TEST' : 'PRODUCTION' }, {
+      sessionDisplayCode: productSalesRef.current.activeSession?.displayCode,
+      pagePath: window.location.pathname,
+      applicationScript: document.querySelector('script[src*="/assets/"]')?.getAttribute('src'),
+      workflow: appliedWorkflowRef.current ? { id: appliedWorkflowRef.current.id, mode: appliedWorkflowRef.current.mode,
+        version: appliedWorkflowRef.current.version } : null,
+      transcripts: sessionTranscriptsRef.current.get(sessionId) || storageService.getSessionTranscripts(owner, sessionId),
+      sales: currentWorkflowSalesRef.current.filter(sale => sale.sessionId === sessionId).map(sale => ({
+        id: sale.id, recognizedAt: sale.recognizedAt, revision: sale.revision, rawTranscript: sale.rawTranscript,
+        amount: sale.amount, buyerNickname: sale.buyerNickname, status: sale.status, syncStatus: sale.syncStatus,
+        printStatus: sale.printStatus, note: sale.note,
+      })),
+    });
+    // An account switch while reading IndexedDB must not export the previous account's report.
+    if (transcriptWorkspaceIdRef.current !== owner) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    const label = (productSalesRef.current.activeSession?.displayCode || sessionId).replace(/[^\p{L}\p{N}_-]/gu, '_');
+    link.download = `VoiceCAP_STT_진단_${runtime.isTest ? '테스트_' : ''}${label}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
   // 라이브 청취 시작 (크롬 탭 방송 소리 또는 마이크)
   const startListening = async (
     mode: 'TAB_AUDIO' | 'MIC' = 'TAB_AUDIO',
@@ -2219,6 +2301,10 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       const newSessionId = salesSessionId || generateSessionId();
+      diagnosticScopeRef.current = { workspaceId: workspaceId || requestedUserId, sessionId: newSessionId,
+        mode: runtime.isTest ? 'TEST' : 'PRODUCTION' };
+      const diagnosticSink = sttDiagnostics.sink(diagnosticScopeRef.current);
+      diagnosticSink({ stage: 'listening.start', detail: { listeningGeneration, audioSource: mode, sttMode: sttModeRef.current, provider: sttProvider } });
       const releaseInput = await runtime.acquireListeningInput?.();
       if (listeningGenerationRef.current !== listeningGeneration || currentUserIdRef.current !== requestedUserId) {
         releaseInput?.();
@@ -2408,11 +2494,13 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
             handleTranscript(data, listeningGeneration, requestedUserId);
           },
           (err) => {
+            diagnosticSink({ stage: 'listening.error', detail: { engine: 'LOCAL', error: err } });
             if (listeningGenerationRef.current === listeningGeneration) {
               console.error('[Live] 로컬 STT 에러 알림:', err);
             }
           },
           (status, message) => {
+            diagnosticSink({ stage: 'listening.status', detail: { engine: 'LOCAL', status, message } });
             if (
               listeningGenerationRef.current !== listeningGeneration ||
               currentUserIdRef.current !== requestedUserId
@@ -2438,7 +2526,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
               pendingStartupRef.current?.finish(false);
             }
           },
-          activeLocalModel
+          activeLocalModel, diagnosticSink
         );
       } else {
         // [클라우드 STT] 관리자가 선택한 STT 공급자와 최신 API Key 확인
@@ -2482,7 +2570,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
           punctuate: true,
           interimResults: true,
           endpointing: 300,
-          allowBrowserSpeechFallback: mode === 'MIC'
+          allowBrowserSpeechFallback: mode === 'MIC',
+          diagnostics: diagnosticSink
         };
         activeCloudSttConfigRef.current = cloudSttConfig;
         activeCloudNicknameTermsRef.current = recentNicknameTerms;
@@ -2495,11 +2584,13 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
             handleTranscript(data, listeningGeneration, requestedUserId);
           },
           (err) => {
+            diagnosticSink({ stage: 'listening.error', detail: { engine: activeSttProvider, error: err } });
             if (listeningGenerationRef.current === listeningGeneration) {
               console.error('[Live] STT 스트림 에러 알림:', err);
             }
           },
           (status, message) => {
+            diagnosticSink({ stage: 'listening.status', detail: { engine: activeSttProvider, status, message } });
             if (
               listeningGenerationRef.current !== listeningGeneration ||
               currentUserIdRef.current !== requestedUserId
@@ -2678,6 +2769,8 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 라이브 청취 중지 (TAB_AUDIO는 파이프라인을 일시정지해 공유 연결을 유지한다)
   const stopListening = useCallback(() => {
+    recordDiagnostic('listening.stop', { listeningGeneration: listeningGenerationRef.current });
+    void sttDiagnostics.flush();
     pendingStartupRef.current?.finish(false);
     inputReleaseRef.current?.();
     inputReleaseRef.current = null;
@@ -2825,6 +2918,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         totalSessionTranscriptCount,
         getCurrentSessionTranscripts,
         downloadSessionTranscripts,
+        downloadSttDiagnostics,
         recentCaptures,
         isVoiceEditing,
         editingFieldInfo,

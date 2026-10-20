@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { diagnosticGlobals } from './runtime-fixture.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -47,6 +48,7 @@ function fixture(comments, activeProduct = undefined, captures = []) {
   const captureRequests = [];
   const voiceSaleBoundaryAtRef = { current: '' };
   const globals = {
+    ...diagnosticGlobals,
     extractSaleFromTranscript, extractSpeechPrice, getPurchaseRequests, matchPurchaseRequest, matchCommentAuthor, areSameCommentAuthor,
     resolveConfirmedBuyer, applyConfirmedBuyer, BUYER_LINK_PENDING, mergeBuyerComments, confirmedBuyerAliases: { get: () => [] },
     buildPendingReasons, buildEvidenceSnapshot, getVoiceReviewRequests, generateSequentialProductName, findCaptureForSale,
