@@ -131,12 +131,12 @@ test('model execution failure is recorded on the pending sale and can be retried
 });
 
 test('the edge handler puts archived speech from the minute around the sale in the prompt and stores the answered nickname plus price', async () => {
-  const state = fixture({ buyer_nickname: '케이치', amount: 0,
-    raw_transcript: '케이치 언니는 연핑 넣어드릴게요', recognized_at: '2026-09-15T12:41:10Z' });
+  const state = fixture({ buyer_nickname: '케이에이치', amount: 0,
+    raw_transcript: '케이에이치 언니는 연핑 넣어드릴게요', recognized_at: '2026-09-15T12:41:10Z' });
   Object.assign(state.comments[0], { nickname_snapshot: 'KH', content: '연핑 저요', captured_at: '2026-09-15T12:40:19Z' });
   state.archives[0].value.logs = [
     { id: 'allocation', recognizedAt: '2026-09-15T12:41:10Z', text: 'KH 언니는 연핑 넣어드릴게요', isFinal: true },
-    { id: 'price', recognizedAt: '2026-09-15T12:41:26Z', text: 'KH 언니는 연핑 1.5에 넣어드렸어요', isFinal: true },
+    { id: 'price', recognizedAt: '2026-09-15T12:41:26Z', text: '가격은 1.5', isFinal: true },
     { id: 'other-product', recognizedAt: '2026-09-15T12:41:30Z', text: '다음 상품 3.5', isFinal: true },
     { id: 'too-late', recognizedAt: '2026-09-15T12:42:20Z', text: '이건 1분 뒤 멘트', isFinal: true },
   ];
@@ -144,7 +144,7 @@ test('the edge handler puts archived speech from the minute around the sale in t
   const body = await (await handleReviewVoicePendingSale('ws', 'actor', {}, state.row, {})).json();
   assert.equal(body.ok, true);
   const seller = state.request.plainTextPrompt.split('<판매자멘트>\n')[1];
-  assert.equal(koreanPeriod(seller), '시각 멘트 \n[오후 9:41:10] KH 언니는 연핑 넣어드릴게요\n[오후 9:41:10] 케이치 언니는 연핑 넣어드릴게요\n[오후 9:41:26] KH 언니는 연핑 1.5에 넣어드렸어요\n[오후 9:41:30] 다음 상품 3.5');
+  assert.equal(koreanPeriod(seller), '시각 멘트 \n[오후 9:41:10] KH 언니는 연핑 넣어드릴게요\n[오후 9:41:10] 케이에이치 언니는 연핑 넣어드릴게요\n[오후 9:41:26] 가격은 1.5\n[오후 9:41:30] 다음 상품 3.5');
   assert.equal(state.current.buyer_nickname, 'KH');
   assert.equal(state.current.buyer_id, 'account');
   assert.equal(state.current.amount, 15000);
@@ -156,16 +156,16 @@ test('the edge handler puts archived speech from the minute around the sale in t
   assert.equal(repeated.data.skipped, true, 'Canonicalizing the result must not start an endless AI review loop');
 });
 
-test('a proven sale with an unmatched nickname remains pending with the verified amount', async () => {
+test('an unmatched buyer leaves both the original buyer and amount unchanged', async () => {
   const state = fixture({ buyer_nickname: '네스트', amount: 0, raw_transcript: '네스트언니 1.5 넣어드릴게요' });
   state.process = answered('닉네임: 네스트\n가격: 15,000원');
   await handleReviewVoicePendingSale('ws', 'actor', {}, state.row, {});
   assert.equal(state.current.buyer_nickname, '네스트');
-  assert.equal(state.current.amount, 15000);
+  assert.equal(state.current.amount, 0);
   assert.equal(state.current.status, '보류');
   assert.equal(state.current.ai_verification.nicknameVerified, false);
   assert.equal(state.current.ai_verification.aiStatus, 'NEEDS_SELLER_CONFIRM');
-  assert.equal(state.current.purchase_request_id, null);
+  assert.equal(state.current.purchase_request_id, undefined);
 });
 
 test('AI waits for the minute after the held sale and does not run on an incomplete window', async () => {
@@ -208,4 +208,31 @@ test('ordinary chat sent by the browser is in the prompt but only stored comment
   assert.equal(state.current.ai_verification.aiStatus, 'RESOLVED');
   assert.equal(state.current.ai_verification.candidateCommentId, undefined);
   assert.deepEqual(state.current.source_comment_ids, []);
+});
+
+test('the operating handler never persists another trade buyer or price on the target sale', async () => {
+  for (const response of ['닉네임: 하늘\n가격: 50000원', '닉네임: 별이\n가격: 50000원', '닉네임: 별이\n가격: 12000원']) {
+    const state = fixture({ buyer_nickname: '별이', buyer_id: 'star', amount: 0,
+      raw_transcript: '네, 이거 별이님 드릴게요. 감사합니다.', recognized_at: '2026-10-20T15:49:32Z',
+      purchase_request_id: 'session:star-request', source_comment_ids: ['star-request'] });
+    state.comments.splice(0, state.comments.length,
+      { id: 'star-request', session_id: 'session', workspace_id: 'ws', platform_message_id: 'star-request',
+        buyer_id: 'star', nickname_snapshot: '별이', content: '저요', captured_at: '2026-10-20T15:49:27Z' },
+      { id: 'sky-request', session_id: 'session', workspace_id: 'ws', platform_message_id: 'sky-request',
+        buyer_id: 'sky', nickname_snapshot: '하늘', content: '저요', captured_at: '2026-10-20T15:49:07Z' },
+    );
+    state.archives[0].value.logs = [
+      { id: 'sky', isFinal: true, recognizedAt: '2026-10-20T15:49:13Z', text: '하늘님 5.0 드릴게요.' },
+      { id: 'star-price', isFinal: true, recognizedAt: '2026-10-20T15:49:35Z', text: '가격 1.2 캡처해주세요.' },
+    ];
+    state.process = answered(response);
+    await handleReviewVoicePendingSale('ws', 'actor', {}, state.row, { forceReanalyze: true });
+    assert.equal(state.current.buyer_nickname, '별이');
+    assert.equal(state.current.buyer_id, 'star');
+    assert.equal(state.current.purchase_request_id, 'session:star-request');
+    assert.deepEqual(state.current.source_comment_ids, ['star-request']);
+    assert.equal(state.current.amount, response.endsWith('12000원') ? 12000 : 0);
+    assert.equal(state.current.ai_verification.aiStatus, response.endsWith('12000원') ? 'RESOLVED' : 'NEEDS_SELLER_CONFIRM');
+    assert.equal(state.current.status, '보류');
+  }
 });

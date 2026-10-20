@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import 'fake-indexeddb/auto';
+import { confirmVoiceTextReviewSale } from '../src/services/voicePendingReviewService.ts';
 
 class WebStorage {
   values = new Map();
@@ -214,5 +215,36 @@ test('local adapters fail closed for unimplemented operations and account data s
   const second = await fixture();
   assert.deepEqual(await second.repo.storedSales(), []);
   assert.deepEqual(second.storage.getCommentRecords(second.workspaceId), []);
+  assert.equal(forbidden.length, 0);
+});
+
+test('test-mode AI cannot replace a star trade with sky; the correct split price can resolve it locally', async () => {
+  let answer = '닉네임: 하늘\n가격: 50000원';
+  const f = await fixture(async payload => ({ task: { taskId: payload.taskId, saleId: payload.sale.id,
+    sessionId: payload.sale.sessionId, saleRevision: payload.sale.revision, activeSlot: 1, status: 'RESOLVED',
+    attempts: [], resolutionResult: { targetSaleId: payload.sale.id, evidenceSummary: answer } } }));
+  const when = Date.now() - 10_000;
+  f.comment = { ...f.comment, nickname: '별이', capturedAt: new Date(when - 1000).toISOString() };
+  const canonical = await ingest(f);
+  await ingest(f, { ...f.comment, nickname: '하늘', platformUserId: 'sky-account', platformMessageId: 'sky-message' });
+  const pending = sale(f, { buyerNickname: '별이', buyerId: canonical.buyerId, sourceCommentIds: [canonical.id],
+    status: '보류', amount: 0, unitPrice: 0, printStatus: 'NOT_REQUESTED', printRevision: 0,
+    rawTranscript: '네, 이거 별이님 드릴게요. 감사합니다.', recognizedAt: new Date(when).toISOString() });
+  await f.repo.commitSale(pending);
+  await f.repo.remote.saveCloudSessionTranscripts(f.workspaceId, f.session.id, [
+    { id: 'sky', text: '하늘님 5.0 드릴게요.', timestamp: new Date(when - 5000).toISOString(), isFinal: true },
+    { id: 'star-price', text: '가격 1.2 캡처해주세요.', timestamp: new Date(when + 3000).toISOString(), isFinal: true },
+  ]);
+  const rejected = await f.repo.ai.triggerPendingAiResolution(pending.id, { forceReanalyze: true });
+  assert.equal(rejected.sale.buyerNickname, '별이');
+  assert.equal(rejected.sale.amount, 0);
+  assert.equal(rejected.sale.purchaseRequestId, pending.purchaseRequestId);
+  assert.equal(confirmVoiceTextReviewSale(rejected.sale), null);
+  answer = '닉네임: 별이\n가격: 12000원';
+  const accepted = await f.repo.ai.triggerPendingAiResolution(pending.id, { forceReanalyze: true });
+  assert.equal(accepted.sale.buyerNickname, '별이');
+  assert.equal(accepted.sale.amount, 12000);
+  assert.equal(accepted.sale.purchaseRequestId, pending.purchaseRequestId);
+  assert.equal(confirmVoiceTextReviewSale({ ...accepted.sale, syncStatus: 'SYNCED' }).status, '확정');
   assert.equal(forbidden.length, 0);
 });
