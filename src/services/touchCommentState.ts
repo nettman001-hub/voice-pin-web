@@ -47,3 +47,12 @@ export function mergeTouchComments(
       map.set(touchCommentKey(c), c);
   return [...map.values()].sort((a, b) => a.sequence - b.sequence).slice(-500);
 }
+
+export const TOUCH_LIST_BOTTOM_SLACK = 24;
+
+export const isTouchListAtBottom = (
+  scrollHeight: number,
+  scrollTop: number,
+  clientHeight: number,
+  slack = TOUCH_LIST_BOTTOM_SLACK,
+) => scrollHeight - scrollTop - clientHeight <= slack;

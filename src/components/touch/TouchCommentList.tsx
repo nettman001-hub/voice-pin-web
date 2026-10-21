@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { TouchComment } from '../../types/touchSales';
 import {
+  isTouchListAtBottom,
   isTouchPurchase,
   shouldFlashTouchComment,
   touchCommentKey,
@@ -115,9 +116,13 @@ export const TouchCommentList: React.FC<Props> = ({
       <div
         className="touch-comment-scroll"
         ref={list}
-        onPointerDown={() => setFollowing(false)}
-        onWheel={() => setFollowing(false)}
-        onTouchStart={() => setFollowing(false)}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          if (isTouchListAtBottom(el.scrollHeight, el.scrollTop, el.clientHeight)) {
+            setFollowing(true);
+            setUnread(0);
+          } else setFollowing(false);
+        }}
       >
         {!visible.length && (
           <p className="touch-empty">
