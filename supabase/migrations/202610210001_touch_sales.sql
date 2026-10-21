@@ -1,5 +1,11 @@
 -- Phone comment-touch sales. Existing voice commit functions and helper protocol are unchanged.
 alter table public.sales add column if not exists touch_sale boolean not null default false;
+-- Existing deployments allow four statuses. Phone cancellation also records the
+-- explicit cancelled label while preserving the sale for its audit trail.
+alter table public.sales drop constraint if exists sales_status_check;
+alter table public.sales add constraint sales_status_check
+  check (status in ('자동저장','수동수정','확정','보류','취소')) not valid;
+alter table public.sales validate constraint sales_status_check;
 create table if not exists public.touch_sales_runs (
   workspace_id uuid primary key references public.workspaces(id) on delete cascade,
   session_id uuid not null references public.live_sessions(id) on delete cascade,
