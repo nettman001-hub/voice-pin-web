@@ -1,4 +1,5 @@
 import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from './WorkspaceRuntimeContext';
+import { useTouchMode } from './TouchModeContext';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
 
@@ -43,6 +44,10 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   const { storageService, remoteWorkspaceService, commentStreamService, enqueueCloudComment, flushPendingComments, promoteCommentOutbox } = runtime;
   const { workspaceId } = useAuth();
   const { isListening, currentSessionId, transcriptLogs } = useLive();
+  const { settings: touchSettings, runningSession: touchSession } = useTouchMode();
+  const touchModeRef = useRef(touchSettings.mode);
+  touchModeRef.current = touchSettings.mode;
+  const collecting = isListening || Boolean(touchSession);
   const { activeSession, feed, pollFeed } = useProductSales();
 
   // 안전을 위해 브라우저를 새로 열거나 새로고침할 때마다 댓글 수집은 꺼진 상태로 시작한다.
@@ -241,7 +246,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   // 화면에는 소켓 댓글을 즉시 보여주고, 클라우드 반영 뒤 판매 피드를 다시 읽는다.
   const flushCloudQueue = useCallback(async () => {
     const owner = workspaceRef.current;
-    if (!owner || cloudFlushInFlightRef.current) return;
+    if (!owner || cloudFlushInFlightRef.current || touchModeRef.current === 'COMMENT_TOUCH') return;
     cloudFlushInFlightRef.current = true;
     urgentCommentPendingRef.current = false;
     let failed = false;
@@ -348,10 +353,10 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
         );
         return [...withoutSameMsg, record]
           .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime())
-          .slice(-100);
+          .slice(touchModeRef.current === 'COMMENT_TOUCH' ? -500 : -100);
       });
 
-      if (record.sessionId) {
+      if (record.sessionId && touchModeRef.current !== 'COMMENT_TOUCH') {
         cloudIngestSequenceRef.current += 1;
         enqueueCloudComment(owner, {
           sessionId: record.sessionId,
@@ -420,7 +425,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
   useEffect(() => {
     if (!isActive) return;
 
-    if (isListening && serverStatus === 'CONNECTED') {
+    if (collecting && serverStatus === 'CONNECTED') {
       // 가상 댓글은 실제 틱톡 계정 설정과 무관하게 생성된다.
       const username = runtime.isTest ? 'live-test' : configRef.current.tiktokUsername.trim();
       if (!username) {
@@ -429,7 +434,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
       }
       commentStreamService.startCollecting(username);
     }
-  }, [isActive, isListening, serverStatus]);
+  }, [isActive, collecting, serverStatus]);
 
   // cloud live_comments와 로컬 링버퍼의 무손실 병합 동기화
   useEffect(() => {
@@ -541,7 +546,7 @@ export const CommentCaptureProvider: React.FC<{ children: React.ReactNode }> = (
     }
   }, []);
 
-  const isRunning = isActive && isListening && serverStatus === 'COLLECTING';
+  const isRunning = isActive && collecting && serverStatus === 'COLLECTING';
 
   return (
     <CommentCaptureContext.Provider

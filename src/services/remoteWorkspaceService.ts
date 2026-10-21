@@ -98,6 +98,7 @@ const mapSale = async (row: Row): Promise<SaleRecord> => {
     aiVerification: row.ai_verification || undefined,
     history: Array.isArray(row.history) ? row.history : [],
     source: row.source || 'LEGACY',
+    touchSale: row.touch_sale === true,
     captureImageUrls: await imageUrls(storagePaths),
     note: row.note || undefined,
     printStatus: row.print_status || 'NOT_REQUESTED',
@@ -680,6 +681,18 @@ export const remoteWorkspaceService = {
   },
 
   async saveSale(workspaceId: string, sale: SaleRecord) {
+    if (sale.touchSale) {
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${sale.id}:${sale.revision}`));
+      const hex = Array.from(new Uint8Array(digest)).map(v => v.toString(16).padStart(2,'0')).join('').slice(0,32);
+      const operationId = `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+      const { data, error } = await ensureEnabled().functions.invoke('sales-api', { body: {
+        action:'update-touch-sale', workspaceId, patch:{operationId,saleId:sale.id,expectedRevision:(sale.revision || 1)-1,
+          kind:sale.status==='취소'||sale.recordState==='CANCELLED'?'CANCEL':'FIELDS',unitPrice:Math.round(sale.amount/(sale.quantity || 1)),
+          buyerId:sale.buyerId,status:sale.status,note:sale.note,productName:sale.productName,reprint:sale.printStatus==='QUEUED'},
+      } });
+      if(error || !data?.ok) throw Object.assign(new Error(data?.error?.message || error?.message || '터치 판매 수정 실패'),{code:data?.error?.code});
+      return;
+    }
     if (sale.source === 'WEB_VOICE' && sale.status === '자동저장'
         && sale.purchaseRequestId && sale.printStatus === 'QUEUED' && (sale.printRevision || 0) === 1) {
       const operationId = sale.id.slice(2);

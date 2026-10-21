@@ -28,6 +28,7 @@ export const CustomerStatsBadge: React.FC<CustomerStatsBadgeProps> = ({
   const stats = index?.lookup({ nickname, buyerId, platformUserId, uniqueId }) || emptyCustomerStats();
   const label = customerStatsLabel(stats);
   if (!label && !stats.validSales.length) return null;
+  if(stats.ambiguous)return <span className={`text-xs font-bold text-amber-700 ${className}`}>동명 · 계정 확인 필요</span>;
   if (variant === 'compact') return (
     <span className={`text-[10px] font-semibold ${stats.defaultCount ? 'text-rose-600' : 'text-slate-500'} ${className}`} title={`${nickname} 고객 구매 통계`}>{label}</span>
   );

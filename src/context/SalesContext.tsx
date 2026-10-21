@@ -336,6 +336,7 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   const sendToPrinter = (sale: SaleRecord) => {
+    if (sale.touchSale) return; // The PC touch worker leases its receipt exactly once on the server.
     const owner = workspaceId;
     const generation = identityGenerationRef.current;
     const printKey = `${generation}:${sale.id}:${sale.printRevision || 1}`;
@@ -501,6 +502,8 @@ export const SalesProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const deleteSale = (id: string) => {
+    const touch = salesRef.current.find(sale => sale.id === id && sale.touchSale);
+    if (touch) { updateSale({ ...touch, status: '취소', recordState: 'CANCELLED' }); return; }
     getController()?.delete(id);
   };
 

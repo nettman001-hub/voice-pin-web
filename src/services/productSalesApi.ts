@@ -16,7 +16,7 @@ import type {
   ImageKind
 } from '../types/productSales';
 
-async function invokeSalesApi<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
+export async function invokeSalesApi<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
   if (!isSupabaseConfigured) {
     throw new Error('Supabase client is not configured.');
   }
