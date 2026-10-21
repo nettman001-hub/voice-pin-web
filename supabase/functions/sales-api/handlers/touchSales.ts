@@ -191,13 +191,13 @@ export async function handleTouchSales(auth: AuthContext, body: any) {
           .from('invoices')
           .select('id')
           .eq('workspace_id', workspace)
-          .contains('sale_ids', [sale.id])
+          .contains('sale_ids', JSON.stringify([sale.id]))
           .limit(1),
         admin
           .from('payment_receipts')
           .select('id')
           .eq('workspace_id', workspace)
-          .contains('sale_ids', [sale.id])
+          .contains('sale_ids', JSON.stringify([sale.id]))
           .limit(1),
         admin
           .from('touch_sale_details')
