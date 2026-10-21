@@ -33,7 +33,15 @@ export interface TouchPcState {
 export interface TouchCommit {
   operationId: string;
   sessionId: string;
-  comment: Pick<CommentRecord, 'platformMessageId' | 'platformUserId' | 'uniqueId' | 'nickname' | 'content' | 'capturedAt'>;
+  comment: Pick<
+    CommentRecord,
+    | 'platformMessageId'
+    | 'platformUserId'
+    | 'uniqueId'
+    | 'nickname'
+    | 'content'
+    | 'capturedAt'
+  >;
   inputPrice: string;
   unitPrice: number;
   quantity: number;
@@ -42,8 +50,17 @@ export interface TouchCommit {
   clientConfirmedAt: string;
   clockOffsetMs: number;
   allowAdditional?: boolean;
+  retargetedFromOperationId?: string;
+  originalConfirmedAt?: string;
+  skipCapture?: boolean;
 }
-export interface TouchCommitResult { saleId: string; buyerId: string; commentId: string; amount: number; captureDueAt: string; }
+export interface TouchCommitResult {
+  saleId: string;
+  buyerId: string;
+  commentId: string;
+  amount: number;
+  captureDueAt: string;
+}
 export interface TouchSale {
   id: string;
   sessionId: string;
@@ -62,5 +79,15 @@ export interface TouchSale {
   revision: number;
   comment: TouchCommit['comment'];
   history: unknown[];
+  source?: string;
+  touchSale?: boolean;
+  recordState?: string;
+  reviewDecision?: string;
 }
-export interface TouchRun { session_id: string; producer_id: string; running: boolean; lease_expires_at: string; settings: TouchSettings; }
+export interface TouchRun {
+  session_id: string;
+  producer_id: string;
+  running: boolean;
+  lease_expires_at: string;
+  settings: TouchSettings;
+}

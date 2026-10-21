@@ -1,0 +1,11 @@
+{
+  "buyers": 1000,
+  "sales": 10000,
+  "lookups": 500000,
+  "buildMs": 66.70019999999997,
+  "totalLookupMs": 94.8324,
+  "averageLookupMs": 0.0001896648,
+  "checksum": 5000000,
+  "scope": "synthetic local Node benchmark; runtime and hardware affect elapsed time",
+  "date": "2026-10-21T12:12:01.929Z"
+}

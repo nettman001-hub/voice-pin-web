@@ -997,6 +997,28 @@ test('feed deletion reconciliation checks known IDs in scope and keeps older exi
   assert.equal(probes[0].ids.length, 2);
 });
 
+test('comment-touch collects without STT and never uploads the transported comment feed',async()=>{
+  const ctx=storageFixture(),hooks=reactFixture(),{react}=hooks;let ingest,upload=0,enqueue=0;
+  const stream={onStatus:()=>()=>{},onComment:handler=>{ingest=handler;return()=>{};},connect(){},stopCollecting(){},disconnect(){}};
+  const {CommentCaptureProvider}=load('../src/context/CommentCaptureContext.tsx',{
+    react:{...react,default:react},'lucide-react':{},
+    './AuthContext':{useAuth:()=>({workspaceId:'workspace-1'})},
+    './TouchModeContext':{useTouchMode:()=>({settings:{mode:'COMMENT_TOUCH'},runningSession:session1})},
+    './LiveContext':{useLive:()=>({isListening:false,currentSessionId:session1,transcriptLogs:[]})},
+    './ProductSalesContext':{useProductSales:()=>({activeSession:{id:session1},feed:{comments:[]},pollFeed:async()=>{}})},
+    '../services/storageService':{storageService:ctx.storage,isTemporarySessionId:ctx.isTemporarySessionId},
+    '../services/remoteWorkspaceService':{remoteWorkspaceService:{loadCommentCaptureConfig:async()=>null,saveCommentCaptureConfig:async()=>{}}},
+    '../services/commentSyncService':{flushPendingComments:async()=>{upload++;},promoteCommentOutbox(){},enqueueCloudComment(){enqueue++;}},
+    '../services/commentStreamService':{commentStreamService:stream,commentDedupeKey:(n,c,id)=>id},'../types/comment':load('../src/types/comment.ts'),
+    '../services/purchaseFirstSales':{purchaseRequestFromComment:r=>r.content==='저요'?{id:r.id}:null,commentWithdrawsPurchase:c=>c==='취소요'},
+  },{window:{...ctx.globals.window,setTimeout:()=>1,clearTimeout(){}}});
+  ctx.storage.addPurchaseRequest=()=>{};ctx.storage.withdrawPurchaseRequestsForComment=()=>{};
+  hooks.render(CommentCaptureProvider).startCapture();hooks.render(CommentCaptureProvider);await tick();
+  for(const [id,content]of [['normal','예뻐요'],['purchase','저요'],['cancel','취소요']])ingest({id,nickname:'하니',content,receivedAt:new Date().toISOString()});
+  const after=hooks.render(CommentCaptureProvider);assert.equal(after.liveComments.length,3);
+  await after.flushComments();assert.equal(upload,0);assert.equal(enqueue,0);
+});
+
 test('failed deletion probes cannot be interpreted as successful deletion', async () => {
   const admin = { from() { return { select() { return this; }, eq() { return this; }, order() { return this; },
     single: async () => ({ data: { revision: 1 } }), limit: async () => ({ data: [], error: null }),
