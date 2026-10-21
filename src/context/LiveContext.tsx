@@ -1,4 +1,5 @@
 import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from './WorkspaceRuntimeContext';
+import { useTouchMode } from './TouchModeContext';
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { LiveSession, SttTranscriptLog, CaptureItem, SaleRecord } from '../types/live';
 import { deepgramService } from '../services/deepgramService';
@@ -198,6 +199,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const [isListening, setIsListening] = useState<boolean>(false);
+  const { settings: touchModeSettings } = useTouchMode();
   const inputReleaseRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (!isListening) { inputReleaseRef.current?.(); inputReleaseRef.current = null; }
@@ -1279,7 +1281,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Wait for the local pending row to reach the server before asking AI. Each
   // meaningful evidence snapshot is reviewed once, with bounded failure retries.
   useEffect(() => {
-    if (!isRemoteAuth || !workspaceId || pendingAiRunningRef.current) return;
+    if (!isRemoteAuth || !workspaceId || pendingAiRunningRef.current || touchModeSettings.mode === 'COMMENT_TOUCH') return;
     const local = storageService.getCommentRecords(workspaceId);
     const feed = (productSales.feed?.comments || []).map((c) => ({ id: c.id, sessionId: c.sessionId,
       platformMessageId: c.platformMessageId, buyerId: c.buyerId, nickname: c.nicknameSnapshot,
@@ -1348,7 +1350,7 @@ export const LiveProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (isCurrentReview()) setPendingAiTick((tick) => tick + 1);
       });
   }, [sales, workspaceId, isRemoteAuth, isListening, currentSessionId, productSales.activeSession?.id,
-    productSales.feed?.comments, refreshSales, pendingAiTick, syncSessionTranscriptsToCloud]);
+    productSales.feed?.comments, refreshSales, pendingAiTick, syncSessionTranscriptsToCloud, touchModeSettings.mode]);
 
   // The seller's text prompt answered "닉네임: … / 가격: …" for one comment
   // account: confirm the held sale so it counts and prints like a 확정 sale.

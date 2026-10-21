@@ -7,6 +7,7 @@ export async function handleClaimPrintJobs(workspaceId: string, deviceId: string
     .select('*')
     .eq('workspace_id', workspaceId)
     .eq('status', 'QUEUED')
+    .or('immutable_payload->>touchSale.is.null,immutable_payload->>touchSale.neq.true')
     .order('created_at', { ascending: true })
     .limit(limit)
 
