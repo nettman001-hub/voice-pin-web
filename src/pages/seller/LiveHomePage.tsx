@@ -158,6 +158,7 @@ export const LiveHomePage: React.FC = () => {
   const [diagnosticDownloading, setDiagnosticDownloading] = useState(false);
   const [diagnosticDownloadError, setDiagnosticDownloadError] = useState('');
   const [hasTestStopped, setHasTestStopped] = useState(false);
+  const [testMentText, setTestMentText] = useState('');
   const startAttemptRef = React.useRef(0);
   const [isSalesRefreshing, setIsSalesRefreshing] = useState(false);
   const [viewerModal, setViewerModal] = useState<{
@@ -1301,6 +1302,33 @@ export const LiveHomePage: React.FC = () => {
                 + "수정 완료"
               </button>
             </div>
+            {runtime.isTest && <form
+              className="space-y-2 border-t border-slate-200 pt-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const text = testMentText.trim();
+                if (text) injectTestMent(text);
+              }}
+            >
+              <label htmlFor="test-sale-ment" className="block font-bold text-slate-700">테스트 멘트 직접 입력</label>
+              <textarea
+                id="test-sale-ment"
+                value={testMentText}
+                onChange={(event) => setTestMentText(event.target.value)}
+                placeholder="별이님 드릴게요. 감사합니다. 가격 1.2 캡처해주세요."
+                rows={2}
+                maxLength={4000}
+                aria-describedby="test-sale-ment-help"
+                className="w-full rounded-xl border border-slate-300 bg-white p-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p id="test-sale-ment-help" className="text-slate-500">마이크 없이 입력한 문장으로 판매 판정을 재현합니다.</p>
+                <button type="submit" disabled={!testMentText.trim()}
+                  className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40">
+                  입력한 멘트 재현
+                </button>
+              </div>
+            </form>}
           </div>
 
           {/* 최근 캡처 이미지 스트립 */}
