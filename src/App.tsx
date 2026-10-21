@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'rea
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SalesProvider } from './context/SalesContext';
 import { LiveProvider } from './context/LiveContext';
+import { CustomerStatsProvider } from './context/CustomerStatsContext';
 import { CommentCaptureProvider } from './context/CommentCaptureContext';
 import { ListeningStopScheduleProvider } from './context/ListeningStopScheduleContext';
 import { AppDataProvider } from './context/AppDataContext';
@@ -193,6 +194,7 @@ export const App: React.FC = () => {
             <ProductSalesProvider>
               <SttVocabularyProvider>
                 <LiveProvider>
+                  <CustomerStatsProvider>
                   <CommentCaptureProvider>
                     <ListeningStopScheduleProvider>
                     <AppDataProvider>
@@ -285,6 +287,7 @@ export const App: React.FC = () => {
                     </AppDataProvider>
                     </ListeningStopScheduleProvider>
                   </CommentCaptureProvider>
+                  </CustomerStatsProvider>
                 </LiveProvider>
               </SttVocabularyProvider>
             </ProductSalesProvider>

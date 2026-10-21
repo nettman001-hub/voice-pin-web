@@ -1173,7 +1173,7 @@ export const LiveHomePage: React.FC = () => {
                       </span>
                     )}
                     <CustomerStatsBadge
-                      nickname={c.nickname}
+                      nickname={c.nickname} platformUserId={c.platformUserId} uniqueId={c.uniqueId}
                       buyerId={c.buyerId || undefined}
                       variant="compact"
                       currentSessionId={currentSessionId || activeSession?.id}
