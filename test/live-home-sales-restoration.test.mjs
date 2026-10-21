@@ -60,6 +60,7 @@ function pageFixture(testMode = false) {
     '../../context/TouchModeContext': { useTouchMode: () => ({settings:{mode:'VOICE'},runningSession:null}) },
     '../../components/live/SalesModeSelector': {SalesModeSelector:'SalesModeSelector'},
     '../../components/live/TouchDesktopPanel': {TouchDesktopPanel:'TouchDesktopPanel'},
+    '../../components/live/VoicePhoneStatusReporter': {VoicePhoneStatusReporter:'VoicePhoneStatusReporter'},
     'react-router-dom': { Link: 'link' },
     'lucide-react': new Proxy({}, { get: (_target, name) => name }),
     '../../context/AuthContext': { useAuth: () => state.auth },

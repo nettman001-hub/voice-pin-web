@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-21T12:18:50.577Z",
+  "integrationBase": "51e5daf0d8f859c8afc8f986d38f4f2a19288aec",
+  "branch": "codex/comment-touch-validation",
+  "node": "v24.12.0",
+  "sourceDesignSha256": "3f770d82e53fd46a767352d4d69cbfeb5a12305353c61a76bbfb81ae350b4aa3",
+  "unitAndRegression": {
+    "command": "npm test",
+    "tests": 1364,
+    "passed": 1364,
+    "failed": 0,
+    "durationMs": 55775.0633
+  },
+  "browser": {
+    "command": "npm run test:touch-ui",
+    "passed": 13,
+    "scope": "isolated fixtures; real browser WebRTC and production phone UI; no operating account or printer"
+  },
+  "typecheck": {
+    "command": "npx tsc --noEmit",
+    "exitCode": 0
+  },
+  "webBuild": {
+    "command": "npx vite build",
+    "exitCode": 0,
+    "warning": "main bundle exceeds 500 kB; build succeeds"
+  },
+  "serverSyntax": {
+    "command": "esbuild sales-api/index.ts --bundle --platform=neutral with external Deno imports",
+    "exitCode": 0,
+    "scope": "syntax/bundling only; Deno runtime/deployment not executed"
+  },
+  "notExecuted": [
+    "Operating Supabase migration / deployment",
+    "Physical printer and paper output",
+    "TikTok or YouTube live with a real seller",
+    "Android SMS app coexistence / iPhone Safari / Wi-Fi and LTE",
+    "Real microphone-to-broadcast delay calibration"
+  ],
+  "productionDeployment": false,
+  "merged": false
+}

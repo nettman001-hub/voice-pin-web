@@ -8,7 +8,7 @@ import {
   clearAutoLoginCredentials,
 } from '../../services/authCredentialsService';
 
-export const LoginPage: React.FC = () => {
+export const LoginPage: React.FC<{ returnTo?: string }> = ({ returnTo } = {}) => {
   const { login, isLocked, lockUntil, loginAttempts, isRemoteAuth, isAuthenticated, isInitialized, user } = useAuth();
   const navigate = useNavigate();
 
@@ -30,8 +30,8 @@ export const LoginPage: React.FC = () => {
   // 자동 로그인으로 이미 로그인된 상태면 로그인 화면을 건너뛴다.
   useEffect(() => {
     if (!isInitialized || !isAuthenticated || isSubmitting) return;
-    navigate(user?.role === '관리자' ? '/admin' : '/live', { replace: true });
-  }, [isInitialized, isAuthenticated, isSubmitting, user, navigate]);
+    navigate(returnTo === '/sell' ? '/sell' : user?.role === '관리자' ? '/admin' : '/live', { replace: true });
+  }, [isInitialized, isAuthenticated, isSubmitting, user, navigate, returnTo]);
 
   const handleAutoLoginChange = (checked: boolean) => {
     setAutoLogin(checked);
@@ -58,7 +58,9 @@ export const LoginPage: React.FC = () => {
         clearAutoLoginCredentials();
       }
 
-      if (email.includes('admin')) {
+      if (returnTo === '/sell') {
+        navigate('/sell');
+      } else if (email.includes('admin')) {
         navigate('/admin');
       } else {
         navigate('/live');

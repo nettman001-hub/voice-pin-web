@@ -1,0 +1,12 @@
+{
+  "id": "/sell",
+  "name": "VoiceCAP 판매",
+  "short_name": "VoiceCAP 판매",
+  "start_url": "/sell",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0874ca",
+  "lang": "ko",
+  "icons": [{"src": "/touch-sales-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}]
+}

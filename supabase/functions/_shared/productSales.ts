@@ -123,8 +123,9 @@ export async function authenticateRequest(request: Request, requestedWorkspaceId
     const { data: member, error: memberError } = await query.maybeSingle()
 
     const userAppMeta = (authData.user.app_metadata || {}) as Record<string, unknown>
-    const userMeta = (authData.user.user_metadata || {}) as Record<string, unknown>
-    const isGlobalAdmin = userAppMeta.role === 'ADMIN' || userMeta.role === 'ADMIN'
+    // user_metadata can be edited by the account holder. Only server-managed
+    // app_metadata may grant cross-workspace administrator access.
+    const isGlobalAdmin = userAppMeta.role === 'ADMIN'
     const isOwner = member?.role === 'OWNER'
     const isAdmin = isGlobalAdmin || isOwner
 
