@@ -27,7 +27,7 @@ export class TouchSalesApi {
   }
   resetCapture(saleId:string) {return this.call('touch-capture-reset',{saleId});}
   update(patch: {saleId:string;expectedRevision:number;kind:'PRICE'|'BUYER'|'CANCEL'|'REPRINT';inputPrice?:string;unitPrice?:number;buyerId?:string;reprint?:boolean}) {
-    return this.call('update-touch-sale',{patch});
+    return this.call('update-touch-sale',{patch:{operationId:crypto.randomUUID(),...patch}});
   }
   event(kind:string,sessionId:string,producerId:string,metrics:Record<string,number>={}) {
     return this.call('touch-events',{kind,sessionId,producerId,metrics});

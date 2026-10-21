@@ -33,6 +33,7 @@ function schedulerFixture() {
     ...reviewService, Date: class extends Date { static now() { return now; } },
     isVoiceReviewReady: (current, comments) => reviewService.isVoiceReviewReady(current, comments, now),
     isVoiceTextReviewReady: (current) => reviewService.isVoiceTextReviewReady(current, now),
+    touchModeSettings:{mode:'VOICE'},
     isRemoteAuth: true, workspaceId: 'workspace', isListening: false,
     currentSessionId: 'temporary-session-after-reload', productSales: { feed: { comments: [] } }, sales: [sale],
     storageService: { getCommentRecords: () => [comment], getSessionTranscripts: () => logs },
@@ -80,4 +81,8 @@ test('an account change during archive upload prevents the old review request fr
   await tick();
   assert.equal(ctx.calls.filter((call) => call[0] === 'review').length, 0);
   assert.equal(ctx.globals.pendingAiRunningRef.current, false);
+});
+
+ test('comment-touch mode never schedules voice AI review', async()=>{
+  const ctx=schedulerFixture();ctx.globals.touchModeSettings.mode='COMMENT_TOUCH';ctx.run();await tick();assert.equal(ctx.calls.length,0);
 });

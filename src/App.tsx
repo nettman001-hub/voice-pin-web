@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { SalesProvider } from './context/SalesContext';
 import { LiveProvider } from './context/LiveContext';
 import { CustomerStatsProvider } from './context/CustomerStatsContext';
+import { TouchModeProvider } from './context/TouchModeContext';
 import { CommentCaptureProvider } from './context/CommentCaptureContext';
 import { ListeningStopScheduleProvider } from './context/ListeningStopScheduleContext';
 import { AppDataProvider } from './context/AppDataContext';
@@ -192,6 +193,7 @@ export const App: React.FC = () => {
         <SalesProvider>
           <CommerceProvider>
             <ProductSalesProvider>
+              <TouchModeProvider>
               <SttVocabularyProvider>
                 <LiveProvider>
                   <CustomerStatsProvider>
@@ -290,6 +292,7 @@ export const App: React.FC = () => {
                   </CustomerStatsProvider>
                 </LiveProvider>
               </SttVocabularyProvider>
+              </TouchModeProvider>
             </ProductSalesProvider>
           </CommerceProvider>
         </SalesProvider>

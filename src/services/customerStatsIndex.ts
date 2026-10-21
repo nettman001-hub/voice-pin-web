@@ -129,7 +129,7 @@ export class CustomerStatsIndex {
     this.stats = next; this.names = names;
     return this;
   }
-  lookup(query: { nickname?: string; buyerId?: string; platformUserId?: string; uniqueId?: string }): CustomerStats {
+  lookup(query: { nickname?: string; buyerId?: string | null; platformUserId?: string; uniqueId?: string }): CustomerStats {
     let key = query.buyerId ? `buyer:${query.buyerId}` : query.platformUserId ? this.accounts.get(query.platformUserId) : undefined;
     if (!key && query.uniqueId) key = this.accounts.get(`handle:${query.uniqueId.toLowerCase()}`);
     if (!key) {

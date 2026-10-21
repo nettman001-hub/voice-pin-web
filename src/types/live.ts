@@ -23,6 +23,7 @@ export interface SaleRecord {
   quantity?: number;
   unitPrice?: number;
   source?: SaleSource;         // 음성/앱/수동 등록 출처
+  touchSale?: boolean;         // 댓글터치 주문은 서버 전표 작업 대기열만 사용
   captureImageUrls?: string[]; // 연결된 화면 캡처 이미지 URL 목록
   note?: string;               // 메모
   /** 댓글 도우미를 통한 로컬 프린터 출력 상태 */

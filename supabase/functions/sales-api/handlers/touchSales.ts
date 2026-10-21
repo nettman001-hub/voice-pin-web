@@ -108,7 +108,7 @@ export async function handleTouchSales(auth: AuthContext, body: any) {
       if(!run?.running || sale?.record_state!=='ACTIVE') return errorResponse('NOT_FOUND','판매 또는 PC 연결을 확인해 주세요.',409);
       const delay=Math.max(0,Math.min(20,Number(run.last_state?.delaySeconds ?? run.settings.fallbackDelaySeconds ?? 6)));
       const {error}=await admin.from('touch_sale_details').update({capture_status:'PENDING',capture_due_at:new Date(Date.now()+delay*1000).toISOString(),
-        capture_owner:null,capture_lease_expires_at:null,updated_at:new Date().toISOString()}).eq('workspace_id',workspace).eq('sale_id',body.saleId);
+        capture_owner:null,capture_lease_expires_at:null,recapture:true,updated_at:new Date().toISOString()}).eq('workspace_id',workspace).eq('sale_id',body.saleId);
       if(error) throw error; return successResponse({ok:true});
     }
     if (body.action==='update-touch-sale') {
