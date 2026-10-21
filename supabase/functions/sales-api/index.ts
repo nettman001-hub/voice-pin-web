@@ -51,6 +51,7 @@ import { handleSellerLogicDetection } from './handlers/sellerLogicDetection.ts'
 import { handleSellerLogicDeep } from './handlers/sellerLogicDeep.ts'
 import { handleSellerWorkflow } from './handlers/sellerWorkflow.ts'
 import { handleLogicOpus } from './handlers/logicOpus.ts'
+import { handleTouchSales } from './handlers/touchSales.ts'
 
 import {
   handleClaimPrintJobs,
@@ -133,6 +134,22 @@ serve(async (req: Request) => {
     }
 
     switch (action) {
+      case 'touch-bootstrap':
+      case 'claim-touch-captures':
+        requireCapability('SALES_READ')
+        return await handleTouchSales(auth, body)
+      case 'commit-touch-sale':
+      case 'touch-run':
+      case 'touch-capture-save':
+      case 'touch-capture-reset':
+      case 'update-touch-sale':
+      case 'touch-events':
+        requireCapability('SALES_WRITE')
+        return await handleTouchSales(auth, body)
+      case 'claim-touch-jobs':
+      case 'touch-print':
+        requireCapability('PRINT')
+        return await handleTouchSales(auth, body)
       case 'seller-logic-slots':
         return await handleSellerLogicSlots(auth)
       case 'seller-logic-deep-hints':
