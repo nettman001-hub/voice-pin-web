@@ -54,6 +54,7 @@ import { KeepingBadge } from '../../components/shipping/KeepingBadge';
 import { SalesModeSelector } from '../../components/live/SalesModeSelector';
 import { TouchDesktopPanel } from '../../components/live/TouchDesktopPanel';
 import { useTouchMode } from '../../context/TouchModeContext';
+import { VoicePhoneStatusReporter } from '../../components/live/VoicePhoneStatusReporter';
 
 const SILENCE_WARNING_DELAY_MS = 5 * 60 * 1000;
 const SILENCE_STOP_COUNTDOWN_SECONDS = 20;
@@ -486,6 +487,7 @@ export const LiveHomePage: React.FC = () => {
   return (
     <div className="p-3.5 sm:p-6 max-w-7xl mx-auto space-y-3 sm:space-y-5">
       {!runtime.isTest && <SalesModeSelector locked={isListening || isSessionStarting} />}
+      {!runtime.isTest && <VoicePhoneStatusReporter />}
       {workflowProcessingError&&<p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">판매방식 처리를 재시도하고 있습니다. 원본 전사는 유지됩니다. {workflowProcessingError}</p>}
       {/* 최소 높이 상단 헤더 & 핵심 제어 */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 px-2.5 py-2 sm:px-3 rounded-2xl shadow-sm">

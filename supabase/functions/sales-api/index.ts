@@ -52,6 +52,7 @@ import { handleSellerLogicDeep } from './handlers/sellerLogicDeep.ts'
 import { handleSellerWorkflow } from './handlers/sellerWorkflow.ts'
 import { handleLogicOpus } from './handlers/logicOpus.ts'
 import { handleTouchSales } from './handlers/touchSales.ts'
+import { handleTouchSalesAdmin } from './handlers/touchSalesAdmin.ts'
 
 import {
   handleClaimPrintJobs,
@@ -98,6 +99,7 @@ import {
 } from './handlers/voiceCorrections.ts'
 
 serve(async (req: Request) => {
+  const requestReceivedAt = Date.now()
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -111,6 +113,7 @@ serve(async (req: Request) => {
     }
 
     const { action } = body
+    body.__serverReceivedAt = requestReceivedAt
     if (!action) {
       return errorResponse('VALIDATION_ERROR', 'action 필드가 누락되었습니다.', 400)
     }
@@ -134,13 +137,21 @@ serve(async (req: Request) => {
     }
 
     switch (action) {
+      case 'touch-admin-connections':
+        return await handleTouchSalesAdmin(auth, body)
+      case 'touch-voice-presence':
+        requireCapability('SALES_WRITE')
+        return await handleTouchSales(auth, body)
       case 'touch-bootstrap':
+      case 'touch-sale-detail':
+      case 'touch-time':
       case 'claim-touch-captures':
         requireCapability('SALES_READ')
         return await handleTouchSales(auth, body)
       case 'commit-touch-sale':
       case 'touch-run':
       case 'touch-capture-save':
+      case 'touch-capture-target':
       case 'touch-capture-reset':
       case 'update-touch-sale':
       case 'touch-events':
