@@ -11,6 +11,8 @@ test('purchase tap stops every existing purchase alert, ordinary tap does not, n
   const selected=selectTouchComment(initial,a,[a,b,talk]);assert.equal(selected.selectedKey,touchCommentKey(a));
   assert.equal(shouldFlashTouchComment(a,selected,new Set()),false);assert.equal(shouldFlashTouchComment(b,selected,new Set()),false);
   assert.equal(shouldFlashTouchComment(later,selected,new Set()),true);
+  const oldTap=selectTouchComment(selected,a,[a,b,talk,later]);
+  assert.equal(shouldFlashTouchComment(later,oldTap,new Set()),true,'a previously acknowledged row must not acknowledge new alerts');
   assert.equal(shouldFlashTouchComment(later,selected,new Set([touchCommentKey(later)])),false);
   assert.equal(shouldFlashTouchComment(c('no','구매 취소요',5),initial,new Set()),false);
 });

@@ -7,9 +7,9 @@ export const touchCommentKey = (comment: Pick<TouchComment,'id'|'platformMessage
   `${comment.sessionId}:${comment.platformMessageId || comment.id}`;
 export interface TouchSelectionState { selectedKey: string | null; acknowledged: ReadonlySet<string>; }
 /** A purchase tap acknowledges the entire currently visible alert generation. New arrivals remain new. */
-export function selectTouchComment(state: TouchSelectionState, selected: TouchComment, comments: readonly TouchComment[]): TouchSelectionState {
+export function selectTouchComment(state: TouchSelectionState, selected: TouchComment, comments: readonly TouchComment[],sold:ReadonlySet<string>=new Set()): TouchSelectionState {
   const acknowledged = new Set(state.acknowledged);
-  if (isTouchPurchase(selected)) for (const comment of comments) if(isTouchPurchase(comment)) acknowledged.add(touchCommentKey(comment));
+  if (shouldFlashTouchComment(selected,state,sold)) for (const comment of comments) if(isTouchPurchase(comment)) acknowledged.add(touchCommentKey(comment));
   return {selectedKey:touchCommentKey(selected),acknowledged};
 }
 export const shouldFlashTouchComment = (comment: TouchComment,state:TouchSelectionState,sold:ReadonlySet<string>) =>

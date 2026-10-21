@@ -71,9 +71,16 @@ export class TouchSalesBridge {
     if(packet.kind==='hello' && this.options.role==='PC'){
       if(this.peerId && this.peerId!==raw.from && Date.now()-this.lastReceivedAt<15000){void this.broadcast({kind:'busy'},raw.from);return;}
       this.peerId=raw.from;this.lastReceivedAt=Date.now();
-      if(!this.peer || this.peer.connectionState==='failed' || Date.now()-this.lastOfferAt>20000) await this.offer();
+      await this.broadcast({kind:'welcome',state:this.pcState},raw.from);
+      if(!this.peer || this.peer.connectionState==='failed' || Date.now()-this.lastOfferAt>20000) await this.offer().catch(()=>{});
       if(this.transport!=='DIRECT'){this.setStatus('FALLBACK');this.sendSnapshot();}
       return;
+    }
+    if(packet.kind==='welcome' && this.options.role==='PHONE'){
+      this.peerId=raw.from;this.lastReceivedAt=Date.now();
+      if(this.transport!=='DIRECT')this.setStatus('FALLBACK');
+      if(packet.state)this.options.onPacket({kind:'state',state:packet.state});
+      this.send({kind:'resync'});return;
     }
     if(packet.kind==='offer' && this.options.role==='PHONE'){
       this.peerId=raw.from;this.lastReceivedAt=Date.now();
