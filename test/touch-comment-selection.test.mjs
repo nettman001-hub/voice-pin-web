@@ -5,6 +5,7 @@ import {
   shouldFlashTouchComment,
   touchCommentKey,
   mergeTouchComments,
+  isTouchListAtBottom,
 } from '../src/services/touchCommentState.ts';
 const c = (id, content, sequence) => ({
   id,
@@ -54,4 +55,10 @@ test('direct/fallback replay merges by canonical platform message and keeps 500 
   assert.equal(rows.length, 500);
   assert.equal(rows[0].sequence, 21);
   assert.equal(rows.at(-1).stats.todayCount, 2);
+});
+test('list follows only while scrolled to the bottom, a few pixels of slack counts as bottom', () => {
+  assert.equal(isTouchListAtBottom(1000, 600, 400), true);
+  assert.equal(isTouchListAtBottom(1000, 580, 400), true);
+  assert.equal(isTouchListAtBottom(1000, 500, 400), false);
+  assert.equal(isTouchListAtBottom(300, 0, 400), true);
 });
