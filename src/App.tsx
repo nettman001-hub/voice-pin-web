@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { SalesProvider } from './context/SalesContext';
 import { LiveProvider } from './context/LiveContext';
 import { CustomerStatsProvider } from './context/CustomerStatsContext';
+import { TouchModeProvider } from './context/TouchModeContext';
 import { CommentCaptureProvider } from './context/CommentCaptureContext';
 import { ListeningStopScheduleProvider } from './context/ListeningStopScheduleContext';
 import { AppDataProvider } from './context/AppDataContext';
@@ -62,6 +63,7 @@ const SellerLogicAnalysisPage = lazy(() => import('./pages/admin/SellerLogicAnal
 const SellerLogicAnalysis03DeepPage = lazy(() => import('./pages/admin/SellerLogicAnalysis03DeepPage'));
 const SellerLogicAnalysis04ArgonPage = lazy(() => import('./pages/admin/SellerLogicAnalysis04ArgonPage'));
 const SellerLogicOpusPage = lazy(() => import('./pages/admin/SellerLogicOpusPage'));
+const TouchPhoneConnectionsPage = lazy(() => import('./pages/admin/TouchPhoneConnectionsPage'));
 
 const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const runtime = useWorkspaceRuntime();
@@ -192,6 +194,7 @@ export const App: React.FC = () => {
         <SalesProvider>
           <CommerceProvider>
             <ProductSalesProvider>
+              <TouchModeProvider>
               <SttVocabularyProvider>
                 <LiveProvider>
                   <CustomerStatsProvider>
@@ -271,6 +274,7 @@ export const App: React.FC = () => {
                       <Route path="/admin/members" element={<MemberManagementPage />} />
                       <Route path="/admin/reports" element={<ReportManagementPage />} />
                       <Route path="/admin/stats" element={<AdminStatsPage />} />
+                      <Route path="/admin/sales-phones" element={<Suspense fallback={<div className="p-8">판매 폰 현황을 불러오는 중…</div>}><TouchPhoneConnectionsPage /></Suspense>} />
                       <Route path="/admin/ai" element={<AdminAiSettingsPage />} />
                       <Route path="/admin/seller-analysis" element={<Suspense fallback={<div className="p-8">판매방식 분석 화면을 불러오는 중…</div>}><SellerAnalysisPage /></Suspense>} />
                       <Route path="/admin/seller-logic-analysis-01" element={<Suspense fallback={<div className="p-8">판매자 로직분석01 화면을 불러오는 중…</div>}><SellerLogicAnalysisPage /></Suspense>} />
@@ -290,6 +294,7 @@ export const App: React.FC = () => {
                   </CustomerStatsProvider>
                 </LiveProvider>
               </SttVocabularyProvider>
+              </TouchModeProvider>
             </ProductSalesProvider>
           </CommerceProvider>
         </SalesProvider>

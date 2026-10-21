@@ -1,4 +1,11 @@
 -- Phone comment-touch sales. Existing voice commit functions and helper protocol are unchanged.
+alter table public.sales add column if not exists touch_sale boolean not null default false;
+-- Existing deployments allow four statuses. Phone cancellation also records the
+-- explicit cancelled label while preserving the sale for its audit trail.
+alter table public.sales drop constraint if exists sales_status_check;
+alter table public.sales add constraint sales_status_check
+  check (status in ('자동저장','수동수정','확정','보류','취소')) not valid;
+alter table public.sales validate constraint sales_status_check;
 create table if not exists public.touch_sales_runs (
   workspace_id uuid primary key references public.workspaces(id) on delete cascade,
   session_id uuid not null references public.live_sessions(id) on delete cascade,
@@ -16,14 +23,20 @@ create table if not exists public.touch_sale_details (
   input_price text not null,
   confirmed_at timestamptz not null,
   client_confirmed_at text,
+  entry_context jsonb not null default '{}'::jsonb,
   capture_due_at timestamptz not null,
   capture_status text not null default 'PENDING' check(capture_status in ('PENDING','CAPTURED','MISSING','CANCELLED')),
+  capture_generation uuid not null default gen_random_uuid(),
   capture_owner uuid,
   capture_lease_expires_at timestamptz,
   captured_at timestamptz,
   image_path text,
+  recapture boolean not null default false,
   updated_at timestamptz not null default now()
 );
+alter table public.touch_sale_details add column if not exists capture_generation uuid not null default gen_random_uuid();
+alter table public.touch_sale_details add column if not exists entry_context jsonb not null default '{}'::jsonb;
+alter table public.touch_sale_details add column if not exists recapture boolean not null default false;
 create table if not exists public.touch_sales_events (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
@@ -148,18 +161,25 @@ begin
     +coalesce((v_run.last_state->>'delaySeconds')::numeric,(v_run.settings->>'fallbackDelaySeconds')::numeric,6));
   insert into public.sales(id,workspace_id,session_id,buyer_id,buyer_nickname,amount,unit_price,quantity,status,source,
       raw_transcript,recognized_at,product_id,product_name,product_name_snapshot,product_code_snapshot,
-      record_state,source_comment_ids,operation_id,print_status,print_revision,revision,note)
+      record_state,source_comment_ids,operation_id,print_status,print_revision,revision,note,touch_sale)
     values(v_sale,p_workspace_id,v_session::text,v_buyer,v_comment->>'nickname',v_unit*v_qty,v_unit,v_qty,'자동저장','ANDROID_COMMENTS',
       '판매자 터치: 폰, 댓글 '||(v_comment->>'platformMessageId')||', 입력값 '||v_input,v_at,v_product,v_product_name,v_product_name,v_product_code,
-      'ACTIVE',jsonb_build_array(v_comment_id),v_op,'QUEUED',1,1,'구매 댓글 "'||(v_comment->>'content')||'"');
-  insert into public.touch_sale_details(sale_id,workspace_id,comment,input_price,confirmed_at,client_confirmed_at,capture_due_at)
-    values(v_sale,p_workspace_id,v_comment,v_input,v_at,p_payload->>'clientConfirmedAt',v_due);
+      'ACTIVE',jsonb_build_array(v_comment_id),v_op,'QUEUED',1,1,'구매 댓글 "'||(v_comment->>'content')||'"',true);
+  insert into public.touch_sale_details(sale_id,workspace_id,comment,input_price,confirmed_at,client_confirmed_at,capture_due_at,capture_status,entry_context)
+    values(v_sale,p_workspace_id,v_comment,v_input,v_at,p_payload->>'clientConfirmedAt',v_due,
+      case when coalesce((p_payload->>'skipCapture')::boolean,false) then 'MISSING' else 'PENDING' end,
+      jsonb_build_object('clockOffsetMs',p_payload->'clockOffsetMs','originalConfirmedAt',p_payload->'originalConfirmedAt',
+        'retargetedFromOperationId',p_payload->'retargetedFromOperationId'));
   insert into public.print_jobs(workspace_id,sale_id,sale_revision,kind,status,immutable_payload)
     values(p_workspace_id,v_sale,1,'SALE','QUEUED',jsonb_build_object('touchSale',true,'buyerNickname',v_comment->>'nickname',
       'amount',v_unit*v_qty,'quantity',v_qty,'unitPrice',v_unit,'sessionId',v_session,'recognizedAt',v_at));
   v_result := jsonb_build_object('ok',true,'saleId',v_sale,'buyerId',v_buyer,'commentId',v_comment_id,'amount',v_unit*v_qty,'captureDueAt',v_due);
   insert into public.operations(workspace_id,operation_id,actor_id,action,request_hash,status,response_json)
     values(p_workspace_id,v_op,p_actor_id::text,'commit-touch-sale',v_hash,'SUCCEEDED',v_result);
+  if v_at<now()-interval '3 seconds' or nullif(p_payload->>'retargetedFromOperationId','') is not null then
+    insert into public.touch_sales_events(id,workspace_id,session_id,kind,metrics)
+      values(v_op,p_workspace_id,v_session,'LATE_SALE','{}'::jsonb) on conflict(id) do nothing;
+  end if;
   return v_result;
 end; $$;
 revoke all on function public.voicecap_commit_touch_sale(uuid,uuid,jsonb) from public,anon,authenticated;
@@ -171,8 +191,12 @@ returns jsonb language plpgsql security definer set search_path=public as $$
 declare v_token text:=gen_random_uuid()::text; v_jobs jsonb; begin
   if not exists(select 1 from public.touch_sales_runs where workspace_id=p_workspace_id and producer_id=p_producer_id
     and lease_expires_at>now()) then return jsonb_build_object('ok',false,'code','PC_LEASE_LOST'); end if;
-  update public.print_jobs j set status='UNKNOWN',updated_at=now() where j.workspace_id=p_workspace_id
-    and j.status='SUBMITTING' and j.lease_expires_at<now() and exists(select 1 from public.touch_sale_details d where d.sale_id=j.sale_id);
+  with expired as (
+    update public.print_jobs j set status='UNKNOWN',updated_at=now() where j.workspace_id=p_workspace_id
+      and j.status='SUBMITTING' and j.lease_expires_at<now() and exists(select 1 from public.touch_sale_details d where d.sale_id=j.sale_id)
+      returning j.sale_id,j.sale_revision
+  ) update public.sales s set print_status='FAILED',print_error='출력 여부 확인 필요',updated_at=now()
+    from expired e where s.id=e.sale_id and s.workspace_id=p_workspace_id and s.revision=e.sale_revision;
   with candidates as (
     select j.id from public.print_jobs j join public.touch_sale_details d on d.sale_id=j.sale_id
       where j.workspace_id=p_workspace_id and (j.status='QUEUED' or (j.status='CLAIMED' and j.lease_expires_at<now()))
@@ -189,7 +213,16 @@ grant execute on function public.voicecap_claim_touch_jobs(uuid,uuid,integer) to
 create or replace function public.voicecap_update_touch_sale(p_workspace_id uuid,p_actor_id uuid,p_payload jsonb)
 returns jsonb language plpgsql security definer set search_path=public as $$
 declare v_sale public.sales%rowtype; v_before jsonb; v_action text:=p_payload->>'kind'; v_buyer public.buyers%rowtype; v_revision integer;
+  v_op uuid := nullif(p_payload->>'operationId','')::uuid; v_hash text:=md5(p_payload::text); v_existing public.operations%rowtype; v_result jsonb;
 begin
+  perform pg_advisory_xact_lock(hashtextextended(p_workspace_id::text,210021));
+  if v_op is not null then
+    select * into v_existing from public.operations where workspace_id=p_workspace_id and operation_id=v_op;
+    if found then
+      if v_existing.request_hash<>v_hash then return jsonb_build_object('ok',false,'code','OPERATION_PAYLOAD_MISMATCH'); end if;
+      if v_existing.status='SUCCEEDED' then return v_existing.response_json; end if;
+    end if;
+  end if;
   select s.* into v_sale from public.sales s join public.touch_sale_details d on d.sale_id=s.id
     where s.id=p_payload->>'saleId' and s.workspace_id=p_workspace_id for update of s;
   if not found then return jsonb_build_object('ok',false,'code','NOT_FOUND'); end if;
@@ -199,20 +232,26 @@ begin
     update public.sales set status='취소',record_state='CANCELLED',revision=v_revision,updated_at=now() where id=v_sale.id;
     update public.print_jobs set status='CANCELLED' where sale_id=v_sale.id and workspace_id=p_workspace_id and status in ('QUEUED','CLAIMED');
     update public.touch_sale_details set capture_status='CANCELLED',updated_at=now() where sale_id=v_sale.id;
-  elsif v_action in ('PRICE','BUYER') then
+  elsif v_action in ('PRICE','BUYER','FIELDS') then
     if v_sale.record_state<>'ACTIVE' then return jsonb_build_object('ok',false,'code','SALE_CANCELLED'); end if;
-    if v_action='PRICE' then
+    if v_action in ('PRICE','FIELDS') then
       if (p_payload->>'unitPrice')::integer<1 or (p_payload->>'unitPrice')::bigint*v_sale.quantity>99999999 then
         return jsonb_build_object('ok',false,'code','VALIDATION_ERROR'); end if;
       v_sale.unit_price:=(p_payload->>'unitPrice')::integer; v_sale.amount:=v_sale.unit_price*v_sale.quantity;
-    else
+    end if;
+    if v_action='BUYER' or (v_action='FIELDS' and nullif(p_payload->>'buyerId','') is not null and p_payload->>'buyerId'<>v_sale.buyer_id::text) then
       select * into v_buyer from public.buyers where id=(p_payload->>'buyerId')::uuid and workspace_id=p_workspace_id;
       if not found then return jsonb_build_object('ok',false,'code','BUYER_NOT_FOUND'); end if;
       v_sale.buyer_id:=v_buyer.id; v_sale.buyer_nickname:=v_buyer.display_nickname;
     end if;
     update public.sales set buyer_id=v_sale.buyer_id,buyer_nickname=v_sale.buyer_nickname,unit_price=v_sale.unit_price,
-      amount=v_sale.amount,status='수동수정',revision=v_revision,print_revision=print_revision+1,
-      print_status=case when coalesce((p_payload->>'reprint')::boolean,true) then 'QUEUED' else print_status end,updated_at=now() where id=v_sale.id;
+      amount=v_sale.amount,status=case when v_action='FIELDS' and p_payload->>'status' in ('자동저장','수동수정','확정') then p_payload->>'status' else '수동수정' end,
+      note=case when v_action='FIELDS' then left(coalesce(p_payload->>'note',''),4000) else note end,
+      product_name=case when v_action='FIELDS' then left(p_payload->>'productName',200) else product_name end,
+      product_name_snapshot=case when v_action='FIELDS' then left(p_payload->>'productName',200) else product_name_snapshot end,
+      revision=v_revision,print_revision=print_revision+case when coalesce((p_payload->>'reprint')::boolean,true) then 1 else 0 end,
+      print_status=case when coalesce((p_payload->>'reprint')::boolean,true) then 'QUEUED' when print_status='QUEUED' then 'NOT_REQUESTED' else print_status end,
+      updated_at=now() where id=v_sale.id;
     update public.print_jobs set status='CANCELLED' where workspace_id=p_workspace_id and sale_id=v_sale.id and status in ('QUEUED','CLAIMED');
     if coalesce((p_payload->>'reprint')::boolean,true) then
       insert into public.print_jobs(workspace_id,sale_id,sale_revision,kind,immutable_payload) values(p_workspace_id,v_sale.id,v_revision,'CORRECTION',
@@ -229,7 +268,10 @@ begin
   insert into public.sale_revisions(workspace_id,sale_id,old_revision,new_revision,before_value,after_value,actor_user_id,reason)
     values(p_workspace_id,v_sale.id,(v_before->>'revision')::integer,v_revision,v_before,
       (select to_jsonb(s) from public.sales s where id=v_sale.id),p_actor_id,'댓글터치 '||v_action);
-  return jsonb_build_object('ok',true,'saleId',v_sale.id);
+  v_result:=jsonb_build_object('ok',true,'saleId',v_sale.id);
+  if v_op is not null then insert into public.operations(workspace_id,operation_id,actor_id,action,request_hash,status,response_json)
+    values(p_workspace_id,v_op,p_actor_id::text,'update-touch-sale',v_hash,'SUCCEEDED',v_result); end if;
+  return v_result;
 end; $$;
 revoke all on function public.voicecap_update_touch_sale(uuid,uuid,jsonb) from public,anon,authenticated;
 grant execute on function public.voicecap_update_touch_sale(uuid,uuid,jsonb) to service_role;
@@ -295,7 +337,7 @@ declare v_rows jsonb; begin
     return jsonb_build_object('ok',false,'code','PC_LEASE_LOST'); end if;
   with candidates as (select d.sale_id from public.touch_sale_details d join public.sales s on s.id=d.sale_id
     where d.workspace_id=p_workspace_id and d.capture_status='PENDING' and s.record_state='ACTIVE'
-      and (d.capture_owner is null or d.capture_owner=p_producer_id or d.capture_lease_expires_at<now())
+      -- Only the current PC lease can reach this statement; it takes over pending captures immediately.
       order by d.capture_due_at for update of d skip locked limit 20), leased as (
       update public.touch_sale_details d set capture_owner=p_producer_id,capture_lease_expires_at=now()+interval '60 seconds'
         from candidates c where d.sale_id=c.sale_id returning d.*)
@@ -305,15 +347,19 @@ end; $$;
 revoke all on function public.voicecap_claim_touch_captures(uuid,uuid) from public,anon,authenticated;
 grant execute on function public.voicecap_claim_touch_captures(uuid,uuid) to service_role;
 
-create or replace function public.voicecap_touch_capture(p_workspace_id uuid,p_producer_id uuid,p_sale_id text,p_status text,p_path text,p_captured_at timestamptz)
+drop function if exists public.voicecap_touch_capture(uuid,uuid,text,text,text,timestamptz);
+create or replace function public.voicecap_touch_capture(p_workspace_id uuid,p_producer_id uuid,p_sale_id text,p_status text,p_path text,p_captured_at timestamptz,p_generation uuid default null)
 returns jsonb language plpgsql security definer set search_path=public as $$
 declare v_old text; begin
   if p_status not in ('MISSING','CAPTURED') then return jsonb_build_object('ok',false,'code','VALIDATION_ERROR'); end if;
+  if not exists(select 1 from public.touch_sales_runs where workspace_id=p_workspace_id and producer_id=p_producer_id and lease_expires_at>now()) then
+    return jsonb_build_object('ok',false,'code','CAPTURE_LEASE_LOST'); end if;
   if p_status='CAPTURED' and (p_path is null or position(p_workspace_id::text||'/touch-sales/'||p_sale_id||'/' in p_path)<>1) then
     return jsonb_build_object('ok',false,'code','INVALID_IMAGE_PATH'); end if;
   select d.image_path into v_old from public.touch_sale_details d join public.sales s on s.id=d.sale_id
     where d.sale_id=p_sale_id and d.workspace_id=p_workspace_id and d.capture_owner=p_producer_id
-      and d.capture_lease_expires_at>now() and s.record_state='ACTIVE' for update of d,s;
+      and d.capture_lease_expires_at>now() and d.capture_status='PENDING'
+      and (p_generation is null or d.capture_generation=p_generation) and s.record_state='ACTIVE' for update of d,s;
   if not found then return jsonb_build_object('ok',false,'code','CAPTURE_LEASE_LOST'); end if;
   update public.touch_sale_details set capture_status=p_status,image_path=case when p_status='CAPTURED' then p_path else image_path end,
     captured_at=p_captured_at,updated_at=now() where sale_id=p_sale_id;
@@ -323,5 +369,15 @@ declare v_old text; begin
   end if;
   return jsonb_build_object('ok',true,'previousPath',v_old);
 end; $$;
-revoke all on function public.voicecap_touch_capture(uuid,uuid,text,text,text,timestamptz) from public,anon,authenticated;
-grant execute on function public.voicecap_touch_capture(uuid,uuid,text,text,text,timestamptz) to service_role;
+revoke all on function public.voicecap_touch_capture(uuid,uuid,text,text,text,timestamptz,uuid) from public,anon,authenticated;
+grant execute on function public.voicecap_touch_capture(uuid,uuid,text,text,text,timestamptz,uuid) to service_role;
+
+do $$ declare target text; begin
+  if exists(select 1 from pg_publication where pubname='supabase_realtime') then
+    foreach target in array array['touch_sales_runs','touch_sale_details','live_sessions','buyers'] loop
+      if not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename=target) then
+        execute format('alter publication supabase_realtime add table public.%I',target);
+      end if;
+    end loop;
+  end if;
+end $$;

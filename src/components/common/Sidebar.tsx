@@ -108,6 +108,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: [
         { name: '관리자 대시보드', path: '/admin', icon: Shield },
         { name: '전체 판매 & 회차 관제', path: '/admin/sales', icon: ShoppingBag },
+        { name: '판매 폰 연결 현황', path: '/admin/sales-phones', icon: Radio },
         { name: '회원 관리 & STT', path: '/admin/members', icon: Users },
         { name: '판매 AI 설정 (보류·정정)', path: '/admin/ai', icon: Sparkles },
         { name: '판매자 판매방식 분석', path: '/admin/seller-analysis', icon: BookOpenText },

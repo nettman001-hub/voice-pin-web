@@ -7,6 +7,10 @@ export default defineConfig({
     {
       name: 'local-api-ai-models-proxy',
       configureServer(server) {
+        server.middlewares.use((req, _res, next) => {
+          if (req.url && /^\/sell(?:\?|$)/.test(req.url)) req.url = req.url.replace(/^\/sell/, '/sell.html');
+          next();
+        });
         // Server-only credentials are not injected into the browser bundle.
         const env = loadEnv(server.config.mode, server.config.root, '');
         for (const key of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY', 'VITE_SUPABASE_URL', 'VITE_SUPABASE_PUBLISHABLE_KEY', 'DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY']) {
@@ -139,6 +143,9 @@ export default defineConfig({
       },
     },
   ],
+  build: {
+    rollupOptions: { input: { main: 'index.html', sell: 'sell.html' } },
+  },
   server: {
     port: 3000,
     open: false,

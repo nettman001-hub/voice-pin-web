@@ -1,0 +1,20 @@
+{
+  "checks": [
+    "actual browser RTCPeerConnection reaches DIRECT",
+    "one purchase tap stops every current row alert and selects exactly one row",
+    "only new purchases flash; ordinary and acknowledged rows do not clear them",
+    "real price pad converts 1.5 and creates one durable-queue sale",
+    "double tap and reload after a lost server reply replay the same durable operation exactly once",
+    "WebRTC disconnect switches to Broadcast without duplicate comments",
+    "audio envelopes are blocked from fallback transport",
+    "signaling and fallback always request a private authenticated channel",
+    "reduced motion uses a static visible alert",
+    "390px phone layout has no horizontal overflow",
+    "no browser runtime errors",
+    "PC replacement resets the old sequence snapshot within the same broadcast",
+    "initial WebRTC failure still receives the full comment snapshot through fallback"
+  ],
+  "passed": 13,
+  "date": "2026-10-21T12:16:18.012Z",
+  "scope": "isolated fixtures; real browser WebRTC and production phone UI; no operating account or printer"
+}
