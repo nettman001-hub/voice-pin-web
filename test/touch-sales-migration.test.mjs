@@ -71,5 +71,22 @@ test('touch sale, chosen comment and receipt commit atomically; retry, session, 
     await db.query("update live_sessions set status='ENDED' where id=$1",[session]);
     assert.deepEqual(await commit(payload),first,'replay still succeeds after end');
     assert.equal((await commit({...payload,operationId:crypto.randomUUID()})).code,'SESSION_ENDED');
+    const monitoring=fs.readFileSync(new URL('../supabase/migrations/202610210002_touch_sales_monitoring.sql',import.meta.url),'utf8');
+    await db.exec(monitoring);await db.exec(monitoring);
+    await db.query("insert into touch_sales_events(workspace_id,session_id,kind,metrics) values($1,$2,'SUMMARY',$3)",
+      [workspace,session,JSON.stringify({directSeconds:180,fallbackSeconds:60,fallbackMessages:20,signalMessages:10,delaySum:50,delaySamples:10,delayMaximum:7})]);
+    const totals=await call('voicecap_touch_monthly_stats',[new Date(Date.now()-60000).toISOString(),new Date(Date.now()+60000).toISOString()]);
+    assert.equal(Number(totals[0].fallback_messages),20);assert.equal(Number(totals[0].delay_average),5);
+    await db.exec(`create or replace function is_workspace_member(id uuid) returns boolean language sql as $$ select id::text=current_setting('request.workspace',true) $$;
+      create or replace function realtime.topic() returns text language sql as $$ select current_setting('request.topic',true) $$;
+      grant usage on schema realtime to authenticated;grant select,insert on realtime.messages to authenticated;alter table realtime.messages enable row level security;`);
+    await db.query("select set_config('request.workspace',$1,false),set_config('request.topic',$2,false)",[workspace,`touch-sales:${workspace}`]);
+    await db.exec("set role authenticated;insert into realtime.messages(extension) values('broadcast');");
+    assert.equal((await db.query('select count(*)::int n from realtime.messages')).rows[0].n,1);
+    await db.query("select set_config('request.topic',$1,false)",[`touch-sales:${crypto.randomUUID()}`]);
+    assert.equal((await db.query('select count(*)::int n from realtime.messages')).rows[0].n,0,'another seller channel is not readable');
+    await assert.rejects(db.exec("insert into realtime.messages(extension) values('broadcast')"),/row-level security/);
+    await assert.rejects(call('voicecap_touch_monthly_stats',[new Date().toISOString(),new Date().toISOString()]),/permission denied/);
+    await db.exec('reset role');
   }finally{await db.close();}
 });

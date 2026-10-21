@@ -27,6 +27,8 @@ export interface TouchPcState {
   product: Product | null;
   totalCount: number;
   totalAmount: number;
+  transport?: TouchTransport;
+  phoneCount?: number;
 }
 export interface TouchCommit {
   operationId: string;

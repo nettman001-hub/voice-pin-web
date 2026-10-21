@@ -17,6 +17,7 @@ import {customerStatsLabel} from '../../services/customerStatsIndex';
 import type {TouchPcState,TouchSale,TouchTransport} from '../../types/touchSales';
 import {isCountedSale} from '../../services/saleRowHistory';
 import {productSalesApi} from '../../services/productSalesApi';
+import {TouchTelemetry} from '../../services/touchTelemetry';
 
 export const TouchDesktopPanel:React.FC=()=>{
   const {workspaceId,isRemoteAuth}=useRuntimeAuth();const runtime=useWorkspaceRuntime();
@@ -30,13 +31,15 @@ export const TouchDesktopPanel:React.FC=()=>{
   const [delay,setDelay]=useState<{seconds:number;source:'AUTO'|'LAST'|'SETTING'}>({seconds:settings.fallbackDelaySeconds,source:'SETTING'});
   const [records,setRecords]=useState<TouchSale[]>([]),[candidates,setCandidates]=useState<{saleId:string;frames:TouchFrame[]}|null>(null);
   const api=useMemo(()=>workspaceId?new TouchSalesApi(workspaceId):null,[workspaceId]);
+  const telemetry=useMemo(()=>api?new TouchTelemetry(api):null,[api]);
+  const lastTick=useRef(Date.now()),previousHelper=useRef(comments.serverStatus);
   const producer=useRef(crypto.randomUUID());
   const bridge=useRef<TouchSalesBridge|null>(null),worker=useRef<TouchPcWorker|null>(null),frames=useRef(new TouchFrameBuffer());
   const sampler=useRef(new AudioEnvelopeSampler()),phoneSamples=useRef<EnvelopeSample[]>([]),tabSamples=useRef<EnvelopeSample[]>([]);
   const stableDelay=useRef(new StableTouchDelay()),lastMeasure=useRef(0),lastGoodDelay=useRef(0),serverOffset=useRef(0);
   const [tick,setTick]=useState(0);const metrics=useRef<Record<string,number>>({});const lifecycle=useRef(0);
-  const live=useRef({settings,delay,comments,activeSession,activeProduct,sales,stats,runningSession});
-  live.current={settings,delay,comments,activeSession,activeProduct,sales,stats,runningSession};
+  const live=useRef({settings,delay,comments,activeSession,activeProduct,sales,stats,runningSession,transport,phoneCount});
+  live.current={settings,delay,comments,activeSession,activeProduct,sales,stats,runningSession,transport,phoneCount};
   const url=typeof window!=='undefined'?`${location.origin}/sell`:'';
   useEffect(()=>{let active=true;void QRCode.toDataURL(url,{width:260,margin:2}).then(data=>{if(active)setQr(data);});return()=>{active=false;};},[url]);
   useEffect(()=>screenCaptureService.subscribeConnection(state=>setScreenConnected(state.isConnected)),[]);
@@ -55,7 +58,7 @@ export const TouchDesktopPanel:React.FC=()=>{
   };
   const report=(kind:string,_e?:unknown)=>{
     if(['PRINT_ERROR','CAPTURE_MISSING','HELPER_ERROR','LATE_SALE'].includes(kind)&&api&&live.current.activeSession)
-      void api.event(kind,live.current.activeSession.id,producer.current).catch(()=>{});
+      telemetry?.log(kind,live.current.activeSession.id,producer.current);
     if(kind==='WORKER_ERROR'&&(_e as any)?.code==='PC_LEASE_LOST'){
       setError('다른 PC로 판매 연결이 바뀌었습니다. 이 화면의 처리를 멈췄습니다.');cleanup();
     }
@@ -66,7 +69,7 @@ export const TouchDesktopPanel:React.FC=()=>{
       helperConnected:runtime.commentStreamService.isConnectedToServer,commentStatus:current.comments.serverStatus,
       screenConnected:screenCaptureService.getConnectionState().isConnected,printerConnected:runtime.commentStreamService.isConnectedToServer,
       delaySeconds:current.delay.seconds,delaySource:current.delay.source,prepareSeconds:current.settings.prepareSeconds,
-      product:current.activeProduct,totalCount:rows.length,totalAmount:rows.reduce((sum,s)=>sum+s.amount,0)};
+      product:current.activeProduct,totalCount:rows.length,totalAmount:rows.reduce((sum,s)=>sum+s.amount,0),transport:current.transport,phoneCount:current.phoneCount};
   };
   const cleanup=()=>{
     ++lifecycle.current;worker.current?.stop();worker.current=null;bridge.current?.stop();bridge.current=null;
@@ -84,10 +87,24 @@ export const TouchDesktopPanel:React.FC=()=>{
     };
     void heartbeat();const timer=setInterval(()=>void heartbeat(),10000);
     const summary=setInterval(()=>{
-      const values=metrics.current;metrics.current={};void api.event('SUMMARY',session.id,producer.current,values).catch(()=>{metrics.current=values;});
+      const values=metrics.current;metrics.current={};telemetry?.log('SUMMARY',session.id,producer.current,values);
     },300000);
     return()=>{clearInterval(timer);clearInterval(summary);};
   },[api,runningSession]);
+  useEffect(()=>{
+    const now=Date.now(),elapsed=Math.min(60,Math.max(0,(now-lastTick.current)/1000));lastTick.current=now;
+    if(!runningSession)return;
+    const field=transport==='DIRECT'?'directSeconds':transport==='FALLBACK'?'fallbackSeconds':null;
+    if(field)metrics.current[field]=(metrics.current[field]||0)+elapsed;
+    if(delay.source==='AUTO'){
+      metrics.current.delaySum=(metrics.current.delaySum||0)+delay.seconds*elapsed;
+      metrics.current.delaySamples=(metrics.current.delaySamples||0)+elapsed;
+      metrics.current.delayMaximum=Math.max(metrics.current.delayMaximum||0,delay.seconds);
+    }else metrics.current.delayUnavailableSeconds=(metrics.current.delayUnavailableSeconds||0)+elapsed;
+    if(previousHelper.current!==comments.serverStatus&&['DISCONNECTED','ERROR'].includes(comments.serverStatus)&&activeSession)
+      telemetry?.log('HELPER_ERROR',activeSession.id,producer.current);
+    previousHelper.current=comments.serverStatus;
+  },[tick,runningSession,transport,delay,comments.serverStatus]);
   useEffect(()=>{
     if(!runningSession||!activeSession)return;
     bridge.current?.setPcState(pcState(activeSession.id,activeSession.displayCode));
@@ -125,7 +142,8 @@ export const TouchDesktopPanel:React.FC=()=>{
       await sampler.current.start(stream,sample=>{tabSamples.current.push(sample);tabSamples.current=tabSamples.current.filter(s=>s.at>Date.now()-60000);});
       const pipe=new TouchSalesBridge({workspaceId:api.workspaceId,role:'PC',id:producer.current,
         onStatus:(status,count)=>{setTransport(status);setPhoneCount(count);
-          if(status==='DIRECT'||status==='FALLBACK'||status==='DISCONNECTED')void api.event(status,session.id,producer.current,{phoneCount:count}).catch(()=>{});},
+          metrics.current.transitions=(metrics.current.transitions||0)+1;
+          if(status==='DIRECT'||status==='FALLBACK'||status==='DISCONNECTED')telemetry?.log(status,session.id,producer.current,{phoneCount:count});},
         onMetric:(key,count)=>{metrics.current[key]=(metrics.current[key]||0)+count;},
         onPacket:packet=>{
           if(packet.kind==='audio'&&Array.isArray(packet.samples)&&pipe.transport==='DIRECT'){
@@ -145,15 +163,15 @@ export const TouchDesktopPanel:React.FC=()=>{
         delaySeconds:()=>live.current.delay.seconds,prepareSeconds:()=>live.current.settings.prepareSeconds,
         canPrint:()=>runtime.commentStreamService.isConnectedToServer,
         print:payload=>runtime.commentStreamService.printSale(payload),onChange:()=>{void refresh().catch(()=>{});},onError:report});
-      worker.current.start();void api.event('START',session.id,producer.current).catch(()=>{});
+      worker.current.start();telemetry?.log('START',session.id,producer.current);
     }catch(e){setError(e instanceof Error?e.message:'판매를 시작하지 못했습니다.');cleanup();}
     finally{setBusy(false);}
   };
   const stop=async()=>{
     if(!api||!activeSession)return;setBusy(true);
     try{await api.run('STOP',producer.current,activeSession.id,settings,pcState(activeSession.id,activeSession.displayCode));
-      await api.event('SUMMARY',activeSession.id,producer.current,metrics.current);metrics.current={};
-      void api.event('STOP',activeSession.id,producer.current).catch(()=>{});cleanup();}
+      telemetry?.log('SUMMARY',activeSession.id,producer.current,metrics.current);metrics.current={};
+      telemetry?.log('STOP',activeSession.id,producer.current);cleanup();}
     catch(e){setError((e as Error).message);}finally{setBusy(false);}
   };
   const state=activeSession?pcState(activeSession.id,activeSession.displayCode):null;

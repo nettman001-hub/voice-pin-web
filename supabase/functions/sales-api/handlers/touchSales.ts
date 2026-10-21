@@ -31,10 +31,11 @@ async function listSales(workspaceId: string, sessionId: string) {
       .eq('session_id', sessionId).order('recognized_at', { ascending: false }).order('id').range(offset,offset+999);
     if (error) throw error; rows.push(...(data || [])); if (!data || data.length<1000) break;
   }
-  const { data: details, error: detailsError } = await admin.from('touch_sale_details').select('*').eq('workspace_id', workspaceId)
-    .in('sale_id', rows.map(r=>r.id).slice(0,1000));
-  if (detailsError) throw detailsError;
-  const detailMap = new Map((details || []).map(d=>[d.sale_id,d]));
+  const detailMap = new Map<string,any>();
+  for(let offset=0;offset<rows.length;offset+=200){
+    const {data,error}=await admin.from('touch_sale_details').select('*').eq('workspace_id',workspaceId).in('sale_id',rows.slice(offset,offset+200).map(r=>r.id));
+    if(error)throw error;for(const d of data||[])detailMap.set(d.sale_id,d);
+  }
   return Promise.all(rows.map(async s => {
     const d = detailMap.get(s.id); let imageUrl = '';
     const imagePath = d?.image_path || s.capture_image_paths?.[0];
@@ -63,6 +64,13 @@ export async function handleTouchSales(auth: AuthContext, body: any) {
         if (data) product={id:data.id,productCode:data.product_code,name:data.name,unitPrice:data.unit_price,revision:data.revision};
       }
       return successResponse({ run,session,product,sales:session ? await listSales(workspace,session.id) : [],serverNow:Date.now() });
+    }
+    if (body.action === 'touch-voice-presence') {
+      const {data:session}=await admin.from('live_sessions').select('id').eq('workspace_id',workspace).eq('id',body.sessionId).maybeSingle();
+      if(!session)return errorResponse('SESSION_ENDED','유효한 회차가 없습니다.',409);
+      const {error}=await admin.from('touch_voice_presence').upsert({workspace_id:workspace,session_id:session.id,
+        producer_id:body.producerId,running:body.running===true,updated_at:new Date().toISOString()});
+      if(error)throw error;return successResponse({ok:true});
     }
     if (body.action === 'commit-touch-sale') {
       const error = validateTouchCommit(body.sale || {}); if (error) return errorResponse('VALIDATION_ERROR',error);
@@ -121,11 +129,13 @@ export async function handleTouchSales(auth: AuthContext, body: any) {
     if (body.action==='touch-events') {
       const allowed=['START','STOP','DIRECT','FALLBACK','DISCONNECTED','HELPER_ERROR','PRINT_ERROR','CAPTURE_MISSING','LATE_SALE','SUMMARY'];
       const metricKeys=['directComments','fallbackComments','fallbackMessages','signalMessages','directSeconds','fallbackSeconds','transitions',
-        'phoneCount','delayAverage','delayMaximum','delayUnavailableSeconds'];
+        'phoneCount','delayAverage','delayMaximum','delaySum','delaySamples','delayUnavailableSeconds'];
       if(!allowed.includes(body.kind)) return errorResponse('VALIDATION_ERROR','잘못된 기록 종류입니다.');
       const metrics=Object.fromEntries(metricKeys.filter(k=>Number.isFinite(body.metrics?.[k])).map(k=>[k,Math.max(0,Math.min(10000000,body.metrics[k]))]));
-      const {error}=await admin.from('touch_sales_events').insert({workspace_id:workspace,session_id:body.sessionId || null,
-        producer_id:body.producerId || null,kind:body.kind,metrics});
+      const {data:session}=await admin.from('live_sessions').select('id').eq('workspace_id',workspace).eq('id',body.sessionId).maybeSingle();
+      if(!session)return errorResponse('SESSION_ENDED','유효한 회차가 없습니다.',409);
+      const {error}=await admin.from('touch_sales_events').upsert({id:body.eventId || crypto.randomUUID(),workspace_id:workspace,session_id:session.id,
+        producer_id:body.producerId || null,kind:body.kind,metrics},{onConflict:'id',ignoreDuplicates:true});
       if(error) throw error; return successResponse({ok:true});
     }
     return errorResponse('VALIDATION_ERROR','알 수 없는 댓글터치 작업입니다.');
