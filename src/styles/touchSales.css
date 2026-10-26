@@ -50,7 +50,7 @@
 }
 .touch-top-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr auto;
   flex-shrink: 0;
   height: 56px;
   border-bottom: 1px solid #e4ebf3;
@@ -66,6 +66,29 @@
 .touch-top-tabs button.active {
   color: var(--touch-blue);
   border-bottom-color: var(--touch-blue);
+}
+.touch-account-button {
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.touch-account-email {
+  margin: -6px 0 12px;
+  color: #53617a;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.touch-account-warning {
+  background: #fffbec;
+  border: 1px solid #efd586;
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #9a550d;
+  font-size: 13px;
+}
+.touch-account-logout {
+  color: #b42318 !important;
+  border-color: #f0b4ad !important;
 }
 .touch-status-line {
   display: flex;
