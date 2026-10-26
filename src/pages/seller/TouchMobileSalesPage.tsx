@@ -41,6 +41,7 @@ import type {
 } from '../../types/touchSales';
 import type { TouchFrame } from '../../services/touchFrameBuffer';
 import type { Buyer } from '../../types/productSales';
+import { touchLogoutWarning } from '../../services/touchAccount';
 import '../../styles/touchSales.css';
 
 const printLabel = (status: string) =>
@@ -50,7 +51,7 @@ const printLabel = (status: string) =>
       ? '전표 확인 필요'
       : '전표 대기';
 export default function TouchMobileSalesPage() {
-  const { workspaceId, user } = useAuth();
+  const { workspaceId, user, logout } = useAuth();
   const api = useMemo(
     () => new TouchSalesApi(workspaceId || ''),
     [workspaceId],
@@ -75,6 +76,8 @@ export default function TouchMobileSalesPage() {
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState(''),
     [error, setError] = useState('');
+  const [accountOpen, setAccountOpen] = useState(false),
+    [logoutConfirm, setLogoutConfirm] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null),
     [editPrice, setEditPrice] = useState(false),
     [buyers, setBuyers] = useState<Buyer[] | null>(null),
@@ -1052,6 +1055,16 @@ export default function TouchMobileSalesPage() {
         >
           판매하기
         </button>
+        <button
+          className="touch-account-button"
+          aria-label="계정 보기"
+          onClick={() => {
+            setLogoutConfirm(false);
+            setAccountOpen(true);
+          }}
+        >
+          계정
+        </button>
       </nav>
       <div
         className={`touch-status-line ${!onlinePc ? 'touch-status-offline' : ''}`}
@@ -1245,6 +1258,40 @@ export default function TouchMobileSalesPage() {
                 </button>
               ))}
         </section>
+      )}
+      {accountOpen && (
+        <div className="touch-modal-backdrop" role="dialog" aria-label="계정">
+          <section className="touch-modal">
+            <h2>{user?.nickname || '판매자'}</h2>
+            <p className="touch-account-email">{user?.email}</p>
+            {logoutConfirm && (
+              <p className="touch-account-warning">
+                {touchLogoutWarning(outbox.length)}
+              </p>
+            )}
+            {logoutConfirm ? (
+              <>
+                <button
+                  className="touch-account-logout"
+                  onClick={() => void logout()}
+                >
+                  로그아웃 확인
+                </button>
+                <button onClick={() => setLogoutConfirm(false)}>취소</button>
+              </>
+            ) : (
+              <>
+                <button
+                  className="touch-account-logout"
+                  onClick={() => setLogoutConfirm(true)}
+                >
+                  로그아웃
+                </button>
+                <button onClick={() => setAccountOpen(false)}>닫기</button>
+              </>
+            )}
+          </section>
+        </div>
       )}
       {renderOverlay()}
     </div>
