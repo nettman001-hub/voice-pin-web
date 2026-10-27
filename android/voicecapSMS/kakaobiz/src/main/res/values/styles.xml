@@ -1,0 +1,10 @@
+<resources>
+    <style name="Theme.KakaoBizTest" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">#F8FAFC</item>
+        <item name="android:statusBarColor">#FFFFFF</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:colorAccent">#B45309</item>
+        <item name="android:navigationBarColor">#F8FAFC</item>
+    </style>
+</resources>

@@ -4,3 +4,5 @@ rootProject.name = 'voicecapSMS'
 include ':app'
 // 입금확인 앱 (문자 앱에서 분리). 은행 알림·은행 입금 문자 → payment-incoming.
 include ':deposit'
+// 카카오비즈 알림 테스트 앱 (단독). 카카오비즈 파트너센터 알림을 휴대폰 화면에만 보여 준다. 서버·인터넷 없음.
+include ':kakaobiz'
