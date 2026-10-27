@@ -199,11 +199,24 @@ public final class MainActivity extends Activity {
                 .append("제목: ").append(e.title).append('\n')
                 .append("본문: ").append(visibleBody(e)).append('\n')
                 .append("버튼: ").append(e.actions).append('\n')
-                .append(e.meta).append("\n\n");
+                .append("본문 길이: text ").append(e.text.length()).append("자 · bigText ").append(e.bigText.length())
+                .append("자 · textLines ").append(e.lines.length()).append("자 · messages ").append(e.messages.length()).append("자\n")
+                .append(e.meta).append('\n');
+            // 상세 보기에 나오는 내용을 빠짐없이 함께 복사한다.
+            appendSection(out, "메시지 목록(MessagingStyle)", e.messages);
+            appendSection(out, "여러 줄(textLines)", e.lines);
+            appendSection(out, "bigText", e.bigText);
+            appendSection(out, "subText", e.subText);
+            appendSection(out, "extras 전체", e.extrasDump);
+            out.append("\n");
         }
         ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         clipboard.setPrimaryClip(ClipData.newPlainText("kakaobiz", out.toString()));
         Toast.makeText(this, "이 휴대폰 클립보드에 복사했습니다", Toast.LENGTH_SHORT).show();
+    }
+
+    private static void appendSection(StringBuilder out, String name, String value) {
+        out.append("── ").append(name).append(" ──\n").append(value.isEmpty() ? "(없음)" : value).append('\n');
     }
 
     // ── 화면 도구 ────────────────────────────────────────────────────────────
