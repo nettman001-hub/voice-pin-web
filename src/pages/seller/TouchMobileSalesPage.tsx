@@ -37,11 +37,23 @@ import type {
   TouchCommit,
   TouchPcState,
   TouchSale,
+  TouchSalesMode,
   TouchTransport,
 } from '../../types/touchSales';
 import type { TouchFrame } from '../../services/touchFrameBuffer';
 import type { Buyer } from '../../types/productSales';
 import { touchLogoutWarning } from '../../services/touchAccount';
+import {
+  nextUnsoldNumber,
+  touchLabelNumber,
+  touchModeUsesNumber,
+  touchProductLabel,
+  touchSlipLine,
+} from '../../services/touchSaleModes';
+import {
+  TouchNumberBar,
+  TouchRecentSaleCard,
+} from '../../components/touch/TouchSaleModeParts';
 import '../../styles/touchSales.css';
 
 const printLabel = (status: string) =>
@@ -96,6 +108,20 @@ export default function TouchMobileSalesPage() {
     settlementUsed: boolean;
     entryContext: Record<string, unknown>;
   } | null>(null);
+  // 판매 방식(상품번호·사이즈·색상): 위쪽 번호, 여러 명 고르기, 방금 판매 칸.
+  const [currentNumber, setCurrentNumber] = useState(1),
+    [returnNumber, setReturnNumber] = useState<number | null>(null),
+    [picked, setPicked] = useState<TouchComment[]>([]),
+    [batch, setBatch] = useState<{
+      comments: TouchComment[];
+      number: number;
+      priceChange: boolean;
+    } | null>(null),
+    [recentSale, setRecentSale] = useState<{
+      saleIds: string[];
+      label: string;
+    } | null>(null),
+    [cardPrice, setCardPrice] = useState(false);
   const pipe = useRef<TouchSalesBridge | null>(null),
     sampler = useRef(new AudioEnvelopeSampler()),
     serverOffset = useRef(0),
@@ -135,6 +161,49 @@ export default function TouchMobileSalesPage() {
     !!sessionId &&
     !!bootstrap?.run?.running &&
     bootstrap.run.session_id === sessionId;
+  const runSettings = bootstrap?.run?.settings;
+  const salesMode: TouchSalesMode = runSettings?.salesMode || 'BASIC',
+    captureOff = runSettings?.captureOff === true,
+    multi = touchModeUsesNumber(salesMode);
+  const numberInfo = useMemo(() => {
+    const map = new Map<number, { unitPrice: number }>();
+    // rows는 최근 판매가 먼저이므로 처음 본 가격이 그 번호의 마지막 가격이다.
+    for (const s of activeRows) {
+      const n = touchLabelNumber(s.productName);
+      if (n !== null && !map.has(n)) map.set(n, { unitPrice: s.unitPrice });
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bootstrap]);
+  const soldNumbers = useMemo(() => new Set(numberInfo.keys()), [numberInfo]);
+  useEffect(() => {
+    if (!sessionId) return;
+    try {
+      const saved = Number(
+        localStorage.getItem(`voicecap-touch-number:${sessionId}`),
+      );
+      setCurrentNumber(saved >= 1 && saved <= 999 ? saved : 1);
+    } catch {
+      setCurrentNumber(1);
+    }
+    setReturnNumber(null);
+  }, [sessionId]);
+  useEffect(() => {
+    if (!sessionId) return;
+    try {
+      localStorage.setItem(
+        `voicecap-touch-number:${sessionId}`,
+        String(returnNumber ?? currentNumber),
+      );
+    } catch {}
+  }, [sessionId, currentNumber, returnNumber]);
+  const changeNumber = (n: number) => {
+    // 지난 번호로 바꾸면 판매 뒤 원래 번호로 돌아온다.
+    if (numberInfo.has(n) && !numberInfo.has(currentNumber))
+      setReturnNumber(currentNumber);
+    else if (!numberInfo.has(n)) setReturnNumber(null);
+    setCurrentNumber(n);
+  };
   const refresh = useCallback(() => {
     if (refreshFlight.current) {
       refreshDirty.current = true;
@@ -155,6 +224,9 @@ export default function TouchMobileSalesPage() {
           setSelectedSnapshot(null);
           setSelection({ selectedKey: null, acknowledged: new Set() });
           setPriceComment(null);
+          setPicked([]);
+          setBatch(null);
+          setRecentSale(null);
         }
         sessionRef.current = value.session?.id || '';
       } while (mounted.current && refreshDirty.current);
@@ -512,6 +584,7 @@ export default function TouchMobileSalesPage() {
       unitPrice,
       quantity,
       productId: pc?.product?.id || bootstrap?.product?.id,
+      captureOff: captureOff || undefined,
       confirmedAt,
       clientConfirmedAt: new Date().toISOString(),
       clockOffsetMs: serverOffset.current,
@@ -555,13 +628,16 @@ export default function TouchMobileSalesPage() {
           ),
         );
         setNotice(
-          `${priceComment.nickname} ${result.amount.toLocaleString()}원 저장 · 전표 출력 중 · ${seconds}초 뒤 캡처`,
+          `${priceComment.nickname} ${result.amount.toLocaleString()}원 저장 · 전표 출력 중${captureOff ? '' : ` · ${seconds}초 뒤 캡처`}`,
         );
+        setRecentSale({ saleIds: [result.saleId], label: '' });
         await refresh();
       } else {
         setNotice('저장 확인 중 · 같은 작업 번호로 확인합니다.');
         void request
-          .then(async () => {
+          .then(async (late) => {
+            if (mounted.current)
+              setRecentSale({ saleIds: [late.saleId], label: '' });
             await touchLocalStore.removeOutbox(item.id);
             await reloadOutbox();
             await refresh();
@@ -595,6 +671,221 @@ export default function TouchMobileSalesPage() {
       }
     } finally {
       submission.current = false;
+      setBusy(false);
+    }
+  };
+  /** 상품번호·사이즈·색상 방식: 고른 고객마다 판매 1건·전표 1장, 같은 시각·같은 가격. */
+  const submitBatch = async (
+    chosen: TouchComment[],
+    number: number,
+    inputPrice: string,
+    unitPrice: number,
+    quantity: number,
+    reuseProductPhoto: boolean,
+  ) => {
+    if (submission.current || !chosen.length || !sessionId) return;
+    const pending = chosen.find((c) =>
+      outbox.some(
+        (i) =>
+          i.sale.comment.platformMessageId === (c.platformMessageId || c.id),
+      ),
+    );
+    if (pending) {
+      setNotice(
+        `${pending.nickname} 댓글의 저장 요청이 이미 있습니다. 판매내역을 확인해 주세요.`,
+      );
+      return;
+    }
+    submission.current = true;
+    setBusy(true);
+    setError('');
+    const label = touchProductLabel(number);
+    const confirmedAt = new Date(
+      Date.now() + serverOffset.current,
+    ).toISOString();
+    const items: TouchOutboxItem[] = chosen.map((c) => {
+      const sale: TouchCommit = {
+        operationId: crypto.randomUUID(),
+        sessionId,
+        comment: {
+          platformMessageId: c.platformMessageId || c.id,
+          platformUserId: c.platformUserId,
+          uniqueId: c.uniqueId,
+          nickname: c.nickname,
+          content: c.content,
+          capturedAt: c.capturedAt,
+        },
+        inputPrice,
+        unitPrice,
+        quantity,
+        productLabel: label,
+        slipLine: touchSlipLine(salesMode, number, c.content),
+        captureOff: captureOff || undefined,
+        reuseProductPhoto: reuseProductPhoto || undefined,
+        allowAdditional: sold.has(touchCommentKey(c)) || undefined,
+        confirmedAt,
+        clientConfirmedAt: new Date().toISOString(),
+        clockOffsetMs: serverOffset.current,
+      };
+      return {
+        id: `${api.workspaceId}:${sale.operationId}`,
+        workspaceId: api.workspaceId,
+        sale,
+        createdAt: Date.now(),
+      };
+    });
+    const saved: string[] = [];
+    let failed = 0,
+      blockedMessage = '';
+    try {
+      for (const item of items) await touchLocalStore.putOutbox(item);
+      await reloadOutbox();
+      const next = [
+        inputPrice,
+        ...recent.filter((p) => p !== inputPrice),
+      ].slice(0, 3);
+      setRecent(next);
+      localStorage.setItem(
+        `voicecap-touch-recent:${workspaceId}`,
+        JSON.stringify(next),
+      );
+      for (const item of items) {
+        try {
+          const result = await api.commit(item.sale);
+          await touchLocalStore.removeOutbox(item.id);
+          saved.push(result.saleId);
+        } catch (e) {
+          const failure = e as { message?: string; code?: string };
+          const blocked = [
+            'COMMENT_ALREADY_COMMITTED',
+            'SESSION_ENDED',
+            'TOUCH_NOT_RUNNING',
+            'VALIDATION_ERROR',
+            'CLOCK_INVALID',
+          ].includes(failure.code || '');
+          failed++;
+          if (blocked) blockedMessage = failure.message || '확인해 주세요.';
+          await touchLocalStore.putOutbox({
+            ...item,
+            error: failure.message,
+            code: failure.code,
+            blocked,
+          });
+        }
+      }
+      await reloadOutbox();
+      if (saved.length) {
+        navigator.vibrate?.(70);
+        setRecentSale({ saleIds: saved, label });
+      }
+      setNotice(
+        `${label} · ${saved.length}명 저장 · 전표 출력 중${failed ? ` · ${failed}건은 판매내역에서 확인` : ''}`,
+      );
+      if (blockedMessage) setError(blockedMessage);
+      setPicked([]);
+      setBatch(null);
+      if (reuseProductPhoto) {
+        setCurrentNumber(returnNumber ?? number);
+        setReturnNumber(null);
+      } else {
+        const following = nextUnsoldNumber(
+          number,
+          new Set([...soldNumbers, number]),
+        );
+        // 카운트다운 동안은 지금 번호를 그대로 보여 준다.
+        const wait = captureOff ? 0 : (runSettings?.prepareSeconds || 4) * 1000;
+        setTimeout(() => {
+          if (mounted.current)
+            setCurrentNumber((n) => (n === number ? following : n));
+        }, wait);
+      }
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      submission.current = false;
+      setBusy(false);
+    }
+  };
+  const confirmBatch = (priceChange: boolean) => {
+    if (!picked.length) return;
+    const people = picked.map(
+      (c) => c.platformUserId || c.uniqueId || c.nickname,
+    );
+    if (
+      new Set(people).size !== people.length &&
+      !confirm('같은 고객의 댓글을 2개 이상 골랐습니다. 그대로 판매할까요?')
+    )
+      return;
+    const info = numberInfo.get(currentNumber);
+    if (info && !priceChange) {
+      void submitBatch(
+        picked,
+        currentNumber,
+        String(info.unitPrice),
+        info.unitPrice,
+        1,
+        true,
+      );
+      return;
+    }
+    setError('');
+    setBatch({ comments: picked, number: currentNumber, priceChange: !!info });
+  };
+  const recentRows = recentSale
+    ? recentSale.saleIds
+        .map((id) => rows.find((s) => s.id === id))
+        .filter(
+          (s): s is TouchSale =>
+            !!s && s.recordState !== 'CANCELLED' && s.status !== '취소',
+        )
+    : [];
+  const updateRecent = async (
+    kind: 'PRICE' | 'CANCEL',
+    price?: { inputPrice: string; unitPrice: number },
+  ) => {
+    if (busy || !recentRows.length) return;
+    setBusy(true);
+    setError('');
+    try {
+      for (const row of recentRows)
+        await api.update({
+          kind,
+          saleId: row.id,
+          expectedRevision: row.revision,
+          ...(price || {}),
+          reprint: kind === 'PRICE' ? true : undefined,
+        });
+      setCardPrice(false);
+      if (kind === 'CANCEL') setRecentSale(null);
+      setNotice(
+        kind === 'CANCEL'
+          ? `${recentRows.length}건을 취소했습니다.`
+          : '가격을 고치고 수정 전표를 출력합니다.',
+      );
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const retakeRecent = async () => {
+    if (busy || !recentRows.length) return;
+    setBusy(true);
+    setError('');
+    try {
+      for (const row of recentRows) await api.resetCapture(row.id);
+      if (transport === 'DIRECT' && recentRows[0])
+        pipe.current?.send({
+          kind: 'get-candidates',
+          saleId: recentRows[0].id,
+        });
+      setNotice('상품을 다시 보여 주세요. 다시 찍습니다.');
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
       setBusy(false);
     }
   };
@@ -755,6 +1046,71 @@ export default function TouchMobileSalesPage() {
           />{' '}
           수정 전표 출력
         </label>
+      </div>
+    );
+  if (cardPrice && recentRows[0])
+    return (
+      <div className="touch-app">
+        <TouchPricePad
+          key={`card-${recentRows[0].id}`}
+          title="방금 판매 가격 수정"
+          comment={{
+            ...recentRows[0].comment,
+            nickname:
+              recentRows.length > 1
+                ? `${recentRows[0].buyerNickname} 외 ${recentRows.length - 1}명`
+                : recentRows[0].buyerNickname,
+            id: recentRows[0].id,
+            sessionId: recentRows[0].sessionId,
+            sequence: 0,
+          }}
+          productName={recentSale?.label || recentRows[0].productName}
+          recent={recent}
+          busy={busy}
+          error={error}
+          onCancel={() => setCardPrice(false)}
+          onSubmit={(inputPrice, unitPrice) =>
+            void updateRecent('PRICE', { inputPrice, unitPrice })
+          }
+        />
+      </div>
+    );
+  if (batch)
+    return (
+      <div className="touch-app">
+        <TouchPricePad
+          key={`batch-${batch.number}-${batch.comments.length}`}
+          title={
+            batch.priceChange
+              ? `${touchProductLabel(batch.number)} 가격 바꾸기`
+              : '가격 입력'
+          }
+          comment={{
+            ...batch.comments[0],
+            nickname:
+              batch.comments.length > 1
+                ? `${batch.comments[0].nickname} 외 ${batch.comments.length - 1}명`
+                : batch.comments[0].nickname,
+          }}
+          productName={`${touchProductLabel(batch.number)} · ${batch.comments.length}명${batch.priceChange ? ' · 캡처 없이 전표만' : ''}`}
+          recent={recent}
+          busy={busy}
+          error={error}
+          onCancel={() => {
+            setBatch(null);
+            setError('');
+          }}
+          onSubmit={(input, price, quantity) =>
+            void submitBatch(
+              batch.comments,
+              batch.number,
+              input,
+              price,
+              quantity,
+              batch.priceChange,
+            )
+          }
+        />
       </div>
     );
   if (priceComment)
@@ -1037,6 +1393,78 @@ export default function TouchMobileSalesPage() {
       </>
     );
   }
+  const recentCard = recentRows.length ? (
+    <TouchRecentSaleCard
+      rows={recentRows}
+      label={recentSale?.label || ''}
+      captureOff={captureOff}
+      busy={busy}
+      now={Date.now() + serverOffset.current}
+      onRetake={() => void retakeRecent()}
+      onPrice={() => {
+        setError('');
+        setCardPrice(true);
+      }}
+      onCancel={() => {
+        if (
+          confirm(
+            recentRows.length > 1
+              ? `방금 판매 ${recentRows.length}건을 모두 취소할까요? 한 명만 취소하려면 판매내역에서 고르세요.`
+              : `${recentRows[0].buyerNickname} ${recentRows[0].amount.toLocaleString()}원 판매를 취소할까요?`,
+          )
+        )
+          void updateRecent('CANCEL');
+      }}
+    />
+  ) : null;
+  const currentLabel = touchProductLabel(currentNumber),
+    currentSoldPrice = numberInfo.get(currentNumber)?.unitPrice;
+  const multiFooter = (
+    <footer className="touch-selection-bar">
+      <p>
+        {picked.length ? (
+          <>
+            <strong>
+              {currentLabel} · {picked.length}명
+            </strong>{' '}
+            · {picked.map((c) => c.nickname).join(', ')}
+          </>
+        ) : (
+          <>
+            🟡 {salesMode === 'NUMBER' ? `${currentLabel} 댓글` : '구매 댓글'}을
+            눌러 구매자를 고르세요 · 여러 명 가능
+          </>
+        )}
+      </p>
+      <div>
+        <button
+          type="button"
+          onClick={() => setPicked([])}
+          disabled={!picked.length}
+        >
+          취소
+        </button>
+        <button
+          type="button"
+          className="touch-primary"
+          onClick={() => confirmBatch(false)}
+          disabled={!picked.length || !enabled || busy}
+        >
+          {currentSoldPrice ? '전표만 출력' : '판매 확정'}
+        </button>
+      </div>
+      {!!currentSoldPrice && !!picked.length && (
+        <button
+          type="button"
+          className="touch-price-change"
+          disabled={!enabled || busy}
+          onClick={() => confirmBatch(true)}
+        >
+          가격 바꾸기
+        </button>
+      )}
+    </footer>
+  );
   return (
     <div className="touch-app">
       <nav className="touch-top-tabs" aria-label="VoiceCAP 판매">
@@ -1118,14 +1546,50 @@ export default function TouchMobileSalesPage() {
                 : micStatus || '녹음·음성 전송 없음'}
             </small>
           </div>
+          {multi && (
+            <TouchNumberBar
+              number={currentNumber}
+              soldPrice={numberInfo.get(currentNumber)?.unitPrice}
+              disabled={busy}
+              onChange={changeNumber}
+            />
+          )}
           <TouchCommentList
             comments={displayComments}
             selection={selection}
             selectedComment={selectedSnapshot}
             sold={sold}
             enabled={enabled}
+            mode={salesMode}
+            currentNumber={currentNumber}
+            picked={multi ? picked.map(touchCommentKey) : undefined}
+            idleFooter={recentCard}
+            footer={
+              multi
+                ? picked.length || !recentCard
+                  ? multiFooter
+                  : recentCard
+                : undefined
+            }
+            onOpenSold={(key) => {
+              const row = rows.find(
+                (s) =>
+                  s.comment?.platformMessageId &&
+                  `${s.sessionId}:${s.comment.platformMessageId}` === key,
+              );
+              if (row) setDetailId(row.id);
+            }}
             onSearch={searchArchive}
             onSelect={(c) => {
+              if (multi) {
+                const key = touchCommentKey(c);
+                setPicked((old) =>
+                  old.some((p) => touchCommentKey(p) === key)
+                    ? old.filter((p) => touchCommentKey(p) !== key)
+                    : [...old, c],
+                );
+                return;
+              }
               setSelectedSnapshot(c);
               setSelection((s) =>
                 selectTouchComment(
@@ -1241,6 +1705,12 @@ export default function TouchMobileSalesPage() {
                         </small>
                       )}
                       {sale.status === '취소' && <small>취소됨</small>}
+                      {sale.productName &&
+                        touchLabelNumber(sale.productName) !== null && (
+                          <small className="touch-number-badge">
+                            {sale.productName}
+                          </small>
+                        )}
                     </p>
                   </div>
                   <time>
@@ -1252,7 +1722,11 @@ export default function TouchMobileSalesPage() {
                     <img src={sale.imageUrl} alt="상품 사진" />
                   ) : (
                     <span className="touch-image-placeholder">
-                      {sale.captureStatus === 'PENDING' ? '대기' : '없음'}
+                      {sale.captureStatus === 'PENDING'
+                        ? '대기'
+                        : sale.captureStatus === 'SKIPPED'
+                          ? '캡처 안 함'
+                          : '없음'}
                     </span>
                   )}
                 </button>

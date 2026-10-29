@@ -12,6 +12,7 @@
     "test:api": "node --test test/sales-api-auth.test.mjs",
     "test:sales": "node --test test/*.test.mjs",
     "test:touch-ui": "node scripts/verify-touch-sales-ui.mjs",
+    "test:sell-test-ui": "node scripts/verify-sell-test-ui.mjs",
     "test": "node --test test/*.test.mjs contracts/product-sales/v1/validate-contracts.test.mjs"
   },
   "dependencies": {

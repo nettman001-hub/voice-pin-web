@@ -247,6 +247,85 @@ try {
     'initial WebRTC failure still receives the full comment snapshot through fallback',
   );
   await blocked.close();
+  // 상품번호 방식: 번호 댓글 깜빡임, 구매 의사 연한 색, 여러 명 한 번에 확정, 지난 번호 전표만.
+  const numbered = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  await numbered.addInitScript(() => {
+    sessionStorage.setItem('touch-fixture-mode', 'NUMBER');
+    sessionStorage.removeItem('touch-fixture-server');
+  });
+  const modePage = await numbered.newPage();
+  const modeErrors = [];
+  modePage.on('pageerror', (e) => modeErrors.push(e.message));
+  await modePage.goto(`http://127.0.0.1:${server.address().port}/`);
+  await modePage.waitForSelector('[data-comment-id="c"]');
+  await modePage.evaluate(() => {
+    window.touchTest.add('n1', '하니', '1번');
+    window.touchTest.add('n2', '두리', '1주세요');
+    window.touchTest.add('n3', '세리', '1번이요');
+    window.touchTest.add('o2', '미미', '2번 주세요');
+    window.touchTest.add('price', '가격문의', '1.5');
+  });
+  await modePage.waitForSelector('[data-comment-id="price"]');
+  assert.equal(await modePage.locator('.touch-purchase-flash').count(), 3);
+  assert.equal(
+    await modePage.locator('[data-comment-id="a"].touch-intent-light').count(),
+    1,
+  );
+  assert.equal(
+    await modePage.locator('[data-comment-id="o2"] .touch-number-badge').textContent(),
+    '2번',
+  );
+  assert.equal(
+    await modePage.locator('[data-comment-id="price"].touch-purchase-flash, [data-comment-id="price"].touch-intent-light').count(),
+    0,
+  );
+  await modePage.screenshot({ path: path.join(artifactDir, '10-number-mode-alerts.png') });
+  checks.push('number mode flashes "1번", "1주세요", "1번이요"; 저요 is light; other numbers get a badge; prices are not numbers');
+  await modePage.locator('[data-comment-id="n1"]').tap();
+  await modePage.locator('[data-comment-id="n2"]').tap();
+  await modePage.locator('[data-comment-id="a"]').tap();
+  assert.equal(await modePage.locator('.touch-comment-selected').count(), 3);
+  assert.equal(await modePage.locator('[data-comment-id="a"].touch-pick-no-number').count(), 1);
+  assert.match(await modePage.locator('.touch-selection-bar p').textContent(), /1번 · 3명/);
+  await modePage.screenshot({ path: path.join(artifactDir, '11-number-mode-picked.png') });
+  await modePage.getByRole('button', { name: '판매 확정', exact: true }).tap();
+  for (const key of ['1', '.', '5'])
+    await modePage.getByRole('button', { name: key, exact: true }).tap();
+  await modePage.getByRole('button', { name: '확정 · 15,000원', exact: true }).tap();
+  await modePage.waitForSelector('.touch-recent-card');
+  const batchSales = await modePage.evaluate(() => window.touchTest.state.sales);
+  assert.equal(batchSales.length, 3);
+  assert.deepEqual([...new Set(batchSales.map((s) => s.productName))], ['1번']);
+  assert.equal(new Set(batchSales.map((s) => s.recognizedAt)).size, 1);
+  assert.match(await modePage.locator('.touch-recent-card').textContent(), /1번 · .+ 외 2명/);
+  await modePage.screenshot({ path: path.join(artifactDir, '12-number-mode-recent-card.png') });
+  checks.push('three picks become three 1번 sales at one time and price, and the 방금 판매 card shows them');
+  await modePage.waitForFunction(
+    () => document.querySelector('[aria-label="지금 상품번호"]')?.value === '2',
+    null,
+    { timeout: 8000 },
+  );
+  checks.push('the top number moves to 2번 after the countdown');
+  await modePage.getByRole('button', { name: '이전 번호' }).tap();
+  await modePage.waitForSelector('text=1번 · 15,000원 · 전표만');
+  await modePage.locator('[data-comment-id="n3"]').tap();
+  await modePage.getByRole('button', { name: '전표만 출력', exact: true }).tap();
+  await modePage.waitForFunction(() => window.touchTest.state.sales.length === 4);
+  const late = await modePage.evaluate(() => window.touchTest.state.sales[0]);
+  assert.equal(late.productName, '1번');
+  assert.equal(late.unitPrice, 15000);
+  assert.equal(late.reuseProductPhoto, true);
+  await modePage.waitForFunction(
+    () => document.querySelector('[aria-label="지금 상품번호"]')?.value === '2',
+  );
+  checks.push('a past number sells slip-only at its last price without a new photo, then the top number returns to 2번');
+  await modePage.getByRole('button', { name: '취소', exact: true }).last().tap();
+  assert.equal(modeErrors.length, 0, modeErrors.join('\n'));
+  await numbered.close();
   fs.writeFileSync(
     path.join(artifactDir, 'browser-checks.json'),
     JSON.stringify(

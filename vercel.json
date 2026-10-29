@@ -1,6 +1,7 @@
 {
   "rewrites": [
     { "source": "/sell", "destination": "/sell.html" },
+    { "source": "/sell-test", "destination": "/sell-test.html" },
     {
       "source": "/((?!api/).*)",
       "destination": "/index.html"

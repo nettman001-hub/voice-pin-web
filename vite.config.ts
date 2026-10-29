@@ -8,7 +8,8 @@ export default defineConfig({
       name: 'local-api-ai-models-proxy',
       configureServer(server) {
         server.middlewares.use((req, _res, next) => {
-          if (req.url && /^\/sell(?:\?|$)/.test(req.url)) req.url = req.url.replace(/^\/sell/, '/sell.html');
+          if (req.url && /^\/sell-test(?:\?|$)/.test(req.url)) req.url = req.url.replace(/^\/sell-test/, '/sell-test.html');
+          else if (req.url && /^\/sell(?:\?|$)/.test(req.url)) req.url = req.url.replace(/^\/sell/, '/sell.html');
           next();
         });
         // Server-only credentials are not injected into the browser bundle.
@@ -144,7 +145,7 @@ export default defineConfig({
     },
   ],
   build: {
-    rollupOptions: { input: { main: 'index.html', sell: 'sell.html' } },
+    rollupOptions: { input: { main: 'index.html', sell: 'sell.html', sellTest: 'sell-test.html' } },
   },
   server: {
     port: 3000,

@@ -76,5 +76,38 @@ export function validateTouchCommit(body: Record<string, any>): string | null {
     !Number.isFinite(Date.parse(body.originalConfirmedAt))
   )
     return '원래 판매 시각을 확인해 주세요.';
+  if (
+    body.productLabel != null &&
+    (typeof body.productLabel !== 'string' ||
+      !/^\d{1,3}번$/.test(body.productLabel))
+  )
+    return '상품번호를 확인해 주세요.';
+  if (
+    body.slipLine != null &&
+    (typeof body.slipLine !== 'string' || body.slipLine.length > 60)
+  )
+    return '전표 내용을 확인해 주세요.';
+  for (const field of ['captureOff', 'reuseProductPhoto', 'skipCapture'])
+    if (body[field] != null && typeof body[field] !== 'boolean')
+      return '판매 설정 값을 확인해 주세요.';
   return null;
+}
+
+/** 판매 방식 설정은 서버에서 정해진 값만 남긴다. */
+export function cleanTouchRunSettings(input: any) {
+  return {
+    mode: 'COMMENT_TOUCH' as const,
+    prepareSeconds: Math.max(
+      2,
+      Math.min(10, Number(input?.prepareSeconds) || 4),
+    ),
+    fallbackDelaySeconds: Math.max(
+      0,
+      Math.min(20, Number(input?.fallbackDelaySeconds) || 0),
+    ),
+    salesMode: ['NUMBER', 'SIZE_COLOR'].includes(input?.salesMode)
+      ? (input.salesMode as 'NUMBER' | 'SIZE_COLOR')
+      : ('BASIC' as const),
+    captureOff: input?.captureOff === true,
+  };
 }

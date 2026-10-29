@@ -28,12 +28,14 @@ import { customerStatsLabel } from '../../services/customerStatsIndex';
 import type {
   TouchPcState,
   TouchSale,
+  TouchSalesMode,
   TouchTransport,
 } from '../../types/touchSales';
 import { isCountedSale } from '../../services/saleRowHistory';
 import { productSalesApi } from '../../services/productSalesApi';
 import { TouchTelemetry } from '../../services/touchTelemetry';
 import { measureTouchClock } from '../../services/touchClock';
+import { TOUCH_SALES_MODES } from '../../services/touchSaleModes';
 
 export const TouchDesktopPanel: React.FC = () => {
   const { workspaceId, isRemoteAuth } = useRuntimeAuth();
@@ -347,7 +349,11 @@ export const TouchDesktopPanel: React.FC = () => {
     setError('');
     const generation = ++lifecycle.current;
     // Open the browser picker within the button gesture; microphone/STT are never started.
-    const streamPromise = screenCaptureService.getOrCreateStream();
+    // 캡처 안 함이면 화면 공유 없이 판매를 시작한다.
+    const captureOff = settings.captureOff === true;
+    const streamPromise = captureOff
+      ? Promise.resolve(null)
+      : screenCaptureService.getOrCreateStream();
     try {
       const sessionPromise =
         choice === 'NEW'
@@ -364,7 +370,8 @@ export const TouchDesktopPanel: React.FC = () => {
         sessionPromise,
       ]);
       if (generation !== lifecycle.current) return;
-      if (!stream) throw new Error('틱톡 라이브 화면 공유를 선택해 주세요.');
+      if (!stream && !captureOff)
+        throw new Error('틱톡 라이브 화면 공유를 선택해 주세요.');
       await api.run('START', producer.current, session.id, settings, {
         ...pcState(session.id, session.displayCode),
         running: true,
@@ -380,7 +387,7 @@ export const TouchDesktopPanel: React.FC = () => {
       if (measured) serverOffset.current = measured.offset;
       setRunningSession(session.id);
       comments.startCapture();
-      frames.current.start(
+      if (stream) frames.current.start(
         () =>
           runtime.storageService.getCaptureAreaConfig() || {
             preset: 'FULL_SCREEN',
@@ -391,7 +398,7 @@ export const TouchDesktopPanel: React.FC = () => {
             heightRatio: 1,
           },
       );
-      void sampler.current
+      if (stream) void sampler.current
         .start(stream, (sample) => {
           tabSamples.current.push(sample);
           tabSamples.current = tabSamples.current.filter(
@@ -524,6 +531,7 @@ export const TouchDesktopPanel: React.FC = () => {
         serverOffset: () => serverOffset.current,
         delaySeconds: () => live.current.delay.seconds,
         prepareSeconds: () => live.current.settings.prepareSeconds,
+        sessionLabel: () => live.current.activeSession?.displayCode || '',
         canPrint: () => runtime.commentStreamService.isConnectedToServer,
         print: (payload) => runtime.commentStreamService.printSale(payload),
         onChange: () => {
@@ -692,9 +700,13 @@ export const TouchDesktopPanel: React.FC = () => {
           ))}
         </div>
         <p className="mt-3 text-xs text-slate-500">
-          {activeSession?.displayCode || '진행 중 회차 없음'} · 사진은 확정{' '}
-          {settings.prepareSeconds}초 + 방송 지연 뒤 저장 · 음성인식·AI 판매
-          판단 사용 안 함
+          {activeSession?.displayCode || '진행 중 회차 없음'} ·{' '}
+          {settings.captureOff
+            ? '캡처 안 함 · 화면 공유 없이 판매'
+            : `사진은 확정 ${settings.prepareSeconds}초 + 방송 지연 뒤 저장`}{' '}
+          · 판매 방식{' '}
+          {TOUCH_SALES_MODES.find((m) => m.value === (settings.salesMode || 'BASIC'))?.label}{' '}
+          · 음성인식·AI 판매 판단 사용 안 함
         </p>
         <p className="mt-2 text-xs text-slate-500">
           프린터 준비 여부는 도우미 연결 기준이며, 실제 출력 오류는 각 판매에
@@ -704,6 +716,39 @@ export const TouchDesktopPanel: React.FC = () => {
       {!runningSession && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-white p-4 text-sm">
           <label>
+            판매 방식{' '}
+            <select
+              aria-label="판매 방식"
+              className="rounded border p-2"
+              value={settings.salesMode || 'BASIC'}
+              onChange={(e) =>
+                void save({
+                  ...settings,
+                  salesMode: e.target.value as TouchSalesMode,
+                }).catch((e) => setError(e.message))
+              }
+            >
+              {TOUCH_SALES_MODES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <input
+              aria-label="캡처 안 함"
+              type="checkbox"
+              checked={settings.captureOff === true}
+              onChange={(e) =>
+                void save({ ...settings, captureOff: e.target.checked }).catch(
+                  (e) => setError(e.message),
+                )
+              }
+            />{' '}
+            캡처 안 함
+          </label>
+          <label>
             상품 준비{' '}
             <input
               aria-label="상품 준비 초"
@@ -711,6 +756,7 @@ export const TouchDesktopPanel: React.FC = () => {
               type="number"
               min="2"
               max="10"
+              disabled={settings.captureOff === true}
               value={settings.prepareSeconds}
               onChange={(e) =>
                 void save({

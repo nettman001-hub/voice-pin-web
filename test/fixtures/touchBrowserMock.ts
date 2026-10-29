@@ -92,7 +92,11 @@ export class TouchSalesApi {
         running: true,
         session_id: session,
         producer_id: 'fixture-pc',
-        settings: { prepareSeconds: 4, fallbackDelaySeconds: 5 },
+        settings: {
+          prepareSeconds: 4,
+          fallbackDelaySeconds: 5,
+          salesMode: sessionStorage.getItem('touch-fixture-mode') || undefined,
+        },
       },
       session: {
         id: session,
@@ -145,8 +149,15 @@ export class TouchSalesApi {
       recognizedAt: sale.confirmedAt,
       status: '자동저장',
       printStatus: 'PRINTED',
-      captureStatus: 'PENDING',
+      captureStatus: sale.captureOff
+        ? 'SKIPPED'
+        : sale.reuseProductPhoto
+          ? 'MISSING'
+          : 'PENDING',
       captureDueAt: result.captureDueAt,
+      productName: sale.productLabel,
+      slipLine: sale.slipLine,
+      reuseProductPhoto: sale.reuseProductPhoto,
       revision: 1,
       comment: sale.comment,
       history: [],
