@@ -84,6 +84,39 @@ export class CommentStreamService {
   private targetUsername: string | null = null;
   private statusListeners = new Set<StatusListener>();
   private commentListeners = new Set<CommentListener>();
+  private serverKey: { key: string; at: number } | null = null;
+  private serverKeyFlight: Promise<string> | null = null;
+
+  /**
+   * 관리자 메뉴 "댓글 연결 키 (Euler)"의 키를 서버에서 받아 도우미에 넘긴다(폰 단독 판매와 같은 키).
+   * 도우미는 메모리에만 두고, 키가 없거나 로그인 전이면 도우미의 예전 키(또는 무료 한도)로 돈다.
+   */
+  private fetchServerKey(): Promise<string> {
+    if (this.serverKey && Date.now() - this.serverKey.at < 10 * 60 * 1000)
+      return Promise.resolve(this.serverKey.key);
+    if (!this.serverKeyFlight)
+      this.serverKeyFlight = import('./productSalesApi')
+        .then(({ invokeSalesApi }) => invokeSalesApi<{ apiKey: string }>('comment-helper-key'))
+        .then((r) => {
+          this.serverKey = { key: r.apiKey || '', at: Date.now() };
+          return this.serverKey.key;
+        })
+        .catch(() => '')
+        .finally(() => {
+          this.serverKeyFlight = null;
+        });
+    return this.serverKeyFlight;
+  }
+
+  /** 서버 키를 먼저 넘기고(최대 3초 기다림) 수집을 시작한다. */
+  private emitCollect(username: string) {
+    const timeout = new Promise<string>((resolve) => setTimeout(() => resolve(''), 3000));
+    void Promise.race([this.fetchServerKey(), timeout]).then((key) => {
+      if (!this.socket || !this.socketConnected || this.targetUsername !== username) return;
+      if (key) this.socket.emit('euler:key', { apiKey: key });
+      this.socket.emit('collect:start', { username });
+    });
+  }
 
   public get isConnectedToServer(): boolean {
     return this.socketConnected && Boolean(this.socket);
@@ -113,9 +146,7 @@ export class CommentStreamService {
     this.socket.on('connect', () => {
       this.socketConnected = true;
       this.emitStatus(mapServerState(this.lastServerState), this.lastMessage || 'VoiceCAP 댓글 도우미 연결됨');
-      if (this.targetUsername) {
-        this.socket?.emit('collect:start', { username: this.targetUsername });
-      }
+      if (this.targetUsername) this.emitCollect(this.targetUsername);
     });
 
     this.socket.on('disconnect', () => {
@@ -150,9 +181,7 @@ export class CommentStreamService {
   public startCollecting(username: string): void {
     const clean = username.trim().replace(/^@/u, '');
     this.targetUsername = clean;
-    if (this.socket && this.socketConnected && clean) {
-      this.socket.emit('collect:start', { username: clean });
-    }
+    if (this.socket && this.socketConnected && clean) this.emitCollect(clean);
   }
 
   public stopCollecting(): void {

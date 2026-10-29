@@ -200,7 +200,7 @@ export const CommentHelperModal: React.FC<CommentHelperModalProps> = ({ isOpen, 
               <div className="flex items-center space-x-2">
                 <h2 className="text-base font-black text-slate-900">VoiceCAP 댓글 도우미</h2>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700">
-                  v{status?.version || '1.3.7'}
+                  v{status?.version || '1.3.8'}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">

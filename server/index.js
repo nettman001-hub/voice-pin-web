@@ -55,12 +55,18 @@ function resolveEulerApiKey() {
   return '';
 }
 
-const EULER_API_KEY = resolveEulerApiKey();
-if (EULER_API_KEY) {
+// 키는 관리자 메뉴 "댓글 연결 키 (Euler)"에 저장한 서버 키를 쓴다(로그인한 웹이 연결할 때마다 'euler:key'로 넘김,
+// 메모리에만 두고 파일에 저장하지 않음). 서버 키를 받기 전에는 예전처럼 환경변수·eulerstream_key.txt를 쓴다.
+let EULER_API_KEY = resolveEulerApiKey();
+function applyEulerKey(key) {
+  EULER_API_KEY = key;
   // v2.x: 전역 SignConfig에 API 키를 등록해야 커뮤니티 한도가 아니라 계정 한도로 동작한다.
-  SignConfig.apiKey = EULER_API_KEY;
+  SignConfig.apiKey = key || undefined;
+}
+if (EULER_API_KEY) {
+  applyEulerKey(EULER_API_KEY);
 } else {
-  console.warn('[설정] Euler Stream API 키 없음 - 무료 커뮤니티 한도로 제한될 수 있다.');
+  console.warn('[설정] Euler Stream API 키 없음 - 웹에서 서버 키를 받기 전까지 무료 커뮤니티 한도로 제한될 수 있다.');
 }
 
 const DEFAULT_ORIGINS = [
@@ -450,6 +456,14 @@ io.on('connection', (socket) => {
     }
 
     await startCollecting(target);
+  });
+
+  socket.on('euler:key', (payload) => {
+    const key = payload && typeof payload.apiKey === 'string' ? payload.apiKey.trim() : '';
+    if (!/^[\x21-\x7e]{16,200}$/.test(key) || key === EULER_API_KEY) return;
+    applyEulerKey(key);
+    log('서버 댓글 연결 키를 받았습니다 (계정 한도로 연결).');
+    socket.emit('tiktok:status', statusPayload());
   });
 
   socket.on('collect:stop', () => {

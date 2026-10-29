@@ -16,7 +16,7 @@ const DEFAULT_HELPER_STATUS: CommentHelperStatus = {
   viewerCount: 0,
   totalComments: 0,
   lastCheckedAt: null,
-  version: '1.3.7',
+  version: '1.3.8',
   autoStart: false,
   webAppUrl: '',
   stt: null,

@@ -146,6 +146,7 @@ serve(async (req: Request) => {
         return await handleCommentKeyAdmin(auth, body)
       case 'touch-tiktok-id':
       case 'touch-comment-token':
+      case 'comment-helper-key':
         requireCapability('SALES_WRITE')
         return await handleCommentToken(auth, body)
       case 'touch-voice-presence':
