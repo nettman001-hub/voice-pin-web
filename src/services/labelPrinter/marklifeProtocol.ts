@@ -129,8 +129,8 @@ export const DOTS_PER_MM = 8; // 203 dpi
 /**
  * How each label ends. AUTO = align end command only; on the M50 (2026-10-29)
  * labels printed back to back and drifted. GAP = ask the printer to find the next
- * gap. FIXED = feed the rest of the label pitch (label + gap); the M50 lined up
- * best with FIXED at 38 mm (30 mm label + 8 mm gap).
+ * gap; the M50 lined up right with GAP from the first label. FIXED = feed the rest
+ * of the label pitch (label + gap), kept as a fallback.
  */
 export type LabelAlign = 'AUTO' | 'GAP' | 'FIXED';
 

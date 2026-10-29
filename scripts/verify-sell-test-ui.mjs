@@ -122,8 +122,8 @@ try {
     hex(job.slice(0, 25)),
   );
   check(
-    'job ends with stop and pitch feed',
-    hex(job.slice(-9)) === '1fc001011f11000040',
+    'job ends with stop and gap search',
+    hex(job.slice(-8)) === '1fc001011f122000',
   );
   await page.screenshot({
     path: path.join(artifactDir, '01-printer.png'),

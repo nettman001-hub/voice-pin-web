@@ -50,7 +50,7 @@ const DEFAULTS: Settings = {
   delayMs: 30,
   chunkSize: 90,
   threshold: 160,
-  align: 'FIXED',
+  align: 'GAP',
   pitchMm: 38,
   seconds: 4,
 };
@@ -455,8 +455,8 @@ const SellTestPage: React.FC = () => {
               value={s.align}
               onChange={(e) => set('align', e.target.value as LabelAlign)}
             >
-              <option value="FIXED">길이만큼 넘김</option>
               <option value="GAP">간격 찾기</option>
+              <option value="FIXED">길이만큼 넘김</option>
               <option value="AUTO">맞춤 없음 (밀림)</option>
             </select>
           </Field>
