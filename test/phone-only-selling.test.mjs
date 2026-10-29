@@ -318,3 +318,14 @@ test('comment token: seller gets a JWT for the saved TikTok ID; devices get noth
   assert.equal(saved.data.tiktokId, 'New_Shop');
   assert.equal(JSON.stringify(h.writes.at(-1)[1].value), '{"tiktokId":"New_Shop"}');
 });
+
+test('PC comment helper gets the same admin-menu key; devices and missing key get nothing', async () => {
+  const h = await loadHandler({ keyRow: { value: { apiKey: KEY, accountId: '9' } } });
+  const seller = { actorType: 'USER', role: 'OWNER', workspaceId: 'w' };
+  const got = await h.handleCommentToken(seller, { action: 'comment-helper-key' });
+  assert.equal(got.data.apiKey, KEY);
+  const device = await h.handleCommentToken({ actorType: 'DEVICE', workspaceId: 'w' }, { action: 'comment-helper-key' });
+  assert.equal(device.code, 'CAPABILITY_DENIED');
+  const none = await (await loadHandler({ keyRow: null })).handleCommentToken(seller, { action: 'comment-helper-key' });
+  assert.equal(none.code, 'COMMENT_KEY_MISSING');
+});

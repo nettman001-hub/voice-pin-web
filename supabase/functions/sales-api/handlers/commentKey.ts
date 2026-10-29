@@ -123,7 +123,7 @@ async function readTouchSettings(workspaceId: string) {
   return (data?.value || {}) as Record<string, unknown>;
 }
 
-/** 판매 폰: 틱톡 ID 저장(touch-tiktok-id)과 댓글 연결 토큰 받기(touch-comment-token). */
+/** 판매 폰: 틱톡 ID 저장(touch-tiktok-id)과 댓글 연결 토큰 받기(touch-comment-token). PC 댓글 도우미 키(comment-helper-key). */
 export async function handleCommentToken(auth: AuthContext, body: any) {
   const workspace = auth.workspaceId;
   // 기기 연결(문자 앱 등)은 댓글 연결 정보를 받지 않는다. 로그인한 판매자만.
@@ -151,6 +151,14 @@ export async function handleCommentToken(auth: AuthContext, body: any) {
       );
       if (error) throw error;
       return successResponse({ tiktokId });
+    }
+    if (body.action === 'comment-helper-key') {
+      // 윈도우 댓글 도우미: 서명(sign)에 키 원문이 필요하다. 로그인한 판매자 웹이 연결할 때마다 받아
+      // 도우미 메모리에만 넘긴다(폰 단독 판매와 같은 관리자 메뉴 키).
+      const value = (await readKeyRow())?.value || {};
+      if (!value.apiKey)
+        return errorResponse('COMMENT_KEY_MISSING', '관리자 메뉴에 댓글 연결 키가 없습니다.', 409);
+      return successResponse({ apiKey: value.apiKey });
     }
     const uniqueId = normalizeTikTokId(settings.tiktokId);
     if (!uniqueId)
