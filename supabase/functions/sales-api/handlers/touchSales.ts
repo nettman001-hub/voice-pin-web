@@ -11,19 +11,19 @@ import {
 } from './touchSalesCore.ts';
 
 const messages: Record<string, string> = {
-  SESSION_ENDED: '판매 중인 회차가 없습니다. PC에서 회차를 확인해 주세요.',
-  TOUCH_NOT_RUNNING: 'PC에서 댓글터치 판매 시작을 눌러 주세요.',
+  SESSION_ENDED: '판매 중인 회차가 없습니다. 판매 화면에서 회차를 확인해 주세요.',
+  TOUCH_NOT_RUNNING: '판매 연결이 멈췄습니다. 판매 화면에서 다시 시작해 주세요.',
   COMMENT_ALREADY_COMMITTED:
     '이미 이 댓글로 판매했습니다. 추가 판매로 저장할 수 있습니다.',
-  PC_ALREADY_RUNNING: '다른 PC 또는 탭에서 판매 중입니다.',
-  PC_LEASE_LOST: '다른 PC로 판매 연결이 변경되었습니다.',
+  PC_ALREADY_RUNNING: '다른 기기 또는 탭에서 판매 중입니다.',
+  PC_LEASE_LOST: '다른 기기로 판매 연결이 변경되었습니다.',
   CLOCK_INVALID: '기기 시각을 맞춘 뒤 다시 시도해 주세요.',
   REVISION_CONFLICT:
     '다른 화면에서 수정했습니다. 새로고침 후 다시 시도해 주세요.',
   OPERATION_PAYLOAD_MISMATCH: '같은 작업 번호로 다른 판매를 보낼 수 없습니다.',
   COMMENT_IDENTITY_CONFLICT: '댓글 계정 정보가 일치하지 않습니다.',
   PRINT_ALREADY_PENDING: '아직 처리 중인 전표가 있습니다.',
-  CAPTURE_LEASE_LOST: '캡처 담당 PC 연결을 확인해 주세요.',
+  CAPTURE_LEASE_LOST: '사진을 촬영하는 기기의 판매 연결을 확인해 주세요.',
 };
 async function rpc(name: string, params: Record<string, unknown>) {
   const { data, error } = await admin.rpc(name, params);
@@ -302,7 +302,7 @@ export async function handleTouchSales(auth: AuthContext, body: any) {
       )
         return errorResponse(
           'VALIDATION_ERROR',
-          'PC 연결 정보가 올바르지 않습니다.',
+          '판매 기기 연결 정보가 올바르지 않습니다.',
         );
       const settings = cleanTouchRunSettings(body.settings);
       const state = cleanState(body.state);
@@ -430,7 +430,7 @@ export async function handleTouchSales(auth: AuthContext, body: any) {
       if (!run?.running || sale?.record_state !== 'ACTIVE')
         return errorResponse(
           'NOT_FOUND',
-          '판매 또는 PC 연결을 확인해 주세요.',
+          '판매 내역과 판매 기기 연결을 확인해 주세요.',
           409,
         );
       const delay = Math.max(

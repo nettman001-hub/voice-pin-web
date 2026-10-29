@@ -5,6 +5,7 @@ import { customerStatsLabel } from '../../services/customerStatsIndex';
 interface Props {
   comment: TouchComment;
   productName?: string;
+  phoneOnly?: boolean;
   recent: string[];
   busy: boolean;
   error?: string;
@@ -15,6 +16,7 @@ interface Props {
 export const TouchPricePad: React.FC<Props> = ({
   comment,
   productName,
+  phoneOnly = false,
   recent,
   busy,
   error,
@@ -65,7 +67,7 @@ export const TouchPricePad: React.FC<Props> = ({
       </div>
       <div className="touch-price-product">
         <span>상품</span> <strong>{productName || '상품명 없이 등록'}</strong>
-        <small>PC 현재 상품</small>
+        {!phoneOnly && <small>PC 현재 상품</small>}
       </div>
       <div className="touch-amount-box">
         <div className="touch-price-input" aria-live="polite">
