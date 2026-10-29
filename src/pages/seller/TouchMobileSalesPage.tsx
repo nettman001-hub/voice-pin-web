@@ -54,6 +54,7 @@ import {
   TouchNumberBar,
   TouchRecentSaleCard,
 } from '../../components/touch/TouchSaleModeParts';
+import { TouchPhoneOnly } from '../../components/touch/TouchPhoneOnly';
 import '../../styles/touchSales.css';
 
 const printLabel = (status: string) =>
@@ -133,6 +134,8 @@ export default function TouchMobileSalesPage() {
     sessionRef = useRef(''),
     producerRef = useRef('');
   const measuredClock = useRef(false);
+  const [phoneRunning, setPhoneRunning] = useState(false);
+  const phoneTotals = useRef({ totalCount: 0, totalAmount: 0 });
   const rows = (bootstrap?.sales || []).filter(
       (s) => s.reviewDecision !== 'NOT_SALE',
     ),
@@ -916,10 +919,16 @@ export default function TouchMobileSalesPage() {
       setBusy(false);
     }
   };
-  const onlinePc =
+  // 폰 단독 판매: 이 폰(또는 다른 폰)이 판매 연결의 주인이다. PC 연결 표시는 쓰지 않는다.
+  const phoneOnlyRun =
+    phoneRunning ||
+    (!!bootstrap?.run?.running && bootstrap.run.last_state?.phoneOnly === true);
+  const bridgeOnline =
     !!pipe.current &&
     Date.now() - pipe.current.lastReceivedAt <
       (transport === 'DIRECT' ? 5000 : 12000);
+  const onlinePc = phoneOnlyRun || bridgeOnline;
+  phoneTotals.current = { totalCount: activeRows.length, totalAmount: total };
   const sessionName =
     bootstrap?.session?.display_code || pc?.displayCode || '회차 대기';
   const compactSession = sessionName.replace(
@@ -1498,22 +1507,44 @@ export default function TouchMobileSalesPage() {
         className={`touch-status-line ${!onlinePc ? 'touch-status-offline' : ''}`}
       >
         <strong>{compactSession}</strong>
-        <span>
-          댓글 ●{' '}
-          {transport === 'DIRECT'
-            ? '직접'
-            : transport === 'FALLBACK'
-              ? '예비'
-              : '연결 중'}
-        </span>
-        <span>PC ● {onlinePc ? '연결' : '끊김'}</span>
+        {phoneOnlyRun ? (
+          <span>폰 단독 판매</span>
+        ) : (
+          <>
+            <span>
+              댓글 ●{' '}
+              {transport === 'DIRECT'
+                ? '직접'
+                : transport === 'FALLBACK'
+                  ? '예비'
+                  : '연결 중'}
+            </span>
+            <span>PC ● {onlinePc ? '연결' : '끊김'}</span>
+          </>
+        )}
         <strong>
           {activeRows.length}건 / {total.toLocaleString()}원
         </strong>
       </div>
-      {!enabled && (
+      <TouchPhoneOnly
+        api={api}
+        bootstrap={bootstrap}
+        refresh={refresh}
+        serverOffset={() => serverOffset.current}
+        totals={() => phoneTotals.current}
+        onComments={(items) =>
+          setComments((old) =>
+            mergeTouchComments(old, items, items[0]?.sessionId || ''),
+          )
+        }
+        onRunningChange={setPhoneRunning}
+        pcOnline={bridgeOnline && !phoneRunning}
+        wakeKey={bootstrap}
+      />
+      {!enabled && !phoneRunning && (
         <p className="touch-waiting">
-          PC 라이브 청취 홈에서 댓글터치 · 판매 시작을 눌러 주세요.
+          PC 라이브 청취 홈에서 댓글터치 · 판매 시작을 누르거나, 위의 폰으로
+          판매 시작을 눌러 주세요.
         </p>
       )}
       {!onlinePc && enabled && (
@@ -1529,6 +1560,7 @@ export default function TouchMobileSalesPage() {
       )}
       {tab === 'SELL' ? (
         <>
+{!phoneOnlyRun && (
           <div className="touch-audio-hint">
             <button
               onClick={() => {
@@ -1546,6 +1578,7 @@ export default function TouchMobileSalesPage() {
                 : micStatus || '녹음·음성 전송 없음'}
             </small>
           </div>
+          )}
           {multi && (
             <TouchNumberBar
               number={currentNumber}

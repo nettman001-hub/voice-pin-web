@@ -20,6 +20,7 @@ import {
   startFrontCamera,
   type GrabbedFrame,
 } from '../../services/frontCamera';
+import { SellTestComments } from './SellTestComments';
 
 const SETTINGS_KEY = 'voicecap-sell-test-settings';
 type Settings = {
@@ -665,12 +666,14 @@ const SellTestPage: React.FC = () => {
         </div>
       </section>
 
+      <SellTestComments addLog={addLog} />
+
       <section
         className="space-y-2 rounded-2xl bg-white p-4 shadow-sm"
         aria-label="시험 기록"
       >
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-black">3. 결과 보내기</h2>
+          <h2 className="text-lg font-black">4. 결과 보내기</h2>
           <button type="button" className={primary} onClick={copy}>
             결과 복사
           </button>

@@ -11,6 +11,8 @@ export interface TouchSettings {
   salesMode?: TouchSalesMode;
   /** 캡처 안 함: 사진을 찍지 않고 PC 화면 공유도 받지 않는다. */
   captureOff?: boolean;
+  /** 폰 단독 판매에서 댓글을 받을 틱톡 ID(@ 제외). 서버 touch-tiktok-id로 저장. */
+  tiktokId?: string;
 }
 export interface TouchComment extends CommentRecord {
   sequence: number;
@@ -34,6 +36,8 @@ export interface TouchPcState {
   totalAmount: number;
   transport?: TouchTransport;
   phoneCount?: number;
+  /** 폰 단독 판매(PC 없음). */
+  phoneOnly?: boolean;
 }
 export interface TouchCommit {
   operationId: string;
@@ -102,4 +106,5 @@ export interface TouchRun {
   running: boolean;
   lease_expires_at: string;
   settings: TouchSettings;
+  last_state?: Partial<TouchPcState>;
 }

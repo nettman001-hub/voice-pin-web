@@ -6,11 +6,22 @@ VoiceCAP 웹앱의 판매자 작업공간에 1회용 연결 코드로 연결되�
 |---|---|---|---|
 | `app` | VoiceCAP SMS Bridge (문자) | `shop.voicecap.smsbridge` | 기본 문자앱. 구매정보·업무 고객 문자 동기화, 웹에서 넣은 문자 발송 |
 | `deposit` | VoiceCAP 입금확인 | `shop.voicecap.deposit` | 고른 은행 앱의 입금 알림(선택: 은행 입금 문자)에서 입금만 읽어 `payment-incoming`으로 전송 |
+| `sales` | VoiceCAP 판매 | `shop.voicecap.sales` | 폰 단독 판매(PC 없음): [판매] 탭 `voicecap.shop/sell`, [관리] 탭 판매내역. 블루투스 라벨프린터로 전표, 앞카메라로 판매 사진 |
 
 - 두 앱은 웹앱에 따로 연결합니다. 웹앱 **마이페이지 → voicecapSMS 휴대폰 연결**에서 코드를 앱마다 한 번씩 만들어 입력합니다.
 - 입금확인 앱은 기본 문자앱이 아니어도 됩니다. 은행 입금 문자 읽기를 켤 때만 문자 수신 권한(`RECEIVE_SMS`)을 묻습니다.
 - 빌드: `gradlew.bat :app:assembleDebug`(문자) → `app/build/outputs/apk/debug/app-debug.apk`, `gradlew.bat :deposit:assembleDebug`(입금확인) → `deposit/build/outputs/apk/debug/deposit-debug.apk`. 두 앱 모두 `release-output/`에 `voicecap-sms-<버전>-*.apk`, `voicecap-deposit-<버전>-*.apk`로도 복사됩니다. 업로드 키 설정(`VOICECAP_UPLOAD_*`, `signing/`)은 두 앱이 같이 씁니다(`build.gradle`).
 - 문자 앱 1.7.0부터 입금확인 탭이 없습니다. 예전 앱에 쌓인 입금 기록은 문자 앱 저장소에 남지만 화면에는 보이지 않고, 새 입금확인 앱은 빈 기록에서 시작합니다(서버로 올라간 입금은 웹앱에 그대로 있습니다).
+
+## 판매 앱 (`sales`)
+
+- 웹 화면을 그대로 쓰는 앱입니다(WebView). 로그인도 웹과 같습니다. 서버 주소는 `VOICECAP_WEB_BASE_URL` 빌드 속성(기본 `https://voicecap.shop`).
+- 웹이 라벨(50×30mm, 384×240px)을 그리고 Marklife 명령 바이트를 만들면, 앱은 `window.VoiceCapAndroid.printerSend`로 받아 블루투스(서비스 ff00, 쓰기 ff02, 허용 신호 ff03)로 보내기만 합니다. 결과는 `voicecap-android` 이벤트로 돌려줍니다(`src/services/labelPrinter/androidBridge.ts`).
+- 판매 사진은 웹의 `getUserMedia`(앞카메라)로 찍습니다. 앱은 카메라 권한만 묻고 마이크는 허용하지 않습니다.
+- 판매 중에는 "VoiceCAP 판매 중" 알림(전경 서비스, connectedDevice)이 떠 있어 화면을 꺼도 프린터 연결이 유지됩니다.
+- CSV는 다운로드/VoiceCAP 폴더에 저장하고 공유할 수 있습니다(`saveFile`, `shareFile`).
+- 빌드: `gradlew.bat :sales:assembleRelease :sales:bundleRelease` → `release-output/voicecap-sales-<버전>-release.apk`, `-release.aab`. 다른 두 앱과 같은 업로드 키로 서명합니다.
+- 필요한 서버: sales-api `touch-comment-token`(댓글 연결), 관리자 메뉴 "댓글 연결 키 (Euler)"에 키 저장, DB `202610290002_comment_connection_key.sql`.
 
 ## 지원 범위
 

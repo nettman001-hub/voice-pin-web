@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">VoiceCAP 판매</string>
+    <string name="tab_sell">판매</string>
+    <string name="tab_manage">관리</string>
+    <string name="selling_channel">판매 중 알림</string>
+    <string name="selling_title">VoiceCAP 판매 중</string>
+    <string name="selling_text">댓글을 받고 라벨프린터로 전표를 보내고 있습니다.</string>
+    <string name="printer_pick_title">라벨프린터 고르기</string>
+    <string name="printer_searching">프린터를 찾는 중… 프린터 전원을 켜 주세요.</string>
+    <string name="cancel">취소</string>
+</resources>
