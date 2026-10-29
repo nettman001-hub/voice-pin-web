@@ -127,9 +127,9 @@ export function bitmapCommand(bitmap: {
 export const DOTS_PER_MM = 8; // 203 dpi
 
 /**
- * How each label ends. AUTO = align start/end commands only; on the M50 (2026-10-29)
- * this printed labels back to back, ignoring the gap. GAP = ask the printer to find
- * the next gap. FIXED = feed the rest of the label pitch (label + gap length).
+ * How each label ends. AUTO = align start/end commands (the M50 default: on
+ * 2026-10-29 it lined up better than GAP once the roll was aligned). GAP = ask the
+ * printer to find the next gap. FIXED = feed the rest of the label pitch.
  */
 export type LabelAlign = 'AUTO' | 'GAP' | 'FIXED';
 
