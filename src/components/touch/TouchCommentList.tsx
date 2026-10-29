@@ -17,6 +17,7 @@ interface Props {
   selection: TouchSelectionState;
   sold: ReadonlyMap<string, string>;
   enabled: boolean;
+  emptyMessage?: string;
   selectedComment?: TouchComment | null;
   onSearch?: (query: string) => void;
   onSelect: (comment: TouchComment) => void;
@@ -36,6 +37,7 @@ export const TouchCommentList: React.FC<Props> = ({
   selection,
   sold,
   enabled,
+  emptyMessage = 'PC에서 판매 시작 후 실시간 댓글이 이곳에 표시됩니다.',
   selectedComment,
   onSearch,
   onSelect,
@@ -160,7 +162,7 @@ export const TouchCommentList: React.FC<Props> = ({
           <p className="touch-empty">
             {comments.length
               ? '검색 조건에 맞는 댓글이 없습니다.'
-              : 'PC에서 판매 시작 후 실시간 댓글이 이곳에 표시됩니다.'}
+              : emptyMessage}
           </p>
         )}
         {visible.map((c) => {

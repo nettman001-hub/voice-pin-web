@@ -165,12 +165,15 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
                 Uri url = request.getUrl();
-                Uri home = Uri.parse(base());
-                if (home.getHost() != null && home.getHost().equals(url.getHost())) return false;
-                // 우리 사이트가 아닌 주소(로그인 도움말, 외부 링크)는 브라우저로 연다.
-                try {
-                    startActivity(new Intent(Intent.ACTION_VIEW, url));
-                } catch (RuntimeException ignored) { }
+                SalesNavigationPolicy.Decision decision = SalesNavigationPolicy.decide(
+                        url.toString(), base(), request.isForMainFrame());
+                if (decision == SalesNavigationPolicy.Decision.IN_APP) return false;
+                // 외부 웹 링크만 브라우저로 연다. iframe이나 앱 전용 스킴은 외부 앱을 실행하지 않는다.
+                if (decision == SalesNavigationPolicy.Decision.EXTERNAL) {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, url));
+                    } catch (RuntimeException ignored) { }
+                }
                 return true;
             }
         });

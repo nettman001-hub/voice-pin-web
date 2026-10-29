@@ -261,7 +261,17 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
     </>
   );
 
-  if (pcSelling && !running) return overlay;
+  if (pcSelling && !running)
+    return (
+      <>
+        {overlay}
+        {androidNative() && (
+          <p className="touch-waiting">
+            다른 기기에서 판매 중입니다. 해당 기기의 판매를 멈춘 뒤 시작해 주세요.
+          </p>
+        )}
+      </>
+    );
 
   if (running && status)
     return (
@@ -298,7 +308,7 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
     <>
       {overlay}
       <div className="touch-phone-offer">
-        <span>{mineStale ? '이 폰의 판매가 멈춰 있습니다.' : 'PC 없이 이 폰 하나로 판매할 수 있습니다.'}</span>
+        <span>{mineStale ? '이 폰의 판매가 멈춰 있습니다.' : '이 폰에서 라이브 판매를 진행할 수 있습니다.'}</span>
         <button className="touch-primary" onClick={() => setOpen(true)}>
           {mineStale ? '이 폰으로 이어서 판매' : '폰으로 판매 시작'}
         </button>
