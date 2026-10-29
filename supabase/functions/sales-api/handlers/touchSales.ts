@@ -61,6 +61,8 @@ const stateKeys = [
   'totalAmount',
   'transport',
   'phoneCount',
+  // 폰 단독 판매: 폰이 댓글·전표·사진을 맡는다. 다시 찍기는 지금 + 카운트다운.
+  'phoneOnly',
 ];
 function cleanState(input: any) {
   return Object.fromEntries(
@@ -436,9 +438,11 @@ export async function handleTouchSales(auth: AuthContext, body: any) {
         Math.min(
           20,
           Number(
-            run.last_state?.delaySeconds ??
-              run.settings.fallbackDelaySeconds ??
-              6,
+            run.last_state?.phoneOnly === true
+              ? (run.settings?.prepareSeconds ?? 4)
+              : (run.last_state?.delaySeconds ??
+                  run.settings.fallbackDelaySeconds ??
+                  6),
           ),
         ),
       );

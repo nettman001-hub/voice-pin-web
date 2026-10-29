@@ -1011,3 +1011,94 @@
   margin-top: 8px;
   padding: 12px;
 }
+
+/* 폰 단독 판매 (PC 없음) */
+.touch-phone-offer,
+.touch-phone-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid #e7edf4;
+  font-size: 12px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.touch-phone-offer span {
+  flex: 1;
+  min-width: 0;
+}
+.touch-phone-offer button,
+.touch-phone-bar button {
+  border: 1px solid #dde6f0;
+  border-radius: 10px;
+  padding: 6px 10px;
+  background: #f2f6fa;
+  font-size: 12px;
+}
+.touch-phone-bar .ok {
+  color: #11764a;
+  font-weight: 800;
+}
+.touch-phone-bar .warn {
+  color: #a44a29;
+  font-weight: 800;
+}
+.touch-phone-bar .touch-phone-stop {
+  margin-left: auto;
+  color: #b42318;
+  border-color: #f0b4ad;
+}
+.touch-phone-start label {
+  display: grid;
+  gap: 6px;
+  font-weight: 800;
+}
+.touch-phone-start label input {
+  max-width: 100%;
+}
+.touch-phone-printer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+.touch-phone-printer button {
+  border: 1px solid #dde6f0;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: #f2f6fa;
+}
+.touch-phone-shot {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: #000d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.touch-phone-shot-idle {
+  /* 카메라 요소는 남겨 두고 화면에서만 숨긴다. */
+  visibility: hidden;
+  pointer-events: none;
+}
+.touch-phone-shot video,
+.touch-phone-shot img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.touch-phone-shot video {
+  transform: scaleX(-1);
+}
+.touch-phone-shot strong {
+  position: relative;
+  font-size: 120px;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 4px 24px #000;
+}

@@ -1,0 +1,95 @@
+plugins {
+    id 'com.android.application'
+}
+
+gradle.ext.salesBuildStartTime = System.currentTimeMillis()
+
+// 업로드 키 설정은 문자·입금확인 앱과 같이 쓰도록 ../build.gradle에 있다.
+def releaseStoreFile = rootProject.ext.releaseStoreFile
+def releaseStorePassword = rootProject.ext.releaseStorePassword
+def releaseKeyAlias = rootProject.ext.releaseKeyAlias
+def releaseKeyPassword = rootProject.ext.releaseKeyPassword
+def hasReleaseSigning = rootProject.ext.hasReleaseSigning
+
+android {
+    namespace 'com.voicecap.sales'
+    compileSdk 36
+
+    defaultConfig {
+        // 판매 폰용 앱. 문자 앱(shop.voicecap.smsbridge)·입금확인 앱과 다른 앱으로 따로 설치된다.
+        applicationId 'shop.voicecap.sales'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+        def webBaseUrl = (project.findProperty('VOICECAP_WEB_BASE_URL') ?: 'https://voicecap.shop').toString().replaceAll('/+$', '')
+        buildConfigField 'String', 'VOICECAP_WEB_BASE_URL', '"' + webBaseUrl.replace('"', '\\"') + '"'
+    }
+
+    buildFeatures { buildConfig true }
+
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+                enableV1Signing true
+                enableV2Signing true
+                enableV3Signing true
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (hasReleaseSigning) signingConfig signingConfigs.release
+        }
+    }
+}
+
+// 빌드 완료 시 다른 앱과 같은 android/voicecapSMS/release-output 에 voicecap-sales-<버전>-*.apk/aab 로 복사
+tasks.register('copyOutputsToRoot') {
+    doLast {
+        def targetDir = file("${rootDir}/release-output")
+        if (!targetDir.exists()) {
+            targetDir.mkdirs()
+        }
+
+        def vName = android.defaultConfig.versionName
+        def buildStartTime = gradle.ext.has('salesBuildStartTime') ? gradle.ext.salesBuildStartTime : 0L
+        def outputs = layout.buildDirectory.get().asFile
+        def files = [
+            [file("${outputs}/outputs/apk/debug/sales-debug.apk"), "voicecap-sales-${vName}-debug.apk"],
+            [file("${outputs}/outputs/apk/release/sales-release.apk"), "voicecap-sales-${vName}-release.apk"],
+            [file("${outputs}/outputs/bundle/release/sales-release.aab"), "voicecap-sales-${vName}-release.aab"],
+        ]
+        files.each { pair ->
+            def source = pair[0]
+            def name = pair[1]
+            // 방금 빌드된 것만 복사
+            if (source.exists() && (buildStartTime == 0L || source.lastModified() >= buildStartTime)) {
+                copy {
+                    from source
+                    into targetDir
+                    rename { name }
+                }
+                println "[VoiceCAP] 판매 앱 ${name} 복사 완료 -> ${targetDir.absolutePath}/${name}"
+            }
+        }
+    }
+}
+
+gradle.projectsEvaluated {
+    tasks.matching {
+        it.name in ['assembleDebug', 'assembleRelease', 'bundleRelease', 'assemble', 'bundle']
+    }.configureEach {
+        finalizedBy 'copyOutputsToRoot'
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}

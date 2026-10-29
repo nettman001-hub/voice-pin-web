@@ -53,6 +53,7 @@ import { handleSellerWorkflow } from './handlers/sellerWorkflow.ts'
 import { handleLogicOpus } from './handlers/logicOpus.ts'
 import { handleTouchSales } from './handlers/touchSales.ts'
 import { handleTouchSalesAdmin } from './handlers/touchSalesAdmin.ts'
+import { handleCommentKeyAdmin, handleCommentToken } from './handlers/commentKey.ts'
 
 import {
   handleClaimPrintJobs,
@@ -139,6 +140,14 @@ serve(async (req: Request) => {
     switch (action) {
       case 'touch-admin-connections':
         return await handleTouchSalesAdmin(auth, body)
+      case 'comment-key-get':
+      case 'comment-key-save':
+      case 'comment-key-test':
+        return await handleCommentKeyAdmin(auth, body)
+      case 'touch-tiktok-id':
+      case 'touch-comment-token':
+        requireCapability('SALES_WRITE')
+        return await handleCommentToken(auth, body)
       case 'touch-voice-presence':
         requireCapability('SALES_WRITE')
         return await handleTouchSales(auth, body)

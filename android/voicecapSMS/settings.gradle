@@ -4,3 +4,5 @@ rootProject.name = 'voicecapSMS'
 include ':app'
 // 입금확인 앱 (문자 앱에서 분리). 은행 알림·은행 입금 문자 → payment-incoming.
 include ':deposit'
+// 판매 앱 "VoiceCAP 판매" (폰 단독 판매): [판매] /sell, [관리] 판매내역, 블루투스 라벨프린터.
+include ':sales'

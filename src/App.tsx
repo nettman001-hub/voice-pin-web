@@ -64,6 +64,7 @@ const SellerLogicAnalysis03DeepPage = lazy(() => import('./pages/admin/SellerLog
 const SellerLogicAnalysis04ArgonPage = lazy(() => import('./pages/admin/SellerLogicAnalysis04ArgonPage'));
 const SellerLogicOpusPage = lazy(() => import('./pages/admin/SellerLogicOpusPage'));
 const TouchPhoneConnectionsPage = lazy(() => import('./pages/admin/TouchPhoneConnectionsPage'));
+const CommentKeyPage = lazy(() => import('./pages/admin/CommentKeyPage'));
 
 const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const runtime = useWorkspaceRuntime();
@@ -275,6 +276,7 @@ export const App: React.FC = () => {
                       <Route path="/admin/reports" element={<ReportManagementPage />} />
                       <Route path="/admin/stats" element={<AdminStatsPage />} />
                       <Route path="/admin/sales-phones" element={<Suspense fallback={<div className="p-8">판매 폰 현황을 불러오는 중…</div>}><TouchPhoneConnectionsPage /></Suspense>} />
+                      <Route path="/admin/comment-key" element={<Suspense fallback={<div className="p-8">댓글 연결 키를 불러오는 중…</div>}><CommentKeyPage /></Suspense>} />
                       <Route path="/admin/ai" element={<AdminAiSettingsPage />} />
                       <Route path="/admin/seller-analysis" element={<Suspense fallback={<div className="p-8">판매방식 분석 화면을 불러오는 중…</div>}><SellerAnalysisPage /></Suspense>} />
                       <Route path="/admin/seller-logic-analysis-01" element={<Suspense fallback={<div className="p-8">판매자 로직분석01 화면을 불러오는 중…</div>}><SellerLogicAnalysisPage /></Suspense>} />
