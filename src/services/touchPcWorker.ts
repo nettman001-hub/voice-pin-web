@@ -9,10 +9,22 @@ export interface PcWorkerOptions {
   serverOffset: () => number;
   delaySeconds: () => number;
   prepareSeconds: () => number;
+  /** 전표 셋째 줄에 넣을 회차 이름. 없으면 회차 줄을 비운다. */
+  sessionLabel?: () => string;
   canPrint: () => boolean;
   print: (payload: SalePrintRequest) => Promise<SalePrintResult>;
   onChange: () => void;
   onError: (kind: string, error: unknown) => void;
+}
+/** 전표 셋째 줄: 번호(·사이즈·색상)와 회차 이름. 도우미는 "회차"가 없으면 뒤에 붙인다. */
+export function touchSlipThirdLine(slipLine: unknown, sessionLabel: string) {
+  const session = sessionLabel.trim();
+  const slip = typeof slipLine === 'string' ? slipLine.trim() : '';
+  const withRound =
+    session && !session.includes('회차') ? `${session} 회차` : session;
+  return (
+    [slip, withRound].filter(Boolean).join(' · ').slice(0, 80) || undefined
+  );
 }
 /** Server leases receipts; capture has its own durable claim and is independent of printer speed. */
 export class TouchPcWorker {
@@ -127,7 +139,10 @@ export class TouchPcWorker {
               printRevision: job.sale_revision,
               buyerNickname: payload.buyerNickname,
               amount: payload.amount,
-              sessionId: payload.sessionId,
+              sessionId: touchSlipThirdLine(
+                payload.slipLine,
+                this.options.sessionLabel?.() || '',
+              ),
               recognizedAt: payload.recognizedAt,
             });
             // A missing helper acknowledgement cannot prove that paper was not printed.

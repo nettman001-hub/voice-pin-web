@@ -12,9 +12,13 @@
     "390px phone layout has no horizontal overflow",
     "no browser runtime errors",
     "PC replacement resets the old sequence snapshot within the same broadcast",
-    "initial WebRTC failure still receives the full comment snapshot through fallback"
+    "initial WebRTC failure still receives the full comment snapshot through fallback",
+    "number mode flashes \"1번\", \"1주세요\", \"1번이요\"; 저요 is light; other numbers get a badge; prices are not numbers",
+    "three picks become three 1번 sales at one time and price, and the 방금 판매 card shows them",
+    "the top number moves to 2번 after the countdown",
+    "a past number sells slip-only at its last price without a new photo, then the top number returns to 2번"
   ],
-  "passed": 13,
-  "date": "2026-10-21T12:16:18.012Z",
+  "passed": 17,
+  "date": "2026-10-29T14:47:02.534Z",
   "scope": "isolated fixtures; real browser WebRTC and production phone UI; no operating account or printer"
 }

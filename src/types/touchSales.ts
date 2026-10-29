@@ -2,10 +2,15 @@ import type { CommentRecord } from './comment';
 import type { CustomerStats } from '../services/customerStatsIndex';
 import type { Product } from './productSales';
 
+export type TouchSalesMode = 'BASIC' | 'NUMBER' | 'SIZE_COLOR';
 export interface TouchSettings {
   mode: 'VOICE' | 'COMMENT_TOUCH';
   prepareSeconds: number;
   fallbackDelaySeconds: number;
+  /** 댓글터치 판매 방식. 없으면 기본. */
+  salesMode?: TouchSalesMode;
+  /** 캡처 안 함: 사진을 찍지 않고 PC 화면 공유도 받지 않는다. */
+  captureOff?: boolean;
 }
 export interface TouchComment extends CommentRecord {
   sequence: number;
@@ -53,6 +58,13 @@ export interface TouchCommit {
   retargetedFromOperationId?: string;
   originalConfirmedAt?: string;
   skipCapture?: boolean;
+  /** 상품번호·사이즈·색상 방식의 번호 상품 이름(예: "1번"). 회차마다 같은 이름이면 같은 상품. */
+  productLabel?: string;
+  /** 전표 셋째 줄(예: "2번 · 블랙 M"). */
+  slipLine?: string;
+  captureOff?: boolean;
+  /** 지난 번호 판매: 그 번호의 사진을 다시 쓰고 새로 찍지 않는다. */
+  reuseProductPhoto?: boolean;
 }
 export interface TouchCommitResult {
   saleId: string;

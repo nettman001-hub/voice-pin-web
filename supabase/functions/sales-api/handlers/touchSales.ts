@@ -4,7 +4,11 @@ import {
   errorResponse,
   type AuthContext,
 } from '../../_shared/productSales.ts';
-import { validateTouchCommit, parseTouchPrice } from './touchSalesCore.ts';
+import {
+  validateTouchCommit,
+  parseTouchPrice,
+  cleanTouchRunSettings,
+} from './touchSalesCore.ts';
 
 const messages: Record<string, string> = {
   SESSION_ENDED: '판매 중인 회차가 없습니다. PC에서 회차를 확인해 주세요.',
@@ -298,17 +302,7 @@ export async function handleTouchSales(auth: AuthContext, body: any) {
           'VALIDATION_ERROR',
           'PC 연결 정보가 올바르지 않습니다.',
         );
-      const settings = {
-        mode: 'COMMENT_TOUCH',
-        prepareSeconds: Math.max(
-          2,
-          Math.min(10, Number(body.settings?.prepareSeconds) || 4),
-        ),
-        fallbackDelaySeconds: Math.max(
-          0,
-          Math.min(20, Number(body.settings?.fallbackDelaySeconds) || 0),
-        ),
-      };
+      const settings = cleanTouchRunSettings(body.settings);
       const state = cleanState(body.state);
       if (typeof state.delaySeconds === 'number')
         state.delaySeconds = Math.max(0, Math.min(20, state.delaySeconds));

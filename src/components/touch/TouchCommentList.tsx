@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { TouchComment } from '../../types/touchSales';
+import type { TouchComment, TouchSalesMode } from '../../types/touchSales';
+import {
+  touchCommentTone,
+  touchModeUsesNumber,
+} from '../../services/touchSaleModes';
 import {
   isTouchListAtBottom,
   isTouchPurchase,
@@ -18,6 +22,14 @@ interface Props {
   onSelect: (comment: TouchComment) => void;
   onCancel: () => void;
   onConfirm: () => void;
+  /** 상품번호·사이즈·색상 방식: 여러 댓글을 고르고 아래 줄은 화면이 그린다. */
+  mode?: TouchSalesMode;
+  currentNumber?: number;
+  picked?: readonly string[];
+  footer?: React.ReactNode;
+  /** 아무것도 고르지 않았을 때 선택 줄 자리에 보일 내용(방금 판매 칸). */
+  idleFooter?: React.ReactNode;
+  onOpenSold?: (key: string) => void;
 }
 export const TouchCommentList: React.FC<Props> = ({
   comments,
@@ -29,7 +41,15 @@ export const TouchCommentList: React.FC<Props> = ({
   onSelect,
   onCancel,
   onConfirm,
+  mode,
+  currentNumber = 1,
+  picked,
+  footer,
+  idleFooter,
+  onOpenSold,
 }) => {
+  const multi = touchModeUsesNumber(mode);
+  const pickedSet = new Set(picked || []);
   const [search, setSearch] = useState(''),
     [purchasesOnly, setPurchasesOnly] = useState(false),
     [following, setFollowing] = useState(true),
@@ -75,6 +95,18 @@ export const TouchCommentList: React.FC<Props> = ({
     },
     [],
   );
+  // 번호를 바꾸면 그 번호 댓글로 이동한다. 댓글을 고르는 중에는 움직이지 않는다.
+  useEffect(() => {
+    if (mode !== 'NUMBER' || pickedSet.size || !list.current) return;
+    const target = list.current.querySelector<HTMLElement>(
+      `[data-product-number="${currentNumber}"]`,
+    );
+    if (target) {
+      setFollowing(false);
+      target.scrollIntoView({ block: 'center' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, currentNumber]);
   const cancelLong = () => {
     if (longPress.current) clearTimeout(longPress.current);
     longPress.current = null;
@@ -134,20 +166,26 @@ export const TouchCommentList: React.FC<Props> = ({
         {visible.map((c) => {
           const key = touchCommentKey(c),
             purchase = isTouchPurchase(c),
-            isSelected = selection.selectedKey === key,
+            isSelected = multi
+              ? pickedSet.has(key)
+              : selection.selectedKey === key,
             saleId = sold.get(key);
-          const flash = shouldFlashTouchComment(
-            c,
-            selection,
-            new Set(sold.keys()),
-          );
+          const tone = touchCommentTone(c, mode, currentNumber);
+          const flash = multi
+            ? tone.tone === 'CURRENT' && !saleId
+            : shouldFlashTouchComment(c, selection, new Set(sold.keys()));
+          const light =
+            multi && !saleId && (tone.tone === 'INTENT' || tone.tone === 'OTHER');
+          const noNumber =
+            mode === 'NUMBER' && isSelected && tone.tone !== 'CURRENT';
           return (
             <button
               type="button"
               key={key}
               data-comment-id={c.platformMessageId || c.id}
+              data-product-number={tone.number ?? undefined}
               aria-pressed={isSelected}
-              className={`touch-comment-row ${flash ? 'touch-purchase-flash' : ''} ${purchase ? 'touch-purchase-row' : ''} ${isSelected ? 'touch-comment-selected' : ''} ${saleId ? 'touch-comment-sold' : ''}`}
+              className={`touch-comment-row ${flash ? 'touch-purchase-flash' : ''} ${light ? 'touch-intent-light' : ''} ${purchase ? 'touch-purchase-row' : ''} ${isSelected ? 'touch-comment-selected' : ''} ${noNumber ? 'touch-pick-no-number' : ''} ${saleId ? 'touch-comment-sold' : ''}`}
               onClick={() => {
                 setFollowing(false);
                 onSelect(c);
@@ -169,10 +207,27 @@ export const TouchCommentList: React.FC<Props> = ({
                   {c.nickname}
                 </strong>
                 {saleId ? (
-                  <small className="touch-sold-label">판매됨 {saleId}</small>
+                  <small
+                    className="touch-sold-label"
+                    role={onOpenSold ? 'link' : undefined}
+                    onClick={(e) => {
+                      if (!onOpenSold) return;
+                      e.stopPropagation();
+                      onOpenSold(key);
+                    }}
+                  >
+                    판매됨 {saleId}
+                    {onOpenSold ? ' · 고치기' : ''}
+                  </small>
                 ) : purchase ? (
                   <small className="touch-purchase-label">구매</small>
                 ) : null}
+                {tone.tone === 'OTHER' && !saleId && (
+                  <small className="touch-number-badge">{tone.number}번</small>
+                )}
+                {noNumber && (
+                  <small className="touch-no-number-label">번호 없음</small>
+                )}
                 {isSelected && (
                   <span className="touch-selected-check" aria-label="선택됨">
                     ✓
@@ -214,6 +269,11 @@ export const TouchCommentList: React.FC<Props> = ({
           새 댓글 {unread}개 ↓
         </button>
       )}
+      {footer ? (
+        footer
+      ) : !selected && idleFooter ? (
+        idleFooter
+      ) : (
       <footer className="touch-selection-bar">
         <p>
           {selected ? (
@@ -238,6 +298,7 @@ export const TouchCommentList: React.FC<Props> = ({
           </button>
         </div>
       </footer>
+      )}
     </section>
   );
 };
