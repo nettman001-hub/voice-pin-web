@@ -931,6 +931,29 @@ export default function TouchMobileSalesPage() {
     Date.now() - pipe.current.lastReceivedAt <
       (transport === 'DIRECT' ? 5000 : 12000);
   const onlinePc = phoneOnlyRun || bridgeOnline;
+  // 같은 keyed 자식으로 모든 판매 화면에 남겨 둔다. 가격 입력·상세 화면으로
+  // 바뀔 때 해제하면 TouchPhoneOnly의 정리 함수가 실제 판매 연결을 멈춘다.
+  const phoneController = (
+    <TouchPhoneOnly
+      key={`phone-producer:${api.workspaceId}`}
+      api={api}
+      bootstrap={bootstrap}
+      refresh={refresh}
+      serverOffset={() => serverOffset.current}
+      totals={() => phoneTotals.current}
+      onComments={(items) =>
+        setComments((old) =>
+          mergeTouchComments(old, items, items[0]?.sessionId || ''),
+        )
+      }
+      onRunningChange={setPhoneRunning}
+      pcOnline={bridgeOnline && !phoneRunning}
+      wakeKey={bootstrap}
+      controlsVisible={
+        !((editPrice && detail) || (cardPrice && recentRows[0]) || batch || priceComment || detail)
+      }
+    />
+  );
   phoneTotals.current = { totalCount: activeRows.length, totalAmount: total };
   const sessionName =
     bootstrap?.session?.display_code || pc?.displayCode || '회차 대기';
@@ -947,8 +970,10 @@ export default function TouchMobileSalesPage() {
           {(item.sale.unitPrice * item.sale.quantity).toLocaleString()}원
         </strong>
         <p>
-          {item.error ||
-            '인터넷이 연결되면 같은 작업 번호로 보냅니다. 전표와 캡처는 저장 확인 후 진행합니다.'}
+          {item.code === 'TOUCH_NOT_RUNNING'
+            ? '판매 연결이 멈춰 저장되지 않았습니다. 판매를 다시 시작한 뒤 저장해 주세요.'
+            : item.error ||
+              '인터넷이 연결되면 같은 작업 번호로 보냅니다. 전표와 캡처는 저장 확인 후 진행합니다.'}
         </p>
         {item.code === 'COMMENT_ALREADY_COMMITTED' && (
           <button
@@ -967,6 +992,26 @@ export default function TouchMobileSalesPage() {
             추가 판매로 저장
           </button>
         )}
+        {item.code === 'TOUCH_NOT_RUNNING' &&
+          item.sale.sessionId === sessionId &&
+          enabled && (
+            <button
+              disabled={busy}
+              onClick={() => {
+                // 같은 회차의 같은 작업을 다시 보낸다. 확정 시각·촬영 기준도 유지한다.
+                void touchLocalStore
+                  .putOutbox({
+                    ...item,
+                    blocked: false,
+                    code: undefined,
+                    error: undefined,
+                  })
+                  .then(() => flush());
+              }}
+            >
+              판매 연결 후 다시 저장
+            </button>
+          )}
         {item.code === 'SESSION_ENDED' &&
           sessionId !== item.sale.sessionId &&
           enabled && (
@@ -1026,7 +1071,9 @@ export default function TouchMobileSalesPage() {
   if (editPrice && detail)
     return (
       <div className="touch-app">
+        {phoneController}
         <TouchPricePad
+          phoneOnly={phoneOnlyUi}
           key={detail.id}
           title="가격 수정"
           comment={{
@@ -1063,7 +1110,9 @@ export default function TouchMobileSalesPage() {
   if (cardPrice && recentRows[0])
     return (
       <div className="touch-app">
+        {phoneController}
         <TouchPricePad
+          phoneOnly={phoneOnlyUi}
           key={`card-${recentRows[0].id}`}
           title="방금 판매 가격 수정"
           comment={{
@@ -1090,7 +1139,9 @@ export default function TouchMobileSalesPage() {
   if (batch)
     return (
       <div className="touch-app">
+        {phoneController}
         <TouchPricePad
+          phoneOnly={phoneOnlyUi}
           key={`batch-${batch.number}-${batch.comments.length}`}
           title={
             batch.priceChange
@@ -1128,7 +1179,9 @@ export default function TouchMobileSalesPage() {
   if (priceComment)
     return (
       <div className="touch-app">
+        {phoneController}
         <TouchPricePad
+          phoneOnly={phoneOnlyUi}
           key={touchCommentKey(priceComment)}
           comment={priceComment}
           productName={pc?.product?.name || undefined}
@@ -1148,6 +1201,7 @@ export default function TouchMobileSalesPage() {
   if (detail)
     return (
       <div className="touch-app">
+        {phoneController}
         <header className="touch-detail-header">
           <button
             aria-label="판매내역으로 돌아가기"
@@ -1538,21 +1592,7 @@ export default function TouchMobileSalesPage() {
           {activeRows.length}건 / {total.toLocaleString()}원
         </strong>
       </div>
-      <TouchPhoneOnly
-        api={api}
-        bootstrap={bootstrap}
-        refresh={refresh}
-        serverOffset={() => serverOffset.current}
-        totals={() => phoneTotals.current}
-        onComments={(items) =>
-          setComments((old) =>
-            mergeTouchComments(old, items, items[0]?.sessionId || ''),
-          )
-        }
-        onRunningChange={setPhoneRunning}
-        pcOnline={bridgeOnline && !phoneRunning}
-        wakeKey={bootstrap}
-      />
+      {phoneController}
       {!enabled && !phoneRunning && (
         <p className="touch-waiting">
           {phoneOnlyUi

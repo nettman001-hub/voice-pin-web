@@ -57,6 +57,8 @@ export interface TouchPhoneOnlyProps {
   pcOnline?: boolean;
   /** 판매가 바뀔 때마다 바뀌는 값: 전표·사진을 바로 확인한다. */
   wakeKey: unknown;
+  /** 가격 입력·판매 상세에서도 댓글·인쇄·촬영은 유지하고 조작 줄만 숨긴다. */
+  controlsVisible?: boolean;
 }
 
 /** PC 없이 이 폰이 댓글·전표·사진을 맡는 판매. PC가 판매 중이면 아무것도 보이지 않는다. */
@@ -208,7 +210,7 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
         onStatus: (s) => setStatus(s),
         onError: (kind, e) => {
           if (kind === 'LEASE_LOST') {
-            setError('다른 기기(PC 또는 다른 폰)로 판매 연결이 바뀌어 이 폰의 판매를 멈췄습니다.');
+            setError('다른 기기로 판매 연결이 바뀌어 이 폰의 판매를 멈췄습니다.');
             setStatus(null);
             props.onRunningChange(false);
             androidNative()?.selling(false);
@@ -226,7 +228,7 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
       const code = (e as any)?.code;
       setError(
         code === 'PC_ALREADY_RUNNING'
-          ? 'PC에서 판매 중입니다. PC 판매를 멈춘 뒤 다시 시도해 주세요.'
+          ? '다른 기기에서 판매 중입니다. 해당 기기의 판매를 멈춘 뒤 다시 시도해 주세요.'
           : (e as Error).message,
       );
     } finally {
@@ -260,6 +262,10 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
       </div>
     </>
   );
+
+  // 화면 전환 때문에 생산자를 해제하면 서버 판매 연결도 STOP된다.
+  // 보조 화면에서는 카메라와 생산자를 유지한 채 조작 UI만 감춘다.
+  if (props.controlsVisible === false) return <>{overlay}</>;
 
   if (pcSelling && !running)
     return (
