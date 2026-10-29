@@ -1,0 +1,83 @@
+plugins {
+    id 'com.android.application'
+}
+
+gradle.ext.kakaobizBuildStartTime = System.currentTimeMillis()
+
+def releaseStoreFile = rootProject.ext.releaseStoreFile
+def releaseStorePassword = rootProject.ext.releaseStorePassword
+def releaseKeyAlias = rootProject.ext.releaseKeyAlias
+def releaseKeyPassword = rootProject.ext.releaseKeyPassword
+def hasReleaseSigning = rootProject.ext.hasReleaseSigning
+
+android {
+    namespace 'com.voicecap.kakaobiz'
+    compileSdk 36
+
+    defaultConfig {
+        // 카카오비즈 알림 테스트 앱. 문자 앱·입금확인 앱과 별개이며 서버·인터넷에 연결하지 않는다(INTERNET 권한 없음).
+        applicationId 'shop.voicecap.kakaobiztest'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+                enableV1Signing true
+                enableV2Signing true
+                enableV3Signing true
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (hasReleaseSigning) signingConfig signingConfigs.release
+        }
+    }
+}
+
+// 직접 설치용 APK만 만든다(플레이 스토어용 AAB 없음). 결과는 다른 앱과 같은 release-output 폴더로 복사한다.
+tasks.register('copyOutputsToRoot') {
+    doLast {
+        def targetDir = file("${rootDir}/release-output")
+        if (!targetDir.exists()) targetDir.mkdirs()
+        def vName = android.defaultConfig.versionName
+        def buildStartTime = gradle.ext.has('kakaobizBuildStartTime') ? gradle.ext.kakaobizBuildStartTime : 0L
+        def outputs = layout.buildDirectory.get().asFile
+        [
+            [file("${outputs}/outputs/apk/debug/kakaobiz-debug.apk"), "voicecap-kakaobiz-test-${vName}-debug.apk"],
+            [file("${outputs}/outputs/apk/release/kakaobiz-release.apk"), "voicecap-kakaobiz-test-${vName}-release.apk"],
+        ].each { pair ->
+            def source = pair[0]
+            def name = pair[1]
+            if (source.exists() && (buildStartTime == 0L || source.lastModified() >= buildStartTime)) {
+                copy {
+                    from source
+                    into targetDir
+                    rename { name }
+                }
+                println "[VoiceCAP] 카카오비즈 테스트 ${name} 복사 완료 -> ${targetDir.absolutePath}/${name}"
+            }
+        }
+    }
+}
+
+gradle.projectsEvaluated {
+    tasks.matching { it.name in ['assembleDebug', 'assembleRelease', 'assemble'] }.configureEach {
+        finalizedBy 'copyOutputsToRoot'
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}
