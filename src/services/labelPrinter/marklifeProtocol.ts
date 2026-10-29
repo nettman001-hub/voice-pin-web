@@ -22,6 +22,11 @@ export const marklifeCommands = {
     bytes(0x1f, 0x60, 0x01, clamp(Math.round(level), 0, 2)),
   alignStart: () => bytes(0x1f, 0x11, 0x51),
   alignEnd: () => bytes(0x1f, 0x11, 0x50),
+  findGap: () => bytes(0x1f, 0x12, 0x20, 0x00),
+  feedDots: (dots: number) => {
+    const n = clamp(Math.round(dots), 0, 0xffff);
+    return bytes(0x1f, 0x11, 0x00, n >> 8, n & 0xff);
+  },
   selfTest: () => bytes(0x1f, 0x40),
   learnPaper: () => bytes(0x1f, 0x30, 0x60),
   status: () => bytes(0x1f, 0x20, 0x00),
@@ -119,12 +124,38 @@ export function bitmapCommand(bitmap: {
   return out;
 }
 
+export const DOTS_PER_MM = 8; // 203 dpi
+
+/**
+ * How each label ends. AUTO = align start/end commands only; on the M50 (2026-10-29)
+ * this printed labels back to back, ignoring the gap. GAP = ask the printer to find
+ * the next gap. FIXED = feed the rest of the label pitch (label + gap length).
+ */
+export type LabelAlign = 'AUTO' | 'GAP' | 'FIXED';
+
 export type PrintJobOptions = {
   paper?: number;
   density?: number;
   speed?: number;
   copies?: number;
+  align?: LabelAlign;
+  pitchMm?: number;
 };
+
+export function labelTail(
+  imageRows: number,
+  align: LabelAlign = 'AUTO',
+  pitchMm = 38,
+) {
+  if (align === 'GAP') return [marklifeCommands.findGap()];
+  if (align === 'FIXED')
+    return [
+      marklifeCommands.feedDots(
+        Math.max(0, Math.round(pitchMm * DOTS_PER_MM) - imageRows),
+      ),
+    ];
+  return [marklifeCommands.alignEnd()];
+}
 
 export function buildPrintJob(
   bitmap: { rowBytes: number; height: number; data: Uint8Array },
@@ -143,7 +174,7 @@ export function buildPrintJob(
       marklifeCommands.alignStart(),
       image,
       marklifeCommands.stop(),
-      marklifeCommands.alignEnd(),
+      ...labelTail(bitmap.height, options.align, options.pitchMm),
     );
   return concatBytes(parts);
 }

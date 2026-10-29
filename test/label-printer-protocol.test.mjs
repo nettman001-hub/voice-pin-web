@@ -9,6 +9,7 @@ import {
   bitmapCommand,
   buildPrintJob,
   chunkBytes,
+  labelTail,
   marklifeCommands,
   packBitmap,
   parseCredit,
@@ -109,4 +110,23 @@ test('sharper frames score higher', () => {
   assert.ok(frameSharpness(sharp, 40, 40) > frameSharpness(blur, 40, 40));
   assert.ok(frameSharpness(blur, 40, 40) > frameSharpness(flat, 40, 40));
   assert.equal(frameSharpness(flat, 40, 40), 0);
+});
+
+test('label tail: gap search, or feed the rest of the pitch', () => {
+  const hex = (parts) =>
+    parts.map((p) => Buffer.from(p).toString('hex')).join('');
+  assert.equal(hex(labelTail(240)), '1f1150');
+  assert.equal(hex(labelTail(240, 'GAP')), '1f122000');
+  // 38 mm pitch = 304 dots, image 240 rows -> feed 64 dots
+  assert.equal(hex(labelTail(240, 'FIXED', 38)), '1f11000040');
+  assert.equal(hex(labelTail(240, 'FIXED', 20)), '1f11000000');
+  const bits = packBitmap(
+    rgba(8, 1, () => true),
+    8,
+    1,
+  );
+  const job = Buffer.from(
+    buildPrintJob(bits, { align: 'GAP', copies: 2 }),
+  ).toString('hex');
+  assert.equal(job.split('1fc001011f122000').length - 1, 2);
 });

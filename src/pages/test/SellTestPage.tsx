@@ -5,6 +5,7 @@ import {
   PAPER_CONTINUOUS,
   PAPER_GAP,
   buildPrintJob,
+  type LabelAlign,
   marklifeCommands,
   packBitmap,
 } from '../../services/labelPrinter/marklifeProtocol';
@@ -33,6 +34,8 @@ type Settings = {
   delayMs: number;
   chunkSize: number;
   threshold: number;
+  align: LabelAlign;
+  pitchMm: number;
   seconds: number;
 };
 const DEFAULTS: Settings = {
@@ -47,6 +50,8 @@ const DEFAULTS: Settings = {
   delayMs: 30,
   chunkSize: 90,
   threshold: 160,
+  align: 'GAP',
+  pitchMm: 38,
   seconds: 4,
 };
 const loadSettings = (): Settings => {
@@ -178,9 +183,11 @@ const SellTestPage: React.FC = () => {
         density: s.density,
         speed: s.speed,
         copies: s.copies,
+        align: s.align,
+        pitchMm: s.pitchMm,
       });
       addLog(
-        `인쇄 ${job.length}바이트 (농도 ${s.density}, 속도 ${s.speed}, ${s.paper === PAPER_GAP ? '라벨' : '연속'}, ${s.copies}장)`,
+        `인쇄 ${job.length}바이트 (농도 ${s.density}, 속도 ${s.speed}, ${s.paper === PAPER_GAP ? '라벨' : '연속'}, ${s.copies}장, 맞춤 ${s.align}${s.align === 'FIXED' ? ` ${s.pitchMm}mm` : ''})`,
       );
       const ms = await printer.current!.send(
         job,
@@ -189,7 +196,7 @@ const SellTestPage: React.FC = () => {
       );
       setPrintResults((prev) => [
         ...prev,
-        `${now()} 농도${s.density} 속도${s.speed} ${s.mode}/${s.delayMs}ms 조각${s.chunkSize} → ${ms}ms`,
+        `${now()} 맞춤${s.align}${s.align === 'FIXED' ? `/${s.pitchMm}mm` : ''} ${s.copies}장 농도${s.density} 속도${s.speed} ${s.mode}/${s.delayMs}ms 조각${s.chunkSize} → ${ms}ms`,
       ]);
     });
 
@@ -375,6 +382,16 @@ const SellTestPage: React.FC = () => {
             className={btn}
             disabled={busy || !connected}
             onClick={() =>
+              sendCommand('다음 라벨로', marklifeCommands.findGap())
+            }
+          >
+            다음 라벨로 넘기기
+          </button>
+          <button
+            type="button"
+            className={btn}
+            disabled={busy || !connected}
+            onClick={() =>
               sendCommand(
                 '배터리·버전 조회',
                 new Uint8Array([
@@ -431,6 +448,41 @@ const SellTestPage: React.FC = () => {
             />
           </Field>
         </div>
+        <div className="grid grid-cols-3 gap-2">
+          <Field label="라벨 맞춤">
+            <select
+              className={input}
+              value={s.align}
+              onChange={(e) => set('align', e.target.value as LabelAlign)}
+            >
+              <option value="GAP">간격 찾기</option>
+              <option value="FIXED">길이만큼 넘김</option>
+              <option value="AUTO">처음 방식</option>
+            </select>
+          </Field>
+          <Field label="라벨+간격(mm)">
+            <input
+              className={input}
+              type="number"
+              min={20}
+              max={80}
+              step={0.5}
+              disabled={s.align !== 'FIXED'}
+              value={s.pitchMm}
+              onChange={(e) => set('pitchMm', Number(e.target.value))}
+            />
+          </Field>
+          <Field label="장수">
+            <input
+              className={input}
+              type="number"
+              min={1}
+              max={5}
+              value={s.copies}
+              onChange={(e) => set('copies', Number(e.target.value))}
+            />
+          </Field>
+        </div>
         <details>
           <summary className="cursor-pointer text-sm font-bold text-slate-700">
             인쇄 세부 설정
@@ -454,16 +506,6 @@ const SellTestPage: React.FC = () => {
                 max={2}
                 value={s.speed}
                 onChange={(e) => set('speed', Number(e.target.value))}
-              />
-            </Field>
-            <Field label="장수">
-              <input
-                className={input}
-                type="number"
-                min={1}
-                max={5}
-                value={s.copies}
-                onChange={(e) => set('copies', Number(e.target.value))}
               />
             </Field>
             <Field label="종이">

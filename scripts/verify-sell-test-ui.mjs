@@ -121,7 +121,10 @@ try {
       '1f8001201f7001031f6001011fc001001f11511f10003000f0',
     hex(job.slice(0, 25)),
   );
-  check('job ends with stop and feed', hex(job.slice(-7)) === '1fc001011f1150');
+  check(
+    'job ends with stop and gap search',
+    hex(job.slice(-8)) === '1fc001011f122000',
+  );
   await page.screenshot({
     path: path.join(artifactDir, '01-printer.png'),
     fullPage: true,
