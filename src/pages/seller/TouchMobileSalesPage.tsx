@@ -55,6 +55,7 @@ import {
   TouchRecentSaleCard,
 } from '../../components/touch/TouchSaleModeParts';
 import { TouchPhoneOnly } from '../../components/touch/TouchPhoneOnly';
+import { isSalesApp } from '../../services/labelPrinter/androidBridge';
 import '../../styles/touchSales.css';
 
 const printLabel = (status: string) =>
@@ -64,6 +65,7 @@ const printLabel = (status: string) =>
       ? '전표 확인 필요'
       : '전표 대기';
 export default function TouchMobileSalesPage() {
+  const salesApp = isSalesApp();
   const { workspaceId, user, logout } = useAuth();
   const api = useMemo(
     () => new TouchSalesApi(workspaceId || ''),
@@ -282,7 +284,7 @@ export default function TouchMobileSalesPage() {
         })
         .catch(() => {});
     syncClock();
-    const bridge = new TouchSalesBridge({
+    const bridge = salesApp ? null : new TouchSalesBridge({
       workspaceId: api.workspaceId,
       role: 'PHONE',
       onStatus: (status) => {
@@ -345,7 +347,7 @@ export default function TouchMobileSalesPage() {
       },
     });
     pipe.current = bridge;
-    void bridge.start().catch((e) => setError(e.message));
+    if (bridge) void bridge.start().catch((e) => setError(e.message));
     const channel = requireSupabase().channel(
       `touch-phone-sales:${api.workspaceId}:${crypto.randomUUID()}`,
     );
@@ -378,7 +380,7 @@ export default function TouchMobileSalesPage() {
       if (document.visibilityState === 'visible') {
         start();
         syncClock();
-        bridge.send({ kind: 'resync' });
+        bridge?.send({ kind: 'resync' });
         void flush();
       }
     };
@@ -392,7 +394,7 @@ export default function TouchMobileSalesPage() {
       mounted.current = false;
       if (timer) clearTimeout(timer);
       clearInterval(retry);
-      bridge.stop();
+      bridge?.stop();
       pipe.current = null;
       sampler.current.stop();
       void requireSupabase().removeChannel(channel);
@@ -400,7 +402,7 @@ export default function TouchMobileSalesPage() {
       window.removeEventListener('focus', wake);
       document.removeEventListener('visibilitychange', wake);
     };
-  }, [api, refresh, flush, reloadOutbox]);
+  }, [api, refresh, flush, reloadOutbox, salesApp]);
   useEffect(() => {
     const timer = setInterval(() => setTick((n) => n + 1), 1000);
     return () => clearInterval(timer);
@@ -431,7 +433,7 @@ export default function TouchMobileSalesPage() {
     };
   }, [tab]);
   useEffect(() => {
-    if (!micEnabled || transport !== 'DIRECT') return;
+    if (salesApp || !micEnabled || transport !== 'DIRECT') return;
     let cancelled = false,
       starting = false;
     const samples: EnvelopeSample[] = [];
@@ -481,7 +483,7 @@ export default function TouchMobileSalesPage() {
       sampler.current.stop();
       document.removeEventListener('visibilitychange', visibility);
     };
-  }, [micEnabled, transport]);
+  }, [micEnabled, transport, salesApp]);
   useEffect(() => {
     try {
       setRecent(
@@ -923,6 +925,7 @@ export default function TouchMobileSalesPage() {
   const phoneOnlyRun =
     phoneRunning ||
     (!!bootstrap?.run?.running && bootstrap.run.last_state?.phoneOnly === true);
+  const phoneOnlyUi = salesApp || phoneOnlyRun;
   const bridgeOnline =
     !!pipe.current &&
     Date.now() - pipe.current.lastReceivedAt <
@@ -1186,26 +1189,33 @@ export default function TouchMobileSalesPage() {
               <small>{printLabel(detail.printStatus)}</small>
             </article>
           </section>
-          <section className="touch-detail-section">
-            <h3>다른 장면</h3>
-            <p className="touch-muted">PC에 24시간 보관 · 판매 사진은 1장</p>
-            <button
-              onClick={() => {
-                pipe.current?.send({
-                  kind: 'get-candidates',
-                  saleId: detail.id,
-                });
-                if (transport !== 'DIRECT')
-                  setNotice('예비 연결 중에는 PC에서 다른 장면을 골라 주세요.');
-              }}
-            >
-              2초 전·기준·2초 후 보기
-            </button>
-          </section>
+          {!phoneOnlyUi && (
+            <section className="touch-detail-section">
+              <h3>다른 장면</h3>
+              <p className="touch-muted">PC에 24시간 보관 · 판매 사진은 1장</p>
+              <button
+                onClick={() => {
+                  pipe.current?.send({
+                    kind: 'get-candidates',
+                    saleId: detail.id,
+                  });
+                  if (transport !== 'DIRECT')
+                    setNotice('예비 연결 중에는 PC에서 다른 장면을 골라 주세요.');
+                }}
+              >
+                2초 전·기준·2초 후 보기
+              </button>
+            </section>
+          )}
           <section className="touch-detail-section">
             <h3>근거 댓글</h3>
             <strong>{detail.comment?.nickname || detail.buyerNickname}</strong>
-            <p>{detail.comment?.content || 'PC에서 등록한 판매입니다.'}</p>
+            <p>
+              {detail.comment?.content ||
+                (phoneOnlyUi
+                  ? '등록된 근거 댓글이 없습니다.'
+                  : 'PC에서 등록한 판매입니다.')}
+            </p>
           </section>
           {!!detailMeta?.history.length && (
             <section className="touch-detail-section">
@@ -1268,7 +1278,9 @@ export default function TouchMobileSalesPage() {
                   .resetCapture(detail.id)
                   .then(() => {
                     setNotice(
-                      '상품을 다시 보여주세요. PC가 방송 지연을 보정해 촬영합니다.',
+                      phoneOnlyUi
+                        ? '상품을 다시 보여주세요. 폰에서 카운트다운 뒤 촬영합니다.'
+                        : '상품을 다시 보여주세요. PC가 방송 지연을 보정해 촬영합니다.',
                     );
                     return refresh();
                   })
@@ -1504,11 +1516,11 @@ export default function TouchMobileSalesPage() {
         </button>
       </nav>
       <div
-        className={`touch-status-line ${!onlinePc ? 'touch-status-offline' : ''}`}
+        className={`touch-status-line ${!phoneOnlyUi && !onlinePc ? 'touch-status-offline' : ''}`}
       >
         <strong>{compactSession}</strong>
-        {phoneOnlyRun ? (
-          <span>폰 단독 판매</span>
+        {phoneOnlyUi ? (
+          <span>{phoneOnlyRun ? '폰 단독 판매' : '폰 판매 대기'}</span>
         ) : (
           <>
             <span>
@@ -1543,11 +1555,12 @@ export default function TouchMobileSalesPage() {
       />
       {!enabled && !phoneRunning && (
         <p className="touch-waiting">
-          PC 라이브 청취 홈에서 댓글터치 · 판매 시작을 누르거나, 위의 폰으로
-          판매 시작을 눌러 주세요.
+          {phoneOnlyUi
+            ? '위의 폰으로 판매 시작을 눌러 주세요.'
+            : 'PC 라이브 청취 홈에서 댓글터치 · 판매 시작을 누르거나, 위의 폰으로 판매 시작을 눌러 주세요.'}
         </p>
       )}
-      {!onlinePc && enabled && (
+      {!phoneOnlyUi && !onlinePc && enabled && (
         <p className="touch-waiting">
           PC 연결 끊김 · 새 댓글과 전표 대기. 이미 받은 댓글의 판매는 저장할 수
           있습니다.
@@ -1560,24 +1573,24 @@ export default function TouchMobileSalesPage() {
       )}
       {tab === 'SELL' ? (
         <>
-{!phoneOnlyRun && (
-          <div className="touch-audio-hint">
-            <button
-              onClick={() => {
-                setMicEnabled((v) => !v);
-                setMicStatus(
-                  micEnabled ? '설정값으로 촬영' : '마이크 허용 후 지연 측정',
-                );
-              }}
-            >
-              {micEnabled ? '지연 측정 끄기' : '마이크로 지연 측정'}
-            </button>
-            <small>
-              {transport !== 'DIRECT'
-                ? '예비 연결에서는 설정값 사용'
-                : micStatus || '녹음·음성 전송 없음'}
-            </small>
-          </div>
+          {!phoneOnlyUi && (
+            <div className="touch-audio-hint">
+              <button
+                onClick={() => {
+                  setMicEnabled((v) => !v);
+                  setMicStatus(
+                    micEnabled ? '설정값으로 촬영' : '마이크 허용 후 지연 측정',
+                  );
+                }}
+              >
+                {micEnabled ? '지연 측정 끄기' : '마이크로 지연 측정'}
+              </button>
+              <small>
+                {transport !== 'DIRECT'
+                  ? '예비 연결에서는 설정값 사용'
+                  : micStatus || '녹음·음성 전송 없음'}
+              </small>
+            </div>
           )}
           {multi && (
             <TouchNumberBar
@@ -1589,6 +1602,13 @@ export default function TouchMobileSalesPage() {
           )}
           <TouchCommentList
             comments={displayComments}
+            emptyMessage={
+              phoneOnlyUi
+                ? phoneOnlyRun
+                  ? '새 댓글을 기다리고 있습니다.'
+                  : '폰으로 판매를 시작하면 실시간 댓글이 이곳에 표시됩니다.'
+                : undefined
+            }
             selection={selection}
             selectedComment={selectedSnapshot}
             sold={sold}

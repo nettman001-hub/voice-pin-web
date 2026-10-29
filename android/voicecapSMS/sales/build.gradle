@@ -17,12 +17,12 @@ android {
 
     defaultConfig {
         // 판매 폰용 앱. 문자 앱(shop.voicecap.smsbridge)·입금확인 앱과 다른 앱으로 따로 설치된다.
-        applicationId 'shop.voicecap.sales'
+        applicationId 'shop.voicecap.seller'
         minSdk 26
         targetSdk 36
-        versionCode 1
-        versionName '1.0.0'
-        def webBaseUrl = (project.findProperty('VOICECAP_WEB_BASE_URL') ?: 'https://voicecap.shop').toString().replaceAll('/+$', '')
+        versionCode 2
+        versionName '1.0.1'
+        def webBaseUrl = (project.findProperty('VOICECAP_WEB_BASE_URL') ?: 'https://www.voicecap.shop').toString().replaceAll('/+$', '')
         buildConfigField 'String', 'VOICECAP_WEB_BASE_URL', '"' + webBaseUrl.replace('"', '\\"') + '"'
     }
 
