@@ -51,7 +51,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * "VoiceCAP 판매": [판매] 탭은 voicecap.shop/sell, [관리] 탭은 판매내역 웹 화면.
+ * "VoiceCAP 판매": 하나의 WebView에서 [판매]·[관리] 화면과 로그인 상태를 함께 유지한다.
  * 웹이 라벨을 그리고 명령 바이트를 만들면 window.VoiceCapAndroid로 받아 블루투스로 보낸다.
  * 결과는 window 'voicecap-android' 이벤트(detail = JSON 문자열)로 돌려준다.
  */
@@ -63,9 +63,9 @@ public class MainActivity extends Activity {
     private static final int REQ_FILE = 14;
 
     private final Handler main = new Handler(Looper.getMainLooper());
-    private WebView sellView;
-    private WebView manageView;
-    private WebView current;
+    private WebView webView;
+    private volatile String selectedTab = "sell";
+    private boolean initialTabDispatched;
     private Button sellTab;
     private Button manageTab;
     private PermissionRequest pendingCamera;
@@ -91,10 +91,8 @@ public class MainActivity extends Activity {
         FrameLayout pages = new FrameLayout(this);
         root.addView(pages, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        sellView = createWebView();
-        manageView = createWebView();
-        pages.addView(sellView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        pages.addView(manageView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        webView = createWebView();
+        pages.addView(webView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         LinearLayout tabs = new LinearLayout(this);
         tabs.setOrientation(LinearLayout.HORIZONTAL);
@@ -104,13 +102,13 @@ public class MainActivity extends Activity {
         tabs.addView(sellTab, new LinearLayout.LayoutParams(0, dp(52), 1f));
         tabs.addView(manageTab, new LinearLayout.LayoutParams(0, dp(52), 1f));
         root.addView(tabs, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        sellTab.setOnClickListener(v -> show(sellView));
-        manageTab.setOnClickListener(v -> show(manageView));
+        sellTab.setOnClickListener(v -> selectTab("sell"));
+        manageTab.setOnClickListener(v -> selectTab("manage"));
 
         applySystemBarInsets(root);
         setContentView(root);
-        sellView.loadUrl(base() + "/sell");
-        show(sellView);
+        updateSelectedTab("sell");
+        webView.loadUrl(base() + "/app/sell");
         // targetSdk 36에서는 onBackPressed가 불리지 않는다(예측 뒤로 가기).
         if (Build.VERSION.SDK_INT >= 33)
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
@@ -129,16 +127,24 @@ public class MainActivity extends Activity {
         return b;
     }
 
-    private void show(WebView view) {
-        if (view == manageView && manageView.getUrl() == null) manageView.loadUrl(base() + "/sales");
-        current = view;
-        sellView.setVisibility(view == sellView ? View.VISIBLE : View.GONE);
-        manageView.setVisibility(view == manageView ? View.VISIBLE : View.GONE);
-        styleTab(sellTab, view == sellView);
-        styleTab(manageTab, view == manageView);
-        // WebView 표시 전환만으로는 웹의 focus/visibilitychange가 보장되지 않는다.
-        // 이미 열린 탭도 다른 탭에서 바뀐 로그인 상태를 공유 저장소에서 다시 읽게 한다.
-        emit(view, event("app-tab-active", null, true, null));
+    /** 탭은 같은 문서의 라우터로 전환한다. 새로 읽으면 진행 중인 판매 상태를 잃는다. */
+    private void selectTab(String tab) {
+        if (!updateSelectedTab(tab)) return;
+        emitSelectedTab();
+    }
+
+    private boolean updateSelectedTab(String tab) {
+        if (!"sell".equals(tab) && !"manage".equals(tab)) return false;
+        selectedTab = tab;
+        styleTab(sellTab, "sell".equals(tab));
+        styleTab(manageTab, "manage".equals(tab));
+        return true;
+    }
+
+    private void emitSelectedTab() {
+        JSONObject detail = event("app-tab-change", null, true, null);
+        try { detail.put("tab", selectedTab); } catch (JSONException ignored) { }
+        emit(webView, detail);
     }
 
     private void styleTab(Button b, boolean active) {
@@ -170,8 +176,12 @@ public class MainActivity extends Activity {
         view.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView v, String url) {
-                // 첫 진입/로그인 이동 중 show()의 알림이 웹 초기화보다 먼저 온 경우를 보완한다.
-                if (v == current) emit(v, event("app-tab-active", null, true, null));
+                // 초기 로딩 중 선택한 탭도 웹의 라우터가 준비된 뒤 반영한다.
+                // 이후 history/fragment 이동에는 이전 탭 명령을 다시 보내지 않는다.
+                if (!initialTabDispatched) {
+                    initialTabDispatched = true;
+                    emitSelectedTab();
+                }
             }
 
             @Override
@@ -323,8 +333,8 @@ public class MainActivity extends Activity {
 
     /** 뒤로: 웹 뒤로 → 관리 탭이면 판매 탭 → 판매 탭이면 앱을 닫지 않고 뒤로 보낸다(판매·프린터 연결 유지). */
     private void handleBack() {
-        if (current != null && current.canGoBack()) current.goBack();
-        else if (current == manageView) show(sellView);
+        if (webView != null && webView.canGoBack()) webView.goBack();
+        else if ("manage".equals(selectedTab)) selectTab("sell");
         else moveTaskToBack(true);
     }
 
@@ -344,8 +354,7 @@ public class MainActivity extends Activity {
             open.getKey().dismiss();
         }
         jsDialogs.clear();
-        sellView.destroy();
-        manageView.destroy();
+        webView.destroy();
         super.onDestroy();
     }
 
@@ -471,6 +480,8 @@ public class MainActivity extends Activity {
             try {
                 o.put("app", "sales");
                 o.put("version", BuildConfig.VERSION_NAME);
+                o.put("singleWebView", true);
+                o.put("tab", selectedTab);
             } catch (JSONException ignored) { }
             return o.toString();
         }
@@ -478,7 +489,13 @@ public class MainActivity extends Activity {
         /** [관리] 탭의 판매 중 띠에서 [판매] 탭으로 바로 간다. */
         @JavascriptInterface
         public void showSell() {
-            main.post(() -> show(sellView));
+            main.post(() -> selectTab("sell"));
+        }
+
+        /** 웹의 뒤로가기를 탭 선택 표시에 반영한다. 라우터와 순환하지 않게 이벤트는 보내지 않는다. */
+        @JavascriptInterface
+        public void setTab(String tab) {
+            main.post(() -> updateSelectedTab(tab));
         }
 
         @JavascriptInterface

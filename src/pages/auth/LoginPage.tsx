@@ -15,6 +15,7 @@ const sellerHome = () => (isSalesApp() ? '/sales' : '/live');
 export const LoginPage: React.FC<{ returnTo?: string }> = ({ returnTo } = {}) => {
   const { login, isLocked, lockUntil, loginAttempts, isRemoteAuth, isAuthenticated, isInitialized, user } = useAuth();
   const navigate = useNavigate();
+  const salesReturnTo = returnTo === '/sell' || returnTo === '/app/sell' ? returnTo : null;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -34,8 +35,8 @@ export const LoginPage: React.FC<{ returnTo?: string }> = ({ returnTo } = {}) =>
   // 자동 로그인으로 이미 로그인된 상태면 로그인 화면을 건너뛴다.
   useEffect(() => {
     if (!isInitialized || !isAuthenticated || isSubmitting) return;
-    navigate(returnTo === '/sell' ? '/sell' : user?.role === '관리자' ? '/admin' : sellerHome(), { replace: true });
-  }, [isInitialized, isAuthenticated, isSubmitting, user, navigate, returnTo]);
+    navigate(salesReturnTo || (user?.role === '관리자' ? '/admin' : sellerHome()), { replace: true });
+  }, [isInitialized, isAuthenticated, isSubmitting, user, navigate, salesReturnTo]);
 
   const handleAutoLoginChange = (checked: boolean) => {
     setAutoLogin(checked);
@@ -62,8 +63,8 @@ export const LoginPage: React.FC<{ returnTo?: string }> = ({ returnTo } = {}) =>
         clearAutoLoginCredentials();
       }
 
-      if (returnTo === '/sell') {
-        navigate('/sell');
+      if (salesReturnTo) {
+        navigate(salesReturnTo);
       } else if (email.includes('admin')) {
         navigate('/admin');
       } else {
