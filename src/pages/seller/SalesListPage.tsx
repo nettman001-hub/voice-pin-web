@@ -46,6 +46,13 @@ import { isBillableSale } from '../../services/billableSales';
 import { needsServerReview } from '../../services/serverRejectedSale';
 import { findNicknameInMessages, messageMentionsNickname, needsNicknameConfirmation } from '../../services/smsNicknameLink';
 import { useBuyerPhoneLinks } from '../../hooks/useBuyerPhoneLinks';
+import {
+  AppRowActions,
+  AppSaleMenuSheet,
+  AppTotalsBar,
+  appRowPress,
+  type AppMenuTarget,
+} from '../../components/sales/AppSaleMenu';
 
 const getBankBadgeStyle = (bank?: string | null): string => {
   if (!bank) return 'bg-slate-100 text-slate-700 border-slate-200';
@@ -129,6 +136,8 @@ export const SalesListPage: React.FC = () => {
   const [cloudSessions, setCloudSessions] = useState<LiveSession[]>([]);
   const [shippingConfig, setShippingConfig] = useState(() => shippingService.getConfig(workspaceId));
   const [actionToast, setActionToast] = useState<string | null>(null);
+  // 판매 앱에서 카드의 ⋯ 버튼·길게 누르기로 여는 메뉴
+  const [appMenu, setAppMenu] = useState<AppMenuTarget | null>(null);
 
   // 최근 삭제 내역 (실행 취소 / Undo 지원)
   const [deletedHistory, setDeletedHistory] = useState<{
@@ -175,14 +184,14 @@ export const SalesListPage: React.FC = () => {
   };
 
   // 구매자별 내역 전체 삭제 핸들러
-  const handleDeleteBuyer = (buyer: BuyerGroupedSale, e?: React.MouseEvent) => {
+  const handleDeleteBuyer = (buyer: BuyerGroupedSale, e?: React.MouseEvent, alreadyConfirmed = false) => {
     e?.stopPropagation();
     const count = buyer.records.length;
     if (count === 0) {
       alert('삭제할 판매 내역이 없습니다.');
       return;
     }
-    const confirmed = window.confirm(
+    const confirmed = alreadyConfirmed || window.confirm(
       `'${buyer.buyerNickname}' 님의 판매 내역 전체 (${count}건)를 삭제하시겠습니까?\n(삭제 후 5초 동안 화면 하단에서 실행 취소할 수 있습니다.)`
     );
     if (!confirmed) return;
@@ -197,11 +206,11 @@ export const SalesListPage: React.FC = () => {
   };
 
   // 개별 판매 내역 단건 삭제 핸들러
-  const handleDeleteSingleSale = (sale: SaleRecord, e?: React.MouseEvent) => {
+  const handleDeleteSingleSale = (sale: SaleRecord, e?: React.MouseEvent, alreadyConfirmed = false) => {
     e?.preventDefault();
     e?.stopPropagation();
     const title = sale.productName || sale.productCode || (sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '해당 판매 건');
-    const confirmed = window.confirm(
+    const confirmed = alreadyConfirmed || window.confirm(
       `'${sale.buyerNickname}' 님의 [${title}] 판매 내역을 삭제하시겠습니까?\n(삭제 후 5초 동안 화면 하단에서 실행 취소할 수 있습니다.)`
     );
     if (!confirmed) return;
@@ -209,6 +218,29 @@ export const SalesListPage: React.FC = () => {
     const recordToBackup = [sale];
     deleteSale(sale.id);
     triggerUndoableDelete(recordToBackup, `'${title}' 판매 내역 1건`);
+  };
+
+  // 판매 앱 전용 메뉴(⋯ 버튼, 길게 누르기). 확인은 메뉴 안에서 하므로 window.confirm을 거치지 않는다.
+  const openSaleMenu = (sale: SaleRecord) => {
+    const printable = sale.status !== '보류' && sale.status !== '취소'
+      && sale.recordState !== 'CANCELLED' && sale.syncStatus !== 'PENDING';
+    setAppMenu({
+      title: `${sale.buyerNickname}님`,
+      subtitle: `${sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '금액 미확인'} · ${new Date(sale.recognizedAt).toLocaleTimeString('ko-KR')}`,
+      detailHref: runtime.path(`/sales/${sale.id}${sessionQuery}`),
+      reprint: printable ? sale : undefined,
+      deleteLabel: '이 판매 내역 삭제',
+      onDelete: () => handleDeleteSingleSale(sale, undefined, true),
+    });
+  };
+  const openBuyerMenu = (buyer: BuyerGroupedSale) => {
+    if (buyer.records.length === 0) return;
+    setAppMenu({
+      title: `${buyer.buyerNickname}님`,
+      subtitle: `${buyer.records.length}건 · 합계 ${buyer.totalAmount.toLocaleString()}원`,
+      deleteLabel: `이 구매자의 판매 내역 ${buyer.records.length}건 전체 삭제`,
+      onDelete: () => handleDeleteBuyer(buyer, undefined, true),
+    });
   };
 
   useEffect(() => {
@@ -752,6 +784,13 @@ export const SalesListPage: React.FC = () => {
         </div>
       </div>
 
+      {/* 판매 앱: 합계 카드가 화면 위로 올라가면 헤더 밑에 한 줄 합계가 따라온다 */}
+      <AppTotalsBar
+        count={currentSessionSummary.totalCount}
+        amount={currentSessionSummary.totalAmount}
+        pending={currentSessionSummary.pendingCount}
+      />
+
       {/* 필터 & 뷰 모드 전환 바 */}
       <div className="bg-white border border-slate-200 rounded-2xl p-2.5 sm:p-3 shadow-sm space-y-2">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
@@ -871,6 +910,7 @@ export const SalesListPage: React.FC = () => {
                   >
                     <div
                       className="w-full p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left hover:bg-slate-50/80 transition"
+                      {...appRowPress(() => openBuyerMenu(buyer))}
                     >
                       <div
                         onClick={() => toggleBuyerExpand(buyer.groupKey)}
@@ -1095,15 +1135,20 @@ export const SalesListPage: React.FC = () => {
                           )}
                         </div>
 
-                        {/* 구매자 판매 내역 전체 삭제 버튼 */}
-                        <button
-                          type="button"
-                          onClick={(e) => handleDeleteBuyer(buyer, e)}
-                          className="p-2 rounded-xl bg-slate-100 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-slate-400 hover:text-rose-600 transition cursor-pointer flex-shrink-0"
-                          title={`'${buyer.buyerNickname}' 구매자 내역 전체 (${buyer.records.length}건) 삭제`}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {/* 구매자 판매 내역 전체 삭제 버튼 (판매 앱에서는 ⋯ 메뉴 안으로 들어간다) */}
+                        <AppRowActions
+                          onOpen={() => openBuyerMenu(buyer)}
+                          fallback={
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteBuyer(buyer, e)}
+                              className="p-2 rounded-xl bg-slate-100 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-slate-400 hover:text-rose-600 transition cursor-pointer flex-shrink-0"
+                              title={`'${buyer.buyerNickname}' 구매자 내역 전체 (${buyer.records.length}건) 삭제`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          }
+                        />
 
                         {/* 펼치기/접기 버튼 */}
                         <button
@@ -1169,6 +1214,7 @@ export const SalesListPage: React.FC = () => {
                           <div
                             key={rec.id}
                             className="p-3 rounded-xl bg-white border border-slate-200 hover:border-brand-400 flex items-center justify-between text-xs transition shadow-sm group"
+                            {...appRowPress(() => openSaleMenu(rec))}
                           >
                             <Link
                               to={runtime.path(`/sales/${rec.id}${sessionQuery}`)}
@@ -1249,21 +1295,28 @@ export const SalesListPage: React.FC = () => {
                                 <span className="text-xs text-brand-600 font-mono ml-1 font-semibold">({formatAmountAsDecimal(rec.amount)})</span>
                               </span>
                               <span className="text-[10px] text-slate-400">{new Date(rec.recognizedAt).toLocaleTimeString('ko-KR')}</span>
-                              <button
-                                type="button"
-                                onClick={(e) => handleDeleteSingleSale(rec, e)}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition cursor-pointer"
-                                title="이 판매 내역 삭제"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                              <Link
-                                to={runtime.path(`/sales/${rec.id}${sessionQuery}`)}
-                                className="text-slate-400 group-hover:text-brand-600 transition p-1"
-                                title="상세 보기 및 수정"
-                              >
-                                <ArrowRight className="w-3.5 h-3.5" />
-                              </Link>
+                              <AppRowActions
+                                onOpen={() => openSaleMenu(rec)}
+                                fallback={
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleDeleteSingleSale(rec, e)}
+                                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition cursor-pointer"
+                                      title="이 판매 내역 삭제"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                    <Link
+                                      to={runtime.path(`/sales/${rec.id}${sessionQuery}`)}
+                                      className="text-slate-400 group-hover:text-brand-600 transition p-1"
+                                      title="상세 보기 및 수정"
+                                    >
+                                      <ArrowRight className="w-3.5 h-3.5" />
+                                    </Link>
+                                  </>
+                                }
+                              />
                             </div>
                           </div>
                           );
@@ -1297,6 +1350,7 @@ export const SalesListPage: React.FC = () => {
                     key={sale.id}
                     to={runtime.path(`/sales/${sale.id}${sessionQuery}`)}
                     className="block p-4 rounded-2xl bg-white border border-slate-200 hover:border-brand-400 transition shadow-sm group"
+                    {...appRowPress(() => openSaleMenu(sale))}
                   >
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                       <div className="flex items-start space-x-3.5 sm:space-x-4 min-w-0 flex-1">
@@ -1517,14 +1571,19 @@ export const SalesListPage: React.FC = () => {
                             <Clock className="w-3 h-3" />
                             <span>{new Date(sale.recognizedAt).toLocaleString('ko-KR')}</span>
                           </div>
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteSingleSale(sale, e)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition cursor-pointer"
-                            title="이 판매 내역 삭제"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <AppRowActions
+                            onOpen={() => openSaleMenu(sale)}
+                            fallback={
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteSingleSale(sale, e)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition cursor-pointer"
+                                title="이 판매 내역 삭제"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            }
+                          />
                         </div>
                       </div>
                     </div>
@@ -1538,7 +1597,7 @@ export const SalesListPage: React.FC = () => {
 
       {/* 실행 취소(Undo) 플로팅 바 */}
       {deletedHistory && (
-        <div className="fixed bottom-6 right-6 z-50 p-3.5 sm:p-4 rounded-2xl bg-slate-900/95 text-white text-xs shadow-2xl border border-slate-700 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-3 backdrop-blur-md">
+        <div className="fixed bottom-24 right-4 sm:bottom-6 sm:right-6 z-50 p-3.5 sm:p-4 rounded-2xl bg-slate-900/95 text-white text-xs shadow-2xl border border-slate-700 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-3 backdrop-blur-md">
           <div className="flex items-center gap-2">
             <Trash2 className="w-4 h-4 text-rose-400 flex-shrink-0 animate-pulse" />
             <div>
@@ -1558,11 +1617,13 @@ export const SalesListPage: React.FC = () => {
       )}
 
       {actionToast && !deletedHistory && (
-        <div className="fixed bottom-6 right-6 z-50 p-4 rounded-2xl bg-slate-900/95 text-white text-xs font-bold shadow-xl border border-slate-700 flex items-center space-x-2 animate-in fade-in slide-in-from-bottom-2">
+        <div className="fixed bottom-24 right-4 sm:bottom-6 sm:right-6 z-50 p-4 rounded-2xl bg-slate-900/95 text-white text-xs font-bold shadow-xl border border-slate-700 flex items-center space-x-2 animate-in fade-in slide-in-from-bottom-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
           <span>{actionToast}</span>
         </div>
       )}
+
+      <AppSaleMenuSheet target={appMenu} onClose={() => setAppMenu(null)} />
 
       {viewerModal.isOpen && (
         <ImageViewerModal

@@ -13,6 +13,8 @@ export type AndroidNative = {
   saveFile(requestId: string, fileName: string, mime: string, base64: string): void;
   shareFile(fileName: string, mime: string, base64: string): void;
   selling(on: boolean): void;
+  /** 앱 1.0.2부터. 옛 앱에는 없다. */
+  showSell?(): void;
 };
 export type AndroidEvent = {
   type: string;

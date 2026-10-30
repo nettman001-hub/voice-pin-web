@@ -63,6 +63,7 @@ function pageFixture() {
     '../../utils/textCleaner': { cleanMessageBody: (value) => value },
     '../../utils/sessionFormatter': { formatSessionDisplay: (value) => value },
     '../../components/sales/BuyerReconciliationPanel': { BuyerReconciliationPanel: 'BuyerReconciliationPanel', BuyerStatusBadges: 'BuyerStatusBadges' },
+    '../../components/sales/AppSaleMenu': { AppRowActions: 'AppRowActions', AppSaleMenuSheet: 'AppSaleMenuSheet', AppTotalsBar: 'AppTotalsBar', appRowPress: () => ({}) },
   };
   for (const [name, path] of [
     ['AiSaleBadge', '../../components/sales/AiSaleBadge'],
