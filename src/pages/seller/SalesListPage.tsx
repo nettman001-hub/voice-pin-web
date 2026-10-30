@@ -183,6 +183,18 @@ export const SalesListPage: React.FC = () => {
     showToast(`삭제를 취소하고 판매 내역 ${count}건을 정상 복구했습니다.`);
   };
 
+  // 댓글터치 판매의 삭제는 서버에 "취소"로 저장되고 서버는 취소된 판매를 되살리지 않는다.
+  // 그래서 터치 판매는 실행 취소를 띄우지 않는다(띄우면 화면에만 되살아나고 서버는 그대로 취소).
+  const undoNote = (records: SaleRecord[]) =>
+    records.some((r) => r.touchSale)
+      ? '댓글터치 판매는 취소로 저장되며 되돌릴 수 없습니다.'
+      : '삭제 후 5초 동안 화면 하단에서 실행 취소할 수 있습니다.';
+  const finishDelete = (records: SaleRecord[], label: string) => {
+    const undoable = records.filter((r) => !r.touchSale);
+    if (undoable.length > 0) triggerUndoableDelete(undoable, undoable.length === records.length ? label : `${label} 중 ${undoable.length}건`);
+    if (undoable.length < records.length) showToast(`${label}: 댓글터치 판매 ${records.length - undoable.length}건을 취소로 저장했습니다.`);
+  };
+
   // 구매자별 내역 전체 삭제 핸들러
   const handleDeleteBuyer = (buyer: BuyerGroupedSale, e?: React.MouseEvent, alreadyConfirmed = false) => {
     e?.stopPropagation();
@@ -192,7 +204,7 @@ export const SalesListPage: React.FC = () => {
       return;
     }
     const confirmed = alreadyConfirmed || window.confirm(
-      `'${buyer.buyerNickname}' 님의 판매 내역 전체 (${count}건)를 삭제하시겠습니까?\n(삭제 후 5초 동안 화면 하단에서 실행 취소할 수 있습니다.)`
+      `'${buyer.buyerNickname}' 님의 판매 내역 전체 (${count}건)를 삭제하시겠습니까?\n(${undoNote(buyer.records)})`
     );
     if (!confirmed) return;
 
@@ -202,7 +214,7 @@ export const SalesListPage: React.FC = () => {
     });
 
     setExpandedBuyers((prev) => prev.filter((k) => k !== buyer.groupKey));
-    triggerUndoableDelete(recordsToBackup, `'${buyer.buyerNickname}' 님의 판매 내역 ${count}건`);
+    finishDelete(recordsToBackup, `'${buyer.buyerNickname}' 님의 판매 내역 ${count}건`);
   };
 
   // 개별 판매 내역 단건 삭제 핸들러
@@ -211,13 +223,13 @@ export const SalesListPage: React.FC = () => {
     e?.stopPropagation();
     const title = sale.productName || sale.productCode || (sale.amount > 0 ? `${sale.amount.toLocaleString()}원` : '해당 판매 건');
     const confirmed = alreadyConfirmed || window.confirm(
-      `'${sale.buyerNickname}' 님의 [${title}] 판매 내역을 삭제하시겠습니까?\n(삭제 후 5초 동안 화면 하단에서 실행 취소할 수 있습니다.)`
+      `'${sale.buyerNickname}' 님의 [${title}] 판매 내역을 삭제하시겠습니까?\n(${undoNote([sale])})`
     );
     if (!confirmed) return;
 
     const recordToBackup = [sale];
     deleteSale(sale.id);
-    triggerUndoableDelete(recordToBackup, `'${title}' 판매 내역 1건`);
+    finishDelete(recordToBackup, `'${title}' 판매 내역 1건`);
   };
 
   // 판매 앱 전용 메뉴(⋯ 버튼, 길게 누르기). 확인은 메뉴 안에서 하므로 window.confirm을 거치지 않는다.
@@ -230,6 +242,7 @@ export const SalesListPage: React.FC = () => {
       detailHref: runtime.path(`/sales/${sale.id}${sessionQuery}`),
       reprint: printable ? sale : undefined,
       deleteLabel: '이 판매 내역 삭제',
+      deleteNote: undoNote([sale]),
       onDelete: () => handleDeleteSingleSale(sale, undefined, true),
     });
   };
@@ -239,6 +252,7 @@ export const SalesListPage: React.FC = () => {
       title: `${buyer.buyerNickname}님`,
       subtitle: `${buyer.records.length}건 · 합계 ${buyer.totalAmount.toLocaleString()}원`,
       deleteLabel: `이 구매자의 판매 내역 ${buyer.records.length}건 전체 삭제`,
+      deleteNote: undoNote(buyer.records),
       onDelete: () => handleDeleteBuyer(buyer, undefined, true),
     });
   };

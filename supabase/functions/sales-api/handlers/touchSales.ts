@@ -23,6 +23,7 @@ const messages: Record<string, string> = {
   OPERATION_PAYLOAD_MISMATCH: '같은 작업 번호로 다른 판매를 보낼 수 없습니다.',
   COMMENT_IDENTITY_CONFLICT: '댓글 계정 정보가 일치하지 않습니다.',
   PRINT_ALREADY_PENDING: '아직 처리 중인 전표가 있습니다.',
+  SALE_CANCELLED: '취소된 판매입니다.',
   CAPTURE_LEASE_LOST: '사진을 촬영하는 기기의 판매 연결을 확인해 주세요.',
 };
 async function rpc(name: string, params: Record<string, unknown>) {
@@ -336,6 +337,32 @@ export async function handleTouchSales(auth: AuthContext, body: any) {
           p_result: body.result || null,
         }),
       );
+    if (body.action === 'touch-direct-print') {
+      const kind = body.kind;
+      if (
+        !['BEGIN', 'FINISH'].includes(kind) ||
+        (kind === 'BEGIN' && (typeof body.saleId !== 'string' || !body.saleId)) ||
+        (kind === 'FINISH' &&
+          (!/^[0-9a-f-]{36}$/i.test(body.jobId || '') ||
+            typeof body.leaseToken !== 'string' ||
+            !['SUCCESS', 'FAILED'].includes(body.result)))
+      )
+        return errorResponse('VALIDATION_ERROR', '출력 요청을 확인해 주세요.');
+      return respond(
+        await rpc('voicecap_touch_direct_print', {
+          p_workspace_id: workspace,
+          p_actor_id: auth.actorId,
+          p_payload: {
+            kind,
+            saleId: body.saleId,
+            expectedRevision: Number.isInteger(body.expectedRevision) ? body.expectedRevision : null,
+            jobId: body.jobId,
+            leaseToken: body.leaseToken,
+            result: body.result,
+          },
+        }),
+      );
+    }
     if (body.action === 'touch-record-print') {
       if (
         typeof body.saleId !== 'string' ||

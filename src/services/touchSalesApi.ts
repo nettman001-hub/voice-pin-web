@@ -66,9 +66,17 @@ export class TouchSalesApi {
   ) {
     return this.call('touch-print', { kind, jobId, leaseToken, result });
   }
-  /** 판매를 켜지 않고 폰 프린터로 바로 출력한 결과를 서버 기록에 남긴다. */
-  recordPrint(saleId: string, result: 'SUCCESS' | 'FAILED') {
-    return this.call('touch-record-print', { saleId, result });
+  /** 판매를 켜지 않고 폰 프린터로 바로 출력하기 전에 서버에서 자리를 잡는다(취소·수정·대기 전표 확인). */
+  beginDirectPrint(saleId: string, expectedRevision?: number) {
+    return this.call<{
+      jobId: string;
+      leaseToken: string;
+      sale: { buyerNickname: string; amount: number; productName?: string | null };
+    }>('touch-direct-print', { kind: 'BEGIN', saleId, expectedRevision });
+  }
+  /** 잡아 둔 직접 출력의 결과를 남긴다. 같은 요청을 다시 보내도 한 번만 기록된다. */
+  finishDirectPrint(jobId: string, leaseToken: string, result: 'SUCCESS' | 'FAILED') {
+    return this.call('touch-direct-print', { kind: 'FINISH', jobId, leaseToken, result });
   }
   claimCaptures(producerId: string) {
     return this.call<{ captures: any[] }>('claim-touch-captures', {

@@ -101,6 +101,12 @@ export const setKeepLogin = (enabled: boolean) => {
  */
 export const authSessionStorage = {
   getItem(key: string): string | null {
+    // 앱에서는 localStorage만 본다. 웹뷰마다 따로 남은 예전 sessionStorage 세션은 지운다.
+    // (그대로 두면 다른 탭에서 로그아웃한 뒤 이 웹뷰가 예전 계정 세션으로 되돌아갈 수 있다.)
+    if (isSalesApp()) {
+      safeRemove(getSession(), key);
+      return safeGet(getLocal(), key);
+    }
     if (isKeepLoginEnabled()) {
       return safeGet(getLocal(), key) ?? safeGet(getSession(), key);
     }

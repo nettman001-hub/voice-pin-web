@@ -22,25 +22,29 @@ export function useAppReprint() {
     if (!workspaceId) return;
     const printer = (printerRef.current ||= createPhonePrinter());
     const api = new TouchSalesApi(workspaceId);
-    setResult({ state: 'working', message: connectFirst ? '프린터를 고르는 중…' : '출력하는 중…' });
+    setResult({ state: 'working', message: connectFirst ? '판매 상태를 확인한 뒤 프린터를 고릅니다…' : '출력하는 중…' });
     try {
-      if (connectFirst) await printer.connect();
-      const mode = await reprintInApp(sale, {
-        bootstrap: () => api.bootstrap(),
-        queueReprint: async (target) => {
-          await api.update({ saleId: target.id, expectedRevision: target.revision || 1, kind: 'REPRINT' });
+      const mode = await reprintInApp(
+        sale,
+        {
+          bootstrap: () => api.bootstrap(),
+          queueReprint: async (target) => {
+            await api.update({ saleId: target.id, expectedRevision: target.revision || 1, kind: 'REPRINT' });
+          },
+          beginDirect: (target) => api.beginDirectPrint(target.id, target.revision),
+          finishDirect: (ticket, printResult) => api.finishDirectPrint(ticket.jobId, ticket.leaseToken, printResult),
+          printer,
+          label: (content) => saleLabelBytes(content),
         },
-        recordPrint: async (saleId, printResult) => {
-          await api.recordPrint(saleId, printResult);
-          await refreshSales();
-        },
-        printer,
-        label: (content) => saleLabelBytes(content),
-      });
+        { connectFirst },
+      );
+      if (mode !== 'QUEUED') void refreshSales().catch(() => {});
       setResult(
         mode === 'QUEUED'
           ? { state: 'queued', message: '판매 중이라 [판매] 탭이 새 판매 전표와 차례로 출력합니다.' }
-          : { state: 'ok', message: `프린터(${printer.name || '연결됨'})로 출력했습니다.` },
+          : mode === 'PRINTED_UNRECORDED'
+            ? { state: 'ok', message: `프린터(${printer.name || '연결됨'})로 출력했지만 서버 기록을 남기지 못했습니다. 판매내역에는 잠시 뒤 "출력 여부 확인 필요"로 보일 수 있습니다.` }
+            : { state: 'ok', message: `프린터(${printer.name || '연결됨'})로 출력했습니다.` },
       );
     } catch (error) {
       const code = (error as { code?: string }).code;

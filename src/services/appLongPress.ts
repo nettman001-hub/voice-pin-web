@@ -14,7 +14,7 @@ const realTimers: LongPressTimers = {
   now: () => Date.now(),
 };
 
-/** 길게 누른 뒤 이 시간 안에 오는 클릭만 삼킨다(클릭이 안 오는 기기에서 다음 탭을 막지 않도록). */
+/** 길게 누른 뒤 손을 뗀 때부터 이 시간 안에 오는 클릭만 삼킨다(클릭이 안 오는 기기에서 다음 탭을 막지 않도록). */
 const CLICK_SWALLOW_MS = 800;
 
 export function createLongPress(options: { delayMs?: number; slopPx?: number; timers?: LongPressTimers } = {}) {
@@ -24,7 +24,10 @@ export function createLongPress(options: { delayMs?: number; slopPx?: number; ti
   let timer: unknown = null;
   let originX = 0;
   let originY = 0;
-  let firedAt = -Infinity;
+  // 메뉴가 열린 누르기: 손을 떼기 전(pressing)이거나 뗀 지 얼마 안 됐으면 따라오는 클릭을 삼킨다.
+  let fired = false;
+  let pressing = false;
+  let releasedAt = -Infinity;
 
   const clearTimer = () => {
     if (timer !== null) timers.clear(timer);
@@ -34,11 +37,13 @@ export function createLongPress(options: { delayMs?: number; slopPx?: number; ti
   return {
     start(x: number, y: number, onLongPress: () => void) {
       clearTimer();
+      fired = false;
+      pressing = true;
       originX = x;
       originY = y;
       timer = timers.set(() => {
         timer = null;
-        firedAt = timers.now();
+        fired = true;
         onLongPress();
       }, delayMs);
     },
@@ -47,15 +52,19 @@ export function createLongPress(options: { delayMs?: number; slopPx?: number; ti
     },
     end() {
       clearTimer();
+      pressing = false;
+      releasedAt = timers.now();
     },
     cancel() {
       clearTimer();
+      pressing = false;
+      releasedAt = timers.now();
     },
     /** 길게 눌러 메뉴가 열렸다면 그 직후의 클릭 한 번을 무시하라고 알려 준다. */
     consumeFired() {
-      const fired = timers.now() - firedAt <= CLICK_SWALLOW_MS;
-      firedAt = -Infinity;
-      return fired;
+      const swallow = fired && (pressing || timers.now() - releasedAt <= CLICK_SWALLOW_MS);
+      fired = false;
+      return swallow;
     },
   };
 }
