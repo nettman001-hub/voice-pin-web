@@ -136,6 +136,9 @@ public class MainActivity extends Activity {
         manageView.setVisibility(view == manageView ? View.VISIBLE : View.GONE);
         styleTab(sellTab, view == sellView);
         styleTab(manageTab, view == manageView);
+        // WebView 표시 전환만으로는 웹의 focus/visibilitychange가 보장되지 않는다.
+        // 이미 열린 탭도 다른 탭에서 바뀐 로그인 상태를 공유 저장소에서 다시 읽게 한다.
+        emit(view, event("app-tab-active", null, true, null));
     }
 
     private void styleTab(Button b, boolean active) {
@@ -165,6 +168,12 @@ public class MainActivity extends Activity {
         s.setUserAgentString(s.getUserAgentString() + " VoiceCAPSales/" + BuildConfig.VERSION_NAME);
         view.addJavascriptInterface(new Bridge(view), "VoiceCapAndroid");
         view.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView v, String url) {
+                // 첫 진입/로그인 이동 중 show()의 알림이 웹 초기화보다 먼저 온 경우를 보완한다.
+                if (v == current) emit(v, event("app-tab-active", null, true, null));
+            }
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
                 Uri url = request.getUrl();

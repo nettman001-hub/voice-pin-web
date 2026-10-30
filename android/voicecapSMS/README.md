@@ -16,6 +16,7 @@ VoiceCAP 웹앱의 판매자 작업공간에 1회용 연결 코드로 연결되�
 ## 판매 앱 (`sales`)
 
 - 웹 화면을 그대로 쓰는 앱입니다(WebView). 로그인도 웹과 같습니다. 서버 주소는 `VOICECAP_WEB_BASE_URL` 빌드 속성(기본 `https://www.voicecap.shop`). `voicecap.shop`과 `www.voicecap.shop` 사이의 HTTPS 이동은 앱 안에서 열려 프린터 연결이 유지됩니다.
+- 판매·관리 탭은 같은 로그인 세션을 사용합니다. 1.0.3부터 탭을 열거나 전환하면 웹에 `app-tab-active` 이벤트를 보내 현재 세션을 다시 확인합니다. 이 동작은 해당 이벤트를 처리하는 웹 수정도 함께 반영해야 합니다.
 - 웹이 라벨(50×30mm, 384×240px)을 그리고 Marklife 명령 바이트를 만들면, 앱은 `window.VoiceCapAndroid.printerSend`로 받아 블루투스(서비스 ff00, 쓰기 ff02, 허용 신호 ff03)로 보내기만 합니다. 결과는 `voicecap-android` 이벤트로 돌려줍니다(`src/services/labelPrinter/androidBridge.ts`).
 - 판매 사진은 웹의 `getUserMedia`(앞카메라)로 찍습니다. 앱은 카메라 권한만 묻고 마이크는 허용하지 않습니다.
 - 판매 중에는 "VoiceCAP 판매 중" 알림(전경 서비스, connectedDevice)이 떠 있어 화면을 꺼도 프린터 연결이 유지됩니다.

@@ -92,6 +92,10 @@ export const setKeepLogin = (enabled: boolean) => {
   if (enabled) safeSet(local, KEEP_LOGIN_FLAG_KEY, '1');
   else safeRemove(local, KEEP_LOGIN_FLAG_KEY);
 
+  // 앱은 선택 여부와 관계없이 공용 localStorage를 쓴다. 로그인 직전에 현재 세션을
+  // 웹뷰 전용 저장소로 옮기거나, 다른 웹뷰에 남은 옛 세션으로 덮어쓰지 않는다.
+  if (isSalesApp()) return;
+
   const from = enabled ? session : local;
   const to = enabled ? local : session;
   for (const key of supabaseKeys(from)) {
