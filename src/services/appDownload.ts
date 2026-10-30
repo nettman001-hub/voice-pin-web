@@ -38,7 +38,10 @@ export async function saveFileInApp(fileName: string, mime: string, data: Blob |
 export async function saveUrlInApp(fileName: string, url: string): Promise<boolean> {
   if (!androidNative()) return false;
   try {
-    const blob = await (await fetch(url)).blob();
+    const response = await fetch(url);
+    const blob = await response.blob();
+    // 오류 응답(403·404·500)이나 사진이 아닌 본문(오류 HTML 등)을 사진 파일로 저장하지 않는다.
+    if (!response.ok || (blob.type && !blob.type.startsWith('image/'))) throw new Error(`HTTP ${response.status}`);
     return await saveFileInApp(fileName, blob.type || 'image/png', blob);
   } catch {
     appToast({ message: '사진을 받지 못했습니다. 연결을 확인하고 다시 시도해 주세요.' });

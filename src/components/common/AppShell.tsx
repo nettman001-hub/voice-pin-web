@@ -92,13 +92,19 @@ export const AppSellingBanner: React.FC = () => {
   const last = useRef<{ selling: boolean; count: number } | null>(null);
 
   useEffect(() => {
+    // 계정(작업 공간)이 바뀌면 이전 계정의 띠를 지운다.
+    setSummary(null);
+    last.current = null;
     if (!api) return;
     let stopped = false;
+    // 마지막으로 읽은 판매 상태. 조회가 실패하는 동안에도 판매 연결(lease)이 끝났는지 다시 계산한다.
+    let lastBoot: { run: Parameters<typeof sellingSummary>[0]; serverNow: number; at: number } | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = async () => {
       try {
         if (document.visibilityState !== 'hidden') {
           const boot = await api.bootstrap();
+          lastBoot = { run: boot.run, serverNow: boot.serverNow, at: Date.now() };
           const next = sellingSummary(boot.run, boot.serverNow);
           if (stopped) return;
           setSummary(next);
@@ -109,7 +115,11 @@ export const AppSellingBanner: React.FC = () => {
           last.current = now;
         }
       } catch {
-        // 연결이 잠시 끊겨도 띠만 그대로 두고 다음에 다시 본다.
+        // 연결이 잠시 끊기면 마지막 상태로 띠를 두되, 판매 연결 시간이 지났으면 내린다.
+        if (!stopped && lastBoot) {
+          const { run, serverNow, at } = lastBoot;
+          setSummary(sellingSummary(run, serverNow + (Date.now() - at)));
+        }
       }
       if (!stopped) timer = setTimeout(() => void tick(), POLL_MS);
     };
@@ -186,7 +196,7 @@ export const AppToastHost: React.FC = () => {
   return (
     <div
       role="status"
-      className="fixed bottom-20 left-3 right-3 z-50 mx-auto flex max-w-lg items-center justify-between gap-3 rounded-2xl bg-slate-900 px-4 py-3 text-sm text-white shadow-xl"
+      className="fixed bottom-20 left-3 right-3 z-[200] mx-auto flex max-w-lg items-center justify-between gap-3 rounded-2xl bg-slate-900 px-4 py-3 text-sm text-white shadow-xl"
     >
       <span className="min-w-0 break-words">{toast.message}</span>
       {toast.onAction && (

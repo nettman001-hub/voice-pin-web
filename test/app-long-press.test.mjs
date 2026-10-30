@@ -72,10 +72,12 @@ test('길게 누른 직후의 클릭은 한 번만 삼키고, 시간이 지나�
   const press = createLongPress({ timers: fake.timers });
   press.start(0, 0, () => {});
   fake.advance(500);
+  press.end();
   assert.equal(press.consumeFired(), true);
   assert.equal(press.consumeFired(), false);
   press.start(0, 0, () => {});
   fake.advance(500);
+  press.end();
   fake.advance(900);
   assert.equal(press.consumeFired(), false, '클릭이 오지 않은 기기에서는 다음 탭을 삼키지 않는다');
 });
@@ -98,4 +100,27 @@ test('합계 줄은 합계 카드가 헤더 밑으로 올라간 뒤에만 보인
   assert.equal(totalsBarVisible(48), false);
   assert.equal(totalsBarVisible(47), true);
   assert.equal(totalsBarVisible(-500), true);
+});
+
+test('1.5초처럼 오래 누르고 떼도 뗀 직후의 클릭은 삼킨다(메뉴가 바로 닫히지 않는다)', () => {
+  const fake = fakeTimers();
+  const press = createLongPress({ timers: fake.timers });
+  press.start(0, 0, () => {});
+  fake.advance(1500);
+  press.end();
+  fake.advance(5);
+  assert.equal(press.consumeFired(), true);
+});
+
+test('짧게 탭한 클릭은 삼키지 않는다(메뉴 안의 첫 탭도 동작)', () => {
+  const fake = fakeTimers();
+  const press = createLongPress({ timers: fake.timers });
+  press.start(0, 0, () => {});
+  fake.advance(500);
+  press.end();
+  assert.equal(press.consumeFired(), true);
+  press.start(0, 0, () => {});
+  fake.advance(100);
+  press.end();
+  assert.equal(press.consumeFired(), false);
 });

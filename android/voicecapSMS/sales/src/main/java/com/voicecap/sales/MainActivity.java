@@ -217,11 +217,24 @@ public class MainActivity extends Activity {
             result.cancel();
             return true;
         }
+        // JsResult는 정확히 한 번만 답해야 한다. 버튼·취소·닫힘(화면 종료 포함) 중 먼저 온 것 하나만 쓴다.
+        final boolean[] answered = {false};
         AlertDialog.Builder builder = new AlertDialog.Builder(this).setMessage(message);
-        builder.setPositiveButton("확인", (d, w) -> result.confirm());
-        if (confirm) builder.setNegativeButton("취소", (d, w) -> result.cancel());
-        builder.setOnCancelListener(d -> result.cancel());
-        builder.show();
+        builder.setPositiveButton("확인", (d, w) -> {
+            if (!answered[0]) { answered[0] = true; result.confirm(); }
+        });
+        if (confirm) builder.setNegativeButton("취소", (d, w) -> {
+            if (!answered[0]) { answered[0] = true; result.cancel(); }
+        });
+        builder.setOnDismissListener(d -> {
+            if (!answered[0]) { answered[0] = true; result.cancel(); }
+        });
+        try {
+            builder.show();
+        } catch (RuntimeException e) {
+            // 화면이 막 닫히는 중이라 대화상자를 띄우지 못하면 "취소"로 답한다.
+            if (!answered[0]) { answered[0] = true; result.cancel(); }
+        }
         return true;
     }
 

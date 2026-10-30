@@ -13,8 +13,17 @@ export type ReprintSale = {
 
 export type ReprintPrinter = {
   readonly connected: boolean;
+  /** 프린터 고르기(처음 연결). */
+  connect?(): Promise<void>;
   reconnect(): Promise<boolean>;
   send(data: Uint8Array): Promise<void>;
+};
+
+/** 서버가 직접 출력 자리를 잡고 돌려준 작업과 최신 판매 내용. */
+export type DirectPrintTicket = {
+  jobId: string;
+  leaseToken: string;
+  sale: { buyerNickname: string; amount: number; productName?: string | null };
 };
 
 export type ReprintDeps = {
@@ -22,13 +31,16 @@ export type ReprintDeps = {
   bootstrap(): Promise<{ run?: Parameters<typeof sellingSummary>[0]; serverNow?: number }>;
   /** 서버 인쇄 대기열에 넣는다(판매 중인 [판매] 탭이 차례로 출력). */
   queueReprint(sale: ReprintSale): Promise<void>;
-  /** 직접 출력한 결과를 서버 기록에 남긴다. 실패해도 출력 자체에는 영향이 없다. */
-  recordPrint?(saleId: string, result: 'SUCCESS' | 'FAILED'): Promise<unknown>;
+  /** 댓글터치 판매: 출력 전에 서버에서 판매 상태·대기 전표를 확인하고 자리를 잡는다. 거절되면 오류를 던진다. */
+  beginDirect?(sale: ReprintSale): Promise<DirectPrintTicket>;
+  /** 잡아 둔 자리에 출력 결과를 남긴다. */
+  finishDirect?(ticket: DirectPrintTicket, result: 'SUCCESS' | 'FAILED'): Promise<unknown>;
   printer: ReprintPrinter;
   label(content: { buyer: string; amount: number; productLabel?: string }): Uint8Array;
 };
 
 export const PRINTER_NOT_CONNECTED = 'PRINTER_NOT_CONNECTED';
+export const SELLING_STATE_UNKNOWN = 'SELLING_STATE_UNKNOWN';
 
 export class PrinterNotConnectedError extends Error {
   code: string;
@@ -38,48 +50,73 @@ export class PrinterNotConnectedError extends Error {
   }
 }
 
+export class SellingStateUnknownError extends Error {
+  code: string;
+  constructor() {
+    super('판매 상태를 확인하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 눌러 주세요.');
+    this.code = SELLING_STATE_UNKNOWN;
+  }
+}
+
+/** PRINTED: 출력하고 서버에도 남김. PRINTED_UNRECORDED: 출력은 했지만 서버 기록을 남기지 못함. */
+export type ReprintResult = 'QUEUED' | 'PRINTED' | 'PRINTED_UNRECORDED';
+
 /**
- * 판매 중이면 서버 대기열에 넣어 [판매] 탭이 새 판매 전표와 차례로 출력하게 한다(두 탭이 한 프린터를 동시에 쓰지 않도록).
- * 판매 중이 아니면 이 탭이 폰 프린터로 바로 출력한다.
+ * 1) 댓글터치 판매는 먼저 판매 상태를 읽는다. 판매 중이면 서버 대기열에 넣어 [판매] 탭이 새 판매 전표와 차례로 출력한다.
+ *    상태를 못 읽으면 출력하지 않는다(판매 중인데 직접 출력하면 같은 전표가 두 번 나갈 수 있다).
+ * 2) 직접 출력할 때만 프린터를 연결한다(판매 중인 [판매] 탭의 프린터 연결을 바꾸지 않도록).
+ * 3) 종이를 내기 전에 서버가 취소·수정·대기 전표를 확인하고 자리를 잡으며, 서버의 최신 내용으로 출력한다.
  */
 export async function reprintInApp(
   sale: ReprintSale,
   deps: ReprintDeps,
-): Promise<'QUEUED' | 'PRINTED'> {
-  let selling = false;
-  try {
-    const boot = await deps.bootstrap();
-    selling = !!sellingSummary(boot.run, boot.serverNow);
-  } catch {
-    // 상태를 못 읽으면 직접 출력을 시도한다. 판매 중이면 프린터가 바쁘다는 오류로 끝난다.
+  options: { connectFirst?: boolean } = {},
+): Promise<ReprintResult> {
+  if (sale.touchSale) {
+    let selling: boolean;
+    try {
+      const boot = await deps.bootstrap();
+      selling = !!sellingSummary(boot.run, boot.serverNow);
+    } catch {
+      throw new SellingStateUnknownError();
+    }
+    if (selling) {
+      await deps.queueReprint(sale);
+      return 'QUEUED';
+    }
   }
-  if (selling && sale.touchSale) {
-    await deps.queueReprint(sale);
-    return 'QUEUED';
-  }
-  if (!deps.printer.connected && !(await deps.printer.reconnect())) throw new PrinterNotConnectedError();
-  const n = touchLabelNumber(sale.productName);
+
+  if (options.connectFirst && deps.printer.connect) await deps.printer.connect();
+  else if (!deps.printer.connected && !(await deps.printer.reconnect())) throw new PrinterNotConnectedError();
+
+  const ticket = sale.touchSale && deps.beginDirect ? await deps.beginDirect(sale) : null;
+  const content = ticket ? ticket.sale : sale;
+  const n = touchLabelNumber(content.productName ?? undefined);
   const bytes = deps.label({
-    buyer: sale.buyerNickname,
-    amount: sale.amount,
+    buyer: content.buyerNickname,
+    amount: content.amount,
     productLabel: n !== null ? `${n}번` : undefined,
   });
   try {
     await deps.printer.send(bytes);
   } catch (error) {
-    await record(deps, sale, 'FAILED');
+    if (ticket) await finish(deps, ticket, 'FAILED');
     throw error;
   }
-  await record(deps, sale, 'SUCCESS');
-  return 'PRINTED';
+  if (!ticket) return 'PRINTED';
+  return (await finish(deps, ticket, 'SUCCESS')) ? 'PRINTED' : 'PRINTED_UNRECORDED';
 }
 
-/** 서버 기록은 부가 기능이라 오류가 나도(판매 전표가 아닌 일반 판매, 서버 미배포, 오프라인) 출력 결과를 바꾸지 않는다. */
-async function record(deps: ReprintDeps, sale: ReprintSale, result: 'SUCCESS' | 'FAILED') {
-  if (!deps.recordPrint || !sale.touchSale) return;
-  try {
-    await deps.recordPrint(sale.id, result);
-  } catch {
-    // 기록만 빠진다.
+/** 결과 기록은 한 번 더 시도한다. 그래도 안 되면 서버가 90초 뒤 "출력 여부 확인 필요"로 돌린다. */
+async function finish(deps: ReprintDeps, ticket: DirectPrintTicket, result: 'SUCCESS' | 'FAILED') {
+  if (!deps.finishDirect) return false;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await deps.finishDirect(ticket, result);
+      return true;
+    } catch {
+      // 같은 작업 번호로 다시 보내도 서버는 한 번만 기록한다.
+    }
   }
+  return false;
 }

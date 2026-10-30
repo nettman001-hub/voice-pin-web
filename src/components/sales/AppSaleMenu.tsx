@@ -17,6 +17,8 @@ export type AppMenuTarget = {
   /** 전표 다시 출력 대상(판매 한 건일 때). */
   reprint?: ReprintSale & { printStatus?: string; printError?: string };
   deleteLabel: string;
+  /** 삭제 확인 문구에 붙이는 안내(실행 취소 가능 여부). */
+  deleteNote?: string;
   onDelete: () => void;
 };
 
@@ -153,7 +155,7 @@ const SheetBody: React.FC<{ target: AppMenuTarget; onClose: () => void }> = ({ t
         {confirmDelete ? (
           <div className="space-y-3 px-1 pt-1">
             <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-bold text-rose-800">
-              {target.deleteLabel}할까요? 삭제한 뒤 5초 동안 화면 아래에서 실행 취소할 수 있습니다.
+              {target.deleteLabel}할까요? {target.deleteNote}
             </p>
             <div className="grid grid-cols-2 gap-2">
               <button type="button" onClick={() => setConfirmDelete(false)} className="min-h-[52px] rounded-2xl border border-slate-200 text-sm font-bold text-slate-700 active:bg-slate-100">

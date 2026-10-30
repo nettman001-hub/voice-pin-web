@@ -171,3 +171,25 @@ test('판매 앱(WebView)에서는 자동 로그인을 꺼도 세션을 localSto
   assert.equal(browser.local.getItem(AUTH_KEY), '{"refresh_token":"r1"}');
   assert.equal(browser.session.getItem(AUTH_KEY), null);
 });
+
+test('판매 앱: 다른 탭에서 로그아웃하면 이 웹뷰에 남은 예전 계정 세션(sessionStorage)으로 되돌아가지 않는다', () => {
+  const browser = installBrowser();
+  globalThis.window.VoiceCapAndroid = {};
+  // 업데이트 전 이 웹뷰에 남아 있던 예전 계정 B
+  browser.session.setItem(AUTH_KEY, '{"refresh_token":"old-B"}');
+  // 다른 웹뷰가 계정 A를 공용 localStorage에 저장
+  browser.local.setItem(AUTH_KEY, '{"refresh_token":"current-A"}');
+  assert.equal(mod.authSessionStorage.getItem(AUTH_KEY), '{"refresh_token":"current-A"}');
+  assert.equal(browser.session.getItem(AUTH_KEY), null, '읽을 때 예전 사본을 지운다');
+  // A 로그아웃(다른 웹뷰가 localStorage를 지움)
+  browser.local.removeItem(AUTH_KEY);
+  assert.equal(mod.authSessionStorage.getItem(AUTH_KEY), null);
+});
+
+test('판매 앱: localStorage가 비어 있고 sessionStorage에만 예전 세션이 있어도 그 세션을 쓰지 않는다', () => {
+  const browser = installBrowser();
+  globalThis.window.VoiceCapAndroid = {};
+  browser.session.setItem(AUTH_KEY, '{"refresh_token":"old-B"}');
+  assert.equal(mod.authSessionStorage.getItem(AUTH_KEY), null);
+  assert.equal(browser.session.getItem(AUTH_KEY), null);
+});
