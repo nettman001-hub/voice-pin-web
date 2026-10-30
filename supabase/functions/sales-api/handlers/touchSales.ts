@@ -336,6 +336,22 @@ export async function handleTouchSales(auth: AuthContext, body: any) {
           p_result: body.result || null,
         }),
       );
+    if (body.action === 'touch-record-print') {
+      if (
+        typeof body.saleId !== 'string' ||
+        !body.saleId ||
+        !['SUCCESS', 'FAILED'].includes(body.result)
+      )
+        return errorResponse('VALIDATION_ERROR', '출력 결과를 확인해 주세요.');
+      return respond(
+        await rpc('voicecap_touch_record_print', {
+          p_workspace_id: workspace,
+          p_actor_id: auth.actorId,
+          p_sale_id: body.saleId,
+          p_result: body.result,
+        }),
+      );
+    }
     if (body.action === 'claim-touch-captures')
       return respond(
         await rpc('voicecap_claim_touch_captures', {

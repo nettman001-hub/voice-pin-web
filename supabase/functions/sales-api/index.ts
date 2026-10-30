@@ -169,6 +169,7 @@ serve(async (req: Request) => {
         return await handleTouchSales(auth, body)
       case 'claim-touch-jobs':
       case 'touch-print':
+      case 'touch-record-print':
         requireCapability('PRINT')
         return await handleTouchSales(auth, body)
       case 'seller-logic-slots':

@@ -66,6 +66,10 @@ export class TouchSalesApi {
   ) {
     return this.call('touch-print', { kind, jobId, leaseToken, result });
   }
+  /** 판매를 켜지 않고 폰 프린터로 바로 출력한 결과를 서버 기록에 남긴다. */
+  recordPrint(saleId: string, result: 'SUCCESS' | 'FAILED') {
+    return this.call('touch-record-print', { saleId, result });
+  }
   claimCaptures(producerId: string) {
     return this.call<{ captures: any[] }>('claim-touch-captures', {
       producerId,

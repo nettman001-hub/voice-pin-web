@@ -22,6 +22,8 @@ export type ReprintDeps = {
   bootstrap(): Promise<{ run?: Parameters<typeof sellingSummary>[0]; serverNow?: number }>;
   /** 서버 인쇄 대기열에 넣는다(판매 중인 [판매] 탭이 차례로 출력). */
   queueReprint(sale: ReprintSale): Promise<void>;
+  /** 직접 출력한 결과를 서버 기록에 남긴다. 실패해도 출력 자체에는 영향이 없다. */
+  recordPrint?(saleId: string, result: 'SUCCESS' | 'FAILED'): Promise<unknown>;
   printer: ReprintPrinter;
   label(content: { buyer: string; amount: number; productLabel?: string }): Uint8Array;
 };
@@ -57,12 +59,27 @@ export async function reprintInApp(
   }
   if (!deps.printer.connected && !(await deps.printer.reconnect())) throw new PrinterNotConnectedError();
   const n = touchLabelNumber(sale.productName);
-  await deps.printer.send(
-    deps.label({
-      buyer: sale.buyerNickname,
-      amount: sale.amount,
-      productLabel: n !== null ? `${n}번` : undefined,
-    }),
-  );
+  const bytes = deps.label({
+    buyer: sale.buyerNickname,
+    amount: sale.amount,
+    productLabel: n !== null ? `${n}번` : undefined,
+  });
+  try {
+    await deps.printer.send(bytes);
+  } catch (error) {
+    await record(deps, sale, 'FAILED');
+    throw error;
+  }
+  await record(deps, sale, 'SUCCESS');
   return 'PRINTED';
+}
+
+/** 서버 기록은 부가 기능이라 오류가 나도(판매 전표가 아닌 일반 판매, 서버 미배포, 오프라인) 출력 결과를 바꾸지 않는다. */
+async function record(deps: ReprintDeps, sale: ReprintSale, result: 'SUCCESS' | 'FAILED') {
+  if (!deps.recordPrint || !sale.touchSale) return;
+  try {
+    await deps.recordPrint(sale.id, result);
+  } catch {
+    // 기록만 빠진다.
+  }
 }
