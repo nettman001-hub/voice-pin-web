@@ -15,6 +15,10 @@ import { MobileBottomNav } from './components/common/MobileBottomNav';
 import { SyncStatusNotice } from './components/common/SyncStatusNotice';
 import { SaleAiConversationProvider } from './components/sales/SaleAiConversationWindow';
 import { PanelLeftOpen } from 'lucide-react';
+import { AppBottomNav, AppHeader, AppSellingBanner, AppToastHost, PcOnlyNotice } from './components/common/AppShell';
+import { AppMorePage } from './pages/seller/AppMorePage';
+import { isSalesApp } from './services/labelPrinter/androidBridge';
+import { isPcOnlyPath } from './services/appShellState';
 import { hasAutoLoginCredentials } from './services/authCredentialsService';
 
 // 페이지 목록
@@ -95,6 +99,22 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   const showNav = isAuthenticated && !isAuthRoute;
 
+  // 판매 앱의 [관리] 탭: PC용 사이드 메뉴·헤더 대신 얇은 헤더와 하단 메뉴 5개.
+  if (isSalesApp()) {
+    return (
+      <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col antialiased">
+        {showNav && <AppHeader />}
+        {showNav && <AppSellingBanner />}
+        <main className={`flex-1 overflow-x-hidden ${showNav ? 'pb-20' : ''}`}>
+          {showNav && <SyncStatusNotice />}
+          {showNav && isPcOnlyPath(location.pathname) ? <PcOnlyNotice /> : children}
+        </main>
+        {showNav && <AppBottomNav />}
+        <AppToastHost />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col selection:bg-brand-500 selection:text-white antialiased">
       <Header
@@ -148,7 +168,7 @@ const RootRedirect: React.FC = () => {
     return <Navigate to="/onboarding" replace />;
   }
   if (user?.role === '관리자') return <Navigate to="/admin" replace />;
-  return <Navigate to="/live" replace />;
+  return <Navigate to={isSalesApp() ? '/sales' : '/live'} replace />;
 };
 
 const AuthLoadingState: React.FC = () => (
@@ -241,6 +261,7 @@ export const App: React.FC = () => {
                           <Route path="/invoices" element={<InvoiceManagementPage />} />
                           <Route path="/shipments" element={<ShipmentManagementPage />} />
                           <Route path="/settlement" element={<SettlementPage />} />
+                          <Route path="/more" element={<AppMorePage />} />
                           <Route path="/seller/devices" element={<DeviceManagementPage />} />
                           <Route path="/devices" element={<DeviceManagementPage />} />
                           <Route path="/seller/helper" element={<CommentHelperPage />} />

@@ -1,3 +1,5 @@
+import { isSalesApp } from './labelPrinter/androidBridge';
+import { saveFileInApp } from './appDownload';
 import { SaleRecord } from '../types/live';
 
 export function exportSalesToCsv(records: SaleRecord[], filename: string = '판매내역_정산목록.csv'): boolean {
@@ -23,8 +25,12 @@ export function exportSalesToCsv(records: SaleRecord[], filename: string = '판�
   // 3. UTF-8 with BOM (\uFEFF) 추가하여 엑셀에서 한글 깨짐 방지
   const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
 
-  // 4. Blob 생성 및 브라우저 다운로드 트리거
+  // 4. Blob 생성 및 다운로드 트리거. 판매 앱에서는 폰 다운로드 폴더에 저장한다.
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  if (isSalesApp()) {
+    void saveFileInApp(filename, 'text/csv', blob);
+    return true;
+  }
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.setAttribute('href', url);

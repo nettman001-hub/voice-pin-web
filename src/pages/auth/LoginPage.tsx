@@ -2,11 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Mic, Lock, Mail, AlertCircle } from 'lucide-react';
+import { isSalesApp } from '../../services/labelPrinter/androidBridge';
 import {
   saveAutoLoginCredentials,
   getAutoLoginCredentials,
   clearAutoLoginCredentials,
 } from '../../services/authCredentialsService';
+
+// 판매 앱에는 PC 전용 라이브 화면이 없어 판매내역으로 간다.
+const sellerHome = () => (isSalesApp() ? '/sales' : '/live');
 
 export const LoginPage: React.FC<{ returnTo?: string }> = ({ returnTo } = {}) => {
   const { login, isLocked, lockUntil, loginAttempts, isRemoteAuth, isAuthenticated, isInitialized, user } = useAuth();
@@ -30,7 +34,7 @@ export const LoginPage: React.FC<{ returnTo?: string }> = ({ returnTo } = {}) =>
   // 자동 로그인으로 이미 로그인된 상태면 로그인 화면을 건너뛴다.
   useEffect(() => {
     if (!isInitialized || !isAuthenticated || isSubmitting) return;
-    navigate(returnTo === '/sell' ? '/sell' : user?.role === '관리자' ? '/admin' : '/live', { replace: true });
+    navigate(returnTo === '/sell' ? '/sell' : user?.role === '관리자' ? '/admin' : sellerHome(), { replace: true });
   }, [isInitialized, isAuthenticated, isSubmitting, user, navigate, returnTo]);
 
   const handleAutoLoginChange = (checked: boolean) => {
@@ -63,7 +67,7 @@ export const LoginPage: React.FC<{ returnTo?: string }> = ({ returnTo } = {}) =>
       } else if (email.includes('admin')) {
         navigate('/admin');
       } else {
-        navigate('/live');
+        navigate(sellerHome());
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '로그인 중 오류가 발생했습니다.');

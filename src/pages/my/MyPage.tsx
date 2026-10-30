@@ -1,3 +1,4 @@
+import { saveFileInApp } from '../../services/appDownload';
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -51,15 +52,20 @@ export const MyPage: React.FC = () => {
   // 전체 데이터 JSON 백업 다운로드
   const handleExportBackup = () => {
     const jsonStr = storageService.exportFullBackup();
+    const fileName = `VoiceCAP_전체데이터백업_${Date.now()}.json`;
     const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `VoiceCAP_전체데이터백업_${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setToastMsg('전체 데이터(판매기록, 캡처, 설정)가 JSON 파일로 백업되었습니다! 💾');
-    setTimeout(() => setToastMsg(null), 3000);
+    // 판매 앱에서는 폰 다운로드 폴더에 저장하고 앱이 알림을 띄운다.
+    void saveFileInApp(fileName, 'application/json', blob).then((handled) => {
+      if (handled) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+      setToastMsg('전체 데이터(판매기록, 캡처, 설정)가 JSON 파일로 백업되었습니다! 💾');
+      setTimeout(() => setToastMsg(null), 3000);
+    });
   };
 
   // JSON 백업 파일 업로드 및 복원
