@@ -172,6 +172,21 @@ test('판매 앱(WebView)에서는 자동 로그인을 꺼도 세션을 localSto
   assert.equal(browser.session.getItem(AUTH_KEY), null);
 });
 
+test('판매 앱: 로그인 선택을 바꿔도 현재 공용 세션을 옮기거나 옛 웹뷰 세션으로 덮어쓰지 않는다', () => {
+  for (const enabled of [false, true]) {
+    const browser = installBrowser();
+    globalThis.window.VoiceCapAndroid = {};
+    browser.local.setItem(AUTH_KEY, '{"refresh_token":"current-A"}');
+    browser.session.setItem(AUTH_KEY, '{"refresh_token":"old-B"}');
+
+    mod.setKeepLogin(enabled);
+
+    assert.equal(browser.local.getItem(AUTH_KEY), '{"refresh_token":"current-A"}');
+    assert.equal(mod.authSessionStorage.getItem(AUTH_KEY), '{"refresh_token":"current-A"}');
+    assert.equal(browser.session.getItem(AUTH_KEY), null);
+  }
+});
+
 test('판매 앱: 다른 탭에서 로그아웃하면 이 웹뷰에 남은 예전 계정 세션(sessionStorage)으로 되돌아가지 않는다', () => {
   const browser = installBrowser();
   globalThis.window.VoiceCapAndroid = {};

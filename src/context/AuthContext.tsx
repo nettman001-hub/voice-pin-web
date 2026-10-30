@@ -8,6 +8,7 @@ import {
 } from '../services/supabaseClient';
 import { storageService } from '../services/storageService';
 import { clearStoredAuthSession, dropAppSessionFallback, setKeepLogin } from '../services/authSessionStorage';
+import { watchSalesAppAuthSync } from '../services/salesAppAuthSync';
 
 interface AuthResult {
   success: boolean;
@@ -74,6 +75,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const identitySyncRef = React.useRef<{ userId: string; promise: Promise<void> } | null>(null);
   const identityGenerationRef = React.useRef(0);
   const requestedUserRef = React.useRef<string | null>(null);
+  const requestedTokenRef = React.useRef<string | null>(null);
+  const appliedIdentityRef = React.useRef<{ userId: string; token: string | null } | null>(null);
+  const authRevisionRef = React.useRef(0);
+
+  const clearRemoteIdentity = useCallback(() => {
+    requestedUserRef.current = null;
+    requestedTokenRef.current = null;
+    appliedIdentityRef.current = null;
+    identityGenerationRef.current += 1;
+    identitySyncRef.current = null;
+    storageService.setWorkspaceId(null);
+    setUser(null); setWorkspaceId(null); setToken(null);
+    setIsInitialized(true);
+  }, []);
 
   const setRemoteIdentity = useCallback(async (authUser: Parameters<typeof formatUser>[0], accessToken?: string | null) => {
     const generation = identityGenerationRef.current;
@@ -86,6 +101,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('[Auth] voicecap-onboard 호출 실패 (DB 직접 조회 진행):', e);
     }
     const identity = await formatUser(authUser);
+    if (generation !== identityGenerationRef.current || requestedUserRef.current !== authUser.id) return;
     if (!identity.workspaceId) {
       throw new Error('VoiceCAP 작업공간을 찾지 못했습니다. 관리자에게 문의하세요.');
     }
@@ -94,17 +110,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     storageService.setWorkspaceId(identity.workspaceId);
     setUser(identity.user);
     setWorkspaceId(identity.workspaceId);
-    setToken(accessToken ?? null);
+    // 같은 계정의 토큰 갱신이 프로필 조회 중 도착했으면 최신 토큰을 쓴다.
+    setToken(requestedTokenRef.current);
+    appliedIdentityRef.current = { userId: authUser.id, token: requestedTokenRef.current };
   }, []);
 
-  const syncRemoteIdentity = useCallback((authUser: Parameters<typeof formatUser>[0], accessToken?: string | null) => {
+  const syncRemoteIdentity = useCallback((authUser: Parameters<typeof formatUser>[0], accessToken?: string | null, refreshIdentity = true) => {
     if (requestedUserRef.current !== authUser.id) {
       requestedUserRef.current = authUser.id;
       identityGenerationRef.current += 1;
+      // 계정 전환 중 이전 계정의 작업공간을 화면에 남기지 않는다.
+      appliedIdentityRef.current = null;
+      storageService.setWorkspaceId(null);
+      setUser(null); setWorkspaceId(null); setToken(null);
+      setIsInitialized(false);
+    }
+    requestedTokenRef.current = accessToken ?? null;
+    if (!refreshIdentity && appliedIdentityRef.current?.userId === authUser.id) {
+      if (appliedIdentityRef.current.token !== requestedTokenRef.current) {
+        setToken(requestedTokenRef.current);
+        appliedIdentityRef.current.token = requestedTokenRef.current;
+      }
+      return Promise.resolve();
     }
     if (identitySyncRef.current?.userId === authUser.id) return identitySyncRef.current.promise;
+    const generation = identityGenerationRef.current;
     const promise = setRemoteIdentity(authUser, accessToken).finally(() => {
       if (identitySyncRef.current?.promise === promise) identitySyncRef.current = null;
+      if (generation === identityGenerationRef.current && requestedUserRef.current === authUser.id)
+        setIsInitialized(true);
     });
     identitySyncRef.current = { userId: authUser.id, promise };
     return promise;
@@ -130,38 +164,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     let active = true;
     const initialize = async () => {
+      const revision = authRevisionRef.current;
       const session = await restoreSupabaseSession();
-      if (session?.user && active) {
+      if (session?.user && active && revision === authRevisionRef.current) {
         try {
           await syncRemoteIdentity(session.user, session.access_token);
         } catch (error) {
           console.error('[Auth] Supabase profile load failed', error);
         }
       }
-      if (active) setIsInitialized(true);
+      if (active && revision === authRevisionRef.current) setIsInitialized(true);
     };
     void initialize();
     const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
       if (!active) return;
+      const revision = ++authRevisionRef.current;
       if (!session?.user) {
         // 판매 앱의 다른 탭에서 로그아웃한 알림도 여기로 온다. 이 탭에만 남은 대체 세션도 버린다.
         dropAppSessionFallback();
-        requestedUserRef.current = null;
-        identityGenerationRef.current += 1;
-        identitySyncRef.current = null;
-        storageService.setWorkspaceId(null);
-        setUser(null); setWorkspaceId(null); setToken(null);
+        clearRemoteIdentity();
         return;
       }
       const authUser = session.user;
       const accessToken = session.access_token;
       window.setTimeout(() => {
-        if (!active) return;
+        if (!active || revision !== authRevisionRef.current) return;
         void syncRemoteIdentity(authUser, accessToken).catch((error) => console.error('[Auth] session update failed', error));
       }, 0);
     });
-    return () => { active = false; listener.subscription.unsubscribe(); };
-  }, [syncRemoteIdentity]);
+    const stopAppSync = watchSalesAppAuthSync((sharedSessionChanged) => {
+      const revision = ++authRevisionRef.current;
+      // 다른 웹뷰가 로그인/로그아웃했다면 이 화면만 보관하던 대체 세션은 버린다.
+      if (sharedSessionChanged) dropAppSessionFallback();
+      // 초기 복원 함수는 첫 결과(null 포함)를 캐시하므로 여기서는 직접 다시 읽는다.
+      void client.auth.getSession().then(async ({ data, error }) => {
+        if (!active || revision !== authRevisionRef.current || error) return;
+        if (data.session?.user) await syncRemoteIdentity(data.session.user, data.session.access_token, false);
+        else clearRemoteIdentity();
+      }).catch((error) => console.error('[Auth] app session sync failed', error));
+    });
+    return () => {
+      active = false;
+      authRevisionRef.current += 1;
+      identityGenerationRef.current += 1;
+      identitySyncRef.current = null;
+      stopAppSync();
+      listener.subscription.unsubscribe();
+    };
+  }, [syncRemoteIdentity, clearRemoteIdentity]);
 
   const login = async (email: string, pass: string, rememberMe = false): Promise<AuthResult> => {
     setAutoLogin(Boolean(rememberMe));
@@ -244,9 +294,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    requestedUserRef.current = null;
-    identityGenerationRef.current += 1;
-    identitySyncRef.current = null;
+    authRevisionRef.current += 1;
+    clearRemoteIdentity();
     if (isSupabaseConfigured) {
       try {
         await requireSupabase().auth.signOut();
