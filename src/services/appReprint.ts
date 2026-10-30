@@ -64,7 +64,7 @@ export type ReprintResult = 'QUEUED' | 'PRINTED' | 'PRINTED_UNRECORDED';
 /**
  * 1) 댓글터치 판매는 먼저 판매 상태를 읽는다. 판매 중이면 서버 대기열에 넣어 [판매] 탭이 새 판매 전표와 차례로 출력한다.
  *    상태를 못 읽으면 출력하지 않는다(판매 중인데 직접 출력하면 같은 전표가 두 번 나갈 수 있다).
- * 2) 직접 출력할 때만 프린터를 연결한다(판매 중인 [판매] 탭의 프린터 연결을 바꾸지 않도록).
+ * 2) 직접 출력할 때만, 그리고 프린터가 끊겨 있을 때만 연결한다(판매 중인 [판매] 탭의 프린터 연결을 바꾸지 않도록).
  * 3) 종이를 내기 전에 서버가 취소·수정·대기 전표를 확인하고 자리를 잡으며, 서버의 최신 내용으로 출력한다.
  */
 export async function reprintInApp(
@@ -86,8 +86,12 @@ export async function reprintInApp(
     }
   }
 
-  if (options.connectFirst && deps.printer.connect) await deps.printer.connect();
-  else if (!deps.printer.connected && !(await deps.printer.reconnect())) throw new PrinterNotConnectedError();
+  // 이미 붙어 있으면 다시 고르지 않는다. 앱의 연결은 [판매] 탭과 같이 쓰는 것이라 새로 고르면 기존 연결을 끊는다
+  // (예전 "프린터 연결 후 출력" 안내가 남아 있는 사이 [판매] 탭이 연결한 경우).
+  if (!deps.printer.connected) {
+    if (options.connectFirst && deps.printer.connect) await deps.printer.connect();
+    else if (!(await deps.printer.reconnect())) throw new PrinterNotConnectedError();
+  }
 
   const ticket = sale.touchSale && deps.beginDirect ? await deps.beginDirect(sale) : null;
   const content = ticket ? ticket.sale : sale;

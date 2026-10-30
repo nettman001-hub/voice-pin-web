@@ -124,3 +124,14 @@ test('짧게 탭한 클릭은 삼키지 않는다(메뉴 안의 첫 탭도 동�
   press.end();
   assert.equal(press.consumeFired(), false);
 });
+
+test('메뉴가 열린 뒤 터치가 취소(touchcancel)되면, 따로 누르지 않은 다음 메뉴 탭을 삼키지 않는다', () => {
+  const fake = fakeTimers();
+  const press = createLongPress({ timers: fake.timers });
+  press.start(0, 0, () => {});
+  fake.advance(600);
+  press.cancel();
+  fake.advance(100);
+  // 메뉴 안에는 start를 부르는 터치 처리가 없으므로, 첫 탭은 곧바로 consumeFired만 거친다.
+  assert.equal(press.consumeFired(), false);
+});

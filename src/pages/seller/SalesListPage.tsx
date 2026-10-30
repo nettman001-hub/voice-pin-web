@@ -144,6 +144,8 @@ export const SalesListPage: React.FC = () => {
     sales: SaleRecord[];
     label: string;
     expiresAt: number;
+    /** 같이 지운 댓글터치 판매(되돌릴 수 없음) 안내. */
+    note?: string;
   } | null>(null);
   const [undoCountdown, setUndoCountdown] = useState<number>(5);
 
@@ -167,11 +169,12 @@ export const SalesListPage: React.FC = () => {
     return () => window.clearInterval(interval);
   }, [deletedHistory]);
 
-  const triggerUndoableDelete = (salesToSave: SaleRecord[], label: string) => {
+  const triggerUndoableDelete = (salesToSave: SaleRecord[], label: string, note?: string) => {
     setDeletedHistory({
       sales: salesToSave,
       label,
       expiresAt: Date.now() + 5000,
+      note,
     });
   };
 
@@ -191,8 +194,17 @@ export const SalesListPage: React.FC = () => {
       : '삭제 후 5초 동안 화면 하단에서 실행 취소할 수 있습니다.';
   const finishDelete = (records: SaleRecord[], label: string) => {
     const undoable = records.filter((r) => !r.touchSale);
-    if (undoable.length > 0) triggerUndoableDelete(undoable, undoable.length === records.length ? label : `${label} 중 ${undoable.length}건`);
-    if (undoable.length < records.length) showToast(`${label}: 댓글터치 판매 ${records.length - undoable.length}건을 취소로 저장했습니다.`);
+    const touchCount = records.length - undoable.length;
+    // 섞여 있으면 실행 취소 막대 하나에 두 결과를 같이 적는다(막대가 떠 있는 동안 토스트는 가려진다).
+    if (undoable.length > 0) {
+      triggerUndoableDelete(
+        undoable,
+        touchCount === 0 ? label : `${label} 중 ${undoable.length}건`,
+        touchCount > 0 ? `댓글터치 ${touchCount}건은 취소로 저장(되돌릴 수 없음)` : undefined,
+      );
+    } else if (touchCount > 0) {
+      showToast(`${label}: 댓글터치 판매 ${touchCount}건을 취소로 저장했습니다.`);
+    }
   };
 
   // 구매자별 내역 전체 삭제 핸들러
@@ -1617,6 +1629,7 @@ export const SalesListPage: React.FC = () => {
             <div>
               <span className="font-bold text-slate-100">{deletedHistory.label}</span>
               <span className="text-slate-400 ml-1">삭제됨</span>
+              {deletedHistory.note && <p className="mt-0.5 text-[11px] text-amber-300">{deletedHistory.note}</p>}
             </div>
           </div>
           <button
