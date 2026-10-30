@@ -1,3 +1,4 @@
+import { saveUrlInApp } from '../../services/appDownload';
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSales } from '../../context/SalesContext';
@@ -31,10 +32,14 @@ export const CaptureViewerModal: React.FC = () => {
   const currentUrl = sale.captureImageUrls[currentImageIndex];
 
   const handleDownload = () => {
-    const a = document.createElement('a');
-    a.href = currentUrl;
-    a.download = `VoiceCAP_캡처_${sale.buyerNickname}_${Date.now()}.png`;
-    a.click();
+    const fileName = `VoiceCAP_캡처_${sale.buyerNickname}_${Date.now()}.png`;
+    void saveUrlInApp(fileName, currentUrl).then((handled) => {
+      if (handled) return;
+      const a = document.createElement('a');
+      a.href = currentUrl;
+      a.download = fileName;
+      a.click();
+    });
   };
 
   return (

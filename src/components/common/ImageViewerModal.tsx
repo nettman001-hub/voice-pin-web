@@ -1,3 +1,4 @@
+import { saveUrlInApp } from '../../services/appDownload';
 import React, { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -112,12 +113,16 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
 
   const handleDownload = () => {
     if (!currentUrl) return;
-    const a = document.createElement('a');
-    a.href = currentUrl;
-    a.download = `VoiceCAP_${titlePrefix.replace(/\s+/g, '_')}_${currentIndex + 1}_${Date.now()}.png`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const fileName = `VoiceCAP_${titlePrefix.replace(/\s+/g, '_')}_${currentIndex + 1}_${Date.now()}.png`;
+    void saveUrlInApp(fileName, currentUrl).then((handled) => {
+      if (handled) return;
+      const a = document.createElement('a');
+      a.href = currentUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    });
   };
 
   const handleOpenExternal = () => {

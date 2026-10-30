@@ -25,6 +25,7 @@ import {
   ZoomIn
 } from 'lucide-react';
 import { ImageViewerModal } from '../../components/common/ImageViewerModal';
+import { AppReprintControl } from '../../components/sales/AppReprintControl';
 
 export const SalesDetailPage: React.FC = () => {
   const runtime = useWorkspaceRuntime();
@@ -492,24 +493,29 @@ export const SalesDetailPage: React.FC = () => {
         </div>
 
         {sale.status !== '보류' && sale.status !== '취소' && sale.recordState !== 'CANCELLED' && sale.syncStatus !== 'PENDING' && (
-          <div className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between ${
-            sale.printStatus === 'PRINTED' ? 'bg-emerald-50 border-emerald-200' : sale.printStatus === 'FAILED' ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'
-          }`}>
-            <div className="flex items-center gap-2 text-xs">
-              <Printer className={`w-4 h-4 ${sale.printStatus === 'FAILED' ? 'text-rose-600' : 'text-brand-600'}`} />
-              <span className="font-bold text-slate-800">
-                {sale.printStatus === 'PRINTED' ? '판매 전표 출력 완료' : sale.printStatus === 'QUEUED' ? '판매 전표 출력 중...' : sale.printStatus === 'FAILED' ? `출력 실패: ${sale.printError || '댓글 도우미의 프린터 설정을 확인해 주세요.'}` : '판매 전표 출력 대기'}
-              </span>
+          <AppReprintControl
+            sale={sale}
+            fallback={
+            <div className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between ${
+              sale.printStatus === 'PRINTED' ? 'bg-emerald-50 border-emerald-200' : sale.printStatus === 'FAILED' ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'
+            }`}>
+              <div className="flex items-center gap-2 text-xs">
+                <Printer className={`w-4 h-4 ${sale.printStatus === 'FAILED' ? 'text-rose-600' : 'text-brand-600'}`} />
+                <span className="font-bold text-slate-800">
+                  {sale.printStatus === 'PRINTED' ? '판매 전표 출력 완료' : sale.printStatus === 'QUEUED' ? '판매 전표 출력 중...' : sale.printStatus === 'FAILED' ? `출력 실패: ${sale.printError || '댓글 도우미의 프린터 설정을 확인해 주세요.'}` : '판매 전표 출력 대기'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => retrySalePrint(sale.id)}
+                className="self-start sm:self-auto px-3 py-2 rounded-xl bg-white border border-slate-200 hover:border-brand-300 text-brand-700 text-[11px] font-bold flex items-center gap-1"
+              >
+                <RotateCw className="w-3.5 h-3.5" />
+                {sale.printStatus === 'FAILED' ? '다시 출력' : '전표 다시 출력'}
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => retrySalePrint(sale.id)}
-              className="self-start sm:self-auto px-3 py-2 rounded-xl bg-white border border-slate-200 hover:border-brand-300 text-brand-700 text-[11px] font-bold flex items-center gap-1"
-            >
-              <RotateCw className="w-3.5 h-3.5" />
-              {sale.printStatus === 'FAILED' ? '다시 출력' : '전표 다시 출력'}
-            </button>
-          </div>
+            }
+          />
         )}
       </div>
 

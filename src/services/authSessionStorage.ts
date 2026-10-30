@@ -72,7 +72,12 @@ const supabaseKeys = (storage: WebStorage | null): string[] => {
   return keys;
 };
 
-export const isKeepLoginEnabled = (): boolean => safeGet(getLocal(), KEEP_LOGIN_FLAG_KEY) === '1';
+// 판매 앱(WebView)은 [판매]·[관리] 탭이 서로 다른 WebView라 sessionStorage를 나눠 쓸 수 없다.
+// 앱 안에서는 항상 localStorage에 둬서 두 탭이 같은 로그인을 쓴다.
+const isSalesApp = (): boolean =>
+  typeof window !== 'undefined' && Boolean((window as unknown as { VoiceCapAndroid?: unknown }).VoiceCapAndroid);
+
+export const isKeepLoginEnabled = (): boolean => isSalesApp() || safeGet(getLocal(), KEEP_LOGIN_FLAG_KEY) === '1';
 
 /**
  * 로그인 직전에 호출한다. 이미 있는 세션은 새 위치로 옮긴다.

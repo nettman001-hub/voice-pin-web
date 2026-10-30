@@ -393,6 +393,7 @@ export const ShipmentManagementPage: React.FC = () => {
                         value={editForm.trackingNumber}
                         onChange={(e) => setEditForm({ ...editForm, trackingNumber: e.target.value })}
                         aria-label="운송장 번호"
+                        inputMode="numeric"
                         placeholder="운송장 번호"
                         className="w-full mt-0.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs focus:outline-none focus:border-brand-500"
                       />

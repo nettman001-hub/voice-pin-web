@@ -69,6 +69,7 @@ function fixture(initial = record(), options = {}) {
     '../../components/sales/SaleAiActionButtons': { SaleAiActionButtons: empty },
     '../../components/sales/AiSaleBadge': { AiSaleBadge: empty },
     '../../components/common/ImageViewerModal': { ImageViewerModal: empty },
+    '../../components/sales/AppReprintControl': { AppReprintControl: ({ fallback }) => fallback },
   };
   const source = fs.readFileSync(new URL('../src/pages/seller/SalesDetailPage.tsx', import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, {

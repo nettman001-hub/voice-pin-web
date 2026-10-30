@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { isSalesApp } from '../../services/labelPrinter/androidBridge';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Check,
@@ -322,7 +323,16 @@ export const InvoiceManagementPage: React.FC = () => {
     setFeedback(`${invoice.customerNickname}님 정산서를 생성했습니다. (${selectedFormula}, 청구액: ${finalInvoiceAmount.toLocaleString()}원)`);
   };
 
-  const handleSend = async (invoiceId: string) => {
+  // 판매 앱에서는 실수로 한 번 눌러 보내는 일이 없도록 한 번 더 눌러야 발송한다(앱 화면은 confirm 창을 보여 주지 않는다).
+  const [sendConfirmId, setSendConfirmId] = useState<string | null>(null);
+  const handleSend = async (invoiceId: string, customerNickname?: string) => {
+    if (isSalesApp() && sendConfirmId !== invoiceId) {
+      setSendConfirmId(invoiceId);
+      setFeedback(`${customerNickname || '이 고객'}님에게 정산서를 보냅니다. 맞으면 [한 번 더 눌러 발송]을 누르세요.`);
+      setTimeout(() => setSendConfirmId((current) => (current === invoiceId ? null : current)), 6000);
+      return;
+    }
+    setSendConfirmId(null);
     const result = await sendInvoice(invoiceId);
     setFeedback(result?.status === 'FAILED' ? `발송 요청 실패: ${result.error || ''}` : 'voicecapSMS 앱에 정산서 발송을 요청했습니다.');
   };
@@ -718,10 +728,10 @@ export const InvoiceManagementPage: React.FC = () => {
                   })}
                   {invoice.status === 'DRAFT' && (
                     <button
-                      onClick={() => void handleSend(invoice.id)}
-                      className="flex items-center gap-1 rounded-lg bg-cyan-600 hover:bg-cyan-700 px-2.5 py-1 text-[10px] font-bold text-white transition"
+                      onClick={() => void handleSend(invoice.id, invoice.customerNickname)}
+                      className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-bold text-white transition ${sendConfirmId === invoice.id ? 'bg-rose-600 hover:bg-rose-700' : 'bg-cyan-600 hover:bg-cyan-700'}`}
                     >
-                      <Send className="h-3 w-3" /> SMS 발송
+                      <Send className="h-3 w-3" /> {sendConfirmId === invoice.id ? '한 번 더 눌러 발송' : 'SMS 발송'}
                     </button>
                   )}
                   {!['PAID', 'CANCELLED'].includes(invoice.status) && (
