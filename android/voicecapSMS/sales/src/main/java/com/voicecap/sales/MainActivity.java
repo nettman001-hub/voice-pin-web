@@ -27,6 +27,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.JsResult;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -178,6 +179,17 @@ public class MainActivity extends Activity {
             }
         });
         view.setWebChromeClient(new WebChromeClient() {
+            // 웹의 alert()/confirm()은 이 함수를 만들어 두지 않으면 화면 없이 무시(confirm은 늘 "취소")된다.
+            @Override
+            public boolean onJsAlert(WebView v, String url, String message, JsResult result) {
+                return showJsDialog(message, false, result);
+            }
+
+            @Override
+            public boolean onJsConfirm(WebView v, String url, String message, JsResult result) {
+                return showJsDialog(message, true, result);
+            }
+
             @Override
             public void onPermissionRequest(PermissionRequest request) {
                 main.post(() -> handleMediaPermission(request));
@@ -197,6 +209,20 @@ public class MainActivity extends Activity {
             }
         });
         return view;
+    }
+
+    /** 웹의 alert/confirm을 앱 대화상자로 보여 준다. 화면을 닫거나 바깥을 누르면 "취소"로 돌려준다. */
+    private boolean showJsDialog(String message, boolean confirm, JsResult result) {
+        if (isFinishing()) {
+            result.cancel();
+            return true;
+        }
+        AlertDialog.Builder builder = new AlertDialog.Builder(this).setMessage(message);
+        builder.setPositiveButton("확인", (d, w) -> result.confirm());
+        if (confirm) builder.setNegativeButton("취소", (d, w) -> result.cancel());
+        builder.setOnCancelListener(d -> result.cancel());
+        builder.show();
+        return true;
     }
 
     /** 판매 사진은 앞카메라만 쓴다. 마이크 요청은 허용하지 않는다. */
@@ -411,6 +437,12 @@ public class MainActivity extends Activity {
                 o.put("version", BuildConfig.VERSION_NAME);
             } catch (JSONException ignored) { }
             return o.toString();
+        }
+
+        /** [관리] 탭의 판매 중 띠에서 [판매] 탭으로 바로 간다. */
+        @JavascriptInterface
+        public void showSell() {
+            main.post(() -> show(sellView));
         }
 
         @JavascriptInterface

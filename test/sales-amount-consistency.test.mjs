@@ -84,6 +84,7 @@ function fixture(records, configOverrides = {}) {
     '../common/ImageViewerModal': { ImageViewerModal: NullComponent },
     './ConfirmedBuyerCard': { ConfirmedBuyerCard: NullComponent },
     '../../components/sales/AiSaleBadge': { AiSaleBadge: NullComponent },
+    '../../components/sales/AppSaleMenu': { AppRowActions: ({ fallback }) => fallback, AppSaleMenuSheet: NullComponent, AppTotalsBar: NullComponent, appRowPress: () => ({}) },
     '../../components/shipping/ShippingConfigModal': { ShippingConfigModal: NullComponent },
     '../../components/shipping/KeepingBadge': { KeepingBadge: NullComponent },
   };

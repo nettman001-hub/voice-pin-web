@@ -6,6 +6,7 @@ import { useSales } from '../../context/SalesContext';
 import { useProductSales } from '../../context/ProductSalesContext';
 import { TouchSalesApi } from '../../services/touchSalesApi';
 import { APP_TOAST_EVENT, type AppToastDetail } from '../../services/appDownload';
+import { androidNative } from '../../services/labelPrinter/androidBridge';
 import {
   APP_TABS,
   appScreenTitle,
@@ -121,6 +122,8 @@ export const AppSellingBanner: React.FC = () => {
   }, [api]);
 
   if (!summary) return null;
+  // 앱 1.0.2부터 [판매] 탭으로 바로 간다. 옛 앱은 안내 문구만 보여 준다.
+  const canGoSell = typeof androidNative()?.showSell === 'function';
   return (
     <div
       role="status"
@@ -130,7 +133,17 @@ export const AppSellingBanner: React.FC = () => {
         <span className="h-2 w-2 animate-pulse rounded-full bg-rose-500" />
         판매 중 · {summary.count}건 {formatWon(summary.amount)}
       </span>
-      <span className="font-medium text-rose-700">[판매] 탭에서 이어서 판매하세요</span>
+      {canGoSell ? (
+        <button
+          type="button"
+          onClick={() => androidNative()?.showSell?.()}
+          className="min-h-[36px] rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white active:bg-rose-700"
+        >
+          판매 화면으로
+        </button>
+      ) : (
+        <span className="font-medium text-rose-700">[판매] 탭에서 이어서 판매하세요</span>
+      )}
     </div>
   );
 };

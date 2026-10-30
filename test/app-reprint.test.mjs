@@ -84,3 +84,46 @@ test('프린터 전송 오류는 그대로 올린다', async () => {
   const { deps } = makeDeps(idle, { send: async () => { throw new Error('전송 실패'); } });
   await assert.rejects(() => reprintInApp(sale, deps), /전송 실패/);
 });
+
+const withRecorder = (boot, printer, recorder) => {
+  const made = makeDeps(boot, printer);
+  made.calls.recorded = [];
+  made.deps.recordPrint =
+    recorder || (async (id, result) => void made.calls.recorded.push([id, result]));
+  return made;
+};
+
+test('직접 출력에 성공하면 서버 기록에 성공으로 남긴다', async () => {
+  const { deps, calls } = withRecorder(idle);
+  assert.equal(await reprintInApp(sale, deps), 'PRINTED');
+  assert.deepEqual(calls.recorded, [['s1', 'SUCCESS']]);
+});
+
+test('프린터 전송이 실패하면 실패로 남기고 오류는 그대로 올린다', async () => {
+  const { deps, calls } = withRecorder(idle, { send: async () => { throw new Error('전송 실패'); } });
+  await assert.rejects(() => reprintInApp(sale, deps), /전송 실패/);
+  assert.deepEqual(calls.recorded, [['s1', 'FAILED']]);
+});
+
+test('프린터가 연결되지 않아 출력을 시도하지 못했으면 기록하지 않는다', async () => {
+  const { deps, calls } = withRecorder(idle, { connected: false });
+  await assert.rejects(() => reprintInApp(sale, deps), (e) => e.code === PRINTER_NOT_CONNECTED);
+  assert.deepEqual(calls.recorded, []);
+});
+
+test('판매 중이라 대기열에 넣은 경우와 터치 판매가 아닌 경우는 기록하지 않는다', async () => {
+  const queued = withRecorder(running);
+  assert.equal(await reprintInApp(sale, queued.deps), 'QUEUED');
+  assert.deepEqual(queued.calls.recorded, []);
+  const plain = withRecorder(idle);
+  assert.equal(await reprintInApp({ ...sale, touchSale: false }, plain.deps), 'PRINTED');
+  assert.deepEqual(plain.calls.recorded, []);
+});
+
+test('서버 기록이 실패해도 출력 결과는 바뀌지 않는다', async () => {
+  const failing = async () => { throw new Error('offline'); };
+  const ok = withRecorder(idle, {}, failing);
+  assert.equal(await reprintInApp(sale, ok.deps), 'PRINTED');
+  const bad = withRecorder(idle, { send: async () => { throw new Error('전송 실패'); } }, failing);
+  await assert.rejects(() => reprintInApp(sale, bad.deps), /전송 실패/);
+});
