@@ -162,3 +162,12 @@ test('실제 Supabase 클라이언트: 자동 로그인이면 브라우저 재�
   const { data: gone } = await makeClient().auth.getSession();
   assert.equal(gone.session, null);
 });
+
+test('판매 앱(WebView)에서는 자동 로그인을 꺼도 세션을 localStorage에 둬 [판매]·[관리] 탭이 함께 쓴다', () => {
+  const browser = installBrowser();
+  globalThis.window.VoiceCapAndroid = {};
+  mod.setKeepLogin(false);
+  mod.authSessionStorage.setItem(AUTH_KEY, '{"refresh_token":"r1"}');
+  assert.equal(browser.local.getItem(AUTH_KEY), '{"refresh_token":"r1"}');
+  assert.equal(browser.session.getItem(AUTH_KEY), null);
+});
