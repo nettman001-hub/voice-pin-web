@@ -17,6 +17,7 @@ import { SaleAiConversationProvider } from './components/sales/SaleAiConversatio
 import { PanelLeftOpen } from 'lucide-react';
 import { AppBottomNav, AppHeader, AppSellingBanner, AppToastHost, PcOnlyNotice } from './components/common/AppShell';
 import { AppMorePage } from './pages/seller/AppMorePage';
+import { APP_SELL_PATH, SalesAppShell } from './components/common/SalesAppShell';
 import { isSalesApp } from './services/labelPrinter/androidBridge';
 import { isPcOnlyPath } from './services/appShellState';
 import { hasAutoLoginCredentials } from './services/authCredentialsService';
@@ -97,7 +98,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const authRoutes = ['/onboarding', '/login', '/signup', '/password/reset', '/pricing', '/privacy'];
   const isAuthRoute = authRoutes.some((route) => location.pathname === route);
 
-  const showNav = isAuthenticated && !isAuthRoute;
+  const showNav = isAuthenticated && !isAuthRoute && location.pathname !== APP_SELL_PATH;
 
   // 판매 앱의 [관리] 탭: PC용 사이드 메뉴·헤더 대신 얇은 헤더와 하단 메뉴 5개.
   if (isSalesApp()) {
@@ -222,10 +223,12 @@ export const App: React.FC = () => {
                   <CommentCaptureProvider>
                     <ListeningStopScheduleProvider>
                     <AppDataProvider>
+                      <SalesAppShell>
                       <AppLayout>
                         <Routes>
                         {/* 루트 리다이렉트 */}
                         <Route path="/" element={<RootRedirect />} />
+                        <Route path={APP_SELL_PATH} element={isSalesApp() ? null : <Navigate to="/sales" replace />} />
 
                         {/* 1. 시작 및 인증 (PG-001 ~ PG-005) */}
                         <Route path="/onboarding" element={<OnboardingPage />} />
@@ -311,6 +314,7 @@ export const App: React.FC = () => {
                   <Route path="*" element={<Navigate to="/" replace />} />
                         </Routes>
                       </AppLayout>
+                      </SalesAppShell>
                     </AppDataProvider>
                     </ListeningStopScheduleProvider>
                   </CommentCaptureProvider>

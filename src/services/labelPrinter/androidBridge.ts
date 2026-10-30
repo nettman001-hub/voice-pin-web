@@ -15,6 +15,8 @@ export type AndroidNative = {
   selling(on: boolean): void;
   /** 앱 1.0.2부터. 옛 앱에는 없다. */
   showSell?(): void;
+  /** 단일 WebView 앱: React Router의 현재 탭을 네이티브 버튼에 표시한다. */
+  setTab?(tab: 'sell' | 'manage'): void;
 };
 export type AndroidEvent = {
   type: string;
