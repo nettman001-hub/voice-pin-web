@@ -227,3 +227,64 @@ test('판매 앱: localStorage 쓰기가 실패한 뒤 다시 성공하면 local
   assert.equal(mod.authSessionStorage.getItem(AUTH_KEY), null);
   delete globalThis.window.VoiceCapAndroid;
 });
+
+test('판매 앱: 예전 토큰이 남은 채 localStorage 쓰기가 실패해도, 토큰 갱신 뒤 다음 읽기는 새 토큰을 쓴다 (실제 Supabase 클라이언트)', async () => {
+  const { createClient } = await import('@supabase/supabase-js');
+  const now = Math.floor(Date.now() / 1000);
+  const user = { id: 'u1', aud: 'authenticated', email: 'seller@example.com', app_metadata: {}, user_metadata: {}, created_at: new Date().toISOString() };
+  const tokenResponse = (refresh) =>
+    new Response(JSON.stringify({ access_token: `a-${refresh}`, refresh_token: refresh, token_type: 'bearer', expires_in: 3600, expires_at: now + 3600, user }), { status: 200, headers: { 'content-type': 'application/json' } });
+  const fetchMock = async (url) => (String(url).includes('grant_type=refresh_token') ? tokenResponse('new-refresh') : tokenResponse('old-refresh'));
+  const makeClient = () => createClient('https://example.supabase.co', 'pk', {
+    auth: { persistSession: true, storage: mod.authSessionStorage, autoRefreshToken: false, detectSessionInUrl: false },
+    global: { fetch: fetchMock },
+  });
+  const KEY = 'sb-example-auth-token';
+  const readRefresh = async (client) => (await client.auth.getSession()).data.session?.refresh_token ?? null;
+
+  for (const mode of ['replace-fits', 'always-full']) {
+    const browser = installBrowser();
+    globalThis.window.VoiceCapAndroid = {};
+    const client = makeClient();
+    await client.auth.signInWithPassword({ email: 'seller@example.com', password: 'pw' });
+    assert.equal(await readRefresh(client), 'old-refresh');
+    const realSet = browser.local.setItem;
+    // replace-fits: 같은 키의 예전 값을 지우면 들어간다. always-full: 계속 실패한다.
+    browser.local.setItem = (k, v) => {
+      if (mode === 'always-full' || browser.local.store.has(k)) throw new Error('QuotaExceededError');
+      realSet(k, v);
+    };
+    const { data, error } = await client.auth.refreshSession();
+    assert.equal(error, null);
+    assert.equal(data.session.refresh_token, 'new-refresh');
+    assert.equal(await readRefresh(client), 'new-refresh', `${mode}: 예전 토큰으로 되돌아가지 않는다`);
+    assert.equal(await readRefresh(makeClient()), 'new-refresh', `${mode}: 새로 읽어도 새 토큰`);
+    if (mode === 'replace-fits') {
+      assert.match(browser.local.getItem(KEY), /new-refresh/, '[판매]·[관리] 탭이 같이 쓰는 저장소에 새 토큰이 들어간다');
+      assert.equal(browser.session.getItem(KEY), null);
+    } else {
+      assert.equal(browser.local.getItem(KEY), null, '예전 토큰은 공용 저장소에 남기지 않는다');
+    }
+    mod.authSessionStorage.removeItem(KEY);
+    delete globalThis.window.VoiceCapAndroid;
+  }
+});
+
+test('판매 앱: 다른 탭의 로그아웃 알림을 받으면 이 탭에만 남은 대체 세션도 버린다', () => {
+  const browser = installBrowser();
+  globalThis.window.VoiceCapAndroid = {};
+  browser.local.setItem = () => {
+    throw new Error('QuotaExceededError');
+  };
+  mod.authSessionStorage.setItem(AUTH_KEY, '{"refresh_token":"fallback"}');
+  assert.equal(mod.authSessionStorage.getItem(AUTH_KEY), '{"refresh_token":"fallback"}');
+  mod.dropAppSessionFallback();
+  assert.equal(mod.authSessionStorage.getItem(AUTH_KEY), null);
+  assert.equal(browser.session.getItem(AUTH_KEY), null);
+  delete globalThis.window.VoiceCapAndroid;
+
+  // 로그인 상태 알림에서 세션이 없으면(SIGNED_OUT, 다른 탭의 로그아웃 포함) 대체 세션을 버린다.
+  const auth = fs.readFileSync(path.join(rootDir, 'src/context/AuthContext.tsx'), 'utf8');
+  const branch = auth.indexOf('if (!session?.user) {');
+  assert.ok(branch > 0 && auth.indexOf('dropAppSessionFallback();', branch) > branch && auth.indexOf('dropAppSessionFallback();', branch) < branch + 200);
+});

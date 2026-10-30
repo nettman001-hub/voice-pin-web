@@ -101,6 +101,27 @@ export const setKeepLogin = (enabled: boolean) => {
 };
 
 /**
+ * localStorage에 새 값을 쓴다. 공간이 모자라 실패하면 같은 키의 예전 값을 지우고 한 번 더 쓴다.
+ * 그래도 실패하면 예전 값은 지운 채로 둔다. 예전 토큰이 남아 있으면 다음 읽기가 방금 받은 새 토큰 대신
+ * 예전 토큰(이미 바뀐 refresh token)을 쓰게 된다.
+ */
+const writeLocalReplacing = (key: string, value: string): boolean => {
+  const local = getLocal();
+  if (safeSet(local, key, value)) return true;
+  safeRemove(local, key);
+  return safeSet(local, key, value);
+};
+
+/**
+ * 판매 앱: 이 화면만 들고 있던 대체 세션(sessionStorage)을 버린다.
+ * 다른 탭(웹뷰)에서 로그아웃했다는 알림을 받았을 때 부른다. 로그아웃은 두 탭 모두에 적용돼야 한다.
+ */
+export const dropAppSessionFallback = () => {
+  for (const key of appSessionFallbackKeys) safeRemove(getSession(), key);
+  appSessionFallbackKeys.clear();
+};
+
+/**
  * Supabase 클라이언트의 auth.storage로 넘기는 어댑터.
  */
 export const authSessionStorage = {
@@ -123,7 +144,7 @@ export const authSessionStorage = {
     return safeGet(getSession(), key);
   },
   setItem(key: string, value: string) {
-    if (isKeepLoginEnabled() && safeSet(getLocal(), key, value)) {
+    if (isKeepLoginEnabled() && writeLocalReplacing(key, value)) {
       appSessionFallbackKeys.delete(key);
       safeRemove(getSession(), key);
       return;

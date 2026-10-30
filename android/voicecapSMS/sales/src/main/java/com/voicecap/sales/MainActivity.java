@@ -73,8 +73,8 @@ public class MainActivity extends Activity {
     private Runnable bluetoothDenied;
     private ValueCallback<Uri[]> pendingFile;
     private BlePrinter printer;
-    /** 떠 있는 웹 alert/confirm 대화상자. 화면이 없어질 때 닫아서 각 JsResult가 "취소"로 한 번 답하게 한다. */
-    private final java.util.Set<AlertDialog> jsDialogs = new java.util.HashSet<>();
+    /** 떠 있는 웹 alert/confirm 대화상자와 그 "취소" 답. 화면이 없어질 때 웹뷰를 없애기 전에 바로 답하고 닫는다. */
+    private final java.util.Map<AlertDialog, Runnable> jsDialogs = new java.util.HashMap<>();
 
     private String base() { return BuildConfig.VOICECAP_WEB_BASE_URL; }
 
@@ -221,26 +221,27 @@ public class MainActivity extends Activity {
         }
         // JsResult는 정확히 한 번만 답해야 한다. 버튼·취소·닫힘(화면 종료 포함) 중 먼저 온 것 하나만 쓴다.
         final boolean[] answered = {false};
+        final Runnable cancel = () -> {
+            if (!answered[0]) { answered[0] = true; result.cancel(); }
+        };
         AlertDialog.Builder builder = new AlertDialog.Builder(this).setMessage(message);
         builder.setPositiveButton("확인", (d, w) -> {
             if (!answered[0]) { answered[0] = true; result.confirm(); }
         });
-        if (confirm) builder.setNegativeButton("취소", (d, w) -> {
-            if (!answered[0]) { answered[0] = true; result.cancel(); }
-        });
+        if (confirm) builder.setNegativeButton("취소", (d, w) -> cancel.run());
         final AlertDialog[] shown = {null};
         builder.setOnDismissListener(d -> {
             jsDialogs.remove(shown[0]);
-            if (!answered[0]) { answered[0] = true; result.cancel(); }
+            cancel.run();
         });
         try {
             shown[0] = builder.create();
-            jsDialogs.add(shown[0]);
+            jsDialogs.put(shown[0], cancel);
             shown[0].show();
         } catch (RuntimeException e) {
             jsDialogs.remove(shown[0]);
             // 화면이 막 닫히는 중이라 대화상자를 띄우지 못하면 "취소"로 답한다.
-            if (!answered[0]) { answered[0] = true; result.cancel(); }
+            cancel.run();
         }
         return true;
     }
@@ -328,8 +329,11 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         SellingService.stop(this);
         printer.disconnect();
-        // 닫힘 처리에서 각 대화상자의 JsResult가 "취소"로 답한다(웹뷰를 없애기 전에).
-        for (AlertDialog dialog : new java.util.ArrayList<>(jsDialogs)) dialog.dismiss();
+        // 닫힘 알림은 나중에(메시지로) 오므로, 웹뷰를 없애기 전에 여기서 바로 "취소"로 답한다. 답은 대화상자마다 한 번뿐이다.
+        for (java.util.Map.Entry<AlertDialog, Runnable> open : new java.util.ArrayList<>(jsDialogs.entrySet())) {
+            open.getValue().run();
+            open.getKey().dismiss();
+        }
         jsDialogs.clear();
         sellView.destroy();
         manageView.destroy();

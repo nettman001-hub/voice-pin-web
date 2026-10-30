@@ -7,7 +7,7 @@ import {
   supabase,
 } from '../services/supabaseClient';
 import { storageService } from '../services/storageService';
-import { clearStoredAuthSession, setKeepLogin } from '../services/authSessionStorage';
+import { clearStoredAuthSession, dropAppSessionFallback, setKeepLogin } from '../services/authSessionStorage';
 
 interface AuthResult {
   success: boolean;
@@ -144,6 +144,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
       if (!active) return;
       if (!session?.user) {
+        // 판매 앱의 다른 탭에서 로그아웃한 알림도 여기로 온다. 이 탭에만 남은 대체 세션도 버린다.
+        dropAppSessionFallback();
         requestedUserRef.current = null;
         identityGenerationRef.current += 1;
         identitySyncRef.current = null;
