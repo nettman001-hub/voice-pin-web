@@ -77,6 +77,10 @@ const supabaseKeys = (storage: WebStorage | null): string[] => {
 const isSalesApp = (): boolean =>
   typeof window !== 'undefined' && Boolean((window as unknown as { VoiceCapAndroid?: unknown }).VoiceCapAndroid);
 
+// 앱에서 localStorage에 쓰지 못해 이 화면이 sessionStorage에 둔 키(이 화면이 떠 있는 동안만 기억한다).
+// 이 표시가 없는 sessionStorage 세션은 예전 버전이 남긴 것이라 읽지 않고 지운다.
+const appSessionFallbackKeys = new Set<string>();
+
 export const isKeepLoginEnabled = (): boolean => isSalesApp() || safeGet(getLocal(), KEEP_LOGIN_FLAG_KEY) === '1';
 
 /**
@@ -104,8 +108,14 @@ export const authSessionStorage = {
     // 앱에서는 localStorage만 본다. 웹뷰마다 따로 남은 예전 sessionStorage 세션은 지운다.
     // (그대로 두면 다른 탭에서 로그아웃한 뒤 이 웹뷰가 예전 계정 세션으로 되돌아갈 수 있다.)
     if (isSalesApp()) {
-      safeRemove(getSession(), key);
-      return safeGet(getLocal(), key);
+      const local = safeGet(getLocal(), key);
+      if (local !== null || !appSessionFallbackKeys.has(key)) {
+        appSessionFallbackKeys.delete(key);
+        safeRemove(getSession(), key);
+        return local;
+      }
+      // localStorage 쓰기가 실패해 방금 이 화면이 sessionStorage에 둔 세션은 그대로 쓴다.
+      return safeGet(getSession(), key);
     }
     if (isKeepLoginEnabled()) {
       return safeGet(getLocal(), key) ?? safeGet(getSession(), key);
@@ -114,12 +124,14 @@ export const authSessionStorage = {
   },
   setItem(key: string, value: string) {
     if (isKeepLoginEnabled() && safeSet(getLocal(), key, value)) {
+      appSessionFallbackKeys.delete(key);
       safeRemove(getSession(), key);
       return;
     }
-    safeSet(getSession(), key, value);
+    if (safeSet(getSession(), key, value) && isSalesApp()) appSessionFallbackKeys.add(key);
   },
   removeItem(key: string) {
+    appSessionFallbackKeys.delete(key);
     safeRemove(getLocal(), key);
     safeRemove(getSession(), key);
   },

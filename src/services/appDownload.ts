@@ -34,6 +34,20 @@ export async function saveFileInApp(fileName: string, mime: string, data: Blob |
   return true;
 }
 
+/**
+ * 받은 본문이 사진이면 그 형식(image/...)을, 아니면 null을 돌려준다.
+ * 서버가 형식을 알려 주지 않으면(빈 Content-Type) 파일 앞부분으로 PNG·JPEG·GIF·WEBP인지 본다.
+ */
+export function imageMimeOf(type: string, head: Uint8Array): string | null {
+  if (type) return type.startsWith('image/') ? type : null;
+  const at = (i: number, ...bytes: number[]) => bytes.every((b, k) => head[i + k] === b);
+  if (at(0, 0x89, 0x50, 0x4e, 0x47)) return 'image/png';
+  if (at(0, 0xff, 0xd8, 0xff)) return 'image/jpeg';
+  if (at(0, 0x47, 0x49, 0x46, 0x38)) return 'image/gif';
+  if (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) return 'image/webp';
+  return null;
+}
+
 /** 사진 주소(data: 또는 https:)를 받아 앱에 저장한다. 받지 못하면 알림만 띄운다. */
 export async function saveUrlInApp(fileName: string, url: string): Promise<boolean> {
   if (!androidNative()) return false;
@@ -41,8 +55,9 @@ export async function saveUrlInApp(fileName: string, url: string): Promise<boole
     const response = await fetch(url);
     const blob = await response.blob();
     // 오류 응답(403·404·500)이나 사진이 아닌 본문(오류 HTML 등)을 사진 파일로 저장하지 않는다.
-    if (!response.ok || (blob.type && !blob.type.startsWith('image/'))) throw new Error(`HTTP ${response.status}`);
-    return await saveFileInApp(fileName, blob.type || 'image/png', blob);
+    const mime = response.ok ? imageMimeOf(blob.type, new Uint8Array(await blob.slice(0, 12).arrayBuffer())) : null;
+    if (!mime) throw new Error(`HTTP ${response.status}`);
+    return await saveFileInApp(fileName, mime, blob);
   } catch {
     appToast({ message: '사진을 받지 못했습니다. 연결을 확인하고 다시 시도해 주세요.' });
     return true;

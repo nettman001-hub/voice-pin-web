@@ -90,9 +90,30 @@ test('프린터 연결 후 출력: 판매 상태를 먼저 보고, 판매 중이
   const { deps, calls } = makeDeps(running);
   assert.equal(await reprintInApp(sale, deps, { connectFirst: true }), 'QUEUED');
   assert.deepEqual(calls.order, ['bootstrap', 'queue']);
-  const idleRun = makeDeps(idle);
+  let connected = false;
+  const idleRun = makeDeps(idle, {
+    printer: {
+      get connected() {
+        return connected;
+      },
+      connect: async () => {
+        idleRun.calls.order.push('connect');
+        connected = true;
+      },
+    },
+  });
   assert.equal(await reprintInApp(sale, idleRun.deps, { connectFirst: true }), 'PRINTED');
   assert.deepEqual(idleRun.calls.order, ['bootstrap', 'connect', 'begin', 'send', 'finish']);
+});
+
+test('프린터 연결 후 출력을 눌러도 이미 붙어 있으면 다시 고르지 않는다(같이 쓰는 [판매] 탭 연결을 끊지 않음)', async () => {
+  const general = { id: 'p1', buyerNickname: '하니', amount: 18000 };
+  const { deps, calls } = makeDeps(running);
+  assert.equal(await reprintInApp(general, deps, { connectFirst: true }), 'PRINTED');
+  assert.deepEqual(calls.order, ['send']);
+  const touch = makeDeps(idle);
+  assert.equal(await reprintInApp(sale, touch.deps, { connectFirst: true }), 'PRINTED');
+  assert.deepEqual(touch.calls.order, ['bootstrap', 'begin', 'send', 'finish']);
 });
 
 test('프린터가 끊겨 있으면 한 번 다시 붙어 보고, 안 되면 연결 필요 오류(서버 자리는 잡지 않는다)', async () => {

@@ -29,6 +29,7 @@ async function setup() {
   await db.exec(read('202610300001_touch_record_print.sql'));
   await db.exec(read('202610300002_touch_direct_print.sql'));
   await db.exec(read('202610300002_touch_direct_print.sql'));
+  await db.exec(read('202610300003_touch_direct_print_latest.sql'));
   const workspace = crypto.randomUUID(), session = crypto.randomUUID(), actor = crypto.randomUUID(), producer = crypto.randomUUID();
   await db.query('insert into workspaces values($1)', [workspace]);
   await db.query("insert into live_sessions values($1,$2,'ACTIVE')", [session, workspace]);
@@ -123,5 +124,44 @@ test('직접 출력: 끝을 알리지 못한 작업은 시간이 지나면 확�
     const grants = (await t.db.query(
       "select has_function_privilege('authenticated','voicecap_touch_direct_print(uuid,uuid,jsonb)','execute') a, has_function_privilege('service_role','voicecap_touch_direct_print(uuid,uuid,jsonb)','execute') s")).rows[0];
     assert.deepEqual(grants, { a: false, s: true });
+  } finally { await t.db.close(); }
+});
+
+test('직접 출력: 오래 멈춘 작업의 늦은 끝 기록은 그 뒤에 시작한 최신 출력의 결과를 덮지 않는다', async () => {
+  const t = await setup();
+  try {
+    const stall = async () => {
+      const a = await t.direct({ kind: 'BEGIN', saleId: t.saleId });
+      await t.db.query("update print_jobs set lease_expires_at=now()-interval '1 second' where id=$1", [a.jobId]);
+      const b = await t.direct({ kind: 'BEGIN', saleId: t.saleId });
+      assert.equal(b.ok, true);
+      return [a, b];
+    };
+    const end = (job, result) => t.direct({ kind: 'FINISH', jobId: job.jobId, leaseToken: job.leaseToken, result });
+
+    // B 성공 뒤 A의 실패가 늦게 와도 판매는 성공(B) 그대로다. A의 결과는 A의 줄에만 남는다.
+    let [a, b] = await stall();
+    assert.equal((await end(b, 'SUCCESS')).ok, true);
+    const printed = await t.sale();
+    assert.equal(printed.print_status, 'PRINTED');
+    assert.equal((await end(a, 'FAILED')).ok, true);
+    assert.deepEqual(await t.sale(), printed);
+    assert.deepEqual((await t.jobs()).map((j) => j.status), ['FAILED', 'SUBMITTED']);
+
+    // 반대로 B 실패 뒤 A의 성공이 늦게 와도 판매는 실패(B) 그대로다.
+    [a, b] = await stall();
+    assert.equal((await end(b, 'FAILED')).ok, true);
+    const failed = await t.sale();
+    assert.equal(failed.print_status, 'FAILED');
+    assert.equal(failed.print_error, '프린터 오류');
+    assert.equal((await end(a, 'SUCCESS')).ok, true);
+    assert.deepEqual(await t.sale(), failed);
+
+    // B가 아직 출력 중일 때 A가 늦게 끝나도 판매는 "확인 필요"로 남고, B의 결과가 정한다.
+    [a, b] = await stall();
+    assert.equal((await end(a, 'SUCCESS')).ok, true);
+    assert.equal((await t.sale()).print_error, '출력 여부 확인 필요');
+    assert.equal((await end(b, 'SUCCESS')).ok, true);
+    assert.equal((await t.sale()).print_status, 'PRINTED');
   } finally { await t.db.close(); }
 });

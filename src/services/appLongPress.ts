@@ -55,10 +55,11 @@ export function createLongPress(options: { delayMs?: number; slopPx?: number; ti
       pressing = false;
       releasedAt = timers.now();
     },
+    // 취소된 터치(touchcancel) 뒤에는 클릭이 따라오지 않으므로, 다음 정상 탭을 삼키지 않게 표시를 지운다.
     cancel() {
       clearTimer();
       pressing = false;
-      releasedAt = timers.now();
+      fired = false;
     },
     /** 길게 눌러 메뉴가 열렸다면 그 직후의 클릭 한 번을 무시하라고 알려 준다. */
     consumeFired() {

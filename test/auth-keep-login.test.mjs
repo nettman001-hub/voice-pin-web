@@ -193,3 +193,37 @@ test('판매 앱: localStorage가 비어 있고 sessionStorage에만 예전 세�
   assert.equal(mod.authSessionStorage.getItem(AUTH_KEY), null);
   assert.equal(browser.session.getItem(AUTH_KEY), null);
 });
+
+test('판매 앱: localStorage 쓰기가 실패하면 방금 받은 로그인 세션을 sessionStorage에 두고 다음 읽기에서도 쓴다', () => {
+  const browser = installBrowser();
+  globalThis.window.VoiceCapAndroid = {};
+  browser.local.setItem = () => {
+    throw new Error('QuotaExceededError');
+  };
+  mod.authSessionStorage.setItem(AUTH_KEY, '{"refresh_token":"fresh"}');
+  assert.equal(browser.session.getItem(AUTH_KEY), '{"refresh_token":"fresh"}');
+  assert.equal(mod.authSessionStorage.getItem(AUTH_KEY), '{"refresh_token":"fresh"}');
+  assert.equal(mod.authSessionStorage.getItem(AUTH_KEY), '{"refresh_token":"fresh"}', '두 번째 읽기에서도 남아 있다');
+  // 로그아웃하면 그 사본도 지운다.
+  mod.authSessionStorage.removeItem(AUTH_KEY);
+  assert.equal(mod.authSessionStorage.getItem(AUTH_KEY), null);
+  delete globalThis.window.VoiceCapAndroid;
+});
+
+test('판매 앱: localStorage 쓰기가 실패한 뒤 다시 성공하면 localStorage 세션을 쓰고 sessionStorage 사본은 지운다', () => {
+  const browser = installBrowser();
+  globalThis.window.VoiceCapAndroid = {};
+  const realSet = browser.local.setItem;
+  browser.local.setItem = () => {
+    throw new Error('QuotaExceededError');
+  };
+  mod.authSessionStorage.setItem(AUTH_KEY, '{"refresh_token":"r1"}');
+  browser.local.setItem = realSet;
+  mod.authSessionStorage.setItem(AUTH_KEY, '{"refresh_token":"r2"}');
+  assert.equal(browser.session.getItem(AUTH_KEY), null);
+  assert.equal(mod.authSessionStorage.getItem(AUTH_KEY), '{"refresh_token":"r2"}');
+  // 그 뒤 다른 웹뷰가 로그아웃하면 이 화면도 로그아웃 상태가 된다.
+  browser.local.removeItem(AUTH_KEY);
+  assert.equal(mod.authSessionStorage.getItem(AUTH_KEY), null);
+  delete globalThis.window.VoiceCapAndroid;
+});

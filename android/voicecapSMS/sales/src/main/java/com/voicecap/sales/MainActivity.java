@@ -73,6 +73,8 @@ public class MainActivity extends Activity {
     private Runnable bluetoothDenied;
     private ValueCallback<Uri[]> pendingFile;
     private BlePrinter printer;
+    /** 떠 있는 웹 alert/confirm 대화상자. 화면이 없어질 때 닫아서 각 JsResult가 "취소"로 한 번 답하게 한다. */
+    private final java.util.Set<AlertDialog> jsDialogs = new java.util.HashSet<>();
 
     private String base() { return BuildConfig.VOICECAP_WEB_BASE_URL; }
 
@@ -226,12 +228,17 @@ public class MainActivity extends Activity {
         if (confirm) builder.setNegativeButton("취소", (d, w) -> {
             if (!answered[0]) { answered[0] = true; result.cancel(); }
         });
+        final AlertDialog[] shown = {null};
         builder.setOnDismissListener(d -> {
+            jsDialogs.remove(shown[0]);
             if (!answered[0]) { answered[0] = true; result.cancel(); }
         });
         try {
-            builder.show();
+            shown[0] = builder.create();
+            jsDialogs.add(shown[0]);
+            shown[0].show();
         } catch (RuntimeException e) {
+            jsDialogs.remove(shown[0]);
             // 화면이 막 닫히는 중이라 대화상자를 띄우지 못하면 "취소"로 답한다.
             if (!answered[0]) { answered[0] = true; result.cancel(); }
         }
@@ -321,6 +328,9 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         SellingService.stop(this);
         printer.disconnect();
+        // 닫힘 처리에서 각 대화상자의 JsResult가 "취소"로 답한다(웹뷰를 없애기 전에).
+        for (AlertDialog dialog : new java.util.ArrayList<>(jsDialogs)) dialog.dismiss();
+        jsDialogs.clear();
         sellView.destroy();
         manageView.destroy();
         super.onDestroy();
