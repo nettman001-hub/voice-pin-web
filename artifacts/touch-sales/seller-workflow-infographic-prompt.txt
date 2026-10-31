@@ -1,0 +1,68 @@
+Use case: infographic-diagram.
+Create a finished, beautiful Korean instructional infographic for VoiceCAP sellers explaining comment-touch selling in the exact order below. One single high-resolution portrait poster, aspect ratio 2:3, intended to be readable on a phone and printable. This is an operator workflow, not a technical architecture diagram.
+
+Visual design: warm off-white background, dark navy Korean sans-serif typography, cobalt blue and soft mint accents, occasional warm yellow for buyer comments. Polished flat editorial illustrations with subtle depth. Generous spacing, strong hierarchy, large exceptionally legible and accurately spelled Korean text. Use clean phone and PC illustrations, a receipt printer and an unbranded garment shown to a live camera. Consistent device appearance and recurring buyer "하니". Make it feel like a professionally designed Korean seller training handout. No clutter, tiny paragraphs, watermarks or extraneous logos.
+
+Composition: large title at top, subtitle, slim preflight strip; then eight clearly numbered illustrated cards in a 2-column x 4-row grid. Reading order MUST be row-major: 01 top left, 02 top right, 03 second left, 04 second right, 05 third left, 06 third right, 07 bottom left, 08 bottom right. Put a right arrow between the cards in every row, plus clearly signposted row progression without arrows crossing text. Each card has a large number, small device pill (PC / 휴대폰 / 판매자), one clear heading, one short explanation and a generous illustration. Steps 03 through 08 comprise the repeating sale cycle; place a small loop reminder below the grid. Footer operational note. Render all the following Korean text VERBATIM, with clear line breaks and enough room. Do not add other prose.
+
+Header:
+"댓글터치 판매, 이렇게 하세요"
+"구매자 선택부터 전표·상품사진 확인까지"
+Small brand: "VoiceCAP"
+
+Preflight strip:
+"방송 전 준비"
+"PC 로그인 · 댓글 도우미 · 프린터 · 상품 캡처 영역"
+
+Card 01, device PC:
+"댓글터치 판매 시작"
+"댓글터치 → 새 회차 판매 시작"
+"방송 화면을 공유해 주세요"
+Illustration: PC with selected 댓글터치 pill and blue 새 회차 판매 시작 button, small screen-share symbol. Do not draw a microphone as a required operation.
+
+Card 02, device 휴대폰:
+"판매 폰 연결"
+"판매 폰 열기 → QR 스캔"
+"PC와 같은 판매자 계정으로 로그인"
+Illustration: smartphone scanning a stylized clearly illustrative nonfunctional QR on PC.
+
+Card 03, device 휴대폰:
+"구매 댓글 터치"
+"판매하기에서 구매할 고객을 선택"
+Illustration: phone with yellow highlighted chat row "하니  저요!" and a finger selecting it. Other rows visually quiet. No automatic sale implied.
+
+Card 04, device 휴대폰:
+"구매자 확인"
+"닉네임과 댓글을 확인한 뒤 ‘확인’"
+Illustration: bottom selected bar "선택: 하니 · 저요!" and clear blue "확인" button.
+
+Card 05, device 휴대폰:
+"가격·수량 입력"
+"1.5 = 15,000원"
+"수량과 총액을 꼭 확인하세요"
+Illustration: numeric keypad, buyer "하니님", input "1.5", "1개", large "15,000원". This card is not saving yet.
+
+Card 06, device 휴대폰:
+"판매 확정"
+"‘확정’ 누르기 → 저장 완료 확인"
+Illustration: finger pressing "확정 · 15,000원", success green tick and "저장 완료". The headline or annotation must not equate pending or offline sending with success.
+
+Card 07, device 판매자:
+"상품 보여주기"
+"설정한 준비시간에 맞춰 보여주세요"
+"사진은 준비시간 + 방송 지연 후 촬영"
+Illustration: seller holds the same plain garment clearly in front of a live camera, alongside small clock and PC image-capture icon. Do not add a misleading fixed countdown or exact universal delay.
+
+Card 08, device 휴대폰:
+"전표·사진 확인"
+"판매내역에서 출력 상태와 사진 확인"
+Illustration: receipt printer with a completed receipt, plus phone sale record "하니  15,000원" with "출력됨" badge and thumbnail of the SAME garment.
+
+Loop reminder:
+"다음 고객도 03~08 순서로 반복"
+
+Footer, two short clearly legible lines:
+"판매 중에는 PC 댓글터치 화면과 화면 공유를 유지하세요"
+"마지막 판매 처리 완료 → 판매 중지 → 회차 종료"
+
+Accuracy constraints: selecting a comment alone does not save a sale; a separate 확인 then price then 확정 is essential. PC must stay running. Seller controls the phone, PC handles printing and capture automatically. Keep phones as screens with plausible UI, not screenshots to be reproduced. All text should be crisp, with no Korean typos, repeated step numbers, omitted steps, garbled lettering, fake QR destinations, or technical implementation details. Deliver the infographic image itself.
