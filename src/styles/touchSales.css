@@ -755,6 +755,28 @@
   font-size: 12px;
   line-height: 1.5;
 }
+.touch-dismissible-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.touch-dismissible-error > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.touch-dismissible-error > button {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
 .touch-page-error {
   flex-shrink: 0;
   padding: 8px 12px;

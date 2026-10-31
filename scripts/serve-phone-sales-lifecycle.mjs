@@ -13,8 +13,16 @@ const result = await build({
       () => ({ path: path.join(root, 'test/fixtures/phoneLifecycleMock.ts') }));
     builder.onResolve({ filter: /\/frontCamera$/ }, () => ({ path: 'camera', namespace: 'phone-lifecycle-mock' }));
     builder.onLoad({ filter: /.*/, namespace: 'phone-lifecycle-mock' }, () => ({ contents: `
-      export const startFrontCamera = async () => ({ getTracks: () => [{ stop() {} }] });
+      export const startFrontCamera = async () => {
+        const state = window.phoneLifecycle.state;
+        state.cameraStarts++;
+        if (state.cameraError) throw new Error(state.cameraError);
+        return { getTracks: () => [{ stop() {} }] };
+      };
       export const grabSharpestFrame = async () => {
+        const state = window.phoneLifecycle.state;
+        state.captureFrames++;
+        if (state.captureFrameDelayMs) await new Promise(resolve => setTimeout(resolve, state.captureFrameDelayMs));
         const canvas = document.createElement('canvas');
         canvas.width = canvas.height = 2;
         const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg'));

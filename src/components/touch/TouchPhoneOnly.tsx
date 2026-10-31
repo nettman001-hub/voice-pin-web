@@ -18,9 +18,11 @@ import { marklifeCommands } from '../../services/labelPrinter/marklifeProtocol';
 import { grabSharpestFrame, startFrontCamera } from '../../services/frontCamera';
 import { productSalesApi } from '../../services/productSalesApi';
 import { remoteWorkspaceService } from '../../services/remoteWorkspaceService';
+import { TouchErrorNotice } from './TouchErrorNotice';
 
 const producerKey = (workspaceId: string) => `voicecap-phone-producer:${workspaceId}`;
 const learnedKey = (workspaceId: string) => `voicecap-phone-printer-learned:${workspaceId}`;
+const printerReconnectError = '저장된 프린터에 연결하지 못했습니다. 프린터 전원을 확인한 뒤 다시 연결해 주세요.';
 const read = (key: string) => {
   try {
     return localStorage.getItem(key) || '';
@@ -70,8 +72,11 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
   const producerId = useRef(read(producerKey(workspaceId)) || crypto.randomUUID());
   const canvas = useRef<HTMLCanvasElement | null>(null);
   const video = useRef<HTMLVideoElement | null>(null);
+  const mounted = useRef(true);
+  const printerFlight = useRef<Promise<boolean> | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [connectingPrinter, setConnectingPrinter] = useState(false);
   const [error, setError] = useState('');
   const [settings, setSettings] = useState<TouchSettings | null>(null);
   const [tiktokId, setTiktokId] = useState('');
@@ -121,13 +126,14 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
     return () => clearInterval(timer);
   }, [shot]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
       void producer.current?.stop();
       androidNative()?.selling(false);
-    },
-    [],
-  );
+    };
+  }, []);
 
   const capture = useCallback(async (request: PhoneCaptureRequest) => {
     setShot({ dueAt: request.dueAt });
@@ -155,20 +161,56 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
     }
   }, []);
 
-  const connectPrinter = async (pick: boolean) => {
-    setError('');
+  const connectPrinter = useCallback((pick: boolean, automatic = false): Promise<boolean> => {
+    if (printerFlight.current) return printerFlight.current;
     const p = printer.current;
-    if (pick || !(await p.reconnect())) await p.connect();
-    setPrinterName(p.name);
-    // 연결 알림: M50은 이 명령 뒤에 보내도 되는 양(허용 신호)을 알려 준다.
-    await p.send(marklifeCommands.btType());
-    // 처음 연결한 폰은 라벨 길이를 한 번 잰다(시험에서 간격 찾기 맞춤이 잘 맞았다).
-    if (!read(learnedKey(workspaceId))) {
-      await p.send(realignBytes());
-      write(learnedKey(workspaceId), String(Date.now()));
-    }
-    producer.current?.wake();
-  };
+    if (automatic && (p.connected || !p.saved)) return Promise.resolve(p.connected);
+    if (!automatic) setError('');
+    setConnectingPrinter(true);
+    printerFlight.current = (async () => {
+      try {
+        if (pick) await p.connect();
+        else if (!p.connected && !(await p.reconnect())) {
+          if (automatic) throw new Error(printerReconnectError);
+          await p.connect();
+        }
+        if (!mounted.current) return p.connected;
+        // 연결 알림: M50은 이 명령 뒤에 보내도 되는 양(허용 신호)을 알려 준다.
+        await p.send(marklifeCommands.btType());
+        // 처음 연결한 폰은 라벨 길이를 한 번 잰다.
+        if (!read(learnedKey(workspaceId))) {
+          await p.send(realignBytes());
+          write(learnedKey(workspaceId), String(Date.now()));
+        }
+        if (mounted.current) {
+          setPrinterName(p.name);
+          setError((current) => current === printerReconnectError ? '' : current);
+          producer.current?.wake();
+        }
+        return true;
+      } catch (e) {
+        if (mounted.current) setError((e as Error).message);
+        return false;
+      } finally {
+        printerFlight.current = null;
+        if (mounted.current) setConnectingPrinter(false);
+      }
+    })();
+    return printerFlight.current;
+  }, [workspaceId]);
+
+  useEffect(() => {
+    const reconnect = () => {
+      if (document.visibilityState === 'visible') void connectPrinter(false, true);
+    };
+    reconnect();
+    document.addEventListener('visibilitychange', reconnect);
+    window.addEventListener('focus', reconnect);
+    return () => {
+      document.removeEventListener('visibilitychange', reconnect);
+      window.removeEventListener('focus', reconnect);
+    };
+  }, [connectPrinter, open]);
 
   const realign = async () => {
     setError('');
@@ -187,6 +229,9 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
     try {
       const id = tiktokId.trim().replace(/^@/, '');
       if (!id) throw new Error('틱톡 ID를 입력해 주세요.');
+      // 앱에 기억된 프린터만 다시 연결한다. 자동 연결은 기기 선택 창을 열지 않는다.
+      await connectPrinter(false, true);
+      if (!mounted.current) return;
       if (id !== (settings.tiktokId || '')) await api.call('touch-tiktok-id', { uniqueId: id });
       let session = choice === 'CONTINUE' ? bootstrap?.session : null;
       if (!session) {
@@ -288,11 +333,11 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
             {commentLabel(status.comments)}
           </span>
           <span className={status.printer.connected ? 'ok' : 'warn'}>
-            프린터 ● {status.printer.connected ? status.printer.name || printerName || '연결' : '끊김'}
+            프린터 ● {connectingPrinter ? '연결 중' : status.printer.connected ? `연결됨${status.printer.name || printerName ? ` · ${status.printer.name || printerName}` : ''}` : '끊김'}
             {status.printer.printing ? ' · 인쇄 중' : ''}
           </span>
           {!status.printer.connected ? (
-            <button onClick={() => void connectPrinter(false).catch((e) => setError(e.message))}>
+            <button disabled={connectingPrinter} onClick={() => void connectPrinter(false)}>
               프린터 연결
             </button>
           ) : (
@@ -302,11 +347,7 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
             판매 멈춤
           </button>
         </div>
-        {error && (
-          <p role="alert" className="touch-error touch-page-error">
-            {error}
-          </p>
-        )}
+        <TouchErrorNotice message={error} onDismiss={() => setError('')} className="touch-page-error" />
       </>
     );
 
@@ -319,6 +360,7 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
           {mineStale ? '이 폰으로 이어서 판매' : '폰으로 판매 시작'}
         </button>
       </div>
+      {!open && <TouchErrorNotice message={error} onDismiss={() => setError('')} className="touch-page-error" />}
       {open && (
         <div className="touch-modal-backdrop" role="dialog" aria-label="폰으로 판매 시작">
           <section className="touch-modal touch-phone-start">
@@ -341,28 +383,24 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
             </p>
             <div className="touch-phone-printer">
               <span>
-                프린터 ● {printer.current.connected ? printer.current.name || printerName || '연결됨' : '연결 안 됨'}
+                프린터 ● {connectingPrinter ? '연결 중' : printer.current.connected ? `연결됨${printer.current.name || printerName ? ` · ${printer.current.name || printerName}` : ''}` : '연결 안 됨'}
               </span>
               <button
-                disabled={busy}
-                onClick={() => void connectPrinter(true).catch((e) => setError(e.message))}
+                disabled={busy || connectingPrinter}
+                onClick={() => void connectPrinter(true)}
               >
                 {printer.current.connected ? '다른 프린터' : '프린터 연결'}
               </button>
             </div>
-            {error && (
-              <p role="alert" className="touch-error">
-                {error}
-              </p>
-            )}
+            <TouchErrorNotice message={error} onDismiss={() => setError('')} />
             {bootstrap?.session && (
-              <button className="touch-primary" disabled={busy || !settings} onClick={() => void start('CONTINUE')}>
+              <button className="touch-primary" disabled={busy || connectingPrinter || !settings} onClick={() => void start('CONTINUE')}>
                 지금 회차 이어서 판매
               </button>
             )}
             <button
               className={bootstrap?.session ? '' : 'touch-primary'}
-              disabled={busy || !settings}
+              disabled={busy || connectingPrinter || !settings}
               onClick={() => {
                 if (bootstrap?.session && !confirm('지금 회차를 끝내고 새 회차로 판매할까요?')) return;
                 void start('NEW');

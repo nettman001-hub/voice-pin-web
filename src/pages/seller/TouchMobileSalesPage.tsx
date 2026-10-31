@@ -30,6 +30,7 @@ import {
 import { requireSupabase } from '../../services/supabaseClient';
 import { TouchCommentList } from '../../components/touch/TouchCommentList';
 import { TouchPricePad } from '../../components/touch/TouchPricePad';
+import { TouchErrorNotice } from '../../components/touch/TouchErrorNotice';
 import { customerStatsLabel } from '../../services/customerStatsIndex';
 import { productSalesApi } from '../../services/productSalesApi';
 import { measureTouchClock } from '../../services/touchClock';
@@ -92,6 +93,7 @@ export default function TouchMobileSalesPage() {
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState(''),
     [error, setError] = useState('');
+  const [dismissedPendingErrorKey, setDismissedPendingErrorKey] = useState('');
   const [accountOpen, setAccountOpen] = useState(false),
     [logoutConfirm, setLogoutConfirm] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null),
@@ -144,10 +146,25 @@ export default function TouchMobileSalesPage() {
     ),
     sessionId = bootstrap?.session?.id || pc?.sessionId || '';
   const detail = rows.find((s) => s.id === detailId);
-  const pendingSaveError = outbox
+  const pendingSaveFailures = outbox
     .filter((item) => item.error && !item.blocked)
-    .map((item) => classifyTouchSaveFailure({ code: item.code, message: item.error }))
-    .find((failure) => failure.kind !== 'NETWORK')?.message || '';
+    .map((item) => ({
+      id: item.id,
+      failure: classifyTouchSaveFailure({ code: item.code, message: item.error }),
+    }))
+    .filter(({ failure }) => failure.kind !== 'NETWORK');
+  const pendingSaveErrorKey = pendingSaveFailures
+    .map(({ id, failure }) => JSON.stringify([id, failure.code, failure.message]))
+    .join('|');
+  const pendingSaveError = pendingSaveErrorKey !== dismissedPendingErrorKey
+    ? pendingSaveFailures[0]?.failure.message || ''
+    : '';
+  const visibleError = error || pendingSaveError;
+  const dismissError = () => {
+    setError('');
+    // Hide the warning only. The durable request and its automatic retry remain intact.
+    setDismissedPendingErrorKey(pendingSaveErrorKey);
+  };
   useEffect(() => {
     let active = true;
     setDetailMeta(null);
@@ -1354,11 +1371,7 @@ export default function TouchMobileSalesPage() {
               삭제
             </button>
           </div>
-          {(error || pendingSaveError) && (
-            <p role="alert" className="touch-error">
-              {error || pendingSaveError}
-            </p>
-          )}
+          <TouchErrorNotice message={visibleError} onDismiss={dismissError} />
         </div>
         {renderOverlay()}
       </div>
@@ -1460,7 +1473,7 @@ export default function TouchMobileSalesPage() {
       </>
     );
   }
-  const recentCard = recentRows.length ? (
+  const recentCard = recentRows.length && !recentRows.every((sale) => sale.captureStatus === 'CAPTURED') ? (
     <TouchRecentSaleCard
       rows={recentRows}
       label={recentSale?.label || ''}
@@ -1598,11 +1611,11 @@ export default function TouchMobileSalesPage() {
           있습니다.
         </p>
       )}
-      {(error || pendingSaveError) && (
-        <p role="alert" className="touch-error touch-page-error">
-          {error || pendingSaveError}
-        </p>
-      )}
+      <TouchErrorNotice
+        message={visibleError}
+        onDismiss={dismissError}
+        className="touch-page-error"
+      />
       {tab === 'SELL' ? (
         <>
           {!phoneOnlyUi && (

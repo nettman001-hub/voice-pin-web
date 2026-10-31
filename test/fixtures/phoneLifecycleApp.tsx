@@ -6,13 +6,18 @@ import { touchLocalStore } from '../../src/services/touchLocalStore';
 
 const emit = (type: string, requestId: string) =>
   window.dispatchEvent(new CustomEvent('voicecap-android', { detail: { type, requestId, ok: true } }));
+const params = new URLSearchParams(location.search);
+phoneLifecycleState.printerConnected = !params.has('remembered');
+phoneLifecycleState.captureFrameDelayMs = params.has('slowCapture') ? 3000 : 0;
+phoneLifecycleState.cameraError = params.has('cameraError') ? '카메라 권한이 필요합니다.' : '';
+phoneLifecycleState.commitError = params.has('pending') ? 'DATABASE_ERROR' : '';
 (window as any).VoiceCapAndroid = {
   info: () => '{"version":"fixture"}',
-  printerState: () => '{"connected":true,"name":"M50-fixture"}',
-  printerPick: (id: string) => emit('printer-connected', id),
-  printerConnectLast: (id: string) => emit('printer-connected', id),
+  printerState: () => JSON.stringify({ connected: phoneLifecycleState.printerConnected, name: 'M50-fixture', saved: phoneLifecycleState.printerSaved }),
+  printerPick: (id: string) => { phoneLifecycleState.printerPicks++; phoneLifecycleState.printerConnected = true; emit('printer-connected', id); },
+  printerConnectLast: (id: string) => { phoneLifecycleState.printerReconnects++; phoneLifecycleState.printerConnected = true; emit('printer-connected', id); },
   printerSend: (id: string) => { phoneLifecycleState.nativeWrites++; emit('printer-sent', id); },
-  printerDisconnect: () => {}, selling: (on: boolean) => phoneLifecycleState.nativeSelling.push(on),
+  printerDisconnect: () => { phoneLifecycleState.printerConnected = false; }, selling: (on: boolean) => phoneLifecycleState.nativeSelling.push(on),
   saveFile: () => {}, shareFile: () => {},
 };
 class FixtureSocket {
@@ -27,7 +32,7 @@ class FixtureSocket {
 (window as any).WebSocket = FixtureSocket;
 const root = createRoot(document.getElementById('root')!);
 let seededSale: any = null;
-if (new URLSearchParams(location.search).has('blocked')) {
+if (params.has('blocked') || params.has('pending')) {
   seededSale = {
     operationId: crypto.randomUUID(), sessionId: phoneLifecycleState.session,
     comment: { platformMessageId: 'blocked-comment', nickname: '이전고객', content: '저요', capturedAt: new Date().toISOString() },
@@ -36,7 +41,9 @@ if (new URLSearchParams(location.search).has('blocked')) {
   };
   await touchLocalStore.putOutbox({
     id: `${phoneLifecycleState.workspace}:${seededSale.operationId}`, workspaceId: phoneLifecycleState.workspace,
-    sale: seededSale, createdAt: Date.now(), blocked: true, code: 'TOUCH_NOT_RUNNING', error: 'PC에서 댓글터치 판매 시작을 눌러 주세요.',
+    sale: seededSale, createdAt: Date.now(), blocked: !params.has('pending'),
+    code: params.has('pending') ? 'DATABASE_ERROR' : 'TOUCH_NOT_RUNNING',
+    error: params.has('pending') ? 'fixture database rejection' : 'PC에서 댓글터치 판매 시작을 눌러 주세요.',
   });
 }
 (window as any).phoneLifecycle = {

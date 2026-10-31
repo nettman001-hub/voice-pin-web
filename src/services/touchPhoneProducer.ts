@@ -92,6 +92,8 @@ export class TouchPhoneProducer {
   private captureTimer: ReturnType<typeof setInterval> | null = null;
   private printing = false;
   private capturing = false;
+  private activeCaptureKey: string | null = null;
+  private captureEpoch = 0;
   private claimBusy = false;
   private sequence = 0;
   private done = new Set<string>();
@@ -216,12 +218,16 @@ export class TouchPhoneProducer {
 
   private async claimCaptures() {
     if (this.stopped || this.claimBusy) return;
+    const epoch = this.captureEpoch;
     this.claimBusy = true;
     try {
       const { captures } = await this.o.api.claimCaptures(this.o.producerId);
+      if (this.stopped || epoch !== this.captureEpoch) return;
       for (const d of captures || []) {
         const key = `${d.sale_id}:${d.capture_generation}`;
-        if (this.done.has(key) || this.queue.some((q) => q.saleId === d.sale_id && q.generation === d.capture_generation))
+        // A pending server claim can repeat throughout the countdown and upload.
+        if (this.done.has(key) || this.activeCaptureKey === key ||
+          this.queue.some((q) => q.saleId === d.sale_id && q.generation === d.capture_generation))
           continue;
         this.queue.push({
           saleId: d.sale_id,
@@ -231,22 +237,28 @@ export class TouchPhoneProducer {
       }
       this.queue.sort((a, b) => a.dueAt - b.dueAt);
     } catch (e) {
-      if (!this.stopped) this.o.onError('CAPTURE_ERROR', e);
+      if (!this.stopped && epoch === this.captureEpoch) this.o.onError('CAPTURE_ERROR', e);
     } finally {
-      this.claimBusy = false;
+      if (epoch === this.captureEpoch) this.claimBusy = false;
     }
     void this.nextCapture();
   }
 
   private async nextCapture() {
     if (this.stopped || this.capturing) return;
-    const request = this.queue.shift();
+    let request = this.queue.shift();
+    while (request && this.done.has(`${request.saleId}:${request.generation}`))
+      request = this.queue.shift();
     if (!request) return;
     this.capturing = true;
     const key = `${request.saleId}:${request.generation}`;
+    const epoch = this.captureEpoch;
+    this.activeCaptureKey = key;
+    let saving = false;
     try {
       const image = await this.o.capture(request);
-      if (this.stopped) return;
+      if (this.stopped || epoch !== this.captureEpoch) return;
+      saving = true;
       await this.o.api.saveCapture(
         this.o.producerId,
         request.saleId,
@@ -254,19 +266,24 @@ export class TouchPhoneProducer {
         image ? new Date(Date.now() + this.o.serverOffset()).toISOString() : undefined,
         request.generation,
       );
-      this.o.onChange();
+      if (!this.stopped && epoch === this.captureEpoch) this.o.onChange();
     } catch (e) {
-      this.o.onError('CAPTURE_ERROR', e);
+      if (!this.stopped && epoch === this.captureEpoch) this.o.onError('CAPTURE_ERROR', e);
     } finally {
-      this.done.add(key);
+      // A stopped countdown may be claimed again. An upload already sent must
+      // remain deduplicated even when the same producer has since restarted.
+      if (saving || epoch === this.captureEpoch) this.done.add(key);
       while (this.done.size > 1000) this.done.delete(this.done.values().next().value!);
+      this.activeCaptureKey = null;
       this.capturing = false;
-      if (this.queue.length) void this.nextCapture();
+      if (!this.stopped && this.queue.length) void this.nextCapture();
     }
   }
 
   private halt() {
     this.stopped = true;
+    this.captureEpoch++;
+    this.claimBusy = false;
     this.stream.stop();
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.captureTimer) clearInterval(this.captureTimer);

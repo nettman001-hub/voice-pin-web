@@ -6,6 +6,9 @@ export const phoneLifecycleState: any = {
   workspace, session, settings, run: null, sales: [], operations: new Map(),
   runCalls: [], commits: 0, printAcks: [], savedCaptures: [], nativeSelling: [],
   printJobs: [], captures: [], nativeWrites: 0, stream: null,
+  printerConnected: true, printerSaved: true, printerReconnects: 0, printerPicks: 0,
+  cameraStarts: 0, captureFrames: 0, captureFrameDelayMs: 0, cameraError: '',
+  captureClaims: [], captureResets: 0, commitError: '',
 };
 const emitChange = () => {
   for (const channel of channels)
@@ -60,6 +63,8 @@ export class TouchSalesApi {
     return { ok: true };
   }
   async commit(sale: any) {
+    if (phoneLifecycleState.commitError)
+      throw Object.assign(new Error('fixture database rejection'), { code: phoneLifecycleState.commitError });
     if (!phoneLifecycleState.run?.running)
       throw Object.assign(new Error('판매 연결이 멈췄습니다.'), { code: 'TOUCH_NOT_RUNNING' });
     const previous = phoneLifecycleState.operations.get(sale.operationId);
@@ -92,9 +97,16 @@ export class TouchSalesApi {
     }
     return { ok: true };
   }
-  async claimCaptures() { return { captures: phoneLifecycleState.captures.splice(0) }; }
+  async claimCaptures() {
+    const captures = structuredClone(phoneLifecycleState.captures);
+    phoneLifecycleState.captureClaims.push(captures);
+    return { captures };
+  }
   async saveCapture(producer: string, saleId: string, image: string, capturedAt: string, generation: string) {
     phoneLifecycleState.savedCaptures.push({ saleId, hasImage: !!image, generation });
+    phoneLifecycleState.captures = phoneLifecycleState.captures.filter(
+      (capture: any) => capture.sale_id !== saleId || capture.capture_generation !== generation,
+    );
     const sale = phoneLifecycleState.sales.find((s: any) => s.id === saleId);
     if (sale) { sale.captureStatus = image ? 'CAPTURED' : 'MISSING'; sale.imageUrl = image; }
     emitChange();
@@ -110,5 +122,14 @@ export class TouchSalesApi {
     emitChange();
     return { ok: true };
   }
-  async resetCapture() { return { ok: true }; }
+  async resetCapture(saleId: string) {
+    phoneLifecycleState.captureResets++;
+    const generation = `capture-${saleId}-retake-${phoneLifecycleState.captureResets}`;
+    const dueAt = new Date(Date.now() + 400).toISOString();
+    phoneLifecycleState.captures.push({ sale_id: saleId, capture_generation: generation, capture_due_at: dueAt });
+    const sale = phoneLifecycleState.sales.find((s: any) => s.id === saleId);
+    if (sale) { sale.captureStatus = 'PENDING'; sale.captureDueAt = dueAt; }
+    emitChange();
+    return { ok: true };
+  }
 }

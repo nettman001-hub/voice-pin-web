@@ -24,6 +24,8 @@ export const PHONE_LABEL_DEFAULTS = {
 export interface PhoneLabelPrinter {
   readonly name: string;
   readonly connected: boolean;
+  /** 네이티브 앱에 마지막으로 고른 프린터가 있으면 true. */
+  readonly saved?: boolean;
   /** 처음 연결(기기 고르기). */
   connect(): Promise<void>;
   /** 저장해 둔 프린터에 다시 붙기. 없으면 false. */
@@ -33,10 +35,11 @@ export interface PhoneLabelPrinter {
 }
 
 class AndroidLabelPrinter implements PhoneLabelPrinter {
-  private state = { connected: false, name: '' };
+  private state = { connected: false, name: '', saved: false };
+  private reconnectFlight: Promise<boolean> | null = null;
   private refresh() {
     const native = androidNative();
-    this.state = androidJson(native?.printerState(), { connected: false, name: '' });
+    this.state = androidJson(native?.printerState(), { connected: false, name: '', saved: false });
   }
   get name() {
     this.refresh();
@@ -46,22 +49,32 @@ class AndroidLabelPrinter implements PhoneLabelPrinter {
     this.refresh();
     return !!this.state.connected;
   }
+  get saved() {
+    this.refresh();
+    return !!this.state.saved;
+  }
   async connect() {
     const id = crypto.randomUUID();
     const wait = waitAndroid('printer-connected', id, 60000);
     androidNative()!.printerPick(id);
     await wait;
   }
-  async reconnect() {
-    const id = crypto.randomUUID();
-    const wait = waitAndroid('printer-connected', id, 20000);
-    androidNative()!.printerConnectLast(id);
-    try {
-      await wait;
-      return true;
-    } catch {
-      return false;
-    }
+  reconnect(): Promise<boolean> {
+    if (this.connected) return Promise.resolve(true);
+    if (this.reconnectFlight) return this.reconnectFlight;
+    if (!this.saved) return Promise.resolve(false);
+    this.reconnectFlight = (async () => {
+      const id = crypto.randomUUID();
+      const wait = waitAndroid('printer-connected', id, 20000);
+      androidNative()!.printerConnectLast(id);
+      try {
+        await wait;
+        return this.connected;
+      } catch {
+        return false;
+      }
+    })().finally(() => { this.reconnectFlight = null; });
+    return this.reconnectFlight;
   }
   async send(data: Uint8Array) {
     const id = crypto.randomUUID();
