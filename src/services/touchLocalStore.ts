@@ -1,5 +1,6 @@
 import type { TouchCommit } from '../types/touchSales';
 import type { TouchFrame } from './touchFrameBuffer';
+import { classifyTouchSaveFailure } from './touchSaveFailure.ts';
 export interface TouchOutboxItem {
   id: string;
   workspaceId: string;
@@ -110,23 +111,14 @@ export async function flushTouchOutbox(
       await store.removeOutbox(item.id);
     } catch (error) {
       if (!active()) return;
-      const e = error as { message?: string; code?: string };
-      const blocked = [
-        'COMMENT_ALREADY_COMMITTED',
-        'SESSION_ENDED',
-        'TOUCH_NOT_RUNNING',
-        'VALIDATION_ERROR',
-        'OPERATION_PAYLOAD_MISMATCH',
-        'CLOCK_INVALID',
-        'COMMENT_IDENTITY_CONFLICT',
-      ].includes(e.code || '');
+      const failure = classifyTouchSaveFailure(error);
       await store.putOutbox({
         ...item,
-        error: e.message || '저장 확인 중',
-        code: e.code,
-        blocked,
+        error: failure.detail || failure.message,
+        code: failure.code,
+        blocked: failure.blocked,
       });
-      if (!blocked) return;
+      if (!failure.blocked) return;
     }
   }
 }

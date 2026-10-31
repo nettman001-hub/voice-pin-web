@@ -11,6 +11,7 @@ import {
   type TouchBootstrap,
 } from '../../services/touchSalesApi';
 import { TouchSalesBridge } from '../../services/touchSalesBridge';
+import { classifyTouchSaveFailure } from '../../services/touchSaveFailure';
 import {
   touchLocalStore,
   flushTouchOutbox,
@@ -143,6 +144,10 @@ export default function TouchMobileSalesPage() {
     ),
     sessionId = bootstrap?.session?.id || pc?.sessionId || '';
   const detail = rows.find((s) => s.id === detailId);
+  const pendingSaveError = outbox
+    .filter((item) => item.error && !item.blocked)
+    .map((item) => classifyTouchSaveFailure({ code: item.code, message: item.error }))
+    .find((failure) => failure.kind !== 'NETWORK')?.message || '';
   useEffect(() => {
     let active = true;
     setDetailMeta(null);
@@ -653,24 +658,17 @@ export default function TouchMobileSalesPage() {
       setSelection((s) => ({ ...s, selectedKey: null }));
       await reloadOutbox();
     } catch (e) {
-      const failure = e as { message?: string; code?: string };
-      const blocked = [
-        'COMMENT_ALREADY_COMMITTED',
-        'SESSION_ENDED',
-        'TOUCH_NOT_RUNNING',
-        'VALIDATION_ERROR',
-        'CLOCK_INVALID',
-      ].includes(failure.code || '');
+      const failure = classifyTouchSaveFailure(e);
       await touchLocalStore.putOutbox({
         ...item,
-        error: failure.message,
+        error: failure.detail || failure.message,
         code: failure.code,
-        blocked,
+        blocked: failure.blocked,
       });
       await reloadOutbox();
-      if (blocked) setError(failure.message || '확인해 주세요.');
+      if (failure.blocked) setError(failure.message);
       else {
-        setNotice('인터넷 연결 후 자동으로 보냅니다.');
+        setNotice(failure.kind === 'NETWORK' ? failure.message : '');
         setPriceComment(null);
         setSelection((s) => ({ ...s, selectedKey: null }));
       }
@@ -760,21 +758,14 @@ export default function TouchMobileSalesPage() {
           await touchLocalStore.removeOutbox(item.id);
           saved.push(result.saleId);
         } catch (e) {
-          const failure = e as { message?: string; code?: string };
-          const blocked = [
-            'COMMENT_ALREADY_COMMITTED',
-            'SESSION_ENDED',
-            'TOUCH_NOT_RUNNING',
-            'VALIDATION_ERROR',
-            'CLOCK_INVALID',
-          ].includes(failure.code || '');
+          const failure = classifyTouchSaveFailure(e);
           failed++;
-          if (blocked) blockedMessage = failure.message || '확인해 주세요.';
+          if (failure.blocked) blockedMessage = failure.message;
           await touchLocalStore.putOutbox({
             ...item,
-            error: failure.message,
+            error: failure.detail || failure.message,
             code: failure.code,
-            blocked,
+            blocked: failure.blocked,
           });
         }
       }
@@ -784,7 +775,7 @@ export default function TouchMobileSalesPage() {
         setRecentSale({ saleIds: saved, label });
       }
       setNotice(
-        `${label} · ${saved.length}명 저장 · 전표 출력 중${failed ? ` · ${failed}건은 판매내역에서 확인` : ''}`,
+        `${label} · ${saved.length}명 저장${saved.length ? ' · 전표 출력 중' : ''}${failed ? ` · ${failed}건 저장 대기 · 판매내역에서 확인` : ''}`,
       );
       if (blockedMessage) setError(blockedMessage);
       setPicked([]);
@@ -972,8 +963,9 @@ export default function TouchMobileSalesPage() {
         <p>
           {item.code === 'TOUCH_NOT_RUNNING'
             ? '판매 연결이 멈춰 저장되지 않았습니다. 판매를 다시 시작한 뒤 저장해 주세요.'
-            : item.error ||
-              '인터넷이 연결되면 같은 작업 번호로 보냅니다. 전표와 캡처는 저장 확인 후 진행합니다.'}
+            : item.error
+              ? classifyTouchSaveFailure({ code: item.code, message: item.error }).message
+              : '판매 저장을 확인하고 있습니다. 전표와 캡처는 저장 확인 후 진행합니다.'}
         </p>
         {item.code === 'COMMENT_ALREADY_COMMITTED' && (
           <button
@@ -1362,9 +1354,9 @@ export default function TouchMobileSalesPage() {
               삭제
             </button>
           </div>
-          {error && (
+          {(error || pendingSaveError) && (
             <p role="alert" className="touch-error">
-              {error}
+              {error || pendingSaveError}
             </p>
           )}
         </div>
@@ -1606,9 +1598,9 @@ export default function TouchMobileSalesPage() {
           있습니다.
         </p>
       )}
-      {error && (
+      {(error || pendingSaveError) && (
         <p role="alert" className="touch-error touch-page-error">
-          {error}
+          {error || pendingSaveError}
         </p>
       )}
       {tab === 'SELL' ? (
