@@ -52,3 +52,19 @@ test('ended sessions and duplicate comments stay reviewable and do not retry for
   assert.equal(attempts, 1);
   assert.equal((await store.listOutbox(workspace))[0].blocked, true);
 });
+test('only failures without a server code read as an internet problem', async () => {
+  const { touchCommitFailure } = await import('../src/services/touchLocalStore.ts');
+  const net = touchCommitFailure(new Error('Failed to send a request to the Edge Function'));
+  assert.equal(net.network, true);
+  assert.equal(net.message, '인터넷 연결 후 자동으로 보냅니다.');
+  const auth = touchCommitFailure(Object.assign(new Error('인증이 필요하거나 기기 연결이 해제되었습니다.'), { code: 'AUTH_REQUIRED' }));
+  assert.equal(auth.network, false);
+  assert.equal(auth.blocked, false, 'retried automatically after login');
+  assert.match(auth.message, /로그인/);
+  const db = touchCommitFailure(Object.assign(new Error('작업 상태를 확인한 뒤 다시 시도해 주세요.'), { code: 'DATABASE_ERROR' }));
+  assert.equal(db.network, false);
+  assert.match(db.message, /DATABASE_ERROR/);
+  const ended = touchCommitFailure(Object.assign(new Error('회차 종료'), { code: 'SESSION_ENDED' }));
+  assert.equal(ended.blocked, true);
+  assert.equal(ended.message, '회차 종료');
+});

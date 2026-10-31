@@ -95,6 +95,57 @@ export class TouchLocalStore {
   }
 }
 export const touchLocalStore = new TouchLocalStore();
+/** 다시 보내도 결과가 같아 판매자가 직접 확인해야 하는 실패. */
+export const TOUCH_BLOCKED_CODES = [
+  'COMMENT_ALREADY_COMMITTED',
+  'SESSION_ENDED',
+  'TOUCH_NOT_RUNNING',
+  'VALIDATION_ERROR',
+  'OPERATION_PAYLOAD_MISMATCH',
+  'CLOCK_INVALID',
+  'COMMENT_IDENTITY_CONFLICT',
+];
+/**
+ * 판매 저장 실패를 판매자에게 보여 줄 말로 바꾼다.
+ * 서버 응답 코드가 없을 때만 인터넷 문제로 본다. 로그인 풀림·서버 거부를
+ * "인터넷 연결 후 자동으로 보냅니다"로 감추면 전표가 왜 안 나오는지 알 수 없다.
+ */
+export function touchCommitFailure(error: unknown): {
+  blocked: boolean;
+  network: boolean;
+  message: string;
+} {
+  const e = (error || {}) as { message?: string; code?: string };
+  const code = e.code || '';
+  const blocked = TOUCH_BLOCKED_CODES.includes(code);
+  if (!code)
+    return {
+      blocked: false,
+      network: true,
+      message: '인터넷 연결 후 자동으로 보냅니다.',
+    };
+  if (code === 'AUTH_REQUIRED')
+    return {
+      blocked: false,
+      network: false,
+      message:
+        '로그인이 풀려 판매가 저장되지 않았습니다(전표도 나오지 않음). 다시 로그인하면 자동으로 보냅니다.',
+    };
+  if (code === 'CAPABILITY_DENIED')
+    return {
+      blocked: false,
+      network: false,
+      message:
+        '이 계정에 판매 저장 권한이 없어 저장되지 않았습니다(전표도 나오지 않음). 판매자 계정으로 로그인해 주세요.',
+    };
+  return {
+    blocked,
+    network: false,
+    message: blocked
+      ? e.message || '확인해 주세요.'
+      : `서버가 판매를 저장하지 못했습니다(전표도 나오지 않음): ${e.message || code} [${code}] 잠시 뒤 자동으로 다시 보냅니다.`,
+  };
+}
 export async function flushTouchOutbox(
   store: TouchLocalStore,
   workspaceId: string,
@@ -111,15 +162,7 @@ export async function flushTouchOutbox(
     } catch (error) {
       if (!active()) return;
       const e = error as { message?: string; code?: string };
-      const blocked = [
-        'COMMENT_ALREADY_COMMITTED',
-        'SESSION_ENDED',
-        'TOUCH_NOT_RUNNING',
-        'VALIDATION_ERROR',
-        'OPERATION_PAYLOAD_MISMATCH',
-        'CLOCK_INVALID',
-        'COMMENT_IDENTITY_CONFLICT',
-      ].includes(e.code || '');
+      const blocked = TOUCH_BLOCKED_CODES.includes(e.code || '');
       await store.putOutbox({
         ...item,
         error: e.message || '저장 확인 중',
