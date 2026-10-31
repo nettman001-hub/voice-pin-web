@@ -14,6 +14,7 @@ import { TouchSalesBridge } from '../../services/touchSalesBridge';
 import {
   touchLocalStore,
   flushTouchOutbox,
+  touchCommitFailure,
   type TouchOutboxItem,
 } from '../../services/touchLocalStore';
 import {
@@ -608,10 +609,14 @@ export default function TouchMobileSalesPage() {
         ...recent.filter((p) => p !== inputPrice),
       ].slice(0, 3);
       setRecent(next);
-      localStorage.setItem(
-        `voicecap-touch-recent:${workspaceId}`,
-        JSON.stringify(next),
-      );
+      try {
+        localStorage.setItem(
+          `voicecap-touch-recent:${workspaceId}`,
+          JSON.stringify(next),
+        );
+      } catch {
+        // 최근 가격 기억은 편의 기능이다. 실패해도 판매 저장은 계속한다.
+      }
       const request = api.commit(sale);
       let timeout: ReturnType<typeof setTimeout>;
       const result = await Promise.race([
@@ -654,23 +659,19 @@ export default function TouchMobileSalesPage() {
       await reloadOutbox();
     } catch (e) {
       const failure = e as { message?: string; code?: string };
-      const blocked = [
-        'COMMENT_ALREADY_COMMITTED',
-        'SESSION_ENDED',
-        'TOUCH_NOT_RUNNING',
-        'VALIDATION_ERROR',
-        'CLOCK_INVALID',
-      ].includes(failure.code || '');
+      const { blocked, network, message } = touchCommitFailure(e);
       await touchLocalStore.putOutbox({
         ...item,
-        error: failure.message,
+        error: network ? failure.message : message,
         code: failure.code,
         blocked,
       });
       await reloadOutbox();
-      if (blocked) setError(failure.message || '확인해 주세요.');
+      if (blocked) setError(message);
       else {
-        setNotice('인터넷 연결 후 자동으로 보냅니다.');
+        // 인터넷 문제만 잠깐 알림으로, 로그인 풀림·서버 거부는 남는 오류로 보여 준다.
+        if (network) setNotice(message);
+        else setError(message);
         setPriceComment(null);
         setSelection((s) => ({ ...s, selectedKey: null }));
       }
@@ -750,10 +751,12 @@ export default function TouchMobileSalesPage() {
         ...recent.filter((p) => p !== inputPrice),
       ].slice(0, 3);
       setRecent(next);
-      localStorage.setItem(
-        `voicecap-touch-recent:${workspaceId}`,
-        JSON.stringify(next),
-      );
+      try {
+        localStorage.setItem(
+          `voicecap-touch-recent:${workspaceId}`,
+          JSON.stringify(next),
+        );
+      } catch {}
       for (const item of items) {
         try {
           const result = await api.commit(item.sale);
@@ -761,18 +764,12 @@ export default function TouchMobileSalesPage() {
           saved.push(result.saleId);
         } catch (e) {
           const failure = e as { message?: string; code?: string };
-          const blocked = [
-            'COMMENT_ALREADY_COMMITTED',
-            'SESSION_ENDED',
-            'TOUCH_NOT_RUNNING',
-            'VALIDATION_ERROR',
-            'CLOCK_INVALID',
-          ].includes(failure.code || '');
+          const { blocked, network, message } = touchCommitFailure(e);
           failed++;
-          if (blocked) blockedMessage = failure.message || '확인해 주세요.';
+          if (!network) blockedMessage = message;
           await touchLocalStore.putOutbox({
             ...item,
-            error: failure.message,
+            error: network ? failure.message : message,
             code: failure.code,
             blocked,
           });
