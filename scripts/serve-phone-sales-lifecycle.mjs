@@ -19,10 +19,12 @@ const result = await build({
         if (state.cameraError) throw new Error(state.cameraError);
         return { getTracks: () => [{ stop() {} }] };
       };
-      export const grabSharpestFrame = async () => {
+      export const grabSharpestFrame = async (_video, options = {}) => {
         const state = window.phoneLifecycle.state;
         state.captureFrames++;
+        options.onPhase?.('SAMPLING');
         if (state.captureFrameDelayMs) await new Promise(resolve => setTimeout(resolve, state.captureFrameDelayMs));
+        options.onPhase?.('ENCODING');
         const canvas = document.createElement('canvas');
         canvas.width = canvas.height = 2;
         const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg'));

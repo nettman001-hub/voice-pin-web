@@ -1180,3 +1180,8 @@
   color: #fff;
   text-shadow: 0 4px 24px #000;
 }
+.touch-phone-shot strong.touch-phone-shot-message {
+  font-size: 28px;
+  text-align: center;
+  padding: 20px;
+}

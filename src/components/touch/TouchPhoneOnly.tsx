@@ -19,10 +19,12 @@ import { grabSharpestFrame, startFrontCamera } from '../../services/frontCamera'
 import { productSalesApi } from '../../services/productSalesApi';
 import { remoteWorkspaceService } from '../../services/remoteWorkspaceService';
 import { TouchErrorNotice } from './TouchErrorNotice';
+import { recordPhoneCaptureDiagnostic, type PhoneCaptureDiagnostic } from '../../services/phoneCaptureDiagnostics';
 
 const producerKey = (workspaceId: string) => `voicecap-phone-producer:${workspaceId}`;
 const learnedKey = (workspaceId: string) => `voicecap-phone-printer-learned:${workspaceId}`;
 const printerReconnectError = '저장된 프린터에 연결하지 못했습니다. 프린터 전원을 확인한 뒤 다시 연결해 주세요.';
+type ShotPhase = 'PREPARING' | 'COUNTDOWN' | 'SAMPLING' | 'ENCODING' | 'PREVIEW';
 const read = (key: string) => {
   try {
     return localStorage.getItem(key) || '';
@@ -73,6 +75,8 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
   const canvas = useRef<HTMLCanvasElement | null>(null);
   const video = useRef<HTMLVideoElement | null>(null);
   const mounted = useRef(true);
+  const captureAttempt = useRef(0);
+  const previewResources = useRef<{ timer?: ReturnType<typeof setTimeout>; url?: string }>({});
   const printerFlight = useRef<Promise<boolean> | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -82,7 +86,7 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
   const [tiktokId, setTiktokId] = useState('');
   const [status, setStatus] = useState<PhoneProducerStatus | null>(null);
   const [printerName, setPrinterName] = useState('');
-  const [shot, setShot] = useState<{ dueAt: number; preview?: string } | null>(null);
+  const [shot, setShot] = useState<{ dueAt: number; phase: ShotPhase; since: number; preview?: string } | null>(null);
   const [now, setNow] = useState(Date.now());
   const running = !!status && !!producer.current?.running;
 
@@ -126,40 +130,92 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
     return () => clearInterval(timer);
   }, [shot]);
 
+  const releasePreview = useCallback(() => {
+    if (previewResources.current.timer) clearTimeout(previewResources.current.timer);
+    if (previewResources.current.url) URL.revokeObjectURL(previewResources.current.url);
+    previewResources.current = {};
+  }, []);
+
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      captureAttempt.current++;
+      releasePreview();
       void producer.current?.stop();
       androidNative()?.selling(false);
     };
-  }, []);
+  }, [releasePreview]);
 
   const capture = useCallback(async (request: PhoneCaptureRequest) => {
-    setShot({ dueAt: request.dueAt });
+    const attempt = ++captureAttempt.current;
+    const active = () => mounted.current && captureAttempt.current === attempt;
+    releasePreview();
+    setNow(Date.now());
+    setShot({ dueAt: request.dueAt, phase: 'PREPARING', since: Date.now() });
+    const started = performance.now();
+    const diagnostic: PhoneCaptureDiagnostic = {
+      saleId: request.saleId,
+      generation: request.generation,
+      startedAt: new Date().toISOString(),
+      status: 'FAILED',
+      timings: { cameraMs: 0, countdownMs: 0, samplingMs: 0, encodingMs: 0, serializationMs: 0, totalMs: 0 },
+    };
+    let stage: keyof PhoneCaptureDiagnostic['timings'] = 'cameraMs';
+    let stageStarted = started;
+    const finishStage = () => {
+      const time = performance.now();
+      diagnostic.timings[stage] += Math.round(time - stageStarted);
+      stageStarted = time;
+    };
+    const phase = (next: ShotPhase, nextStage: keyof PhoneCaptureDiagnostic['timings']) => {
+      finishStage();
+      stage = nextStage;
+      if (active()) setShot({ dueAt: request.dueAt, phase: next, since: Date.now() });
+    };
     let stream: MediaStream | null = null;
     try {
       const el = video.current;
       if (!el) throw new Error('카메라 화면을 열지 못했습니다.');
       stream = await startFrontCamera(el, 1280);
+      if (!active()) return null;
+      phase('COUNTDOWN', 'countdownMs');
       const wait = request.dueAt - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      const frame = await grabSharpestFrame(el, { count: 3, gapMs: 150 });
-      setShot({ dueAt: request.dueAt, preview: frame.url });
-      const data = await blobToDataUrl(frame.blob);
-      setTimeout(() => {
-        setShot((s) => (s?.preview === frame.url ? null : s));
+      if (!active()) return null;
+      const frame = await grabSharpestFrame(el, {
+        count: 3, gapMs: 150,
+        onPhase: (next) => phase(next, next === 'SAMPLING' ? 'samplingMs' : 'encodingMs'),
+      });
+      finishStage();
+      if (!active()) {
         URL.revokeObjectURL(frame.url);
-      }, 1200);
+        return null;
+      }
+      setShot({ dueAt: request.dueAt, phase: 'PREVIEW', since: Date.now(), preview: frame.url });
+      previewResources.current = { url: frame.url, timer: setTimeout(() => {
+        if (active()) setShot((value) => (value?.preview === frame.url ? null : value));
+        if (previewResources.current.url === frame.url) releasePreview();
+      }, 1200) };
+      stage = 'serializationMs';
+      const data = await blobToDataUrl(frame.blob);
+      diagnostic.status = active() ? 'CAPTURED' : 'CANCELLED';
       return data;
     } catch (e) {
-      setError(`사진을 찍지 못했습니다: ${(e as Error).message}`);
-      setShot(null);
+      if (active()) {
+        setError(`사진을 찍지 못했습니다: ${(e as Error).message}`);
+        setShot(null);
+        releasePreview();
+      }
       return null;
     } finally {
+      finishStage();
+      if (!active()) diagnostic.status = 'CANCELLED';
+      diagnostic.timings.totalMs = Math.round(performance.now() - started);
+      recordPhoneCaptureDiagnostic(workspaceId, diagnostic);
       stream?.getTracks().forEach((t) => t.stop());
     }
-  }, []);
+  }, [releasePreview, workspaceId]);
 
   const connectPrinter = useCallback((pick: boolean, automatic = false): Promise<boolean> => {
     if (printerFlight.current) return printerFlight.current;
@@ -255,6 +311,9 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
         onStatus: (s) => setStatus(s),
         onError: (kind, e) => {
           if (kind === 'LEASE_LOST') {
+            captureAttempt.current++;
+            releasePreview();
+            setShot(null);
             setError('다른 기기로 판매 연결이 바뀌어 이 폰의 판매를 멈췄습니다.');
             setStatus(null);
             props.onRunningChange(false);
@@ -282,6 +341,9 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
   };
 
   const stop = async () => {
+    captureAttempt.current++;
+    releasePreview();
+    setShot(null);
     setBusy(true);
     try {
       await producer.current?.stop();
@@ -301,7 +363,12 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
       <div className={shot ? 'touch-phone-shot' : 'touch-phone-shot touch-phone-shot-idle'} aria-hidden={!shot}>
         <video ref={video} playsInline muted />
         {shot && !shot.preview && (
-          <strong>{Math.max(0, Math.ceil((shot.dueAt - now) / 1000)) || '찰칵'}</strong>
+          <strong className={(shot.phase === 'SAMPLING' && now - shot.since < 400) || (shot.phase === 'COUNTDOWN' && shot.dueAt > now) ? '' : 'touch-phone-shot-message'}>
+            {shot.phase === 'PREPARING' ? '카메라 준비 중'
+              : shot.phase === 'SAMPLING' ? (now - shot.since < 400 ? '찰칵' : '사진 처리 중')
+                : shot.phase === 'ENCODING' ? '사진 처리 중'
+                  : Math.max(0, Math.ceil((shot.dueAt - now) / 1000)) || '촬영 준비 중'}
+          </strong>
         )}
         {shot?.preview && <img src={shot.preview} alt="방금 찍은 판매 사진" />}
       </div>

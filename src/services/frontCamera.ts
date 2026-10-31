@@ -1,3 +1,5 @@
+import { encodeCameraJpeg } from './cameraJpegEncoder.ts';
+
 /** Sharpness = variance of a 4-neighbour Laplacian on grayscale; higher is sharper. */
 export function frameSharpness(
   rgba: Uint8Array | Uint8ClampedArray,
@@ -51,11 +53,17 @@ export async function startFrontCamera(
     },
     audio: false,
   });
-  video.srcObject = stream;
-  video.muted = true;
-  video.playsInline = true;
-  await video.play();
-  return stream;
+  try {
+    video.srcObject = stream;
+    video.muted = true;
+    video.playsInline = true;
+    await video.play();
+    return stream;
+  } catch (error) {
+    stream.getTracks().forEach((track) => track.stop());
+    if (video.srcObject === stream) video.srcObject = null;
+    throw error;
+  }
 }
 
 export type GrabbedFrame = {
@@ -73,7 +81,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Takes `count` frames `gapMs` apart and keeps the sharpest (the saved photo is not mirrored). */
 export async function grabSharpestFrame(
   video: HTMLVideoElement,
-  options: { count?: number; gapMs?: number; maxWidth?: number } = {},
+  options: {
+    count?: number;
+    gapMs?: number;
+    maxWidth?: number;
+    onPhase?: (phase: 'SAMPLING' | 'ENCODING') => void;
+  } = {},
 ): Promise<GrabbedFrame> {
   const count = options.count ?? 3;
   const gapMs = options.gapMs ?? 150;
@@ -91,6 +104,7 @@ export async function grabSharpestFrame(
   let best: { canvas: HTMLCanvasElement; score: number; light: number } | null =
     null;
   const scores: number[] = [];
+  options.onPhase?.('SAMPLING');
   for (let i = 0; i < count; i++) {
     if (i) await sleep(gapMs);
     const canvas = document.createElement('canvas');
@@ -104,13 +118,8 @@ export async function grabSharpestFrame(
     if (!best || score > best.score)
       best = { canvas, score, light: frameBrightness(data) };
   }
-  const blob = await new Promise<Blob>((resolve, reject) =>
-    best!.canvas.toBlob(
-      (b) => (b ? resolve(b) : reject(new Error('사진 저장 실패'))),
-      'image/jpeg',
-      0.85,
-    ),
-  );
+  options.onPhase?.('ENCODING');
+  const blob = await encodeCameraJpeg(best!.canvas, 0.85);
   return {
     blob,
     url: URL.createObjectURL(blob),
