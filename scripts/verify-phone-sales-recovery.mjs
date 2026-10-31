@@ -143,6 +143,81 @@ try {
   await pending.screenshot({ path: path.join(output, 'pending-warning-dismissed.png'), fullPage: true });
   checks.push('dismissing a queued server warning preserves its operation and payload across retries');
   await stop(pending);
+
+  const printer = await newPage('');
+  const setup = printer.getByRole('dialog', { name: '폰으로 판매 시작' });
+  const openSetup = async () => {
+    await printer.locator('.touch-phone-offer button').click();
+    await setup.waitFor();
+  };
+  const printerState = () => printer.evaluate(() => {
+    const state = window.phoneLifecycle.state;
+    return { connected: state.printerConnected, name: state.printerName, savedName: state.printerSavedName,
+      saved: state.printerSaved, disconnects: state.printerDisconnects, reconnects: state.printerReconnects, picks: state.printerPicks };
+  });
+  await openSetup();
+  await setup.getByText('프린터 ● 연결됨 · M50-fixture').waitFor();
+  await setup.getByRole('button', { name: '끊기', exact: true }).waitFor();
+  const align = setup.getByRole('button', { name: '라벨 다시 맞추기', exact: true });
+  assert.equal(await align.isEnabled(), true, 'connected setup modal realign action must be enabled');
+  await printer.evaluate(() => { window.phoneLifecycle.state.nativeSendDelayMs = 750; });
+  const writesBeforeAlign = await printer.evaluate(() => window.phoneLifecycle.state.nativePayloads.length);
+  await align.click();
+  assert.equal(await align.isDisabled(), true, 'realign must be disabled while waiting for the native ACK');
+  assert.equal(await setup.getByRole('button', { name: '끊기', exact: true }).isDisabled(), true);
+  assert.equal(await setup.getByRole('button', { name: '지금 회차 이어서 판매', exact: true }).isDisabled(), true);
+  await align.evaluate(button => button.click());
+  assert.deepEqual(await printer.evaluate(start => window.phoneLifecycle.state.nativePayloads.slice(start)
+    .map(payload => [...atob(payload)].map(character => character.charCodeAt(0))), writesBeforeAlign), [[0x1f, 0x30, 0x60]]);
+  await printer.waitForFunction(() => [...document.querySelectorAll('.touch-phone-start button')]
+    .some(button => button.textContent.trim() === '라벨 다시 맞추기' && !button.disabled));
+  await printer.evaluate(() => { window.phoneLifecycle.state.nativeSendDelayMs = 0; });
+  await printer.screenshot({ path: path.join(output, 'printer-connected-disconnect-action.png'), fullPage: true });
+  await setup.getByRole('button', { name: '끊기', exact: true }).click();
+  await setup.getByText('프린터 ● 연결 안 됨').waitFor();
+  assert.ok(await align.count() === 0 || await align.isDisabled(), 'disconnected setup must not offer active realignment');
+  assert.deepEqual(await printerState(), { connected: false, name: 'M50-fixture', savedName: 'M50-fixture', saved: true,
+    disconnects: 1, reconnects: 0, picks: 0 });
+  await printer.evaluate(() => {
+    window.dispatchEvent(new Event('focus'));
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await printer.waitForTimeout(350);
+  await setup.getByRole('button', { name: '닫기', exact: true }).click();
+  await openSetup();
+  await setup.getByText('프린터 ● 연결 안 됨').waitFor();
+  assert.equal((await printerState()).reconnects, 0, 'focus/reopening undid the manual disconnect');
+  await setup.getByRole('button', { name: '지금 회차 이어서 판매', exact: true }).click();
+  await printer.locator('.touch-phone-stop').waitFor();
+  assert.equal((await printerState()).connected, false);
+  assert.equal((await printerState()).reconnects, 0, 'starting a sale undid the manual disconnect');
+  assert.match(await printer.locator('.touch-phone-bar').innerText(), /프린터 ● 끊김/);
+  checks.push('printer disconnect stays disconnected through focus, modal reopening and sale start');
+  await printer.locator('.touch-phone-stop').click();
+  await printer.locator('.touch-phone-offer button').waitFor();
+  await openSetup();
+  await printer.evaluate(() => { window.phoneLifecycle.state.nextPrinterName = 'M80-replacement'; });
+  await setup.getByRole('button', { name: '프린터 연결', exact: true }).click();
+  await setup.getByText('프린터 ● 연결됨 · M80-replacement').waitFor();
+  assert.equal(await align.isEnabled(), true, 'explicit reconnect must restore realignment');
+  const realignedAfterReconnect = await printer.evaluate(() => window.phoneLifecycle.state.nativePayloads.length);
+  await align.click();
+  assert.deepEqual(await printer.evaluate(start => window.phoneLifecycle.state.nativePayloads.slice(start)
+    .map(payload => [...atob(payload)].map(character => character.charCodeAt(0))), realignedAfterReconnect), [[0x1f, 0x30, 0x60]]);
+  checks.push('connected setup realignment sends one learn-paper command, blocks duplicate taps and returns after reconnect');
+  assert.deepEqual(await printerState(), { connected: true, name: 'M80-replacement', savedName: 'M80-replacement', saved: true,
+    disconnects: 1, reconnects: 0, picks: 1 });
+  await printer.screenshot({ path: path.join(output, 'printer-replacement-connected.png'), fullPage: true });
+  await printer.evaluate(() => {
+    window.phoneLifecycle.state.printerConnected = false;
+    window.dispatchEvent(new Event('focus'));
+  });
+  await printer.waitForFunction(() => window.phoneLifecycle.state.printerReconnects === 1 && window.phoneLifecycle.state.printerConnected);
+  await setup.getByText('프린터 ● 연결됨 · M80-replacement').waitFor();
+  assert.equal((await printerState()).picks, 1, 'automatic recovery reopened the picker');
+  assert.equal((await printerState()).savedName, 'M80-replacement');
+  checks.push('explicit reconnect opens the picker and restores automatic recovery for the newly saved printer');
+  await stop(printer);
   assert.deepEqual(errors, [], 'browser page errors');
   const result = { passed: checks.length, checks, scope: 'headless browser; isolated backend, camera and native printer' };
   await fs.writeFile(path.join(output, 'checks.json'), JSON.stringify(result, null, 2));

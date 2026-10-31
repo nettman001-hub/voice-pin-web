@@ -13,11 +13,27 @@ phoneLifecycleState.cameraError = params.has('cameraError') ? '카메라 권한�
 phoneLifecycleState.commitError = params.has('pending') ? 'DATABASE_ERROR' : '';
 (window as any).VoiceCapAndroid = {
   info: () => '{"version":"fixture"}',
-  printerState: () => JSON.stringify({ connected: phoneLifecycleState.printerConnected, name: 'M50-fixture', saved: phoneLifecycleState.printerSaved }),
-  printerPick: (id: string) => { phoneLifecycleState.printerPicks++; phoneLifecycleState.printerConnected = true; emit('printer-connected', id); },
-  printerConnectLast: (id: string) => { phoneLifecycleState.printerReconnects++; phoneLifecycleState.printerConnected = true; emit('printer-connected', id); },
-  printerSend: (id: string) => { phoneLifecycleState.nativeWrites++; emit('printer-sent', id); },
-  printerDisconnect: () => { phoneLifecycleState.printerConnected = false; }, selling: (on: boolean) => phoneLifecycleState.nativeSelling.push(on),
+  printerState: () => JSON.stringify({ connected: phoneLifecycleState.printerConnected, name: phoneLifecycleState.printerName, saved: phoneLifecycleState.printerSaved }),
+  printerPick: (id: string) => {
+    phoneLifecycleState.printerPicks++;
+    phoneLifecycleState.printerName = phoneLifecycleState.nextPrinterName;
+    phoneLifecycleState.printerSavedName = phoneLifecycleState.printerName;
+    phoneLifecycleState.printerSaved = phoneLifecycleState.printerConnected = true;
+    emit('printer-connected', id);
+  },
+  printerConnectLast: (id: string) => {
+    phoneLifecycleState.printerReconnects++;
+    phoneLifecycleState.printerName = phoneLifecycleState.printerSavedName;
+    phoneLifecycleState.printerConnected = true;
+    emit('printer-connected', id);
+  },
+  printerSend: (id: string, data: string) => {
+    phoneLifecycleState.nativeWrites++;
+    phoneLifecycleState.nativePayloads.push(data);
+    if (phoneLifecycleState.nativeSendDelayMs) setTimeout(() => emit('printer-sent', id), phoneLifecycleState.nativeSendDelayMs);
+    else emit('printer-sent', id);
+  },
+  printerDisconnect: () => { phoneLifecycleState.printerDisconnects++; phoneLifecycleState.printerConnected = false; }, selling: (on: boolean) => phoneLifecycleState.nativeSelling.push(on),
   saveFile: () => {}, shareFile: () => {},
 };
 class FixtureSocket {

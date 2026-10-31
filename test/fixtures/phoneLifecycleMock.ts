@@ -6,7 +6,9 @@ export const phoneLifecycleState: any = {
   workspace, session, settings, run: null, sales: [], operations: new Map(),
   runCalls: [], commits: 0, printAcks: [], savedCaptures: [], nativeSelling: [],
   printJobs: [], captures: [], nativeWrites: 0, stream: null,
+  nativePayloads: [], nativeSendDelayMs: 0,
   printerConnected: true, printerSaved: true, printerReconnects: 0, printerPicks: 0,
+  printerDisconnects: 0, printerName: 'M50-fixture', printerSavedName: 'M50-fixture', nextPrinterName: 'M50-fixture',
   cameraStarts: 0, captureFrames: 0, captureFrameDelayMs: 0, cameraError: '',
   captureClaims: [], captureResets: 0, commitError: '',
   buyers: [

@@ -1148,6 +1148,15 @@
   padding: 8px 12px;
   background: #f2f6fa;
 }
+.touch-phone-printer .touch-printer-disconnect {
+  color: #c1214f;
+  border-color: #ecb0bf;
+  background: #fff4f6;
+}
+.touch-printer-notice {
+  margin: 0;
+  padding: 8px 12px;
+}
 .touch-phone-shot {
   position: fixed;
   inset: 0;

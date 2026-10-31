@@ -78,9 +78,12 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
   const captureAttempt = useRef(0);
   const previewResources = useRef<{ timer?: ReturnType<typeof setTimeout>; url?: string }>({});
   const printerFlight = useRef<Promise<boolean> | null>(null);
+  const manuallyDisconnected = useRef(false);
+  const [, refreshPrinterState] = useState(0);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [connectingPrinter, setConnectingPrinter] = useState(false);
+  const [printerNotice, setPrinterNotice] = useState('');
   const [error, setError] = useState('');
   const [settings, setSettings] = useState<TouchSettings | null>(null);
   const [tiktokId, setTiktokId] = useState('');
@@ -219,13 +222,14 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
 
   const connectPrinter = useCallback((pick: boolean, automatic = false): Promise<boolean> => {
     if (printerFlight.current) return printerFlight.current;
+    if (automatic && manuallyDisconnected.current) return Promise.resolve(false);
     const p = printer.current;
     if (automatic && (p.connected || !p.saved)) return Promise.resolve(p.connected);
     if (!automatic) setError('');
     setConnectingPrinter(true);
     printerFlight.current = (async () => {
       try {
-        if (pick) await p.connect();
+        if (pick || manuallyDisconnected.current) await p.connect();
         else if (!p.connected && !(await p.reconnect())) {
           if (automatic) throw new Error(printerReconnectError);
           await p.connect();
@@ -239,6 +243,9 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
           write(learnedKey(workspaceId), String(Date.now()));
         }
         if (mounted.current) {
+          // Only an explicit successful connection resumes auto-reconnect after "끊기".
+          manuallyDisconnected.current = false;
+          setPrinterNotice('');
           setPrinterName(p.name);
           setError((current) => current === printerReconnectError ? '' : current);
           producer.current?.wake();
@@ -255,6 +262,18 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
     return printerFlight.current;
   }, [workspaceId]);
 
+  const disconnectPrinter = () => {
+    if (busy || connectingPrinter || printerFlight.current) return;
+    // Keep the native saved device, but honor this choice until another printer is selected.
+    manuallyDisconnected.current = true;
+    printer.current.disconnect();
+    setPrinterName('');
+    setPrinterNotice('');
+    setError('');
+    refreshPrinterState((value) => value + 1);
+    producer.current?.wake();
+  };
+
   useEffect(() => {
     const reconnect = () => {
       if (document.visibilityState === 'visible') void connectPrinter(false, true);
@@ -269,12 +288,18 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
   }, [connectPrinter, open]);
 
   const realign = async () => {
+    if (busy || connectingPrinter || printerFlight.current || !printer.current.connected || status?.printer.printing) return;
+    setBusy(true);
     setError('');
+    setPrinterNotice('');
     try {
       await printer.current.send(realignBytes());
       write(learnedKey(workspaceId), String(Date.now()));
+      setPrinterNotice('라벨 맞춤 요청을 보냈습니다. 용지가 멈춘 뒤 출력해 주세요.');
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -408,12 +433,15 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
               프린터 연결
             </button>
           ) : (
-            <button onClick={() => void realign()}>라벨 다시 맞추기</button>
+            <button disabled={busy || connectingPrinter || status.printer.printing} onClick={() => void realign()}>
+              라벨 다시 맞추기
+            </button>
           )}
           <button className="touch-phone-stop" disabled={busy} onClick={() => void stop()}>
             판매 멈춤
           </button>
         </div>
+        {printerNotice && <p role="status" className="touch-muted touch-printer-notice">{printerNotice}</p>}
         <TouchErrorNotice message={error} onDismiss={() => setError('')} className="touch-page-error" />
       </>
     );
@@ -452,13 +480,32 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
               <span>
                 프린터 ● {connectingPrinter ? '연결 중' : printer.current.connected ? `연결됨${printer.current.name || printerName ? ` · ${printer.current.name || printerName}` : ''}` : '연결 안 됨'}
               </span>
+              {printer.current.connected && (
+                <button
+                  type="button"
+                  className="touch-printer-disconnect"
+                  disabled={busy || connectingPrinter}
+                  onClick={disconnectPrinter}
+                >
+                  끊기
+                </button>
+              )}
               <button
+                type="button"
                 disabled={busy || connectingPrinter}
                 onClick={() => void connectPrinter(true)}
               >
                 {printer.current.connected ? '다른 프린터' : '프린터 연결'}
               </button>
+              <button
+                type="button"
+                disabled={busy || connectingPrinter || !printer.current.connected}
+                onClick={() => void realign()}
+              >
+                라벨 다시 맞추기
+              </button>
             </div>
+            {printerNotice && <p role="status" className="touch-muted">{printerNotice}</p>}
             <TouchErrorNotice message={error} onDismiss={() => setError('')} />
             {bootstrap?.session && (
               <button className="touch-primary" disabled={busy || connectingPrinter || !settings} onClick={() => void start('CONTINUE')}>
