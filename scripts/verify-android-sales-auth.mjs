@@ -49,6 +49,9 @@ const user = { id: userId, aud: 'authenticated', email: 'android-fixture@example
   app_metadata: {}, user_metadata: {}, created_at: new Date().toISOString() };
 let logins = 0;
 let documentLoads = 0;
+let issuedAccessToken;
+let rejectedPrivateRequests = 0;
+const authenticatedActions = [];
 const html = '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script type="module" src="/app.js"></script></body></html>';
 await page.route('**/*', async (route) => {
   const request = route.request();
@@ -72,8 +75,9 @@ await page.route('**/*', async (route) => {
     logins++;
     const exp = Math.floor(Date.now() / 1000) + 3600;
     const encode = (data) => Buffer.from(JSON.stringify(data)).toString('base64url');
+    issuedAccessToken = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ sub: userId, exp, aud: 'authenticated' })}.fixture`;
     return json({ user, token_type: 'bearer', expires_in: 3600, expires_at: exp,
-      access_token: `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ sub: userId, exp, aud: 'authenticated' })}.fixture`,
+      access_token: issuedAccessToken,
       refresh_token: 'synthetic-android-fixture-refresh' });
   }
   if (url.pathname.includes('/auth/v1/user')) return json(user);
@@ -81,9 +85,16 @@ await page.route('**/*', async (route) => {
   if (url.pathname.includes('/rest/v1/profiles')) return json({ display_name: 'Android 시험 판매자' });
   if (url.pathname.includes('/rest/v1/workspace_members')) return json({ workspace_id: workspaceId, role: 'OWNER' });
   if (url.pathname.includes('/rest/v1/')) return json([]);
+  if (url.pathname.includes('/functions/v1/') &&
+      (!issuedAccessToken || request.headers().authorization !== `Bearer ${issuedAccessToken}`)) {
+    rejectedPrivateRequests++;
+    return route.fulfill({ status: 401, contentType: 'application/json', headers,
+      body: JSON.stringify({ ok: false, error: { code: 'AUTH_REQUIRED', message: 'Login token is missing' } }) });
+  }
   if (url.pathname.endsWith('/voicecap-onboard')) return json({ ok: true, configured: false, allowed: false });
   if (url.pathname.endsWith('/sales-api')) {
     const { action } = request.postDataJSON() || {};
+    authenticatedActions.push(action);
     let data = {};
     if (action === 'touch-bootstrap') data = { run: null, session: null, sales: [], product: null, serverNow: Date.now() };
     else if (action === 'get-bootstrap') data = { workspaceId, activeSession: null, activeProduct: null,
@@ -126,6 +137,8 @@ try {
     assert.equal(await page.locator('input[type="password"]:visible').count(), 0);
   }
   assert.equal(logins, 1, 'tab changes never issue another login');
+  assert.equal(rejectedPrivateRequests, 0, 'every private API call keeps the login token');
+  assert.ok(authenticatedActions.includes('touch-bootstrap'), 'the authenticated sales bootstrap succeeds');
   assert.equal(documentLoads, initialLoads, 'native tabs never navigate the WebView document');
   await device.shell('input keyevent KEYCODE_BACK');
   await page.waitForURL('**/sales');
@@ -135,7 +148,7 @@ try {
   await page.screenshot({ path: path.join(output, 'android-management.png') });
   console.log(JSON.stringify({ ok: true, serial, androidVersion: (await device.shell('getprop ro.build.version.release')).toString().trim(),
     app: start.info, loginRequests: logins, tabRoundTrips: 3, extraDocumentLoads: documentLoads - initialLoads,
-    sellingNodePreserved: true, androidBackTabSynced: true, pageErrors: errors }, null, 2));
+    sellingNodePreserved: true, androidBackTabSynced: true, rejectedPrivateRequests, pageErrors: errors }, null, 2));
 } finally {
   await device.close();
 }

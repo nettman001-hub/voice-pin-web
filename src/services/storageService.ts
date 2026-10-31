@@ -669,7 +669,8 @@ export class StorageService {
     }
   }
 
-  // 회원/인증 데이터는 Supabase만 원본으로 사용한다. 과거 버전이 남긴 로컬 데이터도 즉시 제거한다.
+  // 과거 데모 회원·STT 키만 정리한다.
+  // 현재 Supabase 세션은 AuthContext와 authSessionStorage가 관리하므로 여기서 지우지 않는다.
   public clearLegacyMemberData() {
     this.webStorage.removeItem('dadryeo_users');
     this.webStorage.removeItem('dadryeo_current_user');
@@ -677,10 +678,6 @@ export class StorageService {
     this.webStorage.removeItem('dadryeo_deepgram_api_key');
     this.webStorage.removeItem('voicecap_soniox_api_key');
     this.webStorage.removeItem('voicecap_stt_provider');
-    for (let index = this.webStorage.length - 1; index >= 0; index -= 1) {
-      const key = this.webStorage.key(index);
-      if (key?.startsWith('sb-') && key.endsWith('-auth-token')) this.webStorage.removeItem(key);
-    }
   }
 
   // STT 모드: 'CLOUD' (기존 API) | 'LOCAL' (내 PC 무료 faster-whisper)
