@@ -3,7 +3,6 @@ const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
-const { execSync } = require('child_process');
 
 const APP_NAME = 'VoiceCAP 댓글 도우미';
 const WEB_APP_URL = 'https://www.voicecap.shop/live';
@@ -17,6 +16,7 @@ const PRINT_HISTORY_FILE = 'print-history.json';
 let mainWindow = null;
 let tray = null;
 let serverProcess = null;
+let serverPortConflict = false;
 let healthTimer = null;
 let restartTimer = null;
 let isQuitting = false;
@@ -109,40 +109,15 @@ function serverEntryPath() {
   return path.join(app.getAppPath(), 'server', 'index.js');
 }
 
-function cleanupLegacyHelperProcess() {
-  if (process.platform !== 'win32') return;
-  try {
-    // 1. 구버전 독립형 'VoiceCAP 댓글 도우미.exe' 프로세스가 백그라운드에 남아있다면 강제 종료하여 2137 포트를 확보
-    execSync('taskkill /F /IM "VoiceCAP 댓글 도우미.exe" /T', { stdio: 'ignore' });
-    writeLog('helper', '기존 독립형 댓글 도우미 프로세스 정리 완료');
-  } catch (_) {}
-
-  try {
-    // 2. 2137 포트를 점유하고 있는 이전 프로세스가 남아있다면 정리하여 'Cannot GET /' 방지
-    const output = execSync(`netstat -ano | findstr :${SERVER_PORT}`, {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore']
-    });
-    for (const line of output.split('\n')) {
-      const match = line.trim().match(/LISTENING\s+(\d+)/);
-      if (match) {
-        const pid = parseInt(match[1], 10);
-        if (pid && pid !== process.pid) {
-          writeLog('helper', `포트 ${SERVER_PORT} 점유 중인 기존 프로세스 (PID ${pid}) 정리`);
-          execSync(`taskkill /F /PID ${pid} /T`, { stdio: 'ignore' });
-        }
-      }
-    }
-  } catch (_) {}
-}
-
 function startServer() {
   clearTimeout(restartTimer);
   restartTimer = null;
   if (serverProcess) return;
 
-  // 구버전 독립형 도우미 또는 이전 세션의 포트 점유 해제
-  cleanupLegacyHelperProcess();
+  // 같은 실행 파일 이름에는 현재 앱도 포함된다. 다른 프로세스는 종료하지 않고
+  // 직접 시작한 서버만 stopServer()에서 관리한다.
+  serverPortConflict = false;
+  let serverErrorOutput = '';
 
   const runtimeConfig = readRuntimeConfig();
   state.helper = 'starting';
@@ -171,7 +146,11 @@ function startServer() {
   });
 
   serverProcess.stdout?.on('data', (chunk) => writeLog('server', chunk.toString('utf8')));
-  serverProcess.stderr?.on('data', (chunk) => writeLog('server-error', chunk.toString('utf8')));
+  serverProcess.stderr?.on('data', (chunk) => {
+    const text = chunk.toString('utf8');
+    writeLog('server-error', text);
+    serverErrorOutput = `${serverErrorOutput}${text}`.slice(-4096);
+  });
   serverProcess.on('message', (message) => {
     const payload = message && message.data ? message.data : message;
     if (!payload) return;
@@ -198,6 +177,13 @@ function startServer() {
     }
 
     state.helper = 'error';
+    serverPortConflict = serverErrorOutput.includes('EADDRINUSE');
+    if (serverPortConflict) {
+      state.message = `댓글 서버 포트(${SERVER_PORT})를 다른 프로그램이 사용 중입니다. 기존 도우미를 종료한 뒤 '댓글 서버 다시 시작'을 눌러 주세요.`;
+      publishStatus();
+      manualRestart = false;
+      return;
+    }
     state.message = '댓글 서버가 중지되었습니다. 자동으로 다시 시작합니다.';
     publishStatus();
 
@@ -235,7 +221,7 @@ function restartServer() {
 }
 
 function requestHealth() {
-  if (isQuitting) return;
+  if (isQuitting || serverPortConflict) return;
 
   const request = http.get(
     { hostname: SERVER_HOST, port: SERVER_PORT, path: '/status', timeout: 1800 },
@@ -246,6 +232,7 @@ function requestHealth() {
         body += chunk;
       });
       response.on('end', () => {
+        if (isQuitting || serverPortConflict) return;
         try {
           const payload = JSON.parse(body);
           const tiktok = payload.tiktok || {};
@@ -269,7 +256,7 @@ function requestHealth() {
 }
 
 function setHealthError(message) {
-  if (isQuitting) return;
+  if (isQuitting || serverPortConflict) return;
   if (!serverProcess) state.helper = 'error';
   else if (state.helper !== 'starting') state.helper = 'starting';
   state.message = message;
