@@ -31,8 +31,8 @@ import { requireSupabase } from '../../services/supabaseClient';
 import { TouchCommentList } from '../../components/touch/TouchCommentList';
 import { TouchPricePad } from '../../components/touch/TouchPricePad';
 import { TouchErrorNotice } from '../../components/touch/TouchErrorNotice';
+import { TouchBuyerChangeDialog } from '../../components/touch/TouchBuyerChangeDialog';
 import { customerStatsLabel } from '../../services/customerStatsIndex';
-import { productSalesApi } from '../../services/productSalesApi';
 import { measureTouchClock } from '../../services/touchClock';
 import type {
   TouchComment,
@@ -98,8 +98,7 @@ export default function TouchMobileSalesPage() {
     [logoutConfirm, setLogoutConfirm] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null),
     [editPrice, setEditPrice] = useState(false),
-    [buyers, setBuyers] = useState<Buyer[] | null>(null),
-    [buyerSearch, setBuyerSearch] = useState('');
+    [buyerChangeOpen, setBuyerChangeOpen] = useState(false);
   const [candidates, setCandidates] = useState<{
       saleId: string;
       frames: TouchFrame[];
@@ -165,6 +164,10 @@ export default function TouchMobileSalesPage() {
     // Hide the warning only. The durable request and its automatic retry remain intact.
     setDismissedPendingErrorKey(pendingSaveErrorKey);
   };
+  const searchBuyerSuggestions = useCallback(
+    (query: string) => api.call<{ buyers: Buyer[] }>('search-buyers', { query, limit: 20 }),
+    [api],
+  );
   useEffect(() => {
     let active = true;
     setDetailMeta(null);
@@ -921,7 +924,7 @@ export default function TouchMobileSalesPage() {
       await api.update(patch);
       await refresh();
       setEditPrice(false);
-      setBuyers(null);
+      setBuyerChangeOpen(false);
       setNotice('판매내역을 수정했습니다.');
     } catch (e) {
       setError((e as Error).message);
@@ -1311,8 +1314,7 @@ export default function TouchMobileSalesPage() {
             <button
               disabled={busy || !detail.comment}
               onClick={() => {
-                setBuyers([]);
-                setBuyerSearch('');
+                setBuyerChangeOpen(true);
               }}
             >
               구매자 변경
@@ -1418,57 +1420,22 @@ export default function TouchMobileSalesPage() {
             </section>
           </div>
         )}
-        {buyers && (
-          <div
-            className="touch-modal-backdrop"
-            role="dialog"
-            aria-label="구매자 변경"
-          >
-            <section className="touch-modal">
-              <h2>구매자 변경</h2>
-              <input
-                aria-label="구매자 이름 검색"
-                placeholder="닉네임 검색"
-                value={buyerSearch}
-                onChange={(e) => setBuyerSearch(e.target.value)}
-              />
-              <button
-                onClick={() =>
-                  void productSalesApi
-                    .searchBuyers(buyerSearch)
-                    .then((result) => setBuyers(result.buyers))
-                    .catch((e) => setError(e.message))
-                }
-              >
-                검색
-              </button>
-              {buyers.map((b) => (
-                <button
-                  className="touch-buyer-option"
-                  key={b.id}
-                  onClick={() => {
-                    if (
-                      detail &&
-                      confirm(
-                        `${b.displayNickname} 고객으로 변경하고 수정 전표를 출력할까요?`,
-                      )
-                    )
-                      void update({
-                        kind: 'BUYER',
-                        saleId: detail.id,
-                        expectedRevision: detail.revision,
-                        buyerId: b.id,
-                        reprint: true,
-                      });
-                  }}
-                >
-                  {b.displayNickname} @
-                  {b.platformUniqueId || b.platformUserId || ''}
-                </button>
-              ))}
-              <button onClick={() => setBuyers(null)}>닫기</button>
-            </section>
-          </div>
+        {buyerChangeOpen && (
+          <TouchBuyerChangeDialog
+            search={searchBuyerSuggestions}
+            busy={busy}
+            onClose={() => setBuyerChangeOpen(false)}
+            onSelect={(buyer) => {
+              if (detail && confirm(`${buyer.displayNickname} 고객으로 변경하고 수정 전표를 출력할까요?`))
+                void update({
+                  kind: 'BUYER',
+                  saleId: detail.id,
+                  expectedRevision: detail.revision,
+                  buyerId: buyer.id,
+                  reprint: true,
+                });
+            }}
+          />
         )}
       </>
     );

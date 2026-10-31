@@ -32,6 +32,17 @@ class FixtureSocket {
 (window as any).WebSocket = FixtureSocket;
 const root = createRoot(document.getElementById('root')!);
 let seededSale: any = null;
+if (params.has('buyerChange')) {
+  phoneLifecycleState.sales.push({
+    id: 'buyer-change-sale', sessionId: phoneLifecycleState.session,
+    buyerId: phoneLifecycleState.buyers[2].id, buyerNickname: '꽃미',
+    amount: 15000, unitPrice: 15000, quantity: 1,
+    recognizedAt: new Date().toISOString(), status: '자동저장',
+    printStatus: 'PRINTED', captureStatus: 'CAPTURED', captureDueAt: new Date().toISOString(),
+    revision: 1, recordState: 'ACTIVE', history: [],
+    comment: { platformMessageId: 'buyer-change-comment', nickname: '꽃미', content: '저요', capturedAt: new Date().toISOString() },
+  });
+}
 if (params.has('blocked') || params.has('pending')) {
   seededSale = {
     operationId: crypto.randomUUID(), sessionId: phoneLifecycleState.session,
@@ -50,6 +61,11 @@ if (params.has('blocked') || params.has('pending')) {
   state: phoneLifecycleState,
   seededSale,
   outbox: () => touchLocalStore.listOutbox(phoneLifecycleState.workspace),
+  releaseBuyerSearch(query: string) {
+    phoneLifecycleState.buyerSearchHolds.delete(query);
+    phoneLifecycleState.buyerSearchReleases.get(query)?.();
+    phoneLifecycleState.buyerSearchReleases.delete(query);
+  },
   comment(id = 'comment-1', nickname = '꽃미', content = '저 그거두') {
     phoneLifecycleState.stream?.onmessage?.({ data: JSON.stringify({
       messages: [{ type: 'WebcastChatMessage', data: { common: { msgId: id }, content, user: { userId: `user-${id}`, uniqueId: id, nickname } } }],

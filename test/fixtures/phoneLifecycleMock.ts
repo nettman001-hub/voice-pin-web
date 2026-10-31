@@ -9,6 +9,16 @@ export const phoneLifecycleState: any = {
   printerConnected: true, printerSaved: true, printerReconnects: 0, printerPicks: 0,
   cameraStarts: 0, captureFrames: 0, captureFrameDelayMs: 0, cameraError: '',
   captureClaims: [], captureResets: 0, commitError: '',
+  buyers: [
+    { id: '33333333-3333-4333-8333-333333333331', platform: 'TIKTOK', platformUserId: 'buyer-hani', platformUniqueId: 'hani_shop', displayNickname: '하니', identityStatus: 'VERIFIED' },
+    { id: '33333333-3333-4333-8333-333333333332', platform: 'TIKTOK', platformUserId: 'buyer-haneul', platformUniqueId: 'haneul_live', displayNickname: '하늘', identityStatus: 'VERIFIED' },
+    { id: '33333333-3333-4333-8333-333333333333', platform: 'TIKTOK', platformUserId: 'buyer-flower', platformUniqueId: 'flower_shop', displayNickname: '꽃미', identityStatus: 'VERIFIED' },
+    { id: '33333333-3333-4333-8333-333333333334', platform: 'TIKTOK', platformUserId: 'buyer-jini', platformUniqueId: 'jini_live', displayNickname: '지니', identityStatus: 'VERIFIED' },
+    { id: '33333333-3333-4333-8333-333333333335', platform: 'TIKTOK', platformUserId: '718000000000000001', displayNickname: '소라', identityStatus: 'VERIFIED' },
+    { id: '33333333-3333-4333-8333-333333333336', platform: 'TIKTOK', platformUserId: '718000000000000002', displayNickname: '소라', identityStatus: 'VERIFIED' },
+  ],
+  buyerSearchCalls: [], buyerSearchCompleted: [], buyerSearchHolds: new Set(), buyerSearchReleases: new Map(),
+  buyerSearchErrors: new Set(), updateCalls: [],
 };
 const emitChange = () => {
   for (const channel of channels)
@@ -35,7 +45,18 @@ export const useAuth = () => ({ workspaceId: workspace, user: { id: 'seller', ni
 export const remoteWorkspaceService = { fetchWorkspaceSettings: async () => ({ ...settings }) };
 export const productSalesApi = {
   startSession: async () => ({ session: { id: session, displayCode: '2026-10-30 라이브 1회차' } }),
-  searchBuyers: async () => ({ buyers: [] }),
+  searchBuyers: async (query = '') => {
+    phoneLifecycleState.buyerSearchCalls.push(query);
+    const normalized = query.trim().toLocaleLowerCase();
+    const buyers = phoneLifecycleState.buyers.filter((buyer: any) =>
+      `${buyer.displayNickname} ${buyer.platformUniqueId || ''}`.toLocaleLowerCase().includes(normalized),
+    );
+    if (phoneLifecycleState.buyerSearchHolds.has(query))
+      await new Promise<void>((resolve) => phoneLifecycleState.buyerSearchReleases.set(query, resolve));
+    phoneLifecycleState.buyerSearchCompleted.push(query);
+    if (phoneLifecycleState.buyerSearchErrors.has(query)) throw new Error('구매자 목록을 불러오지 못했습니다.');
+    return { buyers: structuredClone(buyers) };
+  },
 };
 export class TouchSalesApi {
   readonly workspaceId: string;
@@ -49,6 +70,7 @@ export class TouchSalesApi {
   }
   async clock() { return { receivedAt: Date.now(), sentAt: Date.now() }; }
   async call(action: string, payload: any) {
+    if (action === 'search-buyers') return productSalesApi.searchBuyers(payload.query);
     if (action === 'touch-comment-token') return { mode: 'JWT', uniqueId: settings.tiktokId, jwtKey: 'fixture-token' };
     if (action === 'touch-tiktok-id') { settings.tiktokId = payload.uniqueId; return { tiktokId: settings.tiktokId }; }
     throw new Error(`Unexpected fixture action: ${action}`);
@@ -114,10 +136,17 @@ export class TouchSalesApi {
   }
   async detail() { return { history: [], settlementUsed: false, entryContext: {} }; }
   async update(patch: any) {
+    phoneLifecycleState.updateCalls.push(structuredClone(patch));
     const sale = phoneLifecycleState.sales.find((s: any) => s.id === patch.saleId);
     if (!sale) throw new Error('Missing fixture sale');
     if (patch.kind === 'PRICE') { sale.unitPrice = patch.unitPrice; sale.amount = patch.unitPrice * sale.quantity; }
     if (patch.kind === 'CANCEL') sale.status = '취소';
+    if (patch.kind === 'BUYER') {
+      const buyer = phoneLifecycleState.buyers.find((item: any) => item.id === patch.buyerId);
+      if (!buyer) throw new Error('Missing fixture buyer');
+      sale.buyerId = buyer.id;
+      sale.buyerNickname = buyer.displayNickname;
+    }
     sale.revision++;
     emitChange();
     return { ok: true };

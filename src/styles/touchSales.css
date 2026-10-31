@@ -874,6 +874,62 @@
   width: 100%;
   text-align: left;
 }
+.touch-buyer-dialog > label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.touch-buyer-search {
+  display: flex;
+  gap: 8px;
+}
+.touch-buyer-search input {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  font-size: 16px;
+}
+.touch-buyer-search > button {
+  flex: none;
+  border: 1px solid #dde6f0;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f2f6fa;
+}
+.touch-buyer-dialog h3 {
+  margin: 18px 0 6px;
+  font-size: 14px;
+}
+.touch-buyer-search-status {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: #52657b;
+}
+.touch-buyer-suggestions {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 38dvh;
+  overflow-y: auto;
+}
+.touch-buyer-suggestions li + li {
+  margin-top: 6px;
+}
+.touch-buyer-suggestions .touch-buyer-option {
+  min-height: 48px;
+  padding: 12px;
+  border: 1px solid #dde6f0;
+  border-radius: 10px;
+  background: #f2f6fa;
+  color: #142238;
+}
+.touch-buyer-option small {
+  display: block;
+  margin-top: 3px;
+  color: #52657b;
+}
 @media (prefers-reduced-motion: reduce) {
   .touch-purchase-flash {
     animation: none;
