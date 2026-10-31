@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { TouchSalesApi, TouchBootstrap } from '../../services/touchSalesApi';
-import type { TouchComment, TouchSettings } from '../../types/touchSales';
+import type { TouchComment, TouchSettings, TouchPrintTarget, TouchPrintRelayState } from '../../types/touchSales';
 import {
   TouchPhoneProducer,
   blobToDataUrl,
@@ -23,6 +23,8 @@ import { recordPhoneCaptureDiagnostic, type PhoneCaptureDiagnostic } from '../..
 
 const producerKey = (workspaceId: string) => `voicecap-phone-producer:${workspaceId}`;
 const learnedKey = (workspaceId: string) => `voicecap-phone-printer-learned:${workspaceId}`;
+const targetKey = (workspaceId: string) => `voicecap-phone-print-target:${workspaceId}`;
+const targetLabel = (target: TouchPrintTarget) => target === 'PC_HELPER' ? 'PC 판매도우미' : '폰 블루투스';
 const printerReconnectError = '저장된 프린터에 연결하지 못했습니다. 프린터 전원을 확인한 뒤 다시 연결해 주세요.';
 type ShotPhase = 'PREPARING' | 'COUNTDOWN' | 'SAMPLING' | 'ENCODING' | 'PREVIEW';
 const read = (key: string) => {
@@ -84,6 +86,13 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
   const [busy, setBusy] = useState(false);
   const [connectingPrinter, setConnectingPrinter] = useState(false);
   const [printerNotice, setPrinterNotice] = useState('');
+  const [printTarget, setPrintTarget] = useState<TouchPrintTarget>(() =>
+    read(targetKey(workspaceId)) === 'PC_HELPER' ? 'PC_HELPER' : 'PHONE_BLUETOOTH');
+  const targetRef = useRef(printTarget);
+  targetRef.current = printTarget;
+  const [relay, setRelay] = useState<TouchPrintRelayState | null>(null);
+  const [outputOpen, setOutputOpen] = useState(false);
+  const [pendingTarget, setPendingTarget] = useState<TouchPrintTarget>(printTarget);
   const [error, setError] = useState('');
   const [settings, setSettings] = useState<TouchSettings | null>(null);
   const [tiktokId, setTiktokId] = useState('');
@@ -92,6 +101,38 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
   const [shot, setShot] = useState<{ dueAt: number; phase: ShotPhase; since: number; preview?: string } | null>(null);
   const [now, setNow] = useState(Date.now());
   const running = !!status && !!producer.current?.running;
+  const relayReady = !!relay?.ready && Date.parse(relay.leaseExpiresAt) > Date.now() + props.serverOffset();
+
+  useEffect(() => {
+    if (!running) setPrintTarget(read(targetKey(workspaceId)) === 'PC_HELPER' ? 'PC_HELPER' : 'PHONE_BLUETOOTH');
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (!running || busy || bootstrap?.run?.producer_id !== producerId.current) return;
+    const canonical = bootstrap.run.settings.printTarget === 'PC_HELPER' ? 'PC_HELPER' : 'PHONE_BLUETOOTH';
+    setPrintTarget(canonical);
+    producer.current?.syncPrintTarget(canonical);
+    write(targetKey(workspaceId), canonical);
+  }, [bootstrap, running, busy, workspaceId]);
+
+  useEffect(() => {
+    if (!open && !running && !outputOpen) return;
+    let active = true, checking = false;
+    const check = async () => {
+      if (checking || document.visibilityState !== 'visible') return;
+      checking = true;
+      try {
+        const result = await api.printRelayStatus();
+        if (active) setRelay(result.printRelay);
+      } catch {
+        if (active) setRelay(null);
+      } finally { checking = false; }
+    };
+    void check();
+    const timer = setInterval(() => void check(), 5000);
+    window.addEventListener('focus', check);
+    return () => { active = false; clearInterval(timer); window.removeEventListener('focus', check); };
+  }, [api, open, running, outputOpen]);
 
   const run = bootstrap?.run;
   const serverNow = Date.now() + props.serverOffset();
@@ -222,6 +263,7 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
 
   const connectPrinter = useCallback((pick: boolean, automatic = false): Promise<boolean> => {
     if (printerFlight.current) return printerFlight.current;
+    if (automatic && targetRef.current !== 'PHONE_BLUETOOTH') return Promise.resolve(false);
     if (automatic && manuallyDisconnected.current) return Promise.resolve(false);
     const p = printer.current;
     if (automatic && (p.connected || !p.saved)) return Promise.resolve(p.connected);
@@ -311,7 +353,9 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
       const id = tiktokId.trim().replace(/^@/, '');
       if (!id) throw new Error('틱톡 ID를 입력해 주세요.');
       // 앱에 기억된 프린터만 다시 연결한다. 자동 연결은 기기 선택 창을 열지 않는다.
-      await connectPrinter(false, true);
+      if (printTarget === 'PC_HELPER') {
+        if (!relayReady) throw new Error('PC에서 판매도우미를 켜고 댓글터치 판매 화면의 폰 전표 출력 대기를 시작해 주세요.');
+      } else await connectPrinter(false, true);
       if (!mounted.current) return;
       if (id !== (settings.tiktokId || '')) await api.call('touch-tiktok-id', { uniqueId: id });
       let session = choice === 'CONTINUE' ? bootstrap?.session : null;
@@ -326,7 +370,7 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
         producerId: producerId.current,
         sessionId: session.id,
         displayCode: session.display_code,
-        settings: { ...settings, mode: 'COMMENT_TOUCH', tiktokId: id },
+        settings: { ...settings, mode: 'COMMENT_TOUCH', tiktokId: id, printTarget },
         printer: printer.current,
         serverOffset: props.serverOffset,
         totals: props.totals,
@@ -348,6 +392,7 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
         onChange: () => void props.refresh(),
       });
       await p.start();
+      write(targetKey(workspaceId), printTarget);
       producer.current = p;
       props.onRunningChange(true);
       androidNative()?.selling(true);
@@ -369,6 +414,7 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
     captureAttempt.current++;
     releasePreview();
     setShot(null);
+    setOutputOpen(false);
     setBusy(true);
     try {
       await producer.current?.stop();
@@ -381,6 +427,46 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
       setBusy(false);
     }
   };
+
+  const applyPrintTarget = async () => {
+    if (busy || !producer.current?.running) return;
+    if (pendingTarget === 'PC_HELPER' && !relayReady) {
+      setError('PC 판매도우미의 전표 출력 대기를 먼저 시작해 주세요.');
+      return;
+    }
+    if (pendingTarget === 'PHONE_BLUETOOTH' && !printer.current.connected) {
+      setError('폰 블루투스 프린터를 먼저 연결해 주세요.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const target = await producer.current.changePrintTarget(pendingTarget);
+      setPrintTarget(target);
+      targetRef.current = target;
+      write(targetKey(workspaceId), target);
+      setPrinterNotice(`출력 위치를 ${targetLabel(target)}로 변경했습니다. 대기 전표부터 적용됩니다.`);
+      setOutputOpen(false);
+      await props.refresh();
+    } catch (e) {
+      setError((e as Error).message || '출력 위치를 변경하지 못했습니다.');
+    } finally { setBusy(false); }
+  };
+
+  const renderPrintTargets = (value: TouchPrintTarget, change: (value: TouchPrintTarget) => void) => (
+    <fieldset className="touch-print-target" disabled={busy}>
+      <legend>전표 출력 위치</legend>
+      <label><input type="radio" name="phone-print-target" value="PHONE_BLUETOOTH" checked={value === 'PHONE_BLUETOOTH'}
+        onChange={() => change('PHONE_BLUETOOTH')} />폰 블루투스</label>
+      <label><input type="radio" name="phone-print-target" value="PC_HELPER" checked={value === 'PC_HELPER'}
+        onChange={() => change('PC_HELPER')} />PC 판매도우미</label>
+      {value === 'PC_HELPER' && <p role="status">
+        {relayReady ? `PC 전표 대기 연결됨${relay?.printerName ? ` · ${relay.printerName}` : ''}`
+          : 'PC에서 판매도우미를 켜고 댓글터치 판매 화면의 ‘폰 전표 출력 대기’를 시작해 주세요.'}
+      </p>}
+      <small>댓글 수신과 사진 촬영은 이 폰에서 계속합니다.</small>
+    </fieldset>
+  );
 
   const overlay = (
     <>
@@ -424,11 +510,13 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
           <span className={status.comments.state === 'connected' ? 'ok' : 'warn'}>
             {commentLabel(status.comments)}
           </span>
-          <span className={status.printer.connected ? 'ok' : 'warn'}>
-            프린터 ● {connectingPrinter ? '연결 중' : status.printer.connected ? `연결됨${status.printer.name || printerName ? ` · ${status.printer.name || printerName}` : ''}` : '끊김'}
-            {status.printer.printing ? ' · 인쇄 중' : ''}
+          <span className={(printTarget === 'PC_HELPER' ? relayReady : status.printer.connected) ? 'ok' : 'warn'}>
+            {printTarget === 'PC_HELPER'
+              ? `PC 판매도우미 ● ${relayReady ? '연결됨' : '연결 대기'}${relay?.printerName && relayReady ? ` · ${relay.printerName}` : ''}`
+              : `폰 블루투스 ● ${connectingPrinter ? '연결 중' : status.printer.connected ? `연결됨${status.printer.name || printerName ? ` · ${status.printer.name || printerName}` : ''}` : '끊김'}`}
+            {printTarget !== 'PC_HELPER' && status.printer.printing ? ' · 인쇄 중' : ''}
           </span>
-          {!status.printer.connected ? (
+          {printTarget === 'PHONE_BLUETOOTH' && (!status.printer.connected ? (
             <button disabled={connectingPrinter} onClick={() => void connectPrinter(false)}>
               프린터 연결
             </button>
@@ -436,13 +524,37 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
             <button disabled={busy || connectingPrinter || status.printer.printing} onClick={() => void realign()}>
               라벨 다시 맞추기
             </button>
-          )}
+          ))}
+          <button disabled={busy} onClick={() => { setPendingTarget(printTarget); setError(''); setOutputOpen(true); }}>
+            출력 위치 변경
+          </button>
           <button className="touch-phone-stop" disabled={busy} onClick={() => void stop()}>
             판매 멈춤
           </button>
         </div>
         {printerNotice && <p role="status" className="touch-muted touch-printer-notice">{printerNotice}</p>}
         <TouchErrorNotice message={error} onDismiss={() => setError('')} className="touch-page-error" />
+        {outputOpen && (
+          <div className="touch-modal-backdrop" role="dialog" aria-modal="true" aria-label="출력 위치 변경">
+            <section className="touch-modal">
+              <h2>출력 위치 변경</h2>
+              {renderPrintTargets(pendingTarget, setPendingTarget)}
+              <p className="touch-muted">출력 중인 전표가 있으면 완료 후 변경할 수 있습니다. 아직 출력하지 않은 대기 전표부터 새 위치로 보냅니다. 출력 여부 확인이 필요한 전표는 자동으로 다시 보내지 않습니다.</p>
+              {pendingTarget === 'PHONE_BLUETOOTH' && <div className="touch-phone-printer">
+                <span>{printer.current.connected ? `연결됨 · ${printer.current.name}` : '폰 프린터 연결 안 됨'}</span>
+                <button disabled={busy || connectingPrinter} onClick={() => void connectPrinter(true)}>
+                  {printer.current.connected ? '다른 프린터' : '프린터 연결'}
+                </button>
+              </div>}
+              <TouchErrorNotice message={error} onDismiss={() => setError('')} />
+              <button className="touch-primary" disabled={busy || connectingPrinter || pendingTarget === printTarget ||
+                (pendingTarget === 'PC_HELPER' ? !relayReady : !printer.current.connected)} onClick={() => void applyPrintTarget()}>
+                대기 전표부터 적용
+              </button>
+              <button disabled={busy} onClick={() => { setOutputOpen(false); setError(''); }}>닫기</button>
+            </section>
+          </div>
+        )}
       </>
     );
 
@@ -471,12 +583,13 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
               />
             </label>
             <p className="touch-muted">
-              댓글은 이 폰이 직접 받습니다. 전표는 블루투스 라벨프린터로 나오고, 판매 사진은{' '}
+              댓글은 이 폰이 직접 받습니다. 전표는 선택한 출력 위치로 보내고, 판매 사진은{' '}
               {settings?.captureOff
                 ? '찍지 않습니다(캡처 안 함).'
                 : `${settings?.prepareSeconds ?? 4}초 카운트다운 뒤 앞카메라로 1장 찍습니다.`}
             </p>
-            <div className="touch-phone-printer">
+            {renderPrintTargets(printTarget, setPrintTarget)}
+            {printTarget === 'PHONE_BLUETOOTH' && <div className="touch-phone-printer">
               <span>
                 프린터 ● {connectingPrinter ? '연결 중' : printer.current.connected ? `연결됨${printer.current.name || printerName ? ` · ${printer.current.name || printerName}` : ''}` : '연결 안 됨'}
               </span>
@@ -504,17 +617,17 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
               >
                 라벨 다시 맞추기
               </button>
-            </div>
+            </div>}
             {printerNotice && <p role="status" className="touch-muted">{printerNotice}</p>}
             <TouchErrorNotice message={error} onDismiss={() => setError('')} />
             {bootstrap?.session && (
-              <button className="touch-primary" disabled={busy || connectingPrinter || !settings} onClick={() => void start('CONTINUE')}>
+              <button className="touch-primary" disabled={busy || connectingPrinter || !settings || (printTarget === 'PC_HELPER' && !relayReady)} onClick={() => void start('CONTINUE')}>
                 지금 회차 이어서 판매
               </button>
             )}
             <button
               className={bootstrap?.session ? '' : 'touch-primary'}
-              disabled={busy || connectingPrinter || !settings}
+              disabled={busy || connectingPrinter || !settings || (printTarget === 'PC_HELPER' && !relayReady)}
               onClick={() => {
                 if (bootstrap?.session && !confirm('지금 회차를 끝내고 새 회차로 판매할까요?')) return;
                 void start('NEW');

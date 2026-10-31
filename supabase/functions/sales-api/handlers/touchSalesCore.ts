@@ -109,5 +109,8 @@ export function cleanTouchRunSettings(input: any) {
       ? (input.salesMode as 'NUMBER' | 'SIZE_COLOR')
       : ('BASIC' as const),
     captureOff: input?.captureOff === true,
+    printTarget: input?.printTarget === 'PC_HELPER'
+      ? ('PC_HELPER' as const)
+      : ('PHONE_BLUETOOTH' as const),
   };
 }

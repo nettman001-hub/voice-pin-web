@@ -155,6 +155,7 @@ serve(async (req: Request) => {
       case 'touch-bootstrap':
       case 'touch-sale-detail':
       case 'touch-time':
+      case 'touch-print-relay-status':
       case 'claim-touch-captures':
         requireCapability('SALES_READ')
         return await handleTouchSales(auth, body)
@@ -168,6 +169,9 @@ serve(async (req: Request) => {
         requireCapability('SALES_WRITE')
         return await handleTouchSales(auth, body)
       case 'claim-touch-jobs':
+      case 'claim-touch-relay-jobs':
+      case 'touch-print-relay':
+      case 'touch-print-target':
       case 'touch-print':
       case 'touch-record-print':
       case 'touch-direct-print':

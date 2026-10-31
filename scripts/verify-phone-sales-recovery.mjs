@@ -191,7 +191,7 @@ try {
   await printer.locator('.touch-phone-stop').waitFor();
   assert.equal((await printerState()).connected, false);
   assert.equal((await printerState()).reconnects, 0, 'starting a sale undid the manual disconnect');
-  assert.match(await printer.locator('.touch-phone-bar').innerText(), /프린터 ● 끊김/);
+  assert.match(await printer.locator('.touch-phone-bar').innerText(), /폰 블루투스 ● 끊김/);
   checks.push('printer disconnect stays disconnected through focus, modal reopening and sale start');
   await printer.locator('.touch-phone-stop').click();
   await printer.locator('.touch-phone-offer button').waitFor();

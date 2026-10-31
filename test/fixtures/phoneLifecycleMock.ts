@@ -10,7 +10,10 @@ export const phoneLifecycleState: any = {
   printerConnected: true, printerSaved: true, printerReconnects: 0, printerPicks: 0,
   printerDisconnects: 0, printerName: 'M50-fixture', printerSavedName: 'M50-fixture', nextPrinterName: 'M50-fixture',
   cameraStarts: 0, captureFrames: 0, captureFrameDelayMs: 0, cameraError: '',
-  captureClaims: [], captureResets: 0, commitError: '',
+  captureClaims: [], captureClaimOwners: [], captureResets: 0, commitError: '',
+  printRelay: null, relayCalls: [], printTargetCalls: [], printTransitions: [],
+  helperConnected: true, helperPrints: [], helperHold: false, helperRelease: null,
+  helperResult: { ok: true, status: 'PRINTED' }, pauseRelayClaims: false, relayErrors: [], relayStatus: null,
   buyers: [
     { id: '33333333-3333-4333-8333-333333333331', platform: 'TIKTOK', platformUserId: 'buyer-hani', platformUniqueId: 'hani_shop', displayNickname: '하니', identityStatus: 'VERIFIED' },
     { id: '33333333-3333-4333-8333-333333333332', platform: 'TIKTOK', platformUserId: 'buyer-haneul', platformUniqueId: 'haneul_live', displayNickname: '하늘', identityStatus: 'VERIFIED' },
@@ -68,6 +71,7 @@ export class TouchSalesApi {
       run: phoneLifecycleState.run ? structuredClone(phoneLifecycleState.run) : null,
       session: { id: session, display_code: '2026-10-30 라이브 1회차', status: 'ACTIVE' },
       product: null, sales: structuredClone(phoneLifecycleState.sales), serverNow: Date.now(),
+      printRelay: phoneLifecycleState.printRelay ? structuredClone(phoneLifecycleState.printRelay) : null,
     };
   }
   async clock() { return { receivedAt: Date.now(), sentAt: Date.now() }; }
@@ -79,9 +83,14 @@ export class TouchSalesApi {
   }
   async run(kind: string, producerId: string, sessionId: string, runSettings: any, state: any) {
     phoneLifecycleState.runCalls.push(kind);
+    const previous = phoneLifecycleState.run;
+    const preserveTarget = previous?.running && previous.producer_id === producerId && previous.session_id === sessionId;
+    const printTarget = preserveTarget ? previous.settings.printTarget || 'PHONE_BLUETOOTH' : runSettings.printTarget || 'PHONE_BLUETOOTH';
+    if (kind === 'START' && printTarget === 'PC_HELPER' && !phoneLifecycleState.printRelay?.ready)
+      throw Object.assign(new Error('PC 출력 연결을 준비해 주세요.'), { code: 'PRINT_RELAY_NOT_READY' });
     phoneLifecycleState.run = {
       running: kind !== 'STOP', producer_id: producerId, session_id: sessionId,
-      lease_expires_at: new Date(Date.now() + 30000).toISOString(), settings: runSettings, last_state: state,
+      lease_expires_at: new Date(Date.now() + 30000).toISOString(), settings: { ...runSettings, printTarget }, last_state: state,
     };
     emitChange();
     return { ok: true };
@@ -104,30 +113,78 @@ export class TouchSalesApi {
       captureDueAt, revision: 1, comment: sale.comment, history: [], recordState: 'ACTIVE',
     };
     phoneLifecycleState.sales.unshift(row);
-    phoneLifecycleState.printJobs.push({ id: `print-${id}`, sale_id: id, immutable_payload: { buyerNickname: row.buyerNickname, amount: row.amount } });
+    phoneLifecycleState.printJobs.push({ id: `print-${id}`, sale_id: id, sale_revision: 1, session_id: session, status: 'QUEUED',
+      immutable_payload: { buyerNickname: row.buyerNickname, amount: row.amount, recognizedAt: row.recognizedAt, sessionDisplayCode: '2026-10-30 라이브 1회차' } });
     phoneLifecycleState.captures.push({ sale_id: id, capture_generation: `capture-${id}`, capture_due_at: captureDueAt });
     const result = { saleId: id, buyerId: row.buyerId, commentId: sale.comment.platformMessageId, amount: row.amount, captureDueAt };
     phoneLifecycleState.operations.set(sale.operationId, result);
     emitChange();
     return result;
   }
-  async claimPrints() { return { jobs: phoneLifecycleState.printJobs.splice(0), leaseToken: 'fixture-lease' }; }
-  async print(kind: string, jobId: string, leaseToken: string, result: string) {
+  async printRelay(kind: string, relayId: string, ready: boolean, printerName?: string) {
+    phoneLifecycleState.relayCalls.push(kind);
+    phoneLifecycleState.printRelay = kind === 'STOP' ? null : {
+      relayId, ready, printerName, leaseExpiresAt: new Date(Date.now() + 20000).toISOString(),
+    };
+    emitChange();
+    return { ok: true, printRelay: phoneLifecycleState.printRelay };
+  }
+  async printRelayStatus() { return { printRelay: phoneLifecycleState.printRelay }; }
+  async setPrintTarget(producerId: string, printTarget: string) {
+    phoneLifecycleState.printTargetCalls.push(printTarget);
+    const run = phoneLifecycleState.run;
+    if (!run?.running || run.producer_id !== producerId)
+      throw Object.assign(new Error('판매 연결을 확인해 주세요.'), { code: 'PC_LEASE_LOST' });
+    if (phoneLifecycleState.printJobs.some((job: any) => ['CLAIMED', 'SUBMITTING'].includes(job.status)))
+      throw Object.assign(new Error('출력 중인 전표가 있습니다. 출력이 끝난 뒤 변경해 주세요.'), { code: 'PRINT_TARGET_BUSY' });
+    if (printTarget === 'PC_HELPER' && !phoneLifecycleState.printRelay?.ready)
+      throw Object.assign(new Error('PC 출력 연결을 준비해 주세요.'), { code: 'PRINT_RELAY_NOT_READY' });
+    run.settings = { ...run.settings, printTarget };
+    emitChange();
+    return { ok: true, printTarget };
+  }
+  private claimJobs(target: string, owner: string) {
+    const run = phoneLifecycleState.run;
+    const leaseToken = crypto.randomUUID();
+    if (!run?.running || (run.settings.printTarget || 'PHONE_BLUETOOTH') !== target)
+      return { jobs: [], leaseToken };
+    const jobs = phoneLifecycleState.printJobs.filter((job: any) => job.status === 'QUEUED' && job.session_id === run.session_id);
+    for (const job of jobs) Object.assign(job, { status: 'CLAIMED', lease_token: leaseToken, owner, target });
+    return { jobs: structuredClone(jobs), leaseToken };
+  }
+  async claimPrints(producerId: string) { return this.claimJobs('PHONE_BLUETOOTH', producerId); }
+  async claimRelayPrints(relayId: string) {
+    if (phoneLifecycleState.pauseRelayClaims || !phoneLifecycleState.printRelay?.ready || phoneLifecycleState.printRelay?.relayId !== relayId)
+      return { jobs: [], leaseToken: '' };
+    return this.claimJobs('PC_HELPER', relayId);
+  }
+  async print(kind: string, jobId: string, leaseToken: string, result?: string) {
+    const job = phoneLifecycleState.printJobs.find((item: any) => item.id === jobId);
+    if (!job || job.lease_token !== leaseToken)
+      throw Object.assign(new Error('출력 작업 연결이 바뀌었습니다.'), { code: 'PRINT_LEASE_LOST' });
+    if (kind === 'BEGIN') {
+      if (job.status !== 'CLAIMED' || job.target !== phoneLifecycleState.run?.settings.printTarget)
+        throw Object.assign(new Error('출력 작업 연결이 바뀌었습니다.'), { code: 'PRINT_LEASE_LOST' });
+      job.status = 'SUBMITTING';
+    }
     if (kind === 'ACK') {
+      job.status = result === 'SUCCESS' ? 'SUBMITTED' : result === 'UNKNOWN' ? 'UNKNOWN' : 'FAILED';
       phoneLifecycleState.printAcks.push(result);
       const sale = phoneLifecycleState.sales.find((s: any) => `print-${s.id}` === jobId);
       if (sale) sale.printStatus = result === 'SUCCESS' ? 'PRINTED' : 'FAILED';
       emitChange();
     }
+    phoneLifecycleState.printTransitions.push({ kind, jobId, target: job.target, result });
     return { ok: true };
   }
-  async claimCaptures() {
+  async claimCaptures(producerId: string) {
     const captures = structuredClone(phoneLifecycleState.captures);
     phoneLifecycleState.captureClaims.push(captures);
+    phoneLifecycleState.captureClaimOwners.push(producerId);
     return { captures };
   }
   async saveCapture(producer: string, saleId: string, image: string, capturedAt: string, generation: string) {
-    phoneLifecycleState.savedCaptures.push({ saleId, hasImage: !!image, generation });
+    phoneLifecycleState.savedCaptures.push({ saleId, hasImage: !!image, generation, producerId: producer });
     phoneLifecycleState.captures = phoneLifecycleState.captures.filter(
       (capture: any) => capture.sale_id !== saleId || capture.capture_generation !== generation,
     );

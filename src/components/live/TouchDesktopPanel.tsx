@@ -18,6 +18,12 @@ import {
 } from '../../services/touchFrameBuffer';
 import { TouchPcWorker } from '../../services/touchPcWorker';
 import {
+  TouchPcPrintRelay,
+  pcRelayPrinterReadiness,
+  type PcPrintRelayStatus,
+} from '../../services/touchPcPrintRelay';
+import { commentHelperService } from '../../services/commentHelperService';
+import {
   AudioEnvelopeSampler,
   estimateTouchDelay,
   StableTouchDelay,
@@ -50,6 +56,11 @@ export const TouchDesktopPanel: React.FC = () => {
     [error, setError] = useState(''),
     [qr, setQr] = useState(''),
     [showQr, setShowQr] = useState(false);
+  const [relayBusy, setRelayBusy] = useState(false),
+    [relayError, setRelayError] = useState(''),
+    [relayStatus, setRelayStatus] = useState<PcPrintRelayStatus | null>(null);
+  const printRelay = useRef<TouchPcPrintRelay | null>(null);
+  const relayLifecycle = useRef(0);
   const [transport, setTransport] = useState<TouchTransport>('DISCONNECTED'),
     [phoneCount, setPhoneCount] = useState(0);
   const [screenConnected, setScreenConnected] = useState(
@@ -113,6 +124,67 @@ export const TouchDesktopPanel: React.FC = () => {
     phoneCount,
   };
   const url = typeof window !== 'undefined' ? `${location.origin}/sell` : '';
+  useEffect(() => {
+    setRelayStatus(null);
+    setRelayBusy(false);
+    setRelayError('');
+    const unsubscribe = runtime.commentStreamService.onStatus(() => printRelay.current?.wake());
+    return () => {
+      ++relayLifecycle.current;
+      unsubscribe();
+      const relay = printRelay.current;
+      printRelay.current = null;
+      void relay?.stop().catch(() => {});
+    };
+  }, [api, runtime]);
+
+  const togglePrintRelay = async () => {
+    if (!api || !isRemoteAuth) {
+      setRelayError('실제 판매자 계정으로 로그인한 뒤 사용해 주세요.');
+      return;
+    }
+    if (relayBusy) return;
+    let generation = relayLifecycle.current;
+    setRelayBusy(true);
+    setRelayError('');
+    try {
+      if (printRelay.current?.running) {
+        await printRelay.current.stop();
+        printRelay.current = null;
+        return;
+      }
+      if (runningSession) throw new Error('PC 판매를 중지한 뒤 폰 전표 출력 대기를 켜 주세요.');
+      generation = ++relayLifecycle.current;
+      const relay = new TouchPcPrintRelay({
+        api,
+        relayId: crypto.randomUUID(),
+        connected: () => runtime.commentStreamService.isConnectedToServer,
+        readiness: async () => {
+          const connected = runtime.commentStreamService.isConnectedToServer;
+          if (!connected || !window.voicecap) return pcRelayPrinterReadiness(connected);
+          const helper = await commentHelperService.getStatus();
+          return pcRelayPrinterReadiness(runtime.commentStreamService.isConnectedToServer && helper.helper === 'running', helper.print);
+        },
+        print: (payload) => runtime.commentStreamService.printSale(payload),
+        onStatus: (state) => {
+          if (generation === relayLifecycle.current) setRelayStatus(state);
+        },
+        onError: (failure) => {
+          if (generation === relayLifecycle.current)
+            setRelayError((failure as Error)?.message || 'PC 전표 출력을 확인해 주세요.');
+        },
+        onChange: () => {
+          if (generation === relayLifecycle.current) void refreshSales();
+        },
+      });
+      printRelay.current = relay;
+      await relay.start();
+    } catch (failure) {
+      if (generation === relayLifecycle.current) setRelayError((failure as Error).message);
+    } finally {
+      if (generation === relayLifecycle.current) setRelayBusy(false);
+    }
+  };
   useEffect(() => {
     let active = true;
     void QRCode.toDataURL(url, { width: 260, margin: 2 }).then((data) => {
@@ -337,6 +409,10 @@ export const TouchDesktopPanel: React.FC = () => {
       }));
   }, [tick, runningSession]);
   const start = async (choice: 'NEW' | 'CONTINUE') => {
+    if (relayBusy || printRelay.current?.running) {
+      setError('폰 전표 출력 대기를 중지한 뒤 PC 판매를 시작해 주세요.');
+      return;
+    }
     if (!api || !isRemoteAuth) {
       setError('실제 판매자 계정으로 로그인한 뒤 사용해 주세요.');
       return;
@@ -605,7 +681,7 @@ export const TouchDesktopPanel: React.FC = () => {
             ) : (
               <>
                 <button
-                  disabled={busy}
+                  disabled={busy || relayBusy || relayStatus?.running}
                   className="rounded-xl bg-blue-600 px-4 py-2 font-bold text-white disabled:opacity-50"
                   onClick={() => void start('NEW')}
                 >
@@ -613,7 +689,7 @@ export const TouchDesktopPanel: React.FC = () => {
                 </button>
                 {activeSession && (
                   <button
-                    disabled={busy}
+                    disabled={busy || relayBusy || relayStatus?.running}
                     className="rounded-xl border px-4 py-2 font-bold"
                     onClick={() => void start('CONTINUE')}
                   >
@@ -713,6 +789,33 @@ export const TouchDesktopPanel: React.FC = () => {
           표시됩니다.
         </p>
       </div>
+      <section className="rounded-2xl border bg-white p-5 shadow-sm" aria-label="폰 전표 출력 대기">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-black text-slate-900">폰 전표 출력 대기</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              폰에서 댓글과 사진을 처리하고, 전표는 이 PC의 Windows 프린터로 출력합니다.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={relayBusy || busy || !!runningSession}
+            className={`rounded-xl px-4 py-2 font-bold disabled:opacity-50 ${relayStatus?.running ? 'border border-rose-300 text-rose-700' : 'bg-blue-600 text-white'}`}
+            onClick={() => void togglePrintRelay()}
+          >
+            {relayBusy ? '전표 대기 연결 중…' : relayStatus?.running ? '전표 대기 중지' : '폰 전표 출력 대기 켜기'}
+          </button>
+        </div>
+        <p className="mt-3 text-sm" role="status">
+          {relayStatus?.running
+            ? `${relayStatus.printing ? '전표 출력 중' : relayStatus.ready ? '폰 전표 대기 중' : '출력 연결 대기'} · ${relayStatus.message}`
+            : 'PC 댓글 도우미에서 프린터와 자동 출력을 설정한 뒤 켜 주세요.'}
+        </p>
+        <p className="mt-2 text-xs text-slate-500">
+          폰 판매 화면에서 PC 프린터를 선택하세요. 출력하는 동안 이 페이지와 댓글 도우미를 열어 두세요.
+        </p>
+        {relayError && <p role="alert" className="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{relayError}</p>}
+      </section>
       {!runningSession && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-white p-4 text-sm">
           <label>

@@ -3,6 +3,13 @@ import type { CustomerStats } from '../services/customerStatsIndex';
 import type { Product } from './productSales';
 
 export type TouchSalesMode = 'BASIC' | 'NUMBER' | 'SIZE_COLOR';
+export type TouchPrintTarget = 'PHONE_BLUETOOTH' | 'PC_HELPER';
+export interface TouchPrintRelayState {
+  relayId: string;
+  ready: boolean;
+  leaseExpiresAt: string;
+  printerName?: string;
+}
 export interface TouchSettings {
   mode: 'VOICE' | 'COMMENT_TOUCH';
   prepareSeconds: number;
@@ -13,6 +20,8 @@ export interface TouchSettings {
   captureOff?: boolean;
   /** 폰 단독 판매에서 댓글을 받을 틱톡 ID(@ 제외). 서버 touch-tiktok-id로 저장. */
   tiktokId?: string;
+  /** 폰 판매의 전표 출력 위치. 댓글과 촬영은 폰이 계속 담당한다. */
+  printTarget?: TouchPrintTarget;
 }
 export interface TouchComment extends CommentRecord {
   sequence: number;

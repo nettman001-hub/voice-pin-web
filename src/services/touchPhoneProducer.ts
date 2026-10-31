@@ -1,5 +1,5 @@
 import type { TouchSalesApi } from './touchSalesApi.ts';
-import type { TouchComment, TouchPcState, TouchSettings } from '../types/touchSales.ts';
+import type { TouchComment, TouchPcState, TouchSettings, TouchPrintTarget } from '../types/touchSales.ts';
 import {
   EulerCommentStream,
   type CommentToken,
@@ -91,6 +91,7 @@ export class TouchPhoneProducer {
   private printTimer: ReturnType<typeof setTimeout> | null = null;
   private captureTimer: ReturnType<typeof setInterval> | null = null;
   private printing = false;
+  private printFlight = false;
   private capturing = false;
   private activeCaptureKey: string | null = null;
   private captureEpoch = 0;
@@ -163,14 +164,31 @@ export class TouchPhoneProducer {
   }
 
   private async printLoop() {
-    if (this.stopped) return;
+    if (this.stopped || this.printFlight) return;
+    this.printFlight = true;
     try {
-      if (this.o.printer.connected) await this.printJobs();
+      if (this.o.settings.printTarget !== 'PC_HELPER' && this.o.printer.connected) await this.printJobs();
     } catch (e) {
       this.o.onError('PRINT_ERROR', e);
     } finally {
+      this.printFlight = false;
       if (!this.stopped) this.printTimer = setTimeout(() => void this.printLoop(), 1000);
     }
+  }
+
+  /** Server acknowledgement is authoritative; changing output never restarts comments or camera. */
+  async changePrintTarget(printTarget: TouchPrintTarget) {
+    if (this.stopped) throw new Error('판매를 시작한 뒤 출력 위치를 변경해 주세요.');
+    const result = await this.o.api.setPrintTarget(this.o.producerId, printTarget);
+    this.syncPrintTarget(result.printTarget);
+    return result.printTarget;
+  }
+
+  syncPrintTarget(printTarget: TouchPrintTarget) {
+    if (this.o.settings.printTarget === printTarget) return;
+    this.o.settings = { ...this.o.settings, printTarget };
+    this.emit();
+    this.wake();
   }
 
   private async printJobs() {

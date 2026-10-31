@@ -23,6 +23,11 @@ const messages: Record<string, string> = {
   OPERATION_PAYLOAD_MISMATCH: '같은 작업 번호로 다른 판매를 보낼 수 없습니다.',
   COMMENT_IDENTITY_CONFLICT: '댓글 계정 정보가 일치하지 않습니다.',
   PRINT_ALREADY_PENDING: '아직 처리 중인 전표가 있습니다.',
+  PRINT_RELAY_NOT_READY: 'PC에서 판매도우미에 연결한 뒤 PC 전표 출력을 시작해 주세요.',
+  PRINT_RELAY_ALREADY_RUNNING: '다른 PC 또는 탭에서 전표 출력을 연결했습니다.',
+  PRINT_RELAY_LEASE_LOST: 'PC 전표 출력 연결이 끊겼습니다. PC에서 다시 연결해 주세요.',
+  PRINT_TARGET_BUSY: '전표를 출력 중입니다. 출력이 끝난 뒤 출력 기기를 바꿔 주세요.',
+  PRINT_LEASE_LOST: '출력 연결이 변경되었습니다. 전표 상태를 확인해 주세요.',
   SALE_CANCELLED: '취소된 판매입니다.',
   CAPTURE_LEASE_LOST: '사진을 촬영하는 기기의 판매 연결을 확인해 주세요.',
 };
@@ -45,6 +50,14 @@ function respond(result: any) {
       result,
     );
   return successResponse(result);
+}
+function printRelayState(relay: any) {
+  return relay ? {
+    relayId: relay.relay_id,
+    ready: relay.ready === true && Date.parse(relay.lease_expires_at) > Date.now(),
+    leaseExpiresAt: relay.lease_expires_at,
+    printerName: relay.printer_name || undefined,
+  } : null;
 }
 const stateKeys = [
   'running',
@@ -175,6 +188,15 @@ export async function handleTouchSales(auth: AuthContext, body: any) {
         receivedAt: body.__serverReceivedAt,
         sentAt: Date.now(),
       });
+    if (body.action === 'touch-print-relay-status') {
+      const { data, error } = await admin
+        .from('touch_print_relays')
+        .select('relay_id,ready,lease_expires_at,printer_name')
+        .eq('workspace_id', workspace)
+        .maybeSingle();
+      if (error) throw error;
+      return successResponse({ printRelay: printRelayState(data) });
+    }
     if (body.action === 'touch-sale-detail') {
       const { data: sale, error: saleError } = await admin
         .from('sales')
@@ -225,6 +247,7 @@ export async function handleTouchSales(auth: AuthContext, body: any) {
       const [
         { data: run, error: runError },
         { data: session, error: sessionError },
+        { data: relay, error: relayError },
       ] = await Promise.all([
         admin
           .from('touch_sales_runs')
@@ -237,8 +260,13 @@ export async function handleTouchSales(auth: AuthContext, body: any) {
           .eq('workspace_id', workspace)
           .eq('status', 'ACTIVE')
           .maybeSingle(),
+        admin
+          .from('touch_print_relays')
+          .select('relay_id,ready,lease_expires_at,printer_name')
+          .eq('workspace_id', workspace)
+          .maybeSingle(),
       ]);
-      if (runError || sessionError) throw runError || sessionError;
+      if (runError || sessionError || relayError) throw runError || sessionError || relayError;
       let product = null;
       if (session?.active_product_id) {
         const { data } = await admin
@@ -260,6 +288,7 @@ export async function handleTouchSales(auth: AuthContext, body: any) {
         run,
         session,
         product,
+        printRelay: printRelayState(relay),
         sales: session ? await listSales(workspace, session.id) : [],
         serverNow: Date.now(),
       });
@@ -318,6 +347,39 @@ export async function handleTouchSales(auth: AuthContext, body: any) {
           p_state: { settings, state },
         }),
       );
+    }
+    if (body.action === 'touch-print-relay') {
+      if (!['START', 'HEARTBEAT', 'STOP'].includes(body.kind) ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.relayId || '') ||
+        typeof body.ready !== 'boolean' ||
+        (body.printerName != null && typeof body.printerName !== 'string'))
+        return errorResponse('VALIDATION_ERROR', 'PC 출력 연결 정보를 확인해 주세요.');
+      return respond(await rpc('voicecap_touch_print_relay', {
+        p_workspace_id: workspace,
+        p_relay_id: body.relayId,
+        p_kind: body.kind,
+        p_ready: body.ready,
+        p_printer_name: body.printerName?.trim().slice(0, 120) || null,
+      }));
+    }
+    if (body.action === 'touch-print-target') {
+      if (!['PHONE_BLUETOOTH', 'PC_HELPER'].includes(body.printTarget) ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.producerId || ''))
+        return errorResponse('VALIDATION_ERROR', '출력 기기를 확인해 주세요.');
+      return respond(await rpc('voicecap_touch_print_target', {
+        p_workspace_id: workspace,
+        p_producer_id: body.producerId,
+        p_print_target: body.printTarget,
+      }));
+    }
+    if (body.action === 'claim-touch-relay-jobs') {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.relayId || ''))
+        return errorResponse('VALIDATION_ERROR', 'PC 출력 연결 정보를 확인해 주세요.');
+      return respond(await rpc('voicecap_claim_touch_relay_jobs', {
+        p_workspace_id: workspace,
+        p_relay_id: body.relayId,
+        p_limit: 10,
+      }));
     }
     if (body.action === 'claim-touch-jobs')
       return respond(

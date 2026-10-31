@@ -6,6 +6,8 @@ import type {
   TouchRun,
   TouchSale,
   TouchSettings,
+  TouchPrintTarget,
+  TouchPrintRelayState,
 } from '../types/touchSales';
 export interface TouchBootstrap {
   run: TouchRun | null;
@@ -13,6 +15,7 @@ export interface TouchBootstrap {
   sales: TouchSale[];
   product: TouchPcState['product'];
   serverNow: number;
+  printRelay?: TouchPrintRelayState | null;
 }
 export class TouchSalesApi {
   constructor(readonly workspaceId: string) {}
@@ -57,6 +60,20 @@ export class TouchSalesApi {
     return this.call<{ jobs: any[]; leaseToken: string }>('claim-touch-jobs', {
       producerId,
     });
+  }
+  printRelay(kind: 'START' | 'HEARTBEAT' | 'STOP', relayId: string, ready: boolean, printerName?: string) {
+    return this.call<{ ok: true; printRelay: TouchPrintRelayState | null }>('touch-print-relay', {
+      kind, relayId, ready, printerName,
+    });
+  }
+  printRelayStatus() {
+    return this.call<{ printRelay: TouchPrintRelayState | null }>('touch-print-relay-status');
+  }
+  claimRelayPrints(relayId: string) {
+    return this.call<{ jobs: any[]; leaseToken: string }>('claim-touch-relay-jobs', { relayId });
+  }
+  setPrintTarget(producerId: string, printTarget: TouchPrintTarget) {
+    return this.call<{ ok: true; printTarget: TouchPrintTarget }>('touch-print-target', { producerId, printTarget });
   }
   print(
     kind: 'BEGIN' | 'ACK',

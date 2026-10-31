@@ -1,8 +1,9 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import TouchMobileSalesPage from '../../src/pages/seller/TouchMobileSalesPage';
-import { phoneLifecycleState } from './phoneLifecycleMock';
+import { phoneLifecycleState, TouchSalesApi } from './phoneLifecycleMock';
 import { touchLocalStore } from '../../src/services/touchLocalStore';
+import { TouchPcPrintRelay } from '../../src/services/touchPcPrintRelay';
 
 const emit = (type: string, requestId: string) =>
   window.dispatchEvent(new CustomEvent('voicecap-android', { detail: { type, requestId, ok: true } }));
@@ -73,10 +74,38 @@ if (params.has('blocked') || params.has('pending')) {
     error: params.has('pending') ? 'fixture database rejection' : 'PC에서 댓글터치 판매 시작을 눌러 주세요.',
   });
 }
+let printRelay: TouchPcPrintRelay | null = null;
 (window as any).phoneLifecycle = {
   state: phoneLifecycleState,
   seededSale,
   outbox: () => touchLocalStore.listOutbox(phoneLifecycleState.workspace),
+  async startRelay() {
+    if (printRelay?.running) return;
+    printRelay = new TouchPcPrintRelay({
+      api: new TouchSalesApi(phoneLifecycleState.workspace),
+      relayId: '44444444-4444-4444-8444-444444444444',
+      readiness: () => ({ ready: phoneLifecycleState.helperConnected, verified: true,
+        printerName: 'PC fixture printer', message: 'PC fixture printer · 자동 출력 준비됨' }),
+      connected: () => phoneLifecycleState.helperConnected,
+      print: async (payload) => {
+        phoneLifecycleState.helperPrints.push(structuredClone(payload));
+        if (phoneLifecycleState.helperHold)
+          await new Promise<void>(resolve => { phoneLifecycleState.helperRelease = resolve; });
+        return { ...phoneLifecycleState.helperResult };
+      },
+      onStatus: (status) => { phoneLifecycleState.relayStatus = status; },
+      onError: (error) => { phoneLifecycleState.relayErrors.push(String(error)); },
+      onChange: () => {},
+    });
+    await printRelay.start();
+  },
+  stopRelay: () => printRelay?.stop(),
+  wakeRelay: () => printRelay?.wake(),
+  releaseHelper() {
+    phoneLifecycleState.helperHold = false;
+    phoneLifecycleState.helperRelease?.();
+    phoneLifecycleState.helperRelease = null;
+  },
   releaseBuyerSearch(query: string) {
     phoneLifecycleState.buyerSearchHolds.delete(query);
     phoneLifecycleState.buyerSearchReleases.get(query)?.();
