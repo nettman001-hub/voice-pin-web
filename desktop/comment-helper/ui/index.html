@@ -39,6 +39,63 @@
         </div>
       </section>
 
+      <section id="android-card" class="android-card" aria-live="polite" hidden>
+        <div class="android-heading">
+          <div class="status-title">
+            <span id="android-dot" class="status-dot idle"></span>
+            <div>
+              <p class="label">안드로이드 댓글 연결</p>
+              <strong id="android-status">꺼짐</strong>
+            </div>
+          </div>
+          <label class="switch" title="안드로이드 판매 폰으로 댓글 전달">
+            <input id="android-enabled" type="checkbox" />
+            <span></span>
+          </label>
+        </div>
+        <p class="android-help">PC 홈페이지를 닫아도 이 도우미가 틱톡 댓글을 승인된 판매 폰으로 보냅니다. 판매확정·촬영·전표는 폰에서 합니다.</p>
+
+        <div class="android-row">
+          <div><span class="field-label">판매자 계정</span><strong id="android-account">등록되지 않음</strong></div>
+          <div class="android-row-actions">
+            <button id="android-register" class="secondary-button" type="button">판매자 계정 연결</button>
+            <button id="android-unregister" class="text-button" type="button" hidden>계정 연결 해제</button>
+          </div>
+        </div>
+
+        <div id="android-registering" class="android-code-box" hidden>
+          <p>브라우저에서 VoiceCAP에 로그인한 뒤, 아래 확인코드가 맞는지 보고 <b>이 PC 등록</b>을 누르세요.</p>
+          <strong id="android-registering-code" class="android-code"></strong>
+          <p id="android-registering-left" class="android-muted"></p>
+          <button id="android-cancel-register" class="text-button" type="button">등록 취소</button>
+        </div>
+
+        <div id="android-registered" hidden>
+          <div id="android-pair" class="android-code-box">
+            <p>폰 판매 앱 → 판매 설정 → 댓글 받기: <b>PC 댓글도우미</b> → <b>PC와 연결</b>에서 이 번호를 입력하세요.</p>
+            <strong id="android-pair-code" class="android-code">------</strong>
+            <p id="android-pair-left" class="android-muted"></p>
+            <div class="android-row-actions">
+              <button id="android-issue-code" class="secondary-button" type="button">폰 연결 인증번호 발급</button>
+              <button id="android-cancel-code" class="text-button" type="button" hidden>취소</button>
+            </div>
+          </div>
+          <div id="android-requests" class="android-requests" hidden></div>
+          <div id="android-phone" class="android-row" hidden>
+            <div><span class="field-label">연결된 폰</span><strong id="android-phone-name"></strong><p id="android-phone-seen" class="android-muted"></p></div>
+            <button id="android-unlink" class="text-button" type="button">폰 연결 해제</button>
+          </div>
+          <div class="stats android-stats">
+            <div><span>판매 회차</span><strong id="android-session">없음</strong></div>
+            <div><span>틱톡 계정</span><strong id="android-tiktok">-</strong></div>
+            <div><span>최근 전달</span><strong id="android-last-push">-</strong></div>
+            <div><span>미전송</span><strong id="android-pending">0건</strong></div>
+          </div>
+          <p id="android-dropped" class="android-muted"></p>
+        </div>
+        <p id="android-error" class="android-error" hidden></p>
+      </section>
+
       <button id="open-web" class="primary-button" type="button">
         <span>VoiceCAP 홈페이지 열기</span>
         <span aria-hidden="true">→</span>
@@ -126,5 +183,6 @@
       </footer>
     </main>
     <script src="./renderer.js"></script>
+    <script src="./androidCard.js"></script>
   </body>
 </html>
