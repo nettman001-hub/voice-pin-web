@@ -54,6 +54,8 @@ import { handleLogicOpus } from './handlers/logicOpus.ts'
 import { handleTouchSales } from './handlers/touchSales.ts'
 import { handleTouchSalesAdmin } from './handlers/touchSalesAdmin.ts'
 import { handleCommentKeyAdmin, handleCommentToken } from './handlers/commentKey.ts'
+import { handleManage } from './handlers/manage.ts'
+import { MANAGE_ACTIONS } from './handlers/manageCore.ts'
 
 import {
   handleClaimPrintJobs,
@@ -135,6 +137,11 @@ serve(async (req: Request) => {
           details: { requiredCapability: cap },
         }
       }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(MANAGE_ACTIONS, action)) {
+      requireCapability('SALES_WRITE')
+      return await handleManage(auth, action, body)
     }
 
     switch (action) {
