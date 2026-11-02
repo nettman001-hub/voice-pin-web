@@ -54,6 +54,13 @@ import { handleLogicOpus } from './handlers/logicOpus.ts'
 import { handleTouchSales } from './handlers/touchSales.ts'
 import { handleTouchSalesAdmin } from './handlers/touchSalesAdmin.ts'
 import { handleCommentKeyAdmin, handleCommentToken } from './handlers/commentKey.ts'
+import { handleHelperDevice, handleHelperPublic, handleHelperUser } from './handlers/helperLink.ts'
+import {
+  HELPER_CAPABILITY,
+  HELPER_DEVICE_ACTIONS,
+  HELPER_PUBLIC_ACTIONS,
+  HELPER_USER_ACTIONS,
+} from './handlers/helperLinkCore.ts'
 
 import {
   handleClaimPrintJobs,
@@ -119,9 +126,25 @@ serve(async (req: Request) => {
       return errorResponse('VALIDATION_ERROR', 'action 필드가 누락되었습니다.', 400)
     }
 
+    // PC 댓글도우미 최초 등록: 아직 자격 증명이 없으므로 비밀값·확인코드로만 진행한다.
+    if (HELPER_PUBLIC_ACTIONS.has(action)) {
+      return await handleHelperPublic(req, body)
+    }
+
     const auth = await authenticateRequest(req, body.workspaceId)
     if (!auth) {
       return errorResponse('AUTH_REQUIRED', '인증이 필요하거나 기기 연결이 해제되었습니다.', 401)
+    }
+
+    // 도우미 기기 토큰은 댓글 전달 액션만 쓸 수 있다(판매 수정·SMS·관리자 기능 불가).
+    if (auth.capabilities.has(HELPER_CAPABILITY) || HELPER_DEVICE_ACTIONS.has(action)) {
+      if (!HELPER_DEVICE_ACTIONS.has(action) || !auth.capabilities.has(HELPER_CAPABILITY)) {
+        return errorResponse('CAPABILITY_DENIED', '이 기기로 할 수 없는 작업입니다.', 403)
+      }
+      return await handleHelperDevice(auth, body)
+    }
+    if (HELPER_USER_ACTIONS.has(action)) {
+      return await handleHelperUser(auth, body)
     }
 
     const { workspaceId, actorId, capabilities, deviceId } = auth
