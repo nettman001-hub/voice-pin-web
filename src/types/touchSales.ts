@@ -4,6 +4,8 @@ import type { Product } from './productSales';
 
 export type TouchSalesMode = 'BASIC' | 'NUMBER' | 'SIZE_COLOR';
 export type TouchPrintTarget = 'PHONE_BLUETOOTH' | 'PC_HELPER';
+/** 폰 판매의 댓글 출처. 없으면 폰이 직접 받는다(기존 방식). 출력 위치와는 별개. */
+export type TouchCommentSource = 'PHONE_DIRECT' | 'WINDOWS_HELPER';
 export interface TouchPrintRelayState {
   relayId: string;
   ready: boolean;
@@ -22,6 +24,8 @@ export interface TouchSettings {
   tiktokId?: string;
   /** 폰 판매의 전표 출력 위치. 댓글과 촬영은 폰이 계속 담당한다. */
   printTarget?: TouchPrintTarget;
+  /** 댓글 출처. 연결 토큰은 여기에 넣지 않는다(폰 Keystore에만). */
+  commentSource?: TouchCommentSource;
 }
 export interface TouchComment extends CommentRecord {
   sequence: number;

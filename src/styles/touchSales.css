@@ -1230,3 +1230,23 @@
   text-align: center;
   padding: 20px;
 }
+
+/* PC 댓글도우미 연결 (폰 판매 시작 설정) */
+.touch-helper-link {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+.touch-helper-code {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.touch-helper-code input {
+  flex: 1;
+  min-width: 0;
+  font-size: 22px;
+  letter-spacing: 6px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
