@@ -46,8 +46,13 @@ const client: any = {
 };
 export const requireSupabase = () => client;
 export const isSupabaseConfigured = true;
-export const useAuth = () => ({ workspaceId: workspace, user: { id: 'seller', nickname: '테스트 판매자' }, logout: async () => {} });
-export const remoteWorkspaceService = { fetchWorkspaceSettings: async () => ({ ...settings }) };
+export const useAuth = () => ({ isAuthenticated: true, isInitialized: true, isRemoteAuth: true, workspaceId: workspace, user: { id: 'seller', nickname: '테스트 판매자' }, logout: async () => {} });
+export const remoteWorkspaceService = {
+  fetchWorkspaceSettings: async (_workspace: string, key: string) => key === 'customer_keeping_records' ? (phoneLifecycleState.keeping || []) : ({ ...settings }),
+  saveWorkspaceSettings: async (_workspace: string, key: string, value: unknown) => {
+    if (key === 'customer_keeping_records') phoneLifecycleState.keeping = structuredClone(value);
+  },
+};
 export const productSalesApi = {
   startSession: async () => ({ session: { id: session, displayCode: '2026-10-30 라이브 1회차' } }),
   searchBuyers: async (query = '') => {

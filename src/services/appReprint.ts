@@ -104,7 +104,9 @@ export async function reprintInApp(
   try {
     await deps.printer.send(bytes);
   } catch (error) {
-    if (ticket) await finish(deps, ticket, 'FAILED');
+    // A disconnected transport may already have submitted some/all bytes.
+    // Leave the lease unresolved; the existing server expiry records UNKNOWN.
+    if (ticket && deps.printer.connected) await finish(deps, ticket, 'FAILED');
     throw error;
   }
   if (!ticket) return 'PRINTED';

@@ -51,6 +51,7 @@ export const AppBottomNav: React.FC = () => {
     <nav
       className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/95 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.05)] backdrop-blur-lg select-none"
       aria-label="관리 하단 메뉴"
+        style={{ bottom: 'calc(46px + env(safe-area-inset-bottom))' }}
     >
       <div className="mx-auto flex h-16 max-w-lg items-center justify-around px-1">
         {APP_TABS.map((tab) => {

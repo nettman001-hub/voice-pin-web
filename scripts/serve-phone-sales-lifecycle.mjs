@@ -9,6 +9,8 @@ const result = await build({
   entryPoints: ['test/fixtures/phoneLifecycleApp.tsx'],
   bundle: true, write: false, format: 'esm', platform: 'browser', jsx: 'automatic', loader: { '.css': 'empty' },
   plugins: [{ name: 'phone-lifecycle-fixture', setup(builder) {
+    builder.onResolve({ filter: /\/auth\/LoginPage$/ }, () => ({ path: 'login', namespace: 'phone-login-stub' }));
+    builder.onLoad({ filter: /.*/, namespace: 'phone-login-stub' }, () => ({ contents: 'export const LoginPage = () => null;' }));
     builder.onResolve({ filter: /\/(AuthContext|touchSalesApi|supabaseClient|productSalesApi|remoteWorkspaceService)$/ },
       () => ({ path: path.join(root, 'test/fixtures/phoneLifecycleMock.ts') }));
     builder.onResolve({ filter: /\/frontCamera$/ }, () => ({ path: 'camera', namespace: 'phone-lifecycle-mock' }));

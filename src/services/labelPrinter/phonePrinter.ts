@@ -12,6 +12,10 @@ import {
 } from './marklifeProtocol.ts';
 import { drawSaleLabel, type LabelContent } from './labelDraw.ts';
 import { WebBluetoothPrinter } from './webBluetoothPrinter.ts';
+import { xprinterCalibrate, xprinterPrintJob } from './xprinterProtocol.ts';
+import { LABEL_PAPERS, readPaperSize, type LabelPaperSize } from './labelPaper.ts';
+
+export type PrinterModel = 'M50' | 'XP_237BT';
 
 /** 폰 단독 판매의 라벨 인쇄 기본값. M50 시험(2026-10-29)에서 맞춤은 간격 찾기(GAP)가 잘 맞았다. */
 export const PHONE_LABEL_DEFAULTS = {
@@ -22,6 +26,8 @@ export const PHONE_LABEL_DEFAULTS = {
 };
 
 export interface PhoneLabelPrinter {
+  readonly model?: PrinterModel;
+  readonly deviceId?: string;
   readonly name: string;
   readonly connected: boolean;
   /** 네이티브 앱에 마지막으로 고른 프린터가 있으면 true. */
@@ -35,12 +41,17 @@ export interface PhoneLabelPrinter {
 }
 
 class AndroidLabelPrinter implements PhoneLabelPrinter {
-  private state = { connected: false, name: '', saved: false };
+  private state = { connected: false, name: '', saved: false, model: 'M50', address: '' };
   private reconnectFlight: Promise<boolean> | null = null;
   private refresh() {
     const native = androidNative();
-    this.state = androidJson(native?.printerState(), { connected: false, name: '', saved: false });
+    this.state = androidJson(native?.printerState(), { connected: false, name: '', saved: false, model: 'M50', address: '' });
   }
+  get model(): PrinterModel {
+    this.refresh();
+    return this.state.model === 'XP_237BT' ? 'XP_237BT' : 'M50';
+  }
+  get deviceId() { this.refresh(); return this.state.address || this.name; }
   get name() {
     this.refresh();
     return this.state.name || '';
@@ -56,7 +67,9 @@ class AndroidLabelPrinter implements PhoneLabelPrinter {
   async connect() {
     const id = crypto.randomUUID();
     const wait = waitAndroid('printer-connected', id, 60000);
-    androidNative()!.printerPick(id);
+    const native = androidNative()!;
+    if (native.printerPickV2) native.printerPickV2(id);
+    else native.printerPick(id);
     await wait;
   }
   reconnect(): Promise<boolean> {
@@ -88,6 +101,8 @@ class AndroidLabelPrinter implements PhoneLabelPrinter {
 }
 
 class BrowserLabelPrinter implements PhoneLabelPrinter {
+  readonly model = 'M50' as const;
+  get deviceId() { return this.name; }
   private printer = new WebBluetoothPrinter(() => {});
   get name() {
     return this.printer.name;
@@ -117,11 +132,14 @@ export function createPhonePrinter(): PhoneLabelPrinter {
 export function saleLabelBytes(
   content: LabelContent,
   canvas: HTMLCanvasElement = document.createElement('canvas'),
-  options: Partial<typeof PHONE_LABEL_DEFAULTS> = {},
+  options: Partial<typeof PHONE_LABEL_DEFAULTS> & { paperSize?: LabelPaperSize } = {},
+  model: PrinterModel = 'M50',
 ) {
   const o = { ...PHONE_LABEL_DEFAULTS, ...options };
-  const image = drawSaleLabel(canvas, content);
+  const paper = LABEL_PAPERS[options.paperSize || '50x30'];
+  const image = drawSaleLabel(canvas, content, { width: paper.widthPx, height: paper.heightPx });
   const bits = packBitmap(image.data, image.width, image.height, o.threshold);
+  if (model === 'XP_237BT') return xprinterPrintJob(bits, options.paperSize);
   return buildPrintJob(bits, {
     density: o.density,
     speed: o.speed,
@@ -130,4 +148,11 @@ export function saleLabelBytes(
 }
 
 /** "라벨 다시 맞추기": 종이 학습(라벨 길이·간격 재기). 처음 연결 때도 한 번 한다. */
-export const realignBytes = () => marklifeCommands.learnPaper();
+export const realignBytes = (model: PrinterModel = 'M50', paperSize: LabelPaperSize = '50x30') =>
+  model === 'XP_237BT' ? xprinterCalibrate(paperSize) : marklifeCommands.learnPaper();
+
+export const initializePrinterBytes = (model: PrinterModel = 'M50') =>
+  model === 'XP_237BT' ? new Uint8Array() : marklifeCommands.btType();
+
+export const printerCalibrationKey = (workspaceId: string, printer: PhoneLabelPrinter) =>
+  `voicecap-phone-printer-learned:${workspaceId}:${printer.model || 'M50'}:${printer.deviceId || printer.name}:${readPaperSize(workspaceId, printer)}:${printer.model === 'XP_237BT' ? 'gap2' : 'auto'}`;

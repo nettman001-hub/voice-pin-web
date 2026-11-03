@@ -10,7 +10,7 @@ export const touchModeUsesNumber = (mode?: TouchSalesMode) =>
   mode === 'NUMBER' || mode === 'SIZE_COLOR';
 export const touchProductLabel = (n: number) => `${n}번`;
 export const touchLabelNumber = (label?: string | null) => {
-  const match = /^(\d{1,3})번$/.exec((label || '').trim());
+  const match = /^(\d{1,9})번$/.exec((label || '').trim());
   return match ? Number(match[1]) : null;
 };
 
