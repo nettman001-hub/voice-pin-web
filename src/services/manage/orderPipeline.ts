@@ -71,6 +71,8 @@ export interface BuildOrdersInput {
   keepingBuyerKeys?: ReadonlySet<string>;
   /** 정산서와 별개로 입금이 확인된 판매 (입금확인 매칭 결과) */
   paidSaleIds?: ReadonlySet<string>;
+  /** 고객 취소로 빠진 상품 (fulfillment_items CANCELLED). 청구에서 뺀다. */
+  cancelledSaleIds?: ReadonlySet<string>;
 }
 
 export const orderKey = (sessionId: string, buyerKey: string) => `${sessionId}::${buyerKey}`;
@@ -83,7 +85,7 @@ const OPEN_STATUSES: ReadonlySet<InvoiceStatus> = new Set(['DRAFT', 'QUEUED', 'S
 export function buildOrders(input: BuildOrdersInput): ManageOrder[] {
   const groups = new Map<string, { sessionId: string; buyerKey: string; sales: SaleRecord[] }>();
   for (const sale of input.sales) {
-    if (!isBillableSale(sale)) continue;
+    if (!isBillableSale(sale) || input.cancelledSaleIds?.has(sale.id)) continue;
     const buyerKey = saleBuyerKey(sale);
     const key = orderKey(sale.sessionId, buyerKey);
     const group = groups.get(key);

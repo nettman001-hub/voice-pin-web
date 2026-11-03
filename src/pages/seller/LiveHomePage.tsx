@@ -1,3 +1,4 @@
+import { ManageSellExtras } from '../../components/manage/ManageSellExtras';
 import { useWorkspaceRuntime, useRuntimeAuth as useAuth } from '../../context/WorkspaceRuntimeContext';
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -313,6 +314,10 @@ export const LiveHomePage: React.FC = () => {
     sale.aiVerification?.reviewDecision !== 'NOT_SALE' && (sale.sessionId === currentSessionId ||
     (activeSession?.id && sale.sessionId === activeSession.id))
   )), [activeSession?.id, currentSessionId, sales]);
+  const callListBuyers = React.useMemo(
+    () => currentSessionSales.map((sale) => ({ buyerId: sale.buyerId, nickname: sale.buyerNickname })),
+    [currentSessionSales],
+  );
   const sessionSalesScope = JSON.stringify([user?.id, workspaceId, currentSessionId, activeSession?.id]);
   const [stoppedSessionSales, setStoppedSessionSales] = useState<{
     scope: string;
@@ -488,6 +493,7 @@ export const LiveHomePage: React.FC = () => {
     <div className="p-3.5 sm:p-6 max-w-7xl mx-auto space-y-3 sm:space-y-5">
       {!runtime.isTest && <SalesModeSelector locked={isListening || isSessionStarting} />}
       {!runtime.isTest && <VoicePhoneStatusReporter />}
+      {!runtime.isTest && <ManageSellExtras callListOnly buyers={callListBuyers} />}
       {workflowProcessingError&&<p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">판매방식 처리를 재시도하고 있습니다. 원본 전사는 유지됩니다. {workflowProcessingError}</p>}
       {/* 최소 높이 상단 헤더 & 핵심 제어 */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 px-2.5 py-2 sm:px-3 rounded-2xl shadow-sm">

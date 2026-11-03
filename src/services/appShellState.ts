@@ -77,10 +77,12 @@ export const isPcOnlyPath = (pathname: string) =>
 /** 상단 헤더에 보이는 화면 이름. */
 export function appScreenTitle(pathname: string): string {
   if (pathname === '/manage' || pathname === '/manage/') return '관리 홈';
+  if (pathname.startsWith('/manage/orders/')) return '주문 상세';
   if (startsWithPath(pathname, '/manage/orders')) return '주문';
   if (startsWithPath(pathname, '/manage/inbox')) return '문자·입금';
   if (startsWithPath(pathname, '/manage/contacts')) return '연락처 연결';
   if (startsWithPath(pathname, '/manage/settings/keeping')) return '보관 설정';
+  if (startsWithPath(pathname, '/manage/ship')) return '출고';
   if (startsWithPath(pathname, '/invoices')) return '정산서';
   if (startsWithPath(pathname, '/shipments')) return '택배발송';
   if (startsWithPath(pathname, '/settlement')) return '정산';

@@ -269,6 +269,9 @@ const mapShipment = (row: Row): Shipment => ({
   shippedAt: row.shipped_at || undefined,
   deliveredAt: row.delivered_at || undefined,
   smsMessageId: row.sms_message_id || undefined,
+  buyerKey: row.buyer_key || undefined,
+  shippingFee: typeof row.shipping_fee === 'number' ? row.shipping_fee : undefined,
+  revision: typeof row.revision === 'number' ? row.revision : undefined,
 });
 
 const ensureEnabled = () => {

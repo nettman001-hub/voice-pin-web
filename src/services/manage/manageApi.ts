@@ -12,7 +12,13 @@ type Invoke = <T>(action: string, payload: Record<string, unknown>) => Promise<T
 export const newOperationId = () => crypto.randomUUID();
 
 export class ManageApi {
-  constructor(readonly workspaceId: string, private readonly invoke: Invoke = invokeSalesApi) {}
+  readonly workspaceId: string;
+  private readonly invoke: Invoke;
+
+  constructor(workspaceId: string, invoke: Invoke = invokeSalesApi) {
+    this.workspaceId = workspaceId;
+    this.invoke = invoke;
+  }
 
   private call(action: string, payload: Record<string, unknown>, operationId: string = newOperationId()) {
     return this.invoke<ManageResult>(action, { ...payload, operationId, workspaceId: this.workspaceId });

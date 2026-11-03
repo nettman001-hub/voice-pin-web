@@ -45,7 +45,7 @@ async function loadServerState(workspaceId: string): Promise<ManageServerState> 
   const [contacts, items] = await Promise.all([
     client.from('buyer_contacts').select('phone,buyer_key,nickname,state,linked_at').eq('workspace_id', workspaceId),
     client.from('fulfillment_items')
-      .select('sale_id,state,kept_at,shipment_id,cancelled_by,refunded_at')
+      .select('sale_id,buyer_key,state,kept_at,shipment_id,cancelled_by,refunded_at')
       .eq('workspace_id', workspaceId),
   ]);
   if (contacts.error || items.error) {
@@ -58,7 +58,7 @@ async function loadServerState(workspaceId: string): Promise<ManageServerState> 
   const serverPhones = new Set(serverLinks.map((link) => link.phone));
   const contactLinks = [...serverLinks, ...legacyLinks.filter((link) => !serverPhones.has(link.phone.replace(/\D/g, '')))];
   const fulfillmentItems: FulfillmentItemRecord[] = (items.data || []).map((row: any) => ({
-    saleId: row.sale_id, state: row.state, keptAt: row.kept_at, shipmentId: row.shipment_id,
+    saleId: row.sale_id, buyerKey: row.buyer_key, state: row.state, keptAt: row.kept_at, shipmentId: row.shipment_id,
     cancelledBy: row.cancelled_by, refunded: !!row.refunded_at,
   }));
   return { contactLinks, fulfillmentItems, alertDays, serverReady: true, loadedAt: Date.now(), error: null };

@@ -4,7 +4,7 @@ export type SmsCategory = 'PURCHASE_INFO' | 'CUSTOMER_INQUIRY' | 'QUESTION' | 'A
 export type SmsDeliveryStatus = 'RECEIVED' | 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED';
 export type InvoiceStatus = 'DRAFT' | 'QUEUED' | 'SENT' | 'PAID' | 'CANCELLED';
 export type PaymentMatchStatus = 'UNMATCHED' | 'MATCHED' | 'NEEDS_REVIEW';
-export type ShipmentStatus = 'READY' | 'PACKED' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
+export type ShipmentStatus = 'RESERVED' | 'READY' | 'PACKED' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
 
 export interface SmsAttachment {
   id: string;
@@ -106,6 +106,10 @@ export interface Shipment {
   shippedAt?: string;
   deliveredAt?: string;
   smsMessageId?: string;
+  /** 새 출고(관리 화면)에서만: 구매자 키, 출고 때 받을 배송비, 수정 번호 */
+  buyerKey?: string;
+  shippingFee?: number;
+  revision?: number;
 }
 
 export interface SmsBridgeConfig {

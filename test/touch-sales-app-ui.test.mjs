@@ -24,7 +24,7 @@ const result = await build({
     name: 'isolated-touch-page-backend',
     setup(builder) {
       builder.onResolve({
-        filter: /\/(AuthContext|touchSalesApi|supabaseClient|productSalesApi|remoteWorkspaceService)$/,
+        filter: /\/(AuthContext|touchSalesApi|supabaseClient|productSalesApi|remoteWorkspaceService|ManageSellExtras)$/,
       }, () => ({ path: 'backend-fixture', namespace: 'touch-ui-test' }));
       builder.onLoad({ filter: /.*/, namespace: 'touch-ui-test' }, () => ({
         contents: `
@@ -34,6 +34,7 @@ const result = await build({
           export const remoteWorkspaceService = {};
           export const isSupabaseConfigured = true;
           export const requireSupabase = () => { throw new Error('SSR must not access backend'); };
+          export const ManageSellExtras = () => null;
         `,
       }));
     },

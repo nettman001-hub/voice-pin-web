@@ -20,6 +20,7 @@ export type FulfillmentState = 'KEPT' | 'RESERVED' | 'PACKED' | 'SHIPPED' | 'DEL
 
 export interface FulfillmentItemRecord {
   saleId: string;
+  buyerKey?: string | null;
   state: FulfillmentState;
   keptAt?: string | null;
   shipmentId?: string | null;

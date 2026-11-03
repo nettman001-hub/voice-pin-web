@@ -593,6 +593,9 @@ export const CommerceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   return <CommerceContext.Provider value={value}>{children}</CommerceContext.Provider>;
 };
 
+/** 판매 단독 페이지(/sell)처럼 CommerceProvider 밖에서도 쓸 수 있는 읽기 (없으면 undefined) */
+export const useOptionalCommerce = () => useContext(CommerceContext);
+
 export const useCommerce = () => {
   const context = useContext(CommerceContext);
   if (!context) throw new Error('useCommerce must be used within a CommerceProvider');

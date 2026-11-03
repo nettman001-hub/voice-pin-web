@@ -1,3 +1,4 @@
+import { ManageSellExtras } from '../../components/manage/ManageSellExtras';
 import React, {
   useCallback,
   useEffect,
@@ -149,6 +150,10 @@ export default function TouchMobileSalesPage() {
     ),
     sessionId = bootstrap?.session?.id || pc?.sessionId || '';
   const detail = rows.find((s) => s.id === detailId);
+  const broadcastBuyers = useMemo(
+    () => rows.map((s) => ({ buyerId: s.buyerId, nickname: s.buyerNickname })),
+    [bootstrap?.sales], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   const inlineNavigation = salesApp && tab === 'SELL' && !detail && !priceComment && !batch && !cardPrice && !editPrice;
   useEffect(() => {
     queueMicrotask(() => window.dispatchEvent(new CustomEvent('voicecap-inline-navigation', { detail: inlineNavigation })));
@@ -1622,6 +1627,7 @@ export default function TouchMobileSalesPage() {
               onChange={changeNumber}
             />
           )}
+          <ManageSellExtras selected={selectedSnapshot} buyers={broadcastBuyers} />
           {recentCard}
           <TouchCommentList
             comments={displayComments}
