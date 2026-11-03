@@ -151,7 +151,7 @@ export function HelperLinkPanel(props: {
         </div>
       )}
       {!hasToken && (
-        <label>
+        <label className="touch-helper-code-label">
           PC 도우미 화면의 인증번호 6자리
           <div className="touch-helper-code">
             <input
