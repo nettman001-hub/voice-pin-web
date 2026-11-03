@@ -56,6 +56,7 @@ import { handleTouchSalesAdmin } from './handlers/touchSalesAdmin.ts'
 import { handleCommentKeyAdmin, handleCommentToken } from './handlers/commentKey.ts'
 import { handleManage } from './handlers/manage.ts'
 import { MANAGE_ACTIONS } from './handlers/manageCore.ts'
+import { handleManageSummary } from './handlers/manageSummary.ts'
 import { handleHelperDevice, handleHelperPublic, handleHelperUser } from './handlers/helperLink.ts'
 import {
   HELPER_CAPABILITY,
@@ -160,6 +161,11 @@ serve(async (req: Request) => {
           details: { requiredCapability: cap },
         }
       }
+    }
+
+    if (action === 'manage-summary') {
+      requireCapability('SALES_READ')
+      return await handleManageSummary(auth, body)
     }
 
     if (Object.prototype.hasOwnProperty.call(MANAGE_ACTIONS, action)) {

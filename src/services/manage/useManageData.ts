@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useSales } from '../../context/SalesContext';
 import { useCommerce } from '../../context/CommerceContext';
@@ -11,6 +11,8 @@ import {
   type FulfillmentItemRecord, type KeepingAlertDays,
 } from './fulfillment';
 import { buildManageDashboard, type ManageDashboard } from './dashboard';
+import { CONTACT_COLUMNS, FULFILLMENT_COLUMNS, contactLinksFromRows, fulfillmentItemsFromRows, type ManageSummary } from './manageSummary';
+import { ManageApi } from './manageApi';
 
 /**
  * 관리 화면이 읽는 값. 쓰기는 manageApi(서버)로만 한다.
@@ -38,21 +40,15 @@ async function loadServerState(workspaceId: string): Promise<ManageServerState> 
   if (!isSupabaseConfigured) return { ...EMPTY, alertDays, loadedAt: Date.now() };
   const client = requireSupabase();
   const [contacts, items] = await Promise.all([
-    client.from('buyer_contacts').select('phone,buyer_key,nickname,state,linked_at').eq('workspace_id', workspaceId),
-    client.from('fulfillment_items')
-      .select('sale_id,buyer_key,state,kept_at,shipment_id,cancelled_by,refunded_at')
+    client.from('buyer_contacts').select(CONTACT_COLUMNS).eq('workspace_id', workspaceId),
+    client.from('fulfillment_items').select(FULFILLMENT_COLUMNS)
       .eq('workspace_id', workspaceId),
   ]);
   if (contacts.error || items.error) {
     return { ...EMPTY, alertDays, loadedAt: Date.now(), error: (contacts.error || items.error)?.message || null };
   }
-  const contactLinks: ContactLinkRecord[] = (contacts.data || []).filter((row: any) => row.buyer_key || row.state === 'BLOCKED').map((row: any) => ({
-    phone: row.phone, buyerKey: row.buyer_key || '', nickname: row.nickname, linkedAt: row.linked_at, blocked: row.state === 'BLOCKED',
-  }));
-  const fulfillmentItems: FulfillmentItemRecord[] = (items.data || []).map((row: any) => ({
-    saleId: row.sale_id, buyerKey: row.buyer_key, state: row.state, keptAt: row.kept_at, shipmentId: row.shipment_id,
-    cancelledBy: row.cancelled_by, refunded: !!row.refunded_at,
-  }));
+  const contactLinks = contactLinksFromRows(contacts.data || []);
+  const fulfillmentItems = fulfillmentItemsFromRows(items.data || []);
   return { contactLinks, fulfillmentItems, alertDays, serverReady: true, loadedAt: Date.now(), error: null };
 }
 
@@ -95,4 +91,41 @@ export function useManageDashboard(periodDays: number, reloadKey = 0): { dashboa
     periodDays,
   }), [sales, commerce.invoices, commerce.payments, commerce.messages, server, workspaceId, periodDays]);
   return { dashboard, server };
+}
+
+const SUMMARY_REFRESH_DELAY_MS = 3000;
+
+/**
+ * 관리 홈 서버 요약. 폰이 판매를 다 받기 전에도 숫자를 바로 보여 준다.
+ * 판매·정산서·입금·문자가 바뀌면 3초 뒤 다시 받는다. 못 받으면 summary 는 null (폰 계산을 쓴다).
+ */
+export function useManageHomeSummary(periodDays: number, reloadKey = 0): { summary: ManageSummary | null; error: string | null } {
+  const { workspaceId } = useAuth();
+  const { sales } = useSales();
+  const commerce = useCommerce();
+  const api = useMemo(() => (workspaceId && isSupabaseConfigured ? new ManageApi(workspaceId) : null), [workspaceId]);
+  const [state, setState] = useState<{ key: string; summary: ManageSummary | null; error: string | null }>({ key: '', summary: null, error: null });
+  const [changeTick, setChangeTick] = useState(0);
+  const key = `${workspaceId}:${periodDays}`;
+
+  const changes = useRef(0);
+  useEffect(() => {
+    // 첫 그리기는 아래 요청이 맡는다. 이후 바뀐 것만 모아서 한 번 다시 받는다.
+    if (changes.current++ === 0) return undefined;
+    const timer = setTimeout(() => setChangeTick((value) => value + 1), SUMMARY_REFRESH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [sales, commerce.invoices, commerce.payments, commerce.messages]);
+
+  useEffect(() => {
+    if (!api) return undefined;
+    let cancelled = false;
+    api.summary(periodDays)
+      .then((summary) => { if (!cancelled) setState({ key, summary, error: null }); })
+      .catch((error) => {
+        if (!cancelled) setState((prev) => ({ key, summary: prev.key === key ? prev.summary : null, error: String(error?.message || error) }));
+      });
+    return () => { cancelled = true; };
+  }, [api, key, periodDays, reloadKey, changeTick]);
+
+  return state.key === key ? { summary: state.summary, error: state.error } : { summary: null, error: null };
 }
