@@ -14,7 +14,7 @@ import { buildManageTodos, type ManageTodo } from './todos.ts';
  * 숫자 3개(판매액·입금·남은 입금), 돈 4칸, 물건 4칸, 할 일, 보관 카드.
  */
 
-export interface PaymentLike { saleIds: readonly string[]; matchStatus: string }
+export interface PaymentLike { saleIds: readonly string[]; matchStatus: string; paidAt?: string }
 
 export interface DashboardInput {
   sales: readonly SaleRecord[];
@@ -116,6 +116,9 @@ export function buildManageDashboard(input: DashboardInput): ManageDashboard {
   const todos = buildManageTodos({
     orders, contactBook, keepingAlerts: alerts,
     readyToShipBuyerCount: goods.readyToShipBuyers, refundNeededCount: goods.refundNeeded,
+    paymentReviewCount: input.payments.filter((payment) =>
+      (payment.matchStatus === 'NEEDS_REVIEW' || payment.matchStatus === 'UNMATCHED')
+      && (!payment.paidAt || Date.parse(payment.paidAt) >= input.now.getTime() - 30 * DAY_MS)).length,
   });
 
   return {

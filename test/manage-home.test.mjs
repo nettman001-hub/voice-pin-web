@@ -88,7 +88,7 @@ test('dashboard: numbers, money stages, goods and keeping card', () => {
   assert.equal(dashboard.keeping.buyers, 1);
   assert.equal(dashboard.keeping.alert, 1);
   assert.equal(dashboard.keeping.top[0].days, 33);
-  assert.deepEqual(dashboard.todos.map((t) => t.kind), ['READY_TO_BILL', 'AWAITING_PAYMENT', 'READY_TO_SHIP', 'KEEPING_ALERT']);
+  assert.deepEqual(dashboard.todos.map((t) => t.kind), ['PAYMENT_REVIEW', 'READY_TO_BILL', 'AWAITING_PAYMENT', 'READY_TO_SHIP', 'KEEPING_ALERT']);
 
   const all = buildManageDashboard({ sales, invoices: [], payments: [], messages: [], contactLinks: [], fulfillmentItems: [], shippingConfig: CONFIG, alertDays: { warnDays: 14, alertDays: 30 }, now: NOW, periodDays: 0 });
   assert.equal(all.salesAmount, 55000);

@@ -8,7 +8,7 @@ import type { KeepingAlert } from './fulfillment.ts';
  */
 
 export type ManageTodoKind =
-  | 'DUPLICATE_INVOICE' | 'REFUND_NEEDED' | 'CONTACT_CONFIRM' | 'CONTACT_MISSING' | 'UNKNOWN_SENDER'
+  | 'DUPLICATE_INVOICE' | 'REFUND_NEEDED' | 'PAYMENT_REVIEW' | 'CONTACT_CONFIRM' | 'CONTACT_MISSING' | 'UNKNOWN_SENDER'
   | 'READY_TO_BILL' | 'AWAITING_PAYMENT' | 'READY_TO_SHIP' | 'KEEPING_ALERT' | 'KEEPING_WARN';
 
 export interface ManageTodo {
@@ -25,6 +25,8 @@ export interface TodoInput {
   keepingAlerts?: readonly KeepingAlert[];
   readyToShipBuyerCount?: number;
   refundNeededCount?: number;
+  /** 자동으로 못 붙인 입금 (확인 필요 + 미확인) */
+  paymentReviewCount?: number;
 }
 
 export function buildManageTodos(input: TodoInput): ManageTodo[] {
@@ -36,6 +38,7 @@ export function buildManageTodos(input: TodoInput): ManageTodo[] {
   add('DUPLICATE_INVOICE', orders.filter((order) => order.duplicateOpenInvoiceIds.length > 0).length,
     '열린 정산서가 둘인 주문', '/manage/orders?filter=duplicate');
   add('REFUND_NEEDED', input.refundNeededCount || 0, '환불 필요', '/manage/ship?filter=refund');
+  add('PAYMENT_REVIEW', input.paymentReviewCount || 0, '입금 확인 필요', '/manage/inbox');
   add('CONTACT_CONFIRM', orders.filter((order) => order.stage === 'NEEDS_CONTACT' && order.contact?.state === 'NEEDS_CONFIRM').length,
     '연락처 확인 필요', '/manage/contacts');
   add('CONTACT_MISSING', orders.filter((order) => order.stage === 'NEEDS_CONTACT' && order.contact?.state !== 'NEEDS_CONFIRM').length,
