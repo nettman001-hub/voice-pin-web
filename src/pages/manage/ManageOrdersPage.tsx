@@ -2,11 +2,11 @@ import React, { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useManageDashboard } from '../../services/manage/useManageData';
 import { formatWon } from '../../services/appShellState';
+import { orderPath } from '../../services/manage/orderInvoice';
 import { MONEY_STAGE_LABEL, MONEY_STAGE_ORDER, type MoneyStage } from '../../services/manage/orderPipeline';
 
 /**
- * 주문 목록 (읽기). 회차×구매자 주문서를 돈 단계별로 본다.
- * 정산서 만들기·보내기는 다음 단계에서 이 화면으로 옮긴다. 지금은 정산서 화면으로 이어 준다.
+ * 주문 목록. 회차×구매자 주문서를 돈 단계별로 본다. 정산서는 주문 상세에서 보낸다.
  */
 export const ManageOrdersPage: React.FC = () => {
   const [params, setParams] = useSearchParams();
@@ -46,7 +46,7 @@ export const ManageOrdersPage: React.FC = () => {
           연락처 연결하기
         </Link>
       )}
-      <p className="text-[11px] text-slate-500">최근 30일. 정산서 만들기와 보내기는 [정산서] 화면에서 합니다.</p>
+      <p className="text-[11px] text-slate-500">최근 30일. 주문을 눌러 정산서를 보내거나 취소합니다.</p>
       {orders.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">해당하는 주문이 없습니다.</p>
       ) : (
@@ -64,7 +64,7 @@ export const ManageOrdersPage: React.FC = () => {
                 {order.contact?.state === 'NONE' && <span className="font-bold text-amber-700">연락처 없음</span>}
                 {order.duplicateOpenInvoiceIds.length > 0 && <span className="font-bold text-rose-600">열린 정산서 {order.duplicateOpenInvoiceIds.length}장</span>}
               </div>
-              <Link to="/invoices" className="mt-1 inline-block text-xs font-bold text-brand-700">정산서 화면에서 보기</Link>
+              <Link to={orderPath(order.key)} className="mt-1 inline-block text-xs font-bold text-brand-700">{order.stage === 'READY_TO_BILL' ? '정산서 보내기' : '자세히 보기'}</Link>
             </li>
           ))}
         </ul>

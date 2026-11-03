@@ -22,6 +22,7 @@ import { ManageOrdersPage } from './pages/manage/ManageOrdersPage';
 import { ManageInboxPage } from './pages/manage/ManageInboxPage';
 import { KeepingSettingsPage } from './pages/manage/KeepingSettingsPage';
 import { ContactLinkPage } from './pages/manage/ContactLinkPage';
+import { OrderDetailPage } from './pages/manage/OrderDetailPage';
 import { isNewManageUiEnabled } from './services/manage/manageUiSetting';
 import { APP_SELL_PATH, SalesAppShell } from './components/common/SalesAppShell';
 import { isSalesApp } from './services/labelPrinter/androidBridge';
@@ -279,6 +280,7 @@ export const App: React.FC = () => {
                           <Route path="/manage/orders" element={<ManageOrdersPage />} />
                           <Route path="/manage/inbox" element={<ManageInboxPage />} />
                           <Route path="/manage/contacts" element={<ContactLinkPage />} />
+                          <Route path="/manage/orders/:orderKey" element={<OrderDetailPage />} />
                           <Route path="/manage/settings/keeping" element={<KeepingSettingsPage />} />
                           <Route path="/seller/devices" element={<DeviceManagementPage />} />
                           <Route path="/devices" element={<DeviceManagementPage />} />
