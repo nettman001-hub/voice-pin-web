@@ -59,10 +59,6 @@ export const OrderDetailPage: React.FC = () => {
 
   const invoicesById = useMemo(() => new Map(commerce.invoices.map((invoice) => [invoice.id, invoice])), [commerce.invoices]);
   const invoice: SettlementInvoice | undefined = order?.invoiceId ? invoicesById.get(order.invoiceId) : undefined;
-  const extraOpen = (order?.duplicateOpenInvoiceIds || [])
-    .filter((id) => id !== order?.invoiceId)
-    .map((id) => invoicesById.get(id))
-    .filter((item): item is SettlementInvoice => !!item);
 
   if (!order) {
     return (
@@ -254,19 +250,6 @@ export const OrderDetailPage: React.FC = () => {
           </div>
         )}
 
-        {extraOpen.length > 0 && (
-          <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
-            <p className="font-bold">같은 주문에 열린 정산서가 {extraOpen.length + 1}장 있습니다. 하나만 남기고 취소해 주세요.</p>
-            <ul className="mt-2 space-y-1">
-              {extraOpen.map((item) => (
-                <li key={item.id} className="flex items-center justify-between gap-2">
-                  <span>{STATUS_TEXT[item.status]} · {formatWon(item.amount)} · {new Date(item.createdAt).toLocaleDateString('ko-KR')}</span>
-                  <button type="button" disabled={busy !== null} onClick={() => cancel(item)} className="h-9 rounded-lg bg-white px-3 font-bold text-rose-700">취소</button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
       </section>
     </div>
   );

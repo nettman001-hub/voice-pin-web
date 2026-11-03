@@ -56,7 +56,7 @@ export const ManageHomePage: React.FC = () => {
 
       {!server.serverReady && server.loadedAt && (
         <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          보관·출고 기록을 서버에서 아직 읽지 못했습니다. 연락처는 예전 기록으로 보여 드리고, 보관 수는 0으로 보입니다.
+          연락처·보관 기록을 서버에서 읽지 못했습니다. 인터넷 연결을 확인해 주세요.
         </div>
       )}
 
@@ -122,7 +122,7 @@ export const ManageHomePage: React.FC = () => {
             {dashboard.todos.map((todo) => (
               <li key={todo.kind}>
                 <Link to={todo.path} className="flex min-h-[52px] items-center gap-3 px-4 py-2.5 active:bg-slate-50">
-                  {(todo.kind === 'DUPLICATE_INVOICE' || todo.kind === 'REFUND_NEEDED' || todo.kind === 'KEEPING_ALERT') && (
+                  {(todo.kind === 'REFUND_NEEDED' || todo.kind === 'KEEPING_ALERT') && (
                     <AlertTriangle className="h-4 w-4 flex-shrink-0 text-rose-500" />
                   )}
                   <span className="min-w-0 flex-1 text-sm font-bold text-slate-800">{todo.label}</span>

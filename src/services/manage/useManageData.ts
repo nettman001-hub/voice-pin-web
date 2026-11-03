@@ -3,7 +3,6 @@ import { useAuth } from '../../context/AuthContext';
 import { useSales } from '../../context/SalesContext';
 import { useCommerce } from '../../context/CommerceContext';
 import { shippingService } from '../shippingService';
-import { buyerPhoneLinkService } from '../buyerPhoneLinkService';
 import { remoteWorkspaceService } from '../remoteWorkspaceService';
 import { isSupabaseConfigured, requireSupabase } from '../supabaseClient';
 import type { ContactLinkRecord } from './contactLink';
@@ -15,7 +14,7 @@ import { buildManageDashboard, type ManageDashboard } from './dashboard';
 
 /**
  * 관리 화면이 읽는 값. 쓰기는 manageApi(서버)로만 한다.
- * 새 표(buyer_contacts, fulfillment_items)가 아직 운영에 없으면 옛 번호 연결 기록을 쓰고 보관은 비어 있다고 알린다.
+ * 연락처·보관은 서버 표(buyer_contacts, fulfillment_items)만 읽는다. 옛 기록은 쓰지 않는다 (2026-11-03 사용자 규칙).
  */
 
 export interface ManageServerState {
@@ -33,14 +32,10 @@ const EMPTY: ManageServerState = {
 };
 
 async function loadServerState(workspaceId: string): Promise<ManageServerState> {
-  const legacy = await buyerPhoneLinkService.sync(workspaceId);
-  const legacyLinks: ContactLinkRecord[] = Object.entries(legacy).map(([phone, link]) => ({
-    phone, nickname: link.nickname, linkedAt: link.linkedAt, blocked: link.blocked,
-  }));
   const alertDays = normalizeKeepingAlertDays(
     await remoteWorkspaceService.fetchWorkspaceSettings(workspaceId, KEEPING_ALERT_DAYS_SETTING).catch(() => null),
   );
-  if (!isSupabaseConfigured) return { ...EMPTY, contactLinks: legacyLinks, alertDays, loadedAt: Date.now() };
+  if (!isSupabaseConfigured) return { ...EMPTY, alertDays, loadedAt: Date.now() };
   const client = requireSupabase();
   const [contacts, items] = await Promise.all([
     client.from('buyer_contacts').select('phone,buyer_key,nickname,state,linked_at').eq('workspace_id', workspaceId),
@@ -49,14 +44,11 @@ async function loadServerState(workspaceId: string): Promise<ManageServerState> 
       .eq('workspace_id', workspaceId),
   ]);
   if (contacts.error || items.error) {
-    return { ...EMPTY, contactLinks: legacyLinks, alertDays, loadedAt: Date.now(), error: (contacts.error || items.error)?.message || null };
+    return { ...EMPTY, alertDays, loadedAt: Date.now(), error: (contacts.error || items.error)?.message || null };
   }
-  const serverLinks: ContactLinkRecord[] = (contacts.data || []).map((row: any) => ({
-    phone: row.phone, buyerKey: row.buyer_key, nickname: row.nickname, linkedAt: row.linked_at, blocked: row.state === 'BLOCKED',
+  const contactLinks: ContactLinkRecord[] = (contacts.data || []).filter((row: any) => row.buyer_key || row.state === 'BLOCKED').map((row: any) => ({
+    phone: row.phone, buyerKey: row.buyer_key || '', nickname: row.nickname, linkedAt: row.linked_at, blocked: row.state === 'BLOCKED',
   }));
-  // 서버 연결이 우선. 옛 기록은 서버에 없는 번호만 보탠다 (옮기기 뒤 새로 생긴 옛 기록).
-  const serverPhones = new Set(serverLinks.map((link) => link.phone));
-  const contactLinks = [...serverLinks, ...legacyLinks.filter((link) => !serverPhones.has(link.phone.replace(/\D/g, '')))];
   const fulfillmentItems: FulfillmentItemRecord[] = (items.data || []).map((row: any) => ({
     saleId: row.sale_id, buyerKey: row.buyer_key, state: row.state, keptAt: row.kept_at, shipmentId: row.shipment_id,
     cancelledBy: row.cancelled_by, refunded: !!row.refunded_at,
