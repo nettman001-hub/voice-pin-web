@@ -3,7 +3,6 @@ import type { InvoiceStatus } from '../../types/commerce.ts';
 import type { BuyerShippingOverride, CalculatedShipping, ShippingConfig } from '../../types/shipping.ts';
 import { isBillableSale } from '../billableSales.ts';
 import { promiseDefaultBuyerKey } from '../promiseDefaultService.ts';
-import { normalizeNickname } from '../nicknameMatcher.ts';
 import { computeShippingFee } from './shippingFee.ts';
 import type { ContactBook, ContactResolution } from './contactLink.ts';
 
@@ -56,8 +55,6 @@ export interface ManageOrder {
   stage: MoneyStage;
   contact?: ContactResolution;
   invoiceId?: string;
-  /** 같은 주문에 열린 정산서가 둘 이상 (예전 구조에서 생길 수 있는 결함) */
-  duplicateOpenInvoiceIds: string[];
   lastSaleAt: string;
 }
 
@@ -93,27 +90,15 @@ export function buildOrders(input: BuildOrdersInput): ManageOrder[] {
     else groups.set(key, { sessionId: sale.sessionId, buyerKey, sales: [sale] });
   }
 
-  // 정산서를 주문에 붙인다: 판매 id → 구매자 키 → 정규화 닉네임 순서
+  // 정산서를 주문에 붙인다: 판매 id → 회차·구매자 키 (서버가 만든 정산서만 본다. 닉네임으로 추측하지 않는다)
   const orderBySaleId = new Map<string, string>();
-  const ordersBySessionNickname = new Map<string, string[]>();
-  for (const [key, group] of groups) {
-    for (const sale of group.sales) orderBySaleId.set(sale.id, key);
-    const nicknames = new Set(group.sales.map((sale) => normalizeNickname(sale.buyerNickname)));
-    for (const nickname of nicknames) {
-      const lookup = `${group.sessionId}::${nickname}`;
-      ordersBySessionNickname.set(lookup, [...(ordersBySessionNickname.get(lookup) || []), key]);
-    }
-  }
+  for (const [key, group] of groups) for (const sale of group.sales) orderBySaleId.set(sale.id, key);
   const invoicesByOrder = new Map<string, OrderInvoiceLike[]>();
   for (const invoice of input.invoices || []) {
     if (invoice.kind === 'SHIPPING') continue;
     let key = (invoice.saleIds || []).map((id) => orderBySaleId.get(id)).find(Boolean);
     if (!key && invoice.sessionId && invoice.buyerKey && groups.has(orderKey(invoice.sessionId, invoice.buyerKey))) {
       key = orderKey(invoice.sessionId, invoice.buyerKey);
-    }
-    if (!key && invoice.sessionId && invoice.buyerNickname) {
-      const owners = ordersBySessionNickname.get(`${invoice.sessionId}::${normalizeNickname(invoice.buyerNickname)}`) || [];
-      if (owners.length === 1) key = owners[0];
     }
     if (!key) continue;
     invoicesByOrder.set(key, [...(invoicesByOrder.get(key) || []), invoice]);
@@ -163,7 +148,6 @@ export function buildOrders(input: BuildOrdersInput): ManageOrder[] {
       stage,
       contact,
       invoiceId: (paidInvoice || sentInvoice || open[0])?.id,
-      duplicateOpenInvoiceIds: open.length > 1 ? open.map((invoice) => invoice.id) : [],
       lastSaleAt: sorted[sorted.length - 1].recognizedAt,
     });
   }

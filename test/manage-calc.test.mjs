@@ -30,7 +30,7 @@ const msg = (phone, body) => ({ phone, direction: 'INCOMING', body });
 
 // ── 연락처 연결 ─────────────────────────────────────────────
 
-test('contact: previous link by buyer key wins, legacy link matches exact nickname only', () => {
+test('contact: previous link matches by buyer key only, never by a similar nickname', () => {
   const buyers = [
     { buyerKey: 'buyer:1', nickname: '꽃심이' },
     { buyerKey: 'nickname:하늘이', nickname: '하늘이' },
@@ -38,7 +38,7 @@ test('contact: previous link by buyer key wins, legacy link matches exact nickna
   ];
   const book = buildContactBook(buyers, [
     { phone: '010-1111-2222', buyerKey: 'buyer:1', nickname: '꽃심이', linkedAt: '2026-10-01T00:00:00Z' },
-    { phone: '01033334444', nickname: '하늘 이', linkedAt: '2026-10-01T00:00:00Z' },
+    { phone: '01033334444', buyerKey: 'nickname:하늘이', nickname: '하늘이', linkedAt: '2026-10-01T00:00:00Z' },
   ], []);
   assert.equal(book.byBuyer.get('buyer:1').state, 'LINKED');
   assert.equal(book.byBuyer.get('buyer:1').source, 'PREVIOUS');
@@ -80,8 +80,8 @@ test('contact: similar nickname is only a candidate, never linked', () => {
 test('contact: blocked number is not re-attached; a number linked to someone else is not proposed', () => {
   const buyers = [{ buyerKey: 'nickname:꽃심이', nickname: '꽃심이' }, { buyerKey: 'nickname:다른분', nickname: '다른분' }];
   const book = buildContactBook(buyers, [
-    { phone: '01011110000', nickname: '꽃심이', linkedAt: '2026-10-01T00:00:00Z', blocked: true },
-    { phone: '01022220000', nickname: '다른분', linkedAt: '2026-10-01T00:00:00Z' },
+    { phone: '01011110000', buyerKey: 'nickname:꽃심이', nickname: '꽃심이', linkedAt: '2026-10-01T00:00:00Z', blocked: true },
+    { phone: '01022220000', buyerKey: 'nickname:다른분', nickname: '다른분', linkedAt: '2026-10-01T00:00:00Z' },
   ], [msg('01011110000', '꽃심이에요'), msg('01022220000', '꽃심이 대신 보내요')]);
   assert.equal(book.byBuyer.get('nickname:꽃심이').state, 'NONE');
   assert.equal(book.byBuyer.get('nickname:다른분').phone, '01022220000');
@@ -111,10 +111,11 @@ test('money stages: contact first, then bill, then payment', () => {
     sales, shippingConfig: CONFIG,
     contactBook: linkedBook(['nickname:나나나', 'nickname:다다다', 'nickname:라라라', 'nickname:마마마']),
     invoices: [
-      { id: 'i1', sessionId: 'r1', buyerNickname: '다다다', status: 'SENT' },
+      { id: 'i1', sessionId: 'r1', buyerKey: 'nickname:다다다', status: 'SENT' },
       { id: 'i2', saleIds: [ids['라라라']], status: 'PAID' },
-      { id: 'i3', sessionId: 'r1', buyerNickname: '마마마', status: 'DRAFT' },
-      { id: 'i4', sessionId: 'r1', buyerNickname: '마마마', status: 'CANCELLED' },
+      { id: 'i3', saleIds: [ids['마마마']], status: 'DRAFT' },
+      { id: 'i4', saleIds: [ids['마마마']], status: 'CANCELLED' },
+      { id: 'i5', sessionId: 'r1', buyerNickname: '가가가', status: 'PAID' },
     ],
   });
   const stage = Object.fromEntries(orders.map((o) => [o.nickname, o.stage]));
@@ -135,19 +136,14 @@ test('money stages: payment matched to every sale counts as paid; partial paymen
   assert.equal(partial[0].stage, 'NEEDS_CONTACT');
 });
 
-test('two open invoices on one order are flagged', () => {
+test('invoices attach by sale id or buyer key only, never by nickname', () => {
   const s = sale({ buyerNickname: '가가가' });
   const [order] = buildOrders({
     sales: [s], shippingConfig: CONFIG,
-    invoices: [
-      { id: 'a', saleIds: [s.id], status: 'DRAFT', createdAt: '2026-10-17T13:00:00Z' },
-      { id: 'b', saleIds: [s.id], status: 'SENT', createdAt: '2026-10-17T14:00:00Z' },
-    ],
+    invoices: [{ id: 'old', sessionId: s.sessionId, buyerNickname: '가가가', status: 'PAID' }],
   });
-  assert.deepEqual(order.duplicateOpenInvoiceIds.sort(), ['a', 'b']);
-  assert.equal(order.stage, 'AWAITING_PAYMENT');
-  const todos = buildManageTodos({ orders: [order] });
-  assert.equal(todos[0].kind, 'DUPLICATE_INVOICE');
+  assert.equal(order.invoiceId, undefined);
+  assert.equal(order.stage, 'NEEDS_CONTACT');
 });
 
 // ── 꽃심이 83,000원 ────────────────────────────────────────
@@ -307,7 +303,7 @@ test('to-dos put contact before billing', () => {
   const sales = [sale({ buyerNickname: '가가가' }), sale({ buyerNickname: '나나나' }), sale({ buyerNickname: '다다다' })];
   const book = buildContactBook(
     sales.map((s) => ({ buyerKey: saleBuyerKey(s), nickname: s.buyerNickname })),
-    [{ phone: '01000000001', nickname: '나나나', linkedAt: '2026-10-01T00:00:00Z' }],
+    [{ phone: '01000000001', buyerKey: 'nickname:나나나', nickname: '나나나', linkedAt: '2026-10-01T00:00:00Z' }],
     [msg('01000000002', '가가 입니다'), msg('01000000003', '누구게요')],
   );
   const orders = buildOrders({ sales, shippingConfig: CONFIG, contactBook: book });
@@ -321,7 +317,7 @@ test('2,000 sales across 300 buyers stay fast', () => {
     buyerNickname: `구매자${i % 300}`, sessionId: `r${i % 7}`, amount: 1000 + (i % 50) * 100,
   }));
   const buyers = [...new Map(sales.map((s) => [saleBuyerKey(s), { buyerKey: saleBuyerKey(s), nickname: s.buyerNickname }])).values()];
-  const links = buyers.slice(0, 150).map((b, i) => ({ phone: `0101000${String(i).padStart(4, '0')}`, nickname: b.nickname, linkedAt: '2026-10-01T00:00:00Z' }));
+  const links = buyers.slice(0, 150).map((b, i) => ({ phone: `0101000${String(i).padStart(4, '0')}`, buyerKey: b.buyerKey, nickname: b.nickname, linkedAt: '2026-10-01T00:00:00Z' }));
   const messages = Array.from({ length: 300 }, (_, i) => msg(`0102000${String(i).padStart(4, '0')}`, `안녕하세요 구매자${150 + (i % 150)}입니다`));
   const started = performance.now();
   const book = buildContactBook(buyers, links, messages);

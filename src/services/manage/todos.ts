@@ -8,7 +8,7 @@ import type { KeepingAlert } from './fulfillment.ts';
  */
 
 export type ManageTodoKind =
-  | 'DUPLICATE_INVOICE' | 'REFUND_NEEDED' | 'PAYMENT_REVIEW' | 'CONTACT_CONFIRM' | 'CONTACT_MISSING' | 'UNKNOWN_SENDER'
+  | 'REFUND_NEEDED' | 'PAYMENT_REVIEW' | 'CONTACT_CONFIRM' | 'CONTACT_MISSING' | 'UNKNOWN_SENDER'
   | 'READY_TO_BILL' | 'AWAITING_PAYMENT' | 'READY_TO_SHIP' | 'KEEPING_ALERT' | 'KEEPING_WARN';
 
 export interface ManageTodo {
@@ -35,8 +35,6 @@ export function buildManageTodos(input: TodoInput): ManageTodo[] {
     if (count > 0) todos.push({ kind, count, label, path });
   };
   const orders = input.orders;
-  add('DUPLICATE_INVOICE', orders.filter((order) => order.duplicateOpenInvoiceIds.length > 0).length,
-    '열린 정산서가 둘인 주문', '/manage/orders?filter=duplicate');
   add('REFUND_NEEDED', input.refundNeededCount || 0, '환불 필요', '/manage/ship?filter=refund');
   add('PAYMENT_REVIEW', input.paymentReviewCount || 0, '입금 확인 필요', '/manage/inbox');
   add('CONTACT_CONFIRM', orders.filter((order) => order.stage === 'NEEDS_CONTACT' && order.contact?.state === 'NEEDS_CONFIRM').length,

@@ -10,7 +10,7 @@ import {
  * 청구할 수 있으므로, 회차×구매자마다 이 단계가 청구보다 먼저 온다.
  *
  * 규칙
- * - 예전 연결: 판매자가 확인한 번호↔구매자 연결이 있으면 그대로 쓴다 (buyerKey 우선, 옛 기록은 닉네임 정확 일치만).
+ * - 예전 연결: 판매자가 확인한 번호↔구매자 연결(buyer_contacts, 구매자 키 기준)이 있으면 그대로 쓴다.
  * - 새 문자: smsNicknameLink 규칙을 그대로 쓴다. EXACT/SPACING/INTRO 는 연결, SHORT/SIMILAR 는 "확인 필요".
  * - 판매자가 해제한(blocked) 번호는 같은 닉네임에 다시 붙이지 않는다.
  * - 한 번호는 한 구매자에게만. 이미 다른 구매자에 연결된 번호는 새로 제안하지 않는다.
@@ -20,8 +20,8 @@ import {
 
 export interface ContactLinkRecord {
   phone: string;
-  /** buyer:<id> 또는 nickname:<정규화> — 옛 blob 기록에는 없을 수 있다 */
-  buyerKey?: string | null;
+  /** buyer:<id> 또는 nickname:<정규화> (buyer_contacts.buyer_key) */
+  buyerKey: string;
   nickname: string;
   linkedAt: string;
   blocked?: boolean;
@@ -108,21 +108,11 @@ export function buildContactBook(
   const byBuyer = new Map<string, ContactResolution>();
   const linkedPhones = new Set(latestByPhone.keys());
 
-  // 1) 예전 연결
-  const nicknameOwners = new Map<string, string[]>();
-  for (const buyer of uniqueBuyers.values()) {
-    const key = normalizeNickname(buyer.nickname);
-    nicknameOwners.set(key, [...(nicknameOwners.get(key) || []), buyer.buyerKey]);
-  }
+  // 1) 예전 연결 (구매자 키가 같을 때만)
   const previousByBuyer = new Map<string, ContactLinkRecord>();
   for (const link of latestByPhone.values()) {
-    let owner: string | undefined;
-    if (link.buyerKey && uniqueBuyers.has(link.buyerKey)) owner = link.buyerKey;
-    else if (!link.buyerKey) {
-      const owners = nicknameOwners.get(normalizeNickname(link.nickname)) || [];
-      if (owners.length === 1) owner = owners[0];
-    }
-    if (!owner) continue;
+    const owner = link.buyerKey;
+    if (!owner || !uniqueBuyers.has(owner)) continue;
     const previous = previousByBuyer.get(owner);
     if (!previous || Date.parse(link.linkedAt) > Date.parse(previous.linkedAt)) previousByBuyer.set(owner, link);
   }

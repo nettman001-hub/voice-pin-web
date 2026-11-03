@@ -98,7 +98,7 @@ export const ContactLinkPage: React.FC = () => {
 
       {!server.serverReady && server.loadedAt && (
         <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          서버 연결 기록을 읽지 못했습니다. 예전 기록으로 보여 드립니다.
+          서버 연결 기록을 읽지 못했습니다. 인터넷 연결을 확인해 주세요.
         </div>
       )}
       {notice && !error && (

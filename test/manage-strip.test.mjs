@@ -5,7 +5,7 @@ import { broadcastCallList, buyerManageInfo, keptCountByBuyer, stripParts } from
 
 const links = [
   { phone: '01011112222', buyerKey: 'buyer:b1', nickname: '꽃심이', linkedAt: '2026-10-01T00:00:00Z' },
-  { phone: '01033334444', nickname: '하늘이', linkedAt: '2026-10-01T00:00:00Z' },
+  { phone: '01033334444', buyerKey: 'nickname:하늘이', nickname: '하늘이', linkedAt: '2026-10-01T00:00:00Z' },
 ];
 const items = [
   { saleId: 'a', buyerKey: 'buyer:b1', state: 'KEPT' },
@@ -21,7 +21,7 @@ test('strip: kept count and contact state per buyer', () => {
   const moon = buyerManageInfo({ nickname: '달' }, links, kept);
   assert.deepEqual(stripParts(moon), ['킵 1', '연락처 없음']);
   const sky = buyerManageInfo({ nickname: '하늘이' }, links, kept);
-  assert.deepEqual(stripParts(sky), [], 'legacy link by exact nickname counts as linked');
+  assert.deepEqual(stripParts(sky), [], 'a link saved for this buyer key counts as linked');
 });
 
 test('call list: this broadcast buyers without contact, unique, and a text message drops them', () => {

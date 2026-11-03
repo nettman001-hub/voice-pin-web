@@ -26,14 +26,13 @@ export const ManageOrdersPage: React.FC = () => {
   const openOrder = (() => { try { return openKey ? decodeURIComponent(openKey) : null; } catch { return openKey || null; } })();
   const raw = params.get('stage');
   const stage: MoneyStage = MONEY_STAGE_ORDER.includes(raw as MoneyStage) ? (raw as MoneyStage) : 'NEEDS_CONTACT';
-  const duplicateOnly = params.get('filter') === 'duplicate';
   const [reloadKey, setReloadKey] = useState(0);
   const { dashboard } = useManageDashboard(30, reloadKey);
   const orders = useMemo(
-    () => dashboard.orders.filter((order) => (duplicateOnly ? order.duplicateOpenInvoiceIds.length > 0 : order.stage === stage)),
-    [dashboard.orders, stage, duplicateOnly],
+    () => dashboard.orders.filter((order) => order.stage === stage),
+    [dashboard.orders, stage],
   );
-  const bulkMode = stage === 'READY_TO_BILL' && !duplicateOnly;
+  const bulkMode = stage === 'READY_TO_BILL';
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bankAccount, setBankAccount] = useState(readSavedBankAccount);
   const [dueDate, setDueDate] = useState(() => defaultDueDate(new Date()));
@@ -80,7 +79,7 @@ export const ManageOrdersPage: React.FC = () => {
       <div role="tablist" aria-label="주문 단계" className="flex gap-1 overflow-x-auto pb-1">
         {MONEY_STAGE_ORDER.map((item) => {
           const count = dashboard.stages.find((summary) => summary.stage === item)?.orderCount ?? 0;
-          const on = !duplicateOnly && item === stage;
+          const on = item === stage;
           return (
             <button
               key={item}
@@ -97,7 +96,7 @@ export const ManageOrdersPage: React.FC = () => {
           );
         })}
       </div>
-      {stage === 'NEEDS_CONTACT' && !duplicateOnly && (
+      {stage === 'NEEDS_CONTACT' && (
         <Link to="/manage/contacts" className="flex h-12 items-center justify-center rounded-xl bg-amber-500 text-sm font-extrabold text-white">
           연락처 연결하기
         </Link>
@@ -151,7 +150,6 @@ export const ManageOrdersPage: React.FC = () => {
                   <span>{order.shipping.deferredToShipment ? '배송비는 출고 때' : `배송비 ${formatWon(order.shipping.fee)}`}</span>
                   {order.contact?.state === 'NEEDS_CONFIRM' && <span className="font-bold text-amber-700">{order.contact.reason}</span>}
                   {order.contact?.state === 'NONE' && <span className="font-bold text-amber-700">연락처 없음</span>}
-                  {order.duplicateOpenInvoiceIds.length > 0 && <span className="font-bold text-rose-600">열린 정산서 {order.duplicateOpenInvoiceIds.length}장</span>}
                 </div>
               </Link>
             </li>

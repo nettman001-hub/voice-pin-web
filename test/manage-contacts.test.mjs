@@ -15,7 +15,7 @@ test('worklist splits save, confirm, missing, unknown and linked', () => {
     msg('01033330000', '안녕하세요 택배 언제 와요?', '2026-11-02T10:02:00Z'),
     msg('01033330000', '아까 산 거요', '2026-11-02T10:05:00Z'),
   ];
-  const book = buildContactBook(buyers, [{ phone: '01044440000', nickname: '하늘이', linkedAt: '2026-10-01T00:00:00Z' }], messages);
+  const book = buildContactBook(buyers, [{ phone: '01044440000', buyerKey: 'nickname:하늘이', nickname: '하늘이', linkedAt: '2026-10-01T00:00:00Z' }], messages);
   const list = buildContactWorklist(book, messages);
   assert.deepEqual(list.toSave.map((c) => [c.nickname, c.phone]), [['꽃심이', '01011110000']]);
   assert.deepEqual(list.confirm.map((c) => c.nickname), ['달']);
@@ -36,7 +36,7 @@ test('call list text, phone format and snippets ignore outgoing messages', () =>
 
 test('contact to-dos open the contact screen; page writes only through the server API', () => {
   const todos = buildManageTodos({
-    orders: [{ stage: 'NEEDS_CONTACT', contact: { state: 'NONE' }, duplicateOpenInvoiceIds: [] }],
+    orders: [{ stage: 'NEEDS_CONTACT', contact: { state: 'NONE' }}],
     contactBook: { unassignedPhones: ['01000000000'], byBuyer: new Map(), callList: [] },
   });
   assert.deepEqual(todos.map((t) => [t.kind, t.path]), [['CONTACT_MISSING', '/manage/contacts'], ['UNKNOWN_SENDER', '/manage/contacts']]);

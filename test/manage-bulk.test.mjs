@@ -6,7 +6,7 @@ import { bulkSummary, runBulk, sendOrderInvoice } from '../src/services/manage/i
 const order = (nickname, over = {}) => ({
   key: `s1::nickname:${nickname}`, sessionId: 's1', buyerKey: `nickname:${nickname}`, nickname, saleIds: [`${nickname}-1`],
   itemCount: 1, productAmount: 10000, shipping: { fee: 3000, deferredToShipment: false }, totalAmount: 13000,
-  stage: 'READY_TO_BILL', contact: { state: 'LINKED', phone: '01011112222' }, duplicateOpenInvoiceIds: [], ...over,
+  stage: 'READY_TO_BILL', contact: { state: 'LINKED', phone: '01011112222' }, ...over,
 });
 const form = { phone: '01011112222', bankAccount: '국민 1', dueDate: '2026-11-06', depositCode: 'AB1' };
 
@@ -71,7 +71,7 @@ test('runBulk: sent + failed + skipped always equals the number chosen, even whe
 
 test('order list offers bulk send only for 청구 전 and uses the shared sender', () => {
   const page = fs.readFileSync('src/pages/manage/ManageOrdersPage.tsx', 'utf8');
-  assert.match(page, /stage === 'READY_TO_BILL' && !duplicateOnly/);
+  assert.match(page, /const bulkMode = stage === 'READY_TO_BILL';/);
   assert.match(page, /runBulk/);
   assert.match(page, /sendOrderInvoice/);
 });
