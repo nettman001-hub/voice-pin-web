@@ -87,7 +87,7 @@
 ## 5. 폰 (`/sell`, 판매 앱 1.0.7)
 
 - `HelperLinkPanel`: 인증번호 입력 → `helper-pair-claim` → PC 승인 대기(2초 확인) → 연결됨. 해제 버튼.
-- 토큰: 판매 앱 1.0.7의 `HelperLinkVault`(Android Keystore AES-GCM). 브라우저·옛 앱은 탭 메모리에만(새로고침하면 다시 연결).
+- 토큰: 판매 앱 1.0.7의 `HelperLinkVault`(Android Keystore AES-GCM). 옛 앱·브라우저는 로그인 정보와 같은 localStorage에 둔다(앱을 껐다 켜도 연결 유지). 새 앱이 처음 읽을 때 Keystore로 옮기고 지운다. 연결 해제하면 지운다.
 - `HelperCommentStream`: 판매 시작 후 `helper-attach`, 1.5초마다 `helper-pull`(hasMore면 바로 다음 페이지), 멈춤·회차 변경 뒤 늦은 응답 버림, 판매 멈춤 때 `helper-detach`(폰 승인 유지).
 - 상태 줄: `PC 댓글 ● 받는 중 / 방송 시작 대기 / PC 도우미 연결 끊김 / 댓글 연결이 꺼져 있습니다` (댓글 없음과 끊김 구분).
 
