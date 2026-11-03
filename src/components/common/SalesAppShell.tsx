@@ -1,4 +1,5 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { AppSalesTabs } from './AppSalesTabs';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { LoginPage } from '../../pages/auth/LoginPage';
@@ -16,6 +17,7 @@ export function SalesAppShell({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const { isAuthenticated, isInitialized, isRemoteAuth, user, workspaceId } = useAuth();
   const entered = useRef(false);
+  const [inlineNavigation, setInlineNavigation] = useState(false);
   const managementPath = useRef<string | null>(null);
   const native = androidNative();
   const info = androidJson<{ singleWebView?: boolean; tab?: string }>(native?.info?.(), {});
@@ -26,6 +28,17 @@ export function SalesAppShell({ children }: { children: React.ReactNode }) {
   const selling = location.pathname === APP_SELL_PATH;
   if (integrated && !selling && !AUTH_PATHS.includes(location.pathname))
     managementPath.current = `${location.pathname}${location.search}${location.hash}`;
+
+  useEffect(() => {
+    if (!integrated) return;
+    const layout = (event: Event) => setInlineNavigation(!!(event as CustomEvent).detail);
+    window.addEventListener('voicecap-inline-navigation', layout);
+    androidNative()?.setWebNavigation?.(true);
+    return () => {
+      window.removeEventListener('voicecap-inline-navigation', layout);
+      androidNative()?.setWebNavigation?.(false);
+    };
+  }, [integrated]);
 
   useEffect(() => {
     if (!integrated) return;
@@ -59,7 +72,7 @@ export function SalesAppShell({ children }: { children: React.ReactNode }) {
 
   if (!integrated) return <>{children}</>;
   return (
-    <>
+    <div className="sales-app-layout">
       <div hidden={!selling} data-sales-app-page="sell">
         {isAuthenticated && isRemoteAuth && workspaceId ? (
           // Route changes only hide this node. They never stop its comment stream or printer.
@@ -73,6 +86,7 @@ export function SalesAppShell({ children }: { children: React.ReactNode }) {
         )}
       </div>
       <div hidden={selling} data-sales-app-page="manage">{children}</div>
-    </>
+      {(!selling || !inlineNavigation) && <nav className="touch-app-navigation" aria-label="앱 이동"><AppSalesTabs selling={selling} /></nav>}
+    </div>
   );
 }

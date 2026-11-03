@@ -67,6 +67,7 @@ public class MainActivity extends Activity {
     private volatile String selectedTab = "sell";
     private boolean initialTabDispatched;
     private Button sellTab;
+    private LinearLayout tabs;
     private Button manageTab;
     private PermissionRequest pendingCamera;
     private Runnable pendingBluetooth;
@@ -94,7 +95,7 @@ public class MainActivity extends Activity {
         webView = createWebView();
         pages.addView(webView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        LinearLayout tabs = new LinearLayout(this);
+        tabs = new LinearLayout(this);
         tabs.setOrientation(LinearLayout.HORIZONTAL);
         tabs.setBackgroundColor(Color.rgb(242, 246, 250));
         sellTab = tabButton(getString(R.string.tab_sell));
@@ -376,6 +377,61 @@ public class MainActivity extends Activity {
 
     /** 근처 라벨프린터를 찾아 목록으로 보여 준다. 이름 있는 기기만, 이름이 M50/Marklife 계열이면 위로. */
     private void pickPrinter(WebView view, String requestId) {
+        boolean[] picked = {false};
+        new AlertDialog.Builder(this)
+                .setTitle("프린터 모델 선택")
+                .setItems(new String[]{"AbleMark M50 / Marklife", "Xprinter XP-237BT (시험 지원)"}, (d, which) -> {
+                    picked[0] = true;
+                    if (which == 0) pickBlePrinter(view, requestId);
+                    else pickXprinter(view, requestId);
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .setOnDismissListener(d -> {
+                    if (!picked[0]) emit(view, event("printer-connected", requestId, false, "프린터를 고르지 않았습니다."));
+                }).show();
+    }
+
+    private void pickXprinter(WebView view, String requestId) {
+        BluetoothAdapter adapter = printer.adapter();
+        if (adapter == null || !adapter.isEnabled()) {
+            emit(view, event("printer-connected", requestId, false, "블루투스를 켜 주세요."));
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("XP-237BT 시험 지원")
+                .setMessage("블루투스 설정에서 먼저 XP-237BT를 페어링해 주세요. TSPL 라벨 모드와 간격 2mm 용지를 사용합니다. 연결 후 판매 시작 화면에서 용지 크기(50×30 / 40×25 / 40×30mm)를 선택하고 시험 출력으로 방향·농도·용지 위치를 확인해 주세요.")
+                .setPositiveButton("페어링된 기기 선택", (d, w) -> pickPairedXprinter(view, requestId))
+                .setNeutralButton("블루투스 설정", (d, w) -> {
+                    emit(view, event("printer-connected", requestId, false, "페어링 후 프린터 연결을 다시 눌러 주세요."));
+                    startActivity(new Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS));
+                })
+                .setNegativeButton(R.string.cancel, (d, w) -> emit(view, event("printer-connected", requestId, false, "프린터를 고르지 않았습니다.")))
+                .setOnCancelListener(d -> emit(view, event("printer-connected", requestId, false, "프린터를 고르지 않았습니다.")))
+                .show();
+    }
+
+    private void pickPairedXprinter(WebView view, String requestId) {
+        List<BluetoothDevice> devices = new ArrayList<>(printer.adapter().getBondedDevices());
+        String[] names = new String[devices.size()];
+        for (int i = 0; i < devices.size(); i++) {
+            BluetoothDevice device = devices.get(i);
+            names[i] = (device.getName() == null ? "이름 없는 기기" : device.getName()) + " · " + device.getAddress();
+        }
+        boolean[] picked = {false};
+        new AlertDialog.Builder(this)
+                .setTitle(devices.isEmpty() ? "페어링된 기기가 없습니다" : "XP-237BT 기기 선택")
+                .setItems(names, (d, which) -> {
+                    picked[0] = true;
+                    printer.connect(devices.get(which).getAddress(), "XP_237BT", (ok, error) ->
+                            emit(view, printerEvent("printer-connected", requestId, ok, error)));
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .setOnDismissListener(d -> {
+                    if (!picked[0]) emit(view, event("printer-connected", requestId, false, "블루투스 설정에서 프린터를 페어링한 뒤 다시 선택해 주세요."));
+                }).show();
+    }
+
+    private void pickBlePrinter(WebView view, String requestId) {
         BluetoothAdapter adapter = printer.adapter();
         if (adapter == null || !adapter.isEnabled()) {
             emit(view, event("printer-connected", requestId, false, "블루투스를 켜 주세요."));
@@ -410,7 +466,7 @@ public class MainActivity extends Activity {
                     finished[0] = true;
                     stopScan(scanner, scan);
                     BluetoothDevice device = devices.get(which);
-                    printer.connect(device.getAddress(), (ok, error) ->
+                    printer.connect(device.getAddress(), "M50", (ok, error) ->
                             emit(view, printerEvent("printer-connected", requestId, ok, error)));
                 })
                 .setNegativeButton(R.string.cancel, (d, w) -> { })
@@ -468,6 +524,13 @@ public class MainActivity extends Activity {
         return Uri.fromFile(file);
     }
 
+    private HelperLinkVault helperLinkVault;
+
+    private synchronized HelperLinkVault helperVault() {
+        if (helperLinkVault == null) helperLinkVault = new HelperLinkVault(getApplicationContext());
+        return helperLinkVault;
+    }
+
     /** 웹에서 부르는 함수. 모두 문자열만 주고받고, 오래 걸리는 일은 이벤트로 결과를 준다. */
     private final class Bridge {
         private final WebView view;
@@ -499,18 +562,31 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void setWebNavigation(boolean enabled) {
+            main.post(() -> tabs.setVisibility(enabled ? View.GONE : View.VISIBLE));
+        }
+
+        @JavascriptInterface
         public String printerState() {
             JSONObject o = new JSONObject();
             try {
                 o.put("connected", printer.isConnected());
                 o.put("name", printer.name());
                 o.put("saved", !printer.lastAddress().isEmpty());
+                o.put("model", printer.model());
+                o.put("address", printer.address().isEmpty() ? printer.lastAddress() : printer.address());
             } catch (JSONException ignored) { }
             return o.toString();
         }
 
         @JavascriptInterface
         public void printerPick(String requestId) {
+            main.post(() -> withBluetooth(() -> pickBlePrinter(view, requestId),
+                    () -> emit(view, event("printer-connected", requestId, false, "근처 기기(블루투스) 권한을 허용해 주세요."))));
+        }
+
+        @JavascriptInterface
+        public void printerPickV2(String requestId) {
             main.post(() -> withBluetooth(() -> pickPrinter(view, requestId),
                     () -> emit(view, event("printer-connected", requestId, false, "근처 기기(블루투스) 권한을 허용해 주세요."))));
         }
@@ -534,6 +610,10 @@ public class MainActivity extends Activity {
                 data = Base64.decode(base64, Base64.DEFAULT);
             } catch (IllegalArgumentException e) {
                 emit(view, event("printer-sent", requestId, false, "보낼 내용이 올바르지 않습니다."));
+                return;
+            }
+            if ("XP_237BT".equals(printer.model()) && (data.length < 5 || data[0] != 'S' || data[1] != 'I' || data[2] != 'Z' || data[3] != 'E' || data[4] != ' ')) {
+                emit(view, event("printer-sent", requestId, false, "XP-237BT 출력 명령이 아닙니다. 앱 화면을 새로 열어 주세요."));
                 return;
             }
             printer.send(data, (ok, error) -> emit(view, event("printer-sent", requestId, ok, error)));
@@ -574,6 +654,26 @@ public class MainActivity extends Activity {
                 send.putExtra(Intent.EXTRA_SUBJECT, fileName);
                 main.post(() -> startActivity(Intent.createChooser(send, fileName)));
             } catch (IOException | RuntimeException ignored) { }
+        }
+
+        /** PC 댓글도우미 연결 토큰(Keystore 암호화 보관). 작업공간마다 1개. */
+        @JavascriptInterface
+        public String helperLinkGet(String workspaceId) { return helperVault().get(workspaceId); }
+
+        @JavascriptInterface
+        public boolean helperLinkSet(String workspaceId, String token) { return helperVault().put(workspaceId, token); }
+
+        @JavascriptInterface
+        public void helperLinkClear(String workspaceId) { helperVault().clear(workspaceId); }
+
+        @JavascriptInterface
+        public String helperDeviceInfo() {
+            JSONObject o = new JSONObject();
+            try {
+                o.put("installId", helperVault().installId());
+                o.put("name", (Build.MANUFACTURER + " " + Build.MODEL).trim());
+            } catch (JSONException ignored) { }
+            return o.toString();
         }
 
         @JavascriptInterface

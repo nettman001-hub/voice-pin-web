@@ -1,6 +1,7 @@
 export interface CustomerKeepingRecord {
   id: string;                  // 고유 키핑 식별자 (예: keep_20261012_01)
   buyerNickname: string;       // 구매자 닉네임
+  buyerId?: string;
   phoneNumber?: string;        // 구매자 연락처 (있을 경우)
   sessionId: string;           // 주문 회차 ID
   sessionCode?: string;        // 회차 표시 코드 (예: 10/10 #1)

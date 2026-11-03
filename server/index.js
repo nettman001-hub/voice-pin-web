@@ -96,6 +96,10 @@ let reconnectTimer = null;
 let serverState = 'idle';       // idle | connecting | collecting | waiting_live | ended | error
 let serverMessage = '대기 중';
 let viewerCount = 0;
+// 수집을 유지할 이유를 따로 관리한다: PC 웹(Socket.IO 브라우저)과 안드로이드 전달(Electron 메인의 연결 관리자).
+let androidDemandUsername = '';   // 비어 있지 않으면 브라우저가 0개여도 수집을 유지한다.
+let browserDemandUsername = '';   // 마지막으로 PC 웹이 요청한 대상
+let pendingRegistration = null;   // { code, expiresAt } 도우미 등록 확인코드(웹 화면 자동 입력용)
 const stats = {
   startedAt: null,              // 현재 컬렉션 시작 시각
   lastCommentAt: null,
@@ -123,9 +127,32 @@ function sendPrintToHelper(payload, acknowledge) {
   process.parentPort.postMessage({ type: 'print:sale', requestId, payload });
 }
 
+function postToHelper(message) {
+  if (!process.parentPort) return;
+  try {
+    process.parentPort.postMessage(message);
+  } catch (_) { /* 메인 프로세스 종료 중 */ }
+}
+
 if (process.parentPort) {
   process.parentPort.on('message', (event) => {
     const message = event && event.data ? event.data : event;
+    if (message && message.type === 'android:demand') {
+      void setAndroidDemand(message.username);
+      return;
+    }
+    if (message && message.type === 'android:key') {
+      const key = typeof message.apiKey === 'string' ? message.apiKey.trim() : '';
+      if (/^[\x21-\x7e]{16,200}$/.test(key) && key !== EULER_API_KEY) {
+        applyEulerKey(key);
+        log('도우미 등록 자격으로 댓글 연결 키를 받았습니다 (계정 한도로 연결).');
+      }
+      return;
+    }
+    if (message && message.type === 'android:registration') {
+      pendingRegistration = message.code ? { code: String(message.code), expiresAt: message.expiresAt || null } : null;
+      return;
+    }
     if (!message || message.type !== 'print:result') return;
     const pending = pendingPrintRequests.get(message.requestId);
     if (!pending) return;
@@ -199,6 +226,18 @@ app.get('/status', (_req, res) => {
     stt: sttBridge.getStatus(),
     socketClients: io.engine.clientsCount
   });
+});
+
+// 도우미 등록 화면(voicecap.shop/helper/register)이 같은 PC의 확인코드를 자동으로 채운다.
+// 허용된 Origin에서만 응답한다(Origin 없는 요청 거절). 확인코드는 로그인한 대표·매니저가 승인해야 효력이 있다.
+app.get('/helper/registration', (req, res) => {
+  const origin = String(req.headers.origin || '');
+  if (!origin || !ALLOWED_ORIGINS.has(origin)) {
+    res.status(403).json({ ok: false });
+    return;
+  }
+  const live = pendingRegistration && (!pendingRegistration.expiresAt || Date.parse(pendingRegistration.expiresAt) > Date.now());
+  res.json({ ok: true, code: live ? pendingRegistration.code : null });
 });
 
 const httpServer = http.createServer(app);
@@ -423,7 +462,8 @@ function statusPayload() {
     totalComments: stats.totalComments,
     lastCommentAt: stats.lastCommentAt,
     reconnects: stats.reconnects,
-    hasEulerApiKey: Boolean(EULER_API_KEY)
+    hasEulerApiKey: Boolean(EULER_API_KEY),
+    androidDemand: androidDemandUsername
   };
 }
 
@@ -431,6 +471,7 @@ function setState(state, message) {
   serverState = state;
   if (message !== undefined) serverMessage = message;
   io.emit('tiktok:status', statusPayload());
+  postToHelper({ type: 'collector:state', status: statusPayload() });
   log(`상태 -> ${state}${message ? ` (${message})` : ''}`);
 }
 
@@ -445,6 +486,17 @@ io.on('connection', (socket) => {
       socket.emit('tiktok:status', { ...statusPayload(), state: 'error', message: '틱톡 ID가 비어 있습니다.' });
       return;
     }
+
+    // 안드로이드 전달이 쓰는 계정을 PC 웹이 다른 계정으로 덮어쓰지 않는다.
+    if (androidDemandUsername && target.toLowerCase() !== androidDemandUsername.toLowerCase()) {
+      socket.emit('tiktok:status', {
+        ...statusPayload(),
+        state: 'error',
+        message: `안드로이드 판매 폰이 @${androidDemandUsername} 댓글을 받는 중이라 @${target}로 바꿀 수 없습니다. 도우미에서 안드로이드 댓글 연결을 끈 뒤 다시 시도해 주세요.`
+      });
+      return;
+    }
+    browserDemandUsername = target;
 
     if (
       target === desiredUsername &&
@@ -467,6 +519,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('collect:stop', () => {
+    browserDemandUsername = '';
+    // 안드로이드 전달이 같은 수집을 쓰고 있으면 끊지 않는다.
+    if (androidDemandUsername) {
+      socket.emit('tiktok:status', statusPayload());
+      return;
+    }
     stopCollecting();
   });
 
@@ -485,12 +543,45 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     log(`웹앱 클라이언트 연결 해제 (${socket.id}, 총 ${io.engine.clientsCount})`);
     // 모든 브라우저가 떠나면 틱톡 연결도 정리해 Euler 한도를 아낀다.
-    if (io.engine.clientsCount === 0 && connection) {
+    // 단, 안드로이드 전달 요구가 있으면 브라우저가 0개여도 수집을 유지한다.
+    if (io.engine.clientsCount === 0) browserDemandUsername = '';
+    if (io.engine.clientsCount === 0 && connection && !androidDemandUsername) {
       log('브라우저가 없어 틱톡 연결을 정리합니다.');
       stopCollecting(true);
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// 안드로이드 전달 요구 (Electron 메인 → 이 서버)
+// ---------------------------------------------------------------------------
+async function setAndroidDemand(rawUsername) {
+  const target = normalizeUsername(rawUsername);
+  const previous = androidDemandUsername;
+  androidDemandUsername = target;
+  if (target) {
+    const sameTarget = desiredUsername && desiredUsername.toLowerCase() === target.toLowerCase();
+    if (sameTarget && connection && ['collecting', 'connecting', 'waiting_live'].includes(serverState)) {
+      postToHelper({ type: 'collector:state', status: statusPayload() });
+      return;
+    }
+    if (desiredUsername && !sameTarget && io.engine.clientsCount > 0 && browserDemandUsername) {
+      // PC 웹이 다른 계정을 수집 중: 조용히 바꾸지 않고 충돌을 알린다.
+      postToHelper({ type: 'collector:state', status: { ...statusPayload(), state: 'blocked',
+        message: `PC 웹이 @${desiredUsername} 댓글을 수집 중입니다. PC 웹 수집을 멈추면 @${target} 수집을 시작합니다.` } });
+      return;
+    }
+    log(`안드로이드 전달 수집 시작: @${target}`);
+    await startCollecting(target);
+    return;
+  }
+  if (previous) {
+    log('안드로이드 전달 수집 요구 해제');
+    // PC 웹이 같은 계정을 쓰고 있으면 계속 둔다.
+    if (io.engine.clientsCount === 0 || !browserDemandUsername) stopCollecting(io.engine.clientsCount === 0);
+  }
+  postToHelper({ type: 'collector:state', status: statusPayload() });
+}
 
 // ---------------------------------------------------------------------------
 // TikTok 수집 로직
@@ -507,6 +598,14 @@ function teardownConnection() {
     } catch (_) { /* 무시 */ }
     connection = null;
   }
+}
+
+let lastCommentPostAt = 0;
+function postLastCommentThrottled() {
+  const now = Date.now();
+  if (now - lastCommentPostAt < 5000) return;
+  lastCommentPostAt = now;
+  postToHelper({ type: 'collector:state', status: statusPayload() });
 }
 
 async function startCollecting(username) {
@@ -595,6 +694,9 @@ async function connectTikTok(username) {
 
     io.emit('comment:new', commentPayload);
     commentPublisher.enqueue(commentPayload);
+    // 안드로이드 전달: 메인 프로세스가 회차·세대를 붙여 디스크 대기열에 넣고 서버로 보낸다.
+    if (androidDemandUsername) postToHelper({ type: 'comment', comment: commentPayload, username: desiredUsername });
+    stats.lastCommentAt && postLastCommentThrottled();
   });
 
   nextConnection.on(WebcastEvent.ROOM_USER, (data) => {

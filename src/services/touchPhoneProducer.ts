@@ -8,6 +8,7 @@ import {
 } from './eulerComments.ts';
 import type { PhoneLabelPrinter } from './labelPrinter/phonePrinter.ts';
 import { touchLabelNumber } from './touchSaleModes.ts';
+import { HelperCommentStream } from './helperCommentStream.ts';
 
 /** 폰 단독 판매에서 사진 한 장을 찍어 달라는 요청. 화면이 카운트다운을 보여 주고 사진(JPEG data URL)을 돌려준다. */
 export type PhoneCaptureRequest = {
@@ -40,6 +41,16 @@ export interface PhoneProducerOptions {
   onChange: () => void;
   /** 시험용: 웹소켓 만들기 바꾸기. */
   socketFactory?: (url: string) => WebSocket;
+  /** commentSource가 WINDOWS_HELPER일 때: 폰 연결 토큰(Keystore). 토큰은 설정·실행 상태에 넣지 않는다. */
+  helperLinkToken?: () => Promise<string | null>;
+}
+
+/** 댓글 입력만 바꿔 끼운다. 판매 실행권·인쇄·촬영은 그대로. */
+interface PhoneCommentInput {
+  start(): void;
+  stop(): void;
+  reconnect(): void;
+  detach?(): Promise<void>;
 }
 
 /** Euler 댓글 1건 → 판매 화면 댓글. platformMessageId가 같으면 같은 댓글로 본다. */
@@ -85,7 +96,7 @@ export function phoneOnlyState(
  * 댓글을 Euler에서 직접 받고, 전표는 블루투스 라벨프린터로, 사진은 앞카메라로 처리한다.
  */
 export class TouchPhoneProducer {
-  private stream: EulerCommentStream;
+  private stream: PhoneCommentInput;
   private stopped = true;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private printTimer: ReturnType<typeof setTimeout> | null = null;
@@ -107,6 +118,22 @@ export class TouchPhoneProducer {
   private o: PhoneProducerOptions;
   constructor(o: PhoneProducerOptions) {
     this.o = o;
+    if (o.settings.commentSource === 'WINDOWS_HELPER') {
+      // PC 댓글도우미 모드: 폰의 직접 Euler 수신기는 함께 돌리지 않는다(조용한 자동 전환 없음).
+      this.stream = new HelperCommentStream({
+        api: o.api,
+        sessionId: o.sessionId,
+        producerId: o.producerId,
+        linkToken: o.helperLinkToken || (async () => null),
+        onComments: (items) => o.onComments(items),
+        onStatus: (s) => {
+          this.status = { ...this.status, comments: s };
+          this.emit();
+        },
+        isVisible: () => typeof document === 'undefined' || document.visibilityState === 'visible',
+      });
+      return;
+    }
     this.stream = new EulerCommentStream({
       getToken: () => o.api.call<CommentToken>('touch-comment-token'),
       onComments: (items) =>
@@ -116,6 +143,13 @@ export class TouchPhoneProducer {
         this.emit();
       },
       socketFactory: o.socketFactory,
+      onDiagnostic: (event) => {
+        try {
+          const key = `voicecap-comment-connection:${o.api.workspaceId}`;
+          const prior = JSON.parse(localStorage.getItem(key) || '[]');
+          localStorage.setItem(key, JSON.stringify([...(Array.isArray(prior) ? prior : []).slice(-39), event]));
+        } catch { /* Diagnostics never interrupt selling. */ }
+      },
     });
   }
 
@@ -313,7 +347,10 @@ export class TouchPhoneProducer {
 
   async stop() {
     if (this.stopped) return;
+    const detach = this.stream.detach?.bind(this.stream);
     this.halt();
+    // 판매 종료: 이 회차 전달만 끝낸다. 폰 승인은 유지.
+    if (detach) await detach().catch(() => {});
     await this.o.api
       .run('STOP', this.o.producerId, this.o.sessionId, this.o.settings, {
         ...this.state(),
@@ -324,6 +361,10 @@ export class TouchPhoneProducer {
 
   get running() {
     return !this.stopped;
+  }
+
+  reconnectComments() {
+    if (!this.stopped) this.stream.reconnect();
   }
 }
 

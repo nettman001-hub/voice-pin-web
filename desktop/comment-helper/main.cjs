@@ -1,8 +1,12 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, Tray, nativeImage, shell, utilityProcess } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, Tray, nativeImage, safeStorage, shell, utilityProcess } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const http = require('http');
+const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
+const { AndroidLinkManager } = require('./androidLink/linkManager.cjs');
+const { CommentOutbox } = require('./androidLink/outbox.cjs');
 
 const APP_NAME = 'VoiceCAP 댓글 도우미';
 const WEB_APP_URL = 'https://www.voicecap.shop/live';
@@ -12,6 +16,11 @@ const LOGIN_ITEM_ARGS = ['--hidden'];
 const AUTO_START_INITIALIZED_FILE = 'auto-start-initialized';
 const PRINT_SETTINGS_FILE = 'print-settings.json';
 const PRINT_HISTORY_FILE = 'print-history.json';
+const ANDROID_LINK_FILE = 'android-link.json';
+const ANDROID_OUTBOX_FILE = 'android-outbox.json';
+// 공개 주소(비밀 아님). 빌드 시 runtime-config.json의 salesApiUrl로 바꿀 수 있다.
+const DEFAULT_SALES_API_URL = 'https://ymegrhxpbeanvxwdzfym.supabase.co/functions/v1/sales-api';
+const HELPER_REGISTER_URL = 'https://www.voicecap.shop/helper/register';
 
 let mainWindow = null;
 let tray = null;
@@ -27,6 +36,7 @@ let printQueue = Promise.resolve();
 let printedJobIds = [];
 let updateCheckInProgress = false;
 let updateInstallPromptVersion = '';
+let androidLink = null;
 
 const VALID_PAPER_SIZES = ['LABEL_50_30', 'RECEIPT_80', 'RECEIPT_58', 'A4'];
 const DEFAULT_PRINT_SETTINGS = {
@@ -47,6 +57,7 @@ const state = {
   autoStart: false,
   webAppUrl: WEB_APP_URL,
   stt: null,
+  android: null,
   print: {
     ...DEFAULT_PRINT_SETTINGS,
     message: '프린터를 선택하면 판매 전표를 자동으로 출력합니다.'
@@ -145,6 +156,8 @@ function startServer() {
     }
   });
 
+  // 서버가 다시 시작되면 안드로이드 수집 요구·키·등록 코드를 다시 알려 준다.
+  setTimeout(() => androidLink?.resendToServer(), 500);
   serverProcess.stdout?.on('data', (chunk) => writeLog('server', chunk.toString('utf8')));
   serverProcess.stderr?.on('data', (chunk) => {
     const text = chunk.toString('utf8');
@@ -154,6 +167,14 @@ function startServer() {
   serverProcess.on('message', (message) => {
     const payload = message && message.data ? message.data : message;
     if (!payload) return;
+    if (payload.type === 'comment') {
+      androidLink?.onComment(payload.comment);
+      return;
+    }
+    if (payload.type === 'collector:state') {
+      androidLink?.setCollector(payload.status);
+      return;
+    }
     if (payload.type !== 'print:sale') return;
     writeLog('print', `도우미 인쇄 요청 수신: ${JSON.stringify(payload)}`);
     void enqueuePrintJob(payload.payload).then((result) => {
@@ -296,6 +317,7 @@ function publishStatus() {
 function buildTrayMenu() {
   return Menu.buildFromTemplate([
     { label: `상태: ${statusLabel()}`, enabled: false },
+    ...androidTrayItems(),
     { type: 'separator' },
     { label: '상태 화면 열기', click: showWindow },
     { label: 'VoiceCAP 홈페이지 열기', click: () => shell.openExternal(WEB_APP_URL) },
@@ -709,10 +731,109 @@ function enqueuePrintJob(raw) {
   return run;
 }
 
+// ---------------------------------------------------------------------------
+// 안드로이드 댓글 연결
+// ---------------------------------------------------------------------------
+function postToServer(type, payload) {
+  if (!serverProcess) return;
+  try {
+    serverProcess.postMessage({ type, ...payload });
+  } catch (error) {
+    writeLog('android', `댓글 서버에 전달 실패: ${error.message}`);
+  }
+}
+
+/** 기기 토큰은 Windows 사용자별 암호화 저장소(DPAPI, safeStorage)로 감싸 저장한다. 평문 저장 안 함. */
+function createAndroidLinkStore() {
+  const file = path.join(app.getPath('userData'), ANDROID_LINK_FILE);
+  return {
+    load() {
+      const raw = readJson(file, {});
+      const result = {
+        enabled: raw.enabled === true,
+        deviceId: raw.deviceId,
+        workspaceName: raw.workspaceName || '',
+        helperName: raw.helperName || ''
+      };
+      if (raw.tokenEnc) {
+        try {
+          result.deviceToken = safeStorage.decryptString(Buffer.from(raw.tokenEnc, 'base64'));
+        } catch (error) {
+          result.storeError = '저장된 판매자 계정 연결을 읽지 못했습니다. 다시 등록해 주세요.';
+          writeLog('android', `등록 정보 복호화 실패: ${error.message}`);
+        }
+      }
+      return result;
+    },
+    save(value) {
+      const next = {
+        enabled: value.enabled === true,
+        deviceId: value.deviceId,
+        workspaceName: value.workspaceName || '',
+        helperName: value.helperName || ''
+      };
+      let error = '';
+      if (value.deviceToken) {
+        if (safeStorage.isEncryptionAvailable()) {
+          next.tokenEnc = safeStorage.encryptString(value.deviceToken).toString('base64');
+        } else {
+          error = 'Windows 암호화 저장소를 쓸 수 없어 등록 정보를 저장하지 못했습니다. 도우미를 다시 켜면 다시 등록해야 합니다.';
+        }
+      }
+      try {
+        fs.writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+      } catch (e) {
+        error = `연결 설정 저장 실패: ${e.message}`;
+      }
+      if (error) writeLog('android', error);
+      return error ? { error } : { ok: true };
+    }
+  };
+}
+
+function initAndroidLink() {
+  const runtimeConfig = readRuntimeConfig();
+  const outbox = new CommentOutbox({ file: path.join(app.getPath('userData'), ANDROID_OUTBOX_FILE) });
+  androidLink = new AndroidLinkManager({
+    apiUrl: String(runtimeConfig.salesApiUrl || DEFAULT_SALES_API_URL),
+    apiKey: String(runtimeConfig.supabasePublishableKey || ''),
+    fetchFn: (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(15000) }),
+    store: createAndroidLinkStore(),
+    outbox,
+    post: postToServer,
+    openExternal: (url) => shell.openExternal(url),
+    registerUrl: HELPER_REGISTER_URL,
+    newSecret: () => `hrs_${crypto.randomBytes(32).toString('base64url')}`,
+    helperName: (os.hostname() || 'Windows PC').slice(0, 60),
+    appVersion: app.getVersion(),
+    log: (line) => writeLog('android', line),
+    onChange: (snapshot) => {
+      state.android = snapshot;
+      publishStatus();
+    }
+  });
+  androidLink.start();
+}
+
+function androidTrayItems() {
+  const a = state.android;
+  if (!a || !a.registered) return [];
+  return [
+    { label: `안드로이드: ${a.delivery ? a.delivery.label : ''}`, enabled: false },
+    {
+      label: '안드로이드 댓글 연결',
+      type: 'checkbox',
+      checked: Boolean(a.enabled),
+      click: (item) => void androidLink?.setEnabled(item.checked)
+    }
+  ];
+}
+
 function quitApp() {
   isQuitting = true;
   clearInterval(healthTimer);
   clearTimeout(restartTimer);
+  androidLink?.stop();
   stopServer();
   app.quit();
 }
@@ -789,6 +910,16 @@ ipcMain.handle('helper:detect-stt-devices', async () => {
   }
 });
 
+ipcMain.handle('android:get', () => androidLink?.snapshot() || null);
+ipcMain.handle('android:register', () => androidLink.register());
+ipcMain.handle('android:cancel-register', () => androidLink.cancelRegister());
+ipcMain.handle('android:set-enabled', (_event, enabled) => androidLink.setEnabled(enabled === true));
+ipcMain.handle('android:issue-code', () => androidLink.issueCode());
+ipcMain.handle('android:cancel-code', () => androidLink.cancelCode());
+ipcMain.handle('android:decide', (_event, linkId, approve) => androidLink.decide(String(linkId || ''), approve === true));
+ipcMain.handle('android:unlink', (_event, linkId) => androidLink.unlink(String(linkId || '')));
+ipcMain.handle('android:unregister', () => androidLink.unregister());
+
 ipcMain.handle('helper:hide-window', () => mainWindow?.hide());
 ipcMain.handle('helper:quit', quitApp);
 
@@ -796,6 +927,7 @@ app.whenReady().then(() => {
   app.setAppUserModelId('shop.voicecap.commenthelper');
   prepareLogs();
   loadPrintSettings();
+  initAndroidLink();
   createWindow();
   createTray();
   startServer();

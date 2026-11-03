@@ -51,6 +51,7 @@ import { ShipmentManagementPage } from './pages/seller/ShipmentManagementPage';
 import { DeviceManagementPage } from './pages/seller/DeviceManagementPage';
 import { ProductSalesPage } from './pages/seller/ProductSalesPage';
 import { CommentHelperPage } from './pages/seller/CommentHelperPage';
+import { HelperRegisterPage } from './pages/seller/HelperRegisterPage';
 import { CommerceProvider } from './context/CommerceContext';
 import { ProductSalesProvider } from './context/ProductSalesContext';
 import { SttVocabularyProvider } from './context/SttVocabularyContext';
@@ -190,7 +191,10 @@ const AuthLoadingState: React.FC = () => (
 
 const ProtectedRoute: React.FC = () => {
   const { isAuthenticated, isInitialized } = useAuth();
+  const { pathname } = useLocation();
   if (!isInitialized) return <AuthLoadingState />;
+  // 도우미가 연 등록 화면은 로그인 뒤 같은 화면으로 돌아온다.
+  if (!isAuthenticated && pathname === '/helper/register') return <LoginPage returnTo="/helper/register" />;
   return isAuthenticated ? <Outlet /> : <Navigate to="/login" replace />;
 };
 
@@ -280,6 +284,7 @@ export const App: React.FC = () => {
                           <Route path="/devices" element={<DeviceManagementPage />} />
                           <Route path="/seller/helper" element={<CommentHelperPage />} />
                           <Route path="/helper" element={<CommentHelperPage />} />
+                          <Route path="/helper/register" element={<HelperRegisterPage />} />
 
                     {/* 3. 구독 섹션 (PG-014 ~ PG-017) */}
                     <Route path="/subscription" element={<Navigate to="/subscription/plans" replace />} />

@@ -45,9 +45,12 @@ public final class BlePrinter {
     private boolean creditSeen;
     private boolean writePending;
     private Done connectDone;
+    private final SppPrinter spp = new SppPrinter();
+    private volatile String model;
 
     private BlePrinter(Context context) {
         this.context = context.getApplicationContext();
+        model = lastModel();
         thread.start();
         worker = new Handler(thread.getLooper());
     }
@@ -57,7 +60,9 @@ public final class BlePrinter {
         return instance;
     }
 
-    public boolean isConnected() { return connected && writeChar != null; }
+    public boolean isConnected() { return "XP_237BT".equals(model) ? spp.isConnected() : connected && writeChar != null; }
+    public String model() { return model; }
+    public String lastModel() { return prefs().getString("model", "M50"); }
     public String name() { return name; }
     public String address() { return address; }
     public String lastAddress() { return prefs().getString("address", ""); }
@@ -70,17 +75,32 @@ public final class BlePrinter {
     }
 
     public void connect(String deviceAddress, Done done) {
+        connect(deviceAddress, lastModel(), done);
+    }
+
+    public void connect(String deviceAddress, String selectedModel, Done done) {
         BluetoothAdapter adapter = adapter();
         if (adapter == null || !adapter.isEnabled()) {
             done.done(false, "블루투스를 켜 주세요.");
             return;
         }
         disconnect();
+        model = "XP_237BT".equals(selectedModel) ? "XP_237BT" : "M50";
         BluetoothDevice device;
         try {
             device = adapter.getRemoteDevice(deviceAddress);
         } catch (IllegalArgumentException e) {
             done.done(false, "프린터 주소가 올바르지 않습니다.");
+            return;
+        }
+        name = device.getName() == null ? "" : device.getName();
+        address = deviceAddress;
+        if ("XP_237BT".equals(model)) {
+            // Only paired devices are offered by the picker; no discovery runs here.
+            spp.connect(device, (ok, error) -> {
+                if (ok) prefs().edit().putString("address", deviceAddress).putString("name", name).putString("model", "XP_237BT").apply();
+                done.done(ok, error);
+            });
             return;
         }
         synchronized (lock) {
@@ -89,10 +109,11 @@ public final class BlePrinter {
             creditSeen = false;
             writePending = false;
         }
-        name = device.getName() == null ? "" : device.getName();
-        address = deviceAddress;
         gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE);
-        worker.postDelayed(() -> finishConnect(false, "프린터가 응답하지 않습니다. 프린터 전원을 확인해 주세요."), 15000);
+        BluetoothGatt attempt = gatt;
+        worker.postDelayed(() -> {
+            if (gatt == attempt) finishConnect(false, "프린터가 응답하지 않습니다. 프린터 전원을 확인해 주세요.");
+        }, 15000);
     }
 
     private void finishConnect(boolean ok, String error) {
@@ -102,12 +123,15 @@ public final class BlePrinter {
             connectDone = null;
         }
         if (done == null) return;
-        if (ok) prefs().edit().putString("address", address).putString("name", name).apply();
+        if (ok) prefs().edit().putString("address", address).putString("name", name).putString("model", "M50").apply();
         else disconnect();
         done.done(ok, error);
     }
 
     public void disconnect() {
+        spp.disconnect();
+        Done cancelled;
+        synchronized (lock) { cancelled = connectDone; connectDone = null; }
         connected = false;
         writeChar = null;
         if (gatt != null) {
@@ -118,11 +142,13 @@ public final class BlePrinter {
         }
         gatt = null;
         synchronized (lock) { lock.notifyAll(); }
+        if (cancelled != null) cancelled.done(false, "프린터 연결이 취소되었습니다.");
     }
 
     private final BluetoothGattCallback callback = new BluetoothGattCallback() {
         @Override
         public void onConnectionStateChange(BluetoothGatt g, int status, int newState) {
+            if (g != gatt) return;
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 // 웹(Chrome)과 같이 큰 조각(90바이트)을 보내려면 MTU를 늘린다.
                 if (!g.requestMtu(247)) g.discoverServices();
@@ -136,12 +162,14 @@ public final class BlePrinter {
 
         @Override
         public void onMtuChanged(BluetoothGatt g, int newMtu, int status) {
+            if (g != gatt) return;
             if (status == BluetoothGatt.GATT_SUCCESS) mtu = newMtu;
             g.discoverServices();
         }
 
         @Override
         public void onServicesDiscovered(BluetoothGatt g, int status) {
+            if (g != gatt) return;
             BluetoothGattCharacteristic write = null;
             BluetoothGattCharacteristic notify = null;
             for (BluetoothGattService service : g.getServices()) {
@@ -175,12 +203,14 @@ public final class BlePrinter {
 
         @Override
         public void onDescriptorWrite(BluetoothGatt g, BluetoothGattDescriptor descriptor, int status) {
+            if (g != gatt) return;
             connected = true;
             finishConnect(true, null);
         }
 
         @Override
         public void onCharacteristicWrite(BluetoothGatt g, BluetoothGattCharacteristic c, int status) {
+            if (g != gatt) return;
             synchronized (lock) {
                 writePending = false;
                 lock.notifyAll();
@@ -190,12 +220,14 @@ public final class BlePrinter {
         @Override
         @SuppressWarnings("deprecation")
         public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic c) {
+            if (g != gatt) return;
             // Android 13+는 아래 새 콜백도 부른다. 허용 신호를 두 번 세지 않도록 예전 버전에서만 쓴다.
             if (Build.VERSION.SDK_INT < 33) onNotify(c.getValue());
         }
 
         @Override
         public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic c, byte[] value) {
+            if (g != gatt) return;
             onNotify(value);
         }
     };
@@ -237,6 +269,7 @@ public final class BlePrinter {
 
     /** 조각으로 나눠 보낸다. 허용 신호를 받은 프린터는 신호만큼만, 아니면 쓰기 완료마다 보낸다. */
     public void send(byte[] data, Done done) {
+        if ("XP_237BT".equals(model)) { spp.send(data, done); return; }
         worker.post(() -> {
             try {
                 if (!isConnected()) throw new IllegalStateException("프린터가 연결되어 있지 않습니다.");

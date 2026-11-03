@@ -223,6 +223,28 @@ test('touch sales keep required capture paths, recover queued operations once, a
     ).rows[0].p;
     assert.equal(correction.productName, '2번');
     assert.equal(correction.slipLine, '2번 · 블랙 M');
+    await db.exec(read('202611030003_touch_auto_product_numbers.sql'));
+    await db.exec(read('202611030003_touch_auto_product_numbers.sql'));
+    const named = await commit(sale('auto-next'));
+    const nameOf = async id => (await db.query('select product_name_snapshot name from sales where id=$1', [id])).rows[0].name;
+    assert.equal(await nameOf(named.saleId), '3번');
+    assert.equal((await db.query('select immutable_payload p from print_jobs where sale_id=$1', [named.saleId])).rows[0].p.productName, '3번');
+    const fresh = crypto.randomUUID();
+    await db.query("insert into live_sessions values($1,$2,'ACTIVE')", [fresh, workspace]);
+    const runFresh = kind => call('voicecap_touch_run', [workspace, producer, fresh, kind, JSON.stringify({ settings: { prepareSeconds: 0, fallbackDelaySeconds: 0 }, state: {} })]);
+    await runFresh('START');
+    const firstPayload = sale('fresh-1', { sessionId: fresh });
+    const first = await commit(firstPayload);
+    assert.equal(await nameOf(first.saleId), '1번');
+    assert.deepEqual(await commit(firstPayload), first, 'retry must not allocate another number');
+    await runFresh('STOP'); await runFresh('START');
+    const second = await commit(sale('fresh-2', { sessionId: fresh }));
+    assert.equal(await nameOf(second.saleId), '2번', 'continuing a session keeps its sequence');
+    await db.query("update sales set record_state='CANCELLED' where id=$1", [second.saleId]);
+    const third = await commit(sale('fresh-3', { sessionId: fresh }));
+    assert.equal(await nameOf(third.saleId), '3번', 'cancelled numbers are not reused');
+    const explicit = await commit(sale('fresh-named', { sessionId: fresh, productLabel: '셔츠' }));
+    assert.equal(await nameOf(explicit.saleId), '셔츠');
   } finally {
     await db.close();
   }

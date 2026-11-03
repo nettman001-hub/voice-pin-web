@@ -154,3 +154,10 @@ test('결과 기록은 한 번 다시 시도하고, 그래도 안 되면 "기록
   const down = makeDeps(idle, { finish: () => { throw new Error('offline'); } });
   assert.equal(await reprintInApp(sale, down.deps), 'PRINTED_UNRECORDED');
 });
+
+test('전송 중 연결이 끊기면 직접 출력 자리를 실패로 해제하지 않고 결과 확인을 기다린다', async () => {
+  const { deps, calls } = makeDeps(idle);
+  deps.printer.send = async () => { deps.printer.connected = false; throw new Error('출력 여부 확인 필요'); };
+  await assert.rejects(() => reprintInApp(sale, deps), /출력 여부 확인 필요/);
+  assert.deepEqual(calls.finished, []);
+});

@@ -4,6 +4,8 @@ import TouchMobileSalesPage from '../../src/pages/seller/TouchMobileSalesPage';
 import { phoneLifecycleState, TouchSalesApi } from './phoneLifecycleMock';
 import { touchLocalStore } from '../../src/services/touchLocalStore';
 import { TouchPcPrintRelay } from '../../src/services/touchPcPrintRelay';
+import { MemoryRouter } from 'react-router-dom';
+import { SalesAppShell } from '../../src/components/common/SalesAppShell';
 
 const emit = (type: string, requestId: string) =>
   window.dispatchEvent(new CustomEvent('voicecap-android', { detail: { type, requestId, ok: true } }));
@@ -13,7 +15,9 @@ phoneLifecycleState.captureFrameDelayMs = params.has('slowCapture') ? 3000 : 0;
 phoneLifecycleState.cameraError = params.has('cameraError') ? '카메라 권한이 필요합니다.' : '';
 phoneLifecycleState.commitError = params.has('pending') ? 'DATABASE_ERROR' : '';
 (window as any).VoiceCapAndroid = {
-  info: () => '{"version":"fixture"}',
+  info: () => '{"version":"fixture","singleWebView":true}',
+  setWebNavigation: (enabled: boolean) => { phoneLifecycleState.webNavigation = enabled; },
+  setTab: (tab: string) => { phoneLifecycleState.nativeTab = tab; },
   printerState: () => JSON.stringify({ connected: phoneLifecycleState.printerConnected, name: phoneLifecycleState.printerName, saved: phoneLifecycleState.printerSaved }),
   printerPick: (id: string) => {
     phoneLifecycleState.printerPicks++;
@@ -118,4 +122,4 @@ let printRelay: TouchPcPrintRelay | null = null;
   },
   unmount: () => root.unmount(),
 };
-root.render(<TouchMobileSalesPage />);
+root.render(params.has('shell') ? <MemoryRouter initialEntries={['/app/sell']}><SalesAppShell><section>관리 화면</section></SalesAppShell></MemoryRouter> : <TouchMobileSalesPage />);

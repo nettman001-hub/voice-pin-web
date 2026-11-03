@@ -41,6 +41,28 @@ try {
   await page.goto(url);
   await page.locator('.touch-phone-offer button').click();
   const setup = page.getByRole('dialog', { name: '폰으로 판매 시작' });
+  const paper = setup.getByRole('combobox', { name: '용지 크기' });
+  assert.deepEqual(await paper.locator('option').evaluateAll(options => options.map(o => o.value)), ['50x30', '40x25', '40x30']);
+  for (const [size, rowBytes, rows] of [['40x25', 40, 200], ['40x30', 40, 240], ['50x30', 48, 240]]) {
+    await paper.selectOption(size);
+    await setup.getByText('용지 크기를 저장하고 맞춤 요청을 보냈습니다.', { exact: false }).waitFor();
+    await setup.getByRole('button', { name: '시험 출력', exact: true }).click();
+    await setup.getByText('시험 라벨을 전송했습니다.', { exact: false }).waitFor();
+    const bytes = Buffer.from(await page.evaluate(() => window.phoneLifecycle.state.nativePayloads.at(-1)), 'base64');
+    const imageAt = bytes.indexOf(Buffer.from([0x1f, 0x10]));
+    assert.ok(imageAt >= 0);
+    assert.equal(bytes.readUInt16BE(imageAt + 2), rowBytes);
+    assert.equal(bytes.readUInt16BE(imageAt + 4), rows);
+    if (size === '40x25') await page.screenshot({ path: path.join(output, 'paper-40x25.png'), fullPage: true });
+  }
+  await paper.selectOption('40x30');
+  await setup.getByText('용지 크기를 저장하고 맞춤 요청을 보냈습니다.', { exact: false }).waitFor();
+  await page.reload();
+  await page.locator('.touch-phone-offer button').click();
+  assert.equal(await paper.inputValue(), '40x30');
+  await paper.selectOption('50x30');
+  await setup.getByText('용지 크기를 저장하고 맞춤 요청을 보냈습니다.', { exact: false }).waitFor();
+  checks.push('three paper sizes generate matching raster dimensions; selection survives reload');
   await setup.getByRole('radio', { name: 'PC 판매도우미', exact: true }).check();
   const start = setup.getByRole('button', { name: '지금 회차 이어서 판매', exact: true });
   assert.equal(await start.isDisabled(), true, 'PC output must wait for relay readiness');
@@ -144,6 +166,11 @@ try {
   assert.equal(final.transitions.filter(item => item.kind === 'ACK').length, 3);
   await page.screenshot({ path: path.join(output, 'bluetooth-after-live-switch.png'), fullPage: true });
   checks.push('later comments, Bluetooth receipts and photos continue without restarting the phone producer or moving camera ownership');
+  await page.getByRole('button', { name: '출력 위치 변경', exact: true }).click();
+  const paperDialog = page.getByRole('dialog', { name: '출력 위치 변경' });
+  assert.equal(await paperDialog.getByRole('combobox', { name: '용지 크기' }).isDisabled(), true);
+  await paperDialog.getByRole('button', { name: '닫기', exact: true }).click();
+  checks.push('paper size cannot change during an active sale');
   await page.evaluate(async () => { await window.phoneLifecycle.stopRelay(); window.phoneLifecycle.unmount(); });
   await page.waitForFunction(() => !window.phoneLifecycle.state.run?.running);
   assert.deepEqual(errors, [], 'browser page errors');
