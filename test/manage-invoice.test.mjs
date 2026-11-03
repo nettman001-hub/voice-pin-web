@@ -87,7 +87,6 @@ test('order detail page is routed and the order list links to it', () => {
   const list = fs.readFileSync('src/pages/manage/ManageOrdersPage.tsx', 'utf8');
   assert.match(list, /orderPath\(order\.key\)/);
   const detail = fs.readFileSync('src/pages/manage/OrderDetailPage.tsx', 'utf8');
-  assert.match(detail, /sendInvoiceOnce/);
-  assert.match(detail, /createInvoice/);
+  assert.match(detail, /sendOrderInvoice|sendInvoiceOnce/);
   assert.doesNotMatch(detail, /commerce\.createInvoice|commerce\.sendInvoice/);
 });

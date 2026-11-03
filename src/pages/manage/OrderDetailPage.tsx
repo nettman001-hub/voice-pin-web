@@ -10,8 +10,9 @@ import { MONEY_STAGE_LABEL } from '../../services/manage/orderPipeline';
 import { GOODS_STATE_LABEL, goodsStateOf, type GoodsState } from '../../services/manage/fulfillment';
 import { formatPhone } from '../../services/manage/contactWorklist';
 import {
-  INVOICE_BANK_ACCOUNT_KEY, INVOICE_FORM_ERROR_TEXT, defaultDueDate, invoiceCreateRequest, invoiceSmsBody, validateInvoiceForm,
+  INVOICE_FORM_ERROR_TEXT, readSavedBankAccount, saveBankAccount, defaultDueDate, invoiceSmsBody, validateInvoiceForm,
 } from '../../services/manage/orderInvoice';
+import { sendOrderInvoice } from '../../services/manage/invoiceSender';
 import { generateDepositCode } from '../../services/paymentMatching';
 import { formatWon } from '../../services/appShellState';
 import { appToast } from '../../services/appDownload';
@@ -21,12 +22,6 @@ const STATUS_TEXT: Record<string, string> = {
   DRAFT: '아직 안 보냄', QUEUED: '보내는 중', SENT: '보냄', PAID: '입금 완료', CANCELLED: '취소됨',
 };
 
-const readBank = () => {
-  try { return localStorage.getItem(INVOICE_BANK_ACCOUNT_KEY) || ''; } catch { return ''; }
-};
-const saveBank = (value: string) => {
-  try { localStorage.setItem(INVOICE_BANK_ACCOUNT_KEY, value); } catch { /* 저장 못 해도 이번 정산서는 보낸다 */ }
-};
 
 /**
  * 주문 상세 (회차×구매자 한 장).
@@ -42,7 +37,7 @@ export const OrderDetailPage: React.FC = () => {
   const [reloadKey, setReloadKey] = useState(0);
   const { dashboard } = useManageDashboard(0, reloadKey);
   const order = dashboard.orders.find((item) => item.key === key);
-  const [bankAccount, setBankAccount] = useState(readBank);
+  const [bankAccount, setBankAccount] = useState(readSavedBankAccount);
   const [dueDate, setDueDate] = useState(() => defaultDueDate(new Date()));
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -114,24 +109,14 @@ export const OrderDetailPage: React.FC = () => {
     const form = { phone, bankAccount, dueDate, depositCode: generateDepositCode(usedCodes) };
     const invalid = validateInvoiceForm(order, form);
     if (invalid) { setError(INVOICE_FORM_ERROR_TEXT[invalid]); return; }
-    saveBank(form.bankAccount.trim());
+    saveBankAccount(form.bankAccount);
     return run('send', async () => {
-      const created = await api!.createInvoice(invoiceCreateRequest(order, form));
-      const invoiceId = String(created.invoiceId);
-      // 이미 열린 정산서가 있으면 서버가 그것을 돌려준다. 그 정산서의 값(계좌·코드)으로 보낸다.
-      const target = created.existing ? invoicesById.get(invoiceId) : undefined;
-      const sendTarget = target || {
-        id: invoiceId, phoneNumber: form.phone.replace(/\D/g, ''), saleIds: order.saleIds,
-        bankAccount: form.bankAccount.trim(), dueDate: form.dueDate, depositCode: form.depositCode,
-      };
-      if (created.existing && created.status !== 'DRAFT') return '이미 보낸 정산서가 있습니다. 다시 보내려면 [다시 보내기]를 누르세요.';
-      // 다른 기기가 만든 정산서를 아직 못 받았으면 그 입금코드를 모르므로 보내지 않는다.
-      if (created.existing && !target) return '이미 만든 정산서가 있습니다. 잠시 뒤 화면이 바뀌면 [보내기]를 눌러 주세요.';
-      const result = await api!.sendInvoiceOnce(invoiceId, async () => {
-        const sms = await commerce.sendSms(sendTarget.phoneNumber, sendBody(sendTarget), 'INVOICE', sendTarget.saleIds);
-        return sms.status === 'FAILED' ? { sent: false, error: sms.error || '문자 보내기 실패' } : { sent: true, smsMessageId: sms.id };
+      const outcome = await sendOrderInvoice({
+        api: api!, order, form, invoicesById,
+        sendSms: (to, body, saleIds) => commerce.sendSms(to, body, 'INVOICE', saleIds),
       });
-      if (result.sendError) throw new Error(`정산서는 만들었지만 문자를 보내지 못했습니다: ${String(result.sendError)}`);
+      if (outcome.status === 'FAILED') throw new Error(`정산서는 만들었지만 문자를 보내지 못했습니다: ${outcome.reason}`);
+      if (outcome.status === 'SKIPPED') return `${outcome.reason}.`;
       return `${order.nickname}님께 정산서를 보냈습니다.`;
     });
   };

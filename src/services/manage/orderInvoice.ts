@@ -9,6 +9,14 @@ import type { ManageOrder } from './orderPipeline.ts';
 export const INVOICE_BANK_ACCOUNT_KEY = 'voicecap_invoice_bank_account';
 export const DEFAULT_DUE_DAYS = 3;
 
+/** 마지막으로 쓴 입금계좌 (이 기기). 저장소가 막혀 있어도 정산서는 보낸다. */
+export const readSavedBankAccount = () => {
+  try { return localStorage.getItem(INVOICE_BANK_ACCOUNT_KEY) || ''; } catch { return ''; }
+};
+export const saveBankAccount = (value: string) => {
+  try { localStorage.setItem(INVOICE_BANK_ACCOUNT_KEY, value.trim()); } catch { /* 무시 */ }
+};
+
 export interface InvoiceForm {
   phone: string;
   bankAccount: string;
