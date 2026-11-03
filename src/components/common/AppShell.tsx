@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
-import { FileSpreadsheet, GitCompare, MoreHorizontal, Monitor, ReceiptText, ShoppingBag } from 'lucide-react';
+import { FileSpreadsheet, GitCompare, Home, Inbox, ListChecks, MoreHorizontal, Monitor, ReceiptText, ShoppingBag } from 'lucide-react';
+import { useNewManageUi } from '../../services/manage/useNewManageUi';
 import { useAuth } from '../../context/AuthContext';
 import { useSales } from '../../context/SalesContext';
 import { useProductSales } from '../../context/ProductSalesContext';
@@ -9,11 +10,14 @@ import { APP_TOAST_EVENT, type AppToastDetail } from '../../services/appDownload
 import { androidNative } from '../../services/labelPrinter/androidBridge';
 import {
   APP_TABS,
+  MANAGE_APP_TABS,
   appScreenTitle,
   appTabFor,
+  manageTabFor,
   formatWon,
   sellingSummary,
   type AppTabId,
+  type ManageTabId,
   type SellingSummary,
 } from '../../services/appShellState';
 
@@ -26,6 +30,33 @@ const TAB_ICONS: Record<AppTabId, React.ComponentType<{ className?: string }>> =
   settlement: FileSpreadsheet,
   more: MoreHorizontal,
 };
+
+const MANAGE_TAB_ICONS: Record<ManageTabId, React.ComponentType<{ className?: string }>> = {
+  home: Home,
+  orders: ListChecks,
+  inbox: Inbox,
+  settlement: FileSpreadsheet,
+  more: MoreHorizontal,
+};
+
+/** 글자를 입력하는 동안(화면 키보드가 열린 동안) 하단 메뉴를 숨긴다. */
+function useTypingFocus(): boolean {
+  const [typing, setTyping] = useState(false);
+  useEffect(() => {
+    const isField = (target: EventTarget | null) =>
+      target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
+      && !(target instanceof HTMLInputElement && /^(checkbox|radio|button|submit|range|file)$/.test(target.type));
+    const onIn = (event: FocusEvent) => { if (isField(event.target)) setTyping(true); };
+    const onOut = () => setTimeout(() => setTyping(isField(document.activeElement)), 0);
+    document.addEventListener('focusin', onIn);
+    document.addEventListener('focusout', onOut);
+    return () => {
+      document.removeEventListener('focusin', onIn);
+      document.removeEventListener('focusout', onOut);
+    };
+  }, []);
+  return typing;
+}
 
 export const AppHeader: React.FC = () => {
   const { pathname } = useLocation();
@@ -46,6 +77,10 @@ export const AppHeader: React.FC = () => {
 
 export const AppBottomNav: React.FC = () => {
   const { pathname } = useLocation();
+  const [newManage] = useNewManageUi();
+  const typing = useTypingFocus();
+  if (typing) return null;
+  if (newManage) return <ManageBottomNav pathname={pathname} />;
   const active = appTabFor(pathname);
   return (
     <nav
@@ -70,6 +105,39 @@ export const AppBottomNav: React.FC = () => {
                   on ? 'bg-brand-50 text-brand-600 shadow-sm' : ''
                 }`}
               >
+                <Icon className="h-5 w-5" />
+              </span>
+              <span className="mt-0.5 whitespace-nowrap text-[10px] tracking-tight">{tab.name}</span>
+            </NavLink>
+          );
+        })}
+      </div>
+    </nav>
+  );
+};
+
+const ManageBottomNav: React.FC<{ pathname: string }> = ({ pathname }) => {
+  const active = manageTabFor(pathname);
+  return (
+    <nav
+      className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/95 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.05)] backdrop-blur-lg select-none"
+      aria-label="관리 하단 메뉴"
+    >
+      <div className="mx-auto flex h-16 max-w-lg items-center justify-around px-1">
+        {MANAGE_APP_TABS.map((tab) => {
+          const Icon = MANAGE_TAB_ICONS[tab.id];
+          const on = active === tab.id;
+          return (
+            <NavLink
+              key={tab.id}
+              to={tab.path}
+              end={tab.id === 'home'}
+              aria-current={on ? 'page' : undefined}
+              className={`flex h-full min-w-[44px] flex-1 flex-col items-center justify-center rounded-2xl px-1 py-1 ${
+                on ? 'font-black text-brand-600' : 'font-medium text-slate-500'
+              }`}
+            >
+              <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${on ? 'bg-brand-50 text-brand-600 shadow-sm' : ''}`}>
                 <Icon className="h-5 w-5" />
               </span>
               <span className="mt-0.5 whitespace-nowrap text-[10px] tracking-tight">{tab.name}</span>

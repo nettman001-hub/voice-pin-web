@@ -17,6 +17,11 @@ import { SaleAiConversationProvider } from './components/sales/SaleAiConversatio
 import { PanelLeftOpen } from 'lucide-react';
 import { AppBottomNav, AppHeader, AppSellingBanner, AppToastHost, PcOnlyNotice } from './components/common/AppShell';
 import { AppMorePage } from './pages/seller/AppMorePage';
+import { ManageHomePage } from './pages/manage/ManageHomePage';
+import { ManageOrdersPage } from './pages/manage/ManageOrdersPage';
+import { ManageInboxPage } from './pages/manage/ManageInboxPage';
+import { KeepingSettingsPage } from './pages/manage/KeepingSettingsPage';
+import { isNewManageUiEnabled } from './services/manage/manageUiSetting';
 import { APP_SELL_PATH, SalesAppShell } from './components/common/SalesAppShell';
 import { isSalesApp } from './services/labelPrinter/androidBridge';
 import { isPcOnlyPath } from './services/appShellState';
@@ -160,7 +165,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 };
 
 const RootRedirect: React.FC = () => {
-  const { isAuthenticated, isInitialized, user } = useAuth();
+  const { isAuthenticated, isInitialized, user, workspaceId } = useAuth();
   if (!isInitialized) return <AuthLoadingState />;
   if (!isAuthenticated) {
     if (hasAutoLoginCredentials()) {
@@ -169,7 +174,7 @@ const RootRedirect: React.FC = () => {
     return <Navigate to="/onboarding" replace />;
   }
   if (user?.role === '관리자') return <Navigate to="/admin" replace />;
-  return <Navigate to={isSalesApp() ? '/sales' : '/live'} replace />;
+  return <Navigate to={isSalesApp() ? (isNewManageUiEnabled(workspaceId) ? '/manage' : '/sales') : '/live'} replace />;
 };
 
 const AuthLoadingState: React.FC = () => (
@@ -265,6 +270,10 @@ export const App: React.FC = () => {
                           <Route path="/shipments" element={<ShipmentManagementPage />} />
                           <Route path="/settlement" element={<SettlementPage />} />
                           <Route path="/more" element={<AppMorePage />} />
+                          <Route path="/manage" element={<ManageHomePage />} />
+                          <Route path="/manage/orders" element={<ManageOrdersPage />} />
+                          <Route path="/manage/inbox" element={<ManageInboxPage />} />
+                          <Route path="/manage/settings/keeping" element={<KeepingSettingsPage />} />
                           <Route path="/seller/devices" element={<DeviceManagementPage />} />
                           <Route path="/devices" element={<DeviceManagementPage />} />
                           <Route path="/seller/helper" element={<CommentHelperPage />} />

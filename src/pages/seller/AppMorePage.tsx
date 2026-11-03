@@ -11,7 +11,13 @@ import {
   Truck,
   User,
   BarChart3,
+  Package,
+  ReceiptText,
+  ShoppingBag,
+  Timer,
+  LayoutDashboard,
 } from 'lucide-react';
+import { useNewManageUi } from '../../services/manage/useNewManageUi';
 import { useAuth } from '../../context/AuthContext';
 import { androidJson, androidNative } from '../../services/labelPrinter/androidBridge';
 
@@ -42,10 +48,23 @@ export const AppMorePage: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const version = androidJson<{ version?: string }>(androidNative()?.info(), {}).version;
+  const [newManage, setNewManage] = useNewManageUi();
+  const manageRows: Item[] = newManage
+    ? [
+        { name: '출고 (보관함·합배송)', hint: '보관 중인 상품과 결제된 새 상품을 한 번에 보냅니다', path: '/shipments', icon: Package },
+        { name: '판매내역', hint: '회차별 판매 목록', path: '/sales', icon: ShoppingBag },
+        { name: '정산서', path: '/invoices', icon: ReceiptText },
+      ]
+    : [];
+  const baseRows: Item[] = [
+    ...manageRows,
+    ...ITEMS.filter((item) => !(newManage && item.path === '/shipments')),
+    { name: '보관 설정', hint: '오래 보관한 상품을 알릴 일수 (주의·경고)', path: '/manage/settings/keeping', icon: Timer },
+  ];
   const rows: Item[] =
     user?.role === '관리자'
-      ? [...ITEMS, { name: '관리자 메뉴', hint: '관리자 계정에만 보입니다', path: '/admin', icon: Shield }]
-      : ITEMS;
+      ? [...baseRows, { name: '관리자 메뉴', hint: '관리자 계정에만 보입니다', path: '/admin', icon: Shield }]
+      : baseRows;
 
   const handleLogout = async () => {
     await logout();
@@ -58,6 +77,26 @@ export const AppMorePage: React.FC = () => {
         <div className="text-sm font-bold text-slate-900">{user?.nickname || '판매자'}</div>
         {user?.email && <div className="truncate text-xs text-slate-500">{user.email}</div>}
       </div>
+      <label className="flex min-h-[56px] items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+        <LayoutDashboard className="h-5 w-5 flex-shrink-0 text-brand-600" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-bold text-slate-900">새 관리 화면 사용</span>
+          <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">
+            켜면 하단 메뉴가 홈 · 주문 · 문자·입금 · 정산 · 더보기로 바뀝니다. 이 폰에만 적용되고 언제든 끌 수 있습니다.
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          role="switch"
+          checked={newManage}
+          onChange={(event) => {
+            setNewManage(event.target.checked);
+            navigate(event.target.checked ? '/manage' : '/sales');
+          }}
+          className="h-6 w-6 flex-shrink-0 accent-brand-600"
+          aria-label="새 관리 화면 사용"
+        />
+      </label>
       <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white">
         {rows.map((item) => {
           const Icon = item.icon;
