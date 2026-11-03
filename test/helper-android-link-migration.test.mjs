@@ -35,7 +35,7 @@ test('Windows helper → server → Android link: registration, phone approval, 
         };
         const run = (kind = 'START', p = producer, s = session) => call('voicecap_touch_run', [ws, p, s, kind,
           JSON.stringify({ settings: { prepareSeconds: 4, fallbackDelaySeconds: 0, printTarget: 'PHONE_BLUETOOTH' }, state: { phoneOnly: true } })]);
-        const attach = (install = 'phone-1', p = producer, s = session, detach = false) => call('voicecap_helper_attach', [ws, user, h('link-' + install), s, p, detach]);
+        const attach = (install = 'phone-1', p = producer, s = session, detach = false, start = false) => call('voicecap_helper_attach', [ws, user, h('link-' + install), s, p, detach, start]);
         const push = (helper, gen, comments, s = session) => call('voicecap_helper_push', [helper, s, gen, JSON.stringify(comments)]);
         const pull = (after = 0, install = 'phone-1', s = session, tail = 100, limit = 500, who = user) =>
           call('voicecap_helper_pull', [ws, who, h('link-' + install), s, after, tail, limit]);
@@ -206,6 +206,47 @@ test('Windows helper → server → Android link: registration, phone approval, 
       assert.equal((await x.attach('phone-1', p2, s2, true)).detached, true);
       assert.equal((await call('voicecap_helper_heartbeat', [helper, '{}'])).link.phoneName, 'Galaxy');
       assert.equal((await call('voicecap_helper_heartbeat', [helper, '{}'])).sessionId, null);
+    });
+
+    await scenario('phone sale start turns the helper on, sale stop turns it off; latest change wins', async (x) => {
+      const helper = await x.register();
+      const claim = await x.pair(helper);
+      await call('voicecap_helper_pair_decide', [helper, claim.linkId, true]);
+      const hb0 = await call('voicecap_helper_heartbeat', [helper, '{}']);
+      assert.equal(hb0.enabled, false);
+      await x.run();
+      // 재연결·자동 재부착(start=false)은 꺼진 도우미를 켜지 않는다.
+      assert.equal((await x.attach()).enabled, false);
+      const on = await x.attach('phone-1', x.producer, x.session, false, true);
+      assert.equal(on.enabled, true);
+      assert.ok(on.generation > hb0.generation, 'turning on starts a new generation');
+      const hb1 = await call('voicecap_helper_heartbeat', [helper, '{}']);
+      assert.equal(hb1.enabled, true);
+      assert.equal(hb1.enabledBy, 'PHONE');
+      assert.ok(hb1.enabledVersion > hb0.enabledVersion);
+      assert.equal((await x.push(helper, on.generation, [x.c('a1')])).inserted, 1);
+      // PC에서 끄면 PC가 이긴다.
+      const off = await call('voicecap_helper_set_enabled', [helper, false]);
+      assert.equal(off.enabledBy, 'HELPER');
+      assert.ok(off.enabledVersion > hb1.enabledVersion);
+      // 다시 판매 시작하면 켜진다.
+      assert.equal((await x.attach('phone-1', x.producer, x.session, false, true)).enabled, true);
+      // 다른 판매(producer)의 종료는 지금 판매를 끄지 않는다.
+      await x.attach('phone-1', crypto.randomUUID(), x.session, true);
+      assert.equal((await call('voicecap_helper_heartbeat', [helper, '{}'])).enabled, true);
+      // 판매 종료: 회차를 끊고 도우미를 끈다. 폰 승인은 유지.
+      const before = (await call('voicecap_helper_heartbeat', [helper, '{}'])).enabledVersion;
+      assert.equal((await x.attach('phone-1', x.producer, x.session, true)).detached, true);
+      const hb2 = await call('voicecap_helper_heartbeat', [helper, '{}']);
+      assert.equal(hb2.enabled, false);
+      assert.equal(hb2.enabledBy, 'PHONE');
+      assert.equal(hb2.enabledVersion, before + 1);
+      assert.equal(hb2.sessionId, null);
+      assert.equal(hb2.link.phoneName, 'Galaxy');
+      assert.equal((await x.push(helper, on.generation, [x.c('late')])).code, 'HELPER_DISABLED');
+      // 이미 꺼진 상태에서 한 번 더 종료해도 버전은 그대로.
+      await x.attach('phone-1', x.producer, x.session, true);
+      assert.equal((await call('voicecap_helper_heartbeat', [helper, '{}'])).enabledVersion, before + 1);
     });
 
     await scenario('A15 5,000 comments page by cursor in order without loss; tail start skips history', async (x) => {

@@ -212,6 +212,8 @@ export async function handleHelperUser(auth: AuthContext, body: any) {
           p_session: body.sessionId,
           p_producer: body.producerId,
           p_detach: body.action === 'helper-detach',
+          // 판매 시작의 첫 연결이면 PC 도우미 댓글 연결을 켠다(종료하면 detach가 끈다).
+          p_start: body.action === 'helper-attach' && body.start === true,
         }));
       case 'helper-pull': {
         if (!isUuid(body.sessionId)) return errorResponse('VALIDATION_ERROR', '판매 회차 정보가 올바르지 않습니다.');

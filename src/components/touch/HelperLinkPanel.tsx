@@ -123,7 +123,7 @@ export function HelperLinkPanel(props: {
     : !status?.helperAlive
       ? 'PC 도우미 꺼짐 · PC에서 도우미를 실행해 주세요'
       : !status?.enabled
-        ? 'PC 도우미에서 "안드로이드 댓글 연결"을 켜 주세요'
+        ? '판매를 시작하면 PC 도우미 댓글 연결이 자동으로 켜집니다'
         : 'PC 도우미 켜짐';
 
   return (
