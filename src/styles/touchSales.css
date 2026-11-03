@@ -1142,6 +1142,26 @@
   flex-wrap: wrap;
   margin: 8px 0;
 }
+.touch-phone-paper {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.touch-phone-paper select {
+  min-height: 44px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #d8e2ee;
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+}
+.touch-phone-paper small {
+  color: #7186a3;
+  font-size: 12px;
+  font-weight: 400;
+}
 .touch-phone-printer button {
   border: 1px solid #dde6f0;
   border-radius: 10px;
@@ -1250,3 +1270,19 @@
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+/* Compact seller controls and one shared navigation/action row. */
+.touch-price-validation { min-height: 20px; margin: 0; }
+.touch-selection-bar { padding: 6px 10px calc(6px + env(safe-area-inset-bottom)); }
+.touch-selection-bar p { margin-bottom: 4px; }
+.touch-selection-bar button { min-height: 38px; padding: 7px 8px; border-radius: 8px; }
+.touch-selection-bar > .touch-unified-actions { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.touch-controls-toggle { flex-shrink: 0; align-self: flex-end; border: 0; background: #f2f6fa; padding: 5px 12px; color: #526982; font-size: 12px !important; }
+.touch-status-line[hidden] { display: none; }
+.touch-today-total { display: block; color: #637992; font-size: 11px; margin-top: 3px; }
+.sales-app-layout { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+.sales-app-layout > [data-sales-app-page] { flex: 1; min-height: 0; overflow: auto; }
+.sales-app-layout > [hidden] { display: none; }
+.sales-app-layout [data-sales-app-page='sell'] > .touch-app { height: 100%; min-height: 0; }
+.touch-app-navigation { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; min-height: 46px; flex-shrink: 0; border-top: 1px solid #e4ebf3; background: #fff; padding: 4px 10px calc(4px + env(safe-area-inset-bottom)); }
+.touch-app-navigation button { min-height: 38px; border: 0; border-radius: 8px; background: #f2f6fa; color: #526982; font: inherit; }
+.touch-app-navigation [aria-current='page'], .touch-unified-actions [aria-current='page'] { color: #0874ca; font-weight: 800; }

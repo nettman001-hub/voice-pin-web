@@ -24,7 +24,7 @@ function fitFont(
   return size;
 }
 
-/** 50x30 mm label (384x240 px): number badge, buyer, amount. No 회차 line (plan decision). */
+/** Number badge, buyer and amount. Layout scales to the selected stock (default 384x240). */
 export function drawSaleLabel(
   canvas: HTMLCanvasElement,
   content: LabelContent,
@@ -32,7 +32,8 @@ export function drawSaleLabel(
 ) {
   const width = options.width ?? LABEL_WIDTH_PX;
   const height = options.height ?? LABEL_HEIGHT_PX;
-  const m = options.margin ?? 16;
+  const scale = Math.min(width / LABEL_WIDTH_PX, height / LABEL_HEIGHT_PX);
+  const m = options.margin ?? Math.round(16 * scale);
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
@@ -42,13 +43,13 @@ export function drawSaleLabel(
   ctx.textBaseline = 'middle';
   let top = m;
   if (content.productLabel) {
-    ctx.font = `900 40px ${FONT}`;
-    const w = ctx.measureText(content.productLabel).width + 24;
-    ctx.fillRect(m, top, w, 52);
+    ctx.font = `900 ${40 * scale}px ${FONT}`;
+    const w = Math.min(width - m * 2, ctx.measureText(content.productLabel).width + 24 * scale);
+    ctx.fillRect(m, top, w, 52 * scale);
     ctx.fillStyle = '#fff';
-    ctx.fillText(content.productLabel, m + 12, top + 27);
+    ctx.fillText(content.productLabel, m + 12 * scale, top + 27 * scale, w - 24 * scale);
     ctx.fillStyle = '#000';
-    top += 64;
+    top += 64 * scale;
   }
   const buyer = content.buyer.trim() || '구매자';
   const amount = `${Math.max(0, Math.round(content.amount)).toLocaleString('ko-KR')}원`;
@@ -58,20 +59,20 @@ export function drawSaleLabel(
     buyer,
     width - m * 2,
     Math.min(72, rest * 0.55),
-    22,
+    22 * scale,
   );
   ctx.font = `900 ${buyerSize}px ${FONT}`;
-  ctx.fillText(buyer, m, top + rest * 0.3);
+  ctx.fillText(buyer, m, top + rest * 0.3, width - m * 2);
   const amountSize = fitFont(
     ctx,
     amount,
     width - m * 2,
     Math.min(64, rest * 0.45),
-    22,
+    22 * scale,
   );
   ctx.font = `900 ${amountSize}px ${FONT}`;
   ctx.textAlign = 'right';
-  ctx.fillText(amount, width - m, top + rest * 0.78);
+  ctx.fillText(amount, width - m, top + rest * 0.78, width - m * 2);
   ctx.textAlign = 'left';
   return ctx.getImageData(0, 0, width, height);
 }

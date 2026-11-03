@@ -9,12 +9,14 @@ import {
 } from '../../services/touchPhoneProducer';
 import {
   createPhonePrinter,
+  initializePrinterBytes,
+  printerCalibrationKey,
   realignBytes,
   saleLabelBytes,
   type PhoneLabelPrinter,
 } from '../../services/labelPrinter/phonePrinter';
 import { androidNative } from '../../services/labelPrinter/androidBridge';
-import { marklifeCommands } from '../../services/labelPrinter/marklifeProtocol';
+import { LABEL_PAPERS, readPaperSize, savePaperSize, type LabelPaperSize } from '../../services/labelPrinter/labelPaper';
 import { grabSharpestFrame, startFrontCamera } from '../../services/frontCamera';
 import { productSalesApi } from '../../services/productSalesApi';
 import { remoteWorkspaceService } from '../../services/remoteWorkspaceService';
@@ -24,7 +26,6 @@ import { readHelperLink } from '../../services/helperLinkStore';
 import { recordPhoneCaptureDiagnostic, type PhoneCaptureDiagnostic } from '../../services/phoneCaptureDiagnostics';
 
 const producerKey = (workspaceId: string) => `voicecap-phone-producer:${workspaceId}`;
-const learnedKey = (workspaceId: string) => `voicecap-phone-printer-learned:${workspaceId}`;
 const targetKey = (workspaceId: string) => `voicecap-phone-print-target:${workspaceId}`;
 // 댓글 출처 선택만 기억한다(토큰은 helperLinkStore가 Keystore에 따로 보관).
 const sourceKey = (workspaceId: string) => `voicecap-phone-comment-source:${workspaceId}`;
@@ -276,7 +277,8 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
     if (automatic && targetRef.current !== 'PHONE_BLUETOOTH') return Promise.resolve(false);
     if (automatic && manuallyDisconnected.current) return Promise.resolve(false);
     const p = printer.current;
-    if (automatic && (p.connected || !p.saved)) return Promise.resolve(p.connected);
+    if (automatic && p.connected && read(printerCalibrationKey(workspaceId, p))) return Promise.resolve(true);
+    if (automatic && !p.connected && !p.saved) return Promise.resolve(false);
     if (!automatic) setError('');
     setConnectingPrinter(true);
     printerFlight.current = (async () => {
@@ -288,11 +290,12 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
         }
         if (!mounted.current) return p.connected;
         // 연결 알림: M50은 이 명령 뒤에 보내도 되는 양(허용 신호)을 알려 준다.
-        await p.send(marklifeCommands.btType());
+        const init = initializePrinterBytes(p.model);
+        if (init.length) await p.send(init);
         // 처음 연결한 폰은 라벨 길이를 한 번 잰다.
-        if (!read(learnedKey(workspaceId))) {
-          await p.send(realignBytes());
-          write(learnedKey(workspaceId), String(Date.now()));
+        if (!read(printerCalibrationKey(workspaceId, p))) {
+          await p.send(realignBytes(p.model, readPaperSize(workspaceId, p)));
+          write(printerCalibrationKey(workspaceId, p), String(Date.now()));
         }
         if (mounted.current) {
           // Only an explicit successful connection resumes auto-reconnect after "끊기".
@@ -345,14 +348,47 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
     setError('');
     setPrinterNotice('');
     try {
-      await printer.current.send(realignBytes());
-      write(learnedKey(workspaceId), String(Date.now()));
+      await printer.current.send(realignBytes(printer.current.model, readPaperSize(workspaceId, printer.current)));
+      write(printerCalibrationKey(workspaceId, printer.current), String(Date.now()));
       setPrinterNotice('라벨 맞춤 요청을 보냈습니다. 용지가 멈춘 뒤 출력해 주세요.');
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
+  };
+
+  const testPrint = async () => {
+    if (busy || connectingPrinter || !printer.current.connected) return;
+    setBusy(true);
+    setError('');
+    try {
+      const p = printer.current;
+      if (!read(printerCalibrationKey(workspaceId, p))) {
+        await p.send(realignBytes(p.model, readPaperSize(workspaceId, p)));
+        write(printerCalibrationKey(workspaceId, p), String(Date.now()));
+      }
+      await p.send(saleLabelBytes({ buyer: '시험 출력 가나다', amount: 123456, productLabel: '1번' }, undefined, { paperSize: readPaperSize(workspaceId, p) }, p.model));
+      setPrinterNotice('시험 라벨을 전송했습니다. 글자·방향·라벨 위치를 확인해 주세요.');
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const changePaperSize = async (size: LabelPaperSize) => {
+    if (busy || connectingPrinter || running || !printer.current.connected) return;
+    setBusy(true);
+    setError('');
+    setPrinterNotice('');
+    const p = printer.current;
+    try {
+      savePaperSize(workspaceId, p, size);
+      localStorage.removeItem(printerCalibrationKey(workspaceId, p));
+      refreshPrinterState((value) => value + 1);
+      await p.send(realignBytes(p.model, size));
+      write(printerCalibrationKey(workspaceId, p), String(Date.now()));
+      setPrinterNotice('용지 크기를 저장하고 맞춤 요청을 보냈습니다. 용지가 멈춘 뒤 시험 출력해 주세요.');
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
   };
 
   const start = async (choice: 'NEW' | 'CONTINUE') => {
@@ -387,7 +423,7 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
         printer: printer.current,
         serverOffset: props.serverOffset,
         totals: props.totals,
-        label: (content) => saleLabelBytes(content, canvas.current || undefined),
+        label: (content) => saleLabelBytes(content, canvas.current || undefined, { paperSize: readPaperSize(workspaceId, printer.current) }, printer.current.model),
         capture,
         onComments: props.onComments,
         onStatus: (s) => setStatus(s),
@@ -483,6 +519,19 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
     </fieldset>
   );
 
+  const renderPaperSize = () => (
+    <label className="touch-phone-paper">용지 크기
+      <select aria-label="용지 크기" value={readPaperSize(workspaceId, printer.current)}
+        disabled={busy || connectingPrinter || running || !printer.current.connected}
+        onChange={(e) => void changePaperSize(e.target.value as LabelPaperSize)}>
+        {Object.entries(LABEL_PAPERS).map(([id, paper]) => (
+          <option key={id} value={id}>{paper.widthMm} × {paper.heightMm} mm</option>
+        ))}
+      </select>
+      <small>{running ? '용지 크기는 판매를 멈춘 뒤 변경할 수 있습니다.' : '용지를 교체한 뒤 선택하세요. 프린터별로 저장합니다.'}</small>
+    </label>
+  );
+
   const overlay = (
     <>
       <canvas ref={canvas} hidden />
@@ -525,6 +574,7 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
           <span className={status.comments.state === 'connected' ? 'ok' : 'warn'}>
             {commentLabel(status.comments, runningSource)}
           </span>
+          <button disabled={busy} onClick={() => producer.current?.reconnectComments()}>댓글 재연결</button>
           <span className={(printTarget === 'PC_HELPER' ? relayReady : status.printer.connected) ? 'ok' : 'warn'}>
             {printTarget === 'PC_HELPER'
               ? `PC 판매도우미 ● ${relayReady ? '연결됨' : '연결 대기'}${relay?.printerName && relayReady ? ` · ${relay.printerName}` : ''}`
@@ -561,6 +611,7 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
                   {printer.current.connected ? '다른 프린터' : '프린터 연결'}
                 </button>
               </div>}
+              {pendingTarget === 'PHONE_BLUETOOTH' && renderPaperSize()}
               <TouchErrorNotice message={error} onDismiss={() => setError('')} />
               <button className="touch-primary" disabled={busy || connectingPrinter || pendingTarget === printTarget ||
                 (pendingTarget === 'PC_HELPER' ? !relayReady : !printer.current.connected)} onClick={() => void applyPrintTarget()}>
@@ -615,6 +666,7 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
                 : `${settings?.prepareSeconds ?? 4}초 카운트다운 뒤 앞카메라로 1장 찍습니다.`}
             </p>
             {renderPrintTargets(printTarget, setPrintTarget)}
+            {printTarget === 'PHONE_BLUETOOTH' && renderPaperSize()}
             {printTarget === 'PHONE_BLUETOOTH' && <div className="touch-phone-printer">
               <span>
                 프린터 ● {connectingPrinter ? '연결 중' : printer.current.connected ? `연결됨${printer.current.name || printerName ? ` · ${printer.current.name || printerName}` : ''}` : '연결 안 됨'}
@@ -643,7 +695,13 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
               >
                 라벨 다시 맞추기
               </button>
+              <button type="button" disabled={busy || connectingPrinter || !printer.current.connected} onClick={() => void testPrint()}>
+                시험 출력
+              </button>
             </div>}
+            {printTarget === 'PHONE_BLUETOOTH' && printer.current.model === 'XP_237BT' && (
+              <p className="touch-muted">Xprinter XP-237BT 시험 지원 · 간격 2mm. 선택한 용지로 판매 전 시험 출력 결과를 확인해 주세요.</p>
+            )}
             {printerNotice && <p role="status" className="touch-muted">{printerNotice}</p>}
             <TouchErrorNotice message={error} onDismiss={() => setError('')} />
             {bootstrap?.session && (

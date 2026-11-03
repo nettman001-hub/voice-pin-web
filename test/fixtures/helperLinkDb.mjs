@@ -33,8 +33,8 @@ export async function helperLinkDb() {
     create table sale_revisions(workspace_id uuid,sale_id text,old_revision integer,new_revision integer,before_value jsonb,after_value jsonb,actor_user_id uuid,reason text);`);
   for (const name of ['202610210001_touch_sales.sql', '202610290001_touch_sale_modes.sql',
     '202610300003_touch_direct_print_latest.sql', '202610310001_touch_sale_capture_paths.sql',
-    '202610310002_touch_print_targets.sql', '202611030001_helper_android_link.sql']) await db.exec(read(name));
+    '202610310002_touch_print_targets.sql', '202611030002_helper_android_link.sql']) await db.exec(read(name));
   // 두 번 적용해도 실패하지 않는다(추가 전용·재실행 안전).
-  await db.exec(read('202611030001_helper_android_link.sql'));
+  await db.exec(read('202611030002_helper_android_link.sql'));
   return db;
 }

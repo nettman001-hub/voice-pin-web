@@ -4,6 +4,7 @@ import { useSales } from '../../context/SalesContext';
 import { createPhonePrinter, saleLabelBytes } from '../../services/labelPrinter/phonePrinter';
 import { PRINTER_NOT_CONNECTED, reprintInApp, type ReprintSale } from '../../services/appReprint';
 import { TouchSalesApi } from '../../services/touchSalesApi';
+import { readPaperSize } from '../../services/labelPrinter/labelPaper';
 
 export type PrintState = { state: 'working' | 'ok' | 'queued' | 'failed' | 'needConnect'; message: string };
 
@@ -34,7 +35,7 @@ export function useAppReprint() {
           beginDirect: (target) => api.beginDirectPrint(target.id, target.revision),
           finishDirect: (ticket, printResult) => api.finishDirectPrint(ticket.jobId, ticket.leaseToken, printResult),
           printer,
-          label: (content) => saleLabelBytes(content),
+          label: (content) => saleLabelBytes(content, undefined, { paperSize: readPaperSize(workspaceId, printer) }, printer.model),
         },
         { connectFirst },
       );

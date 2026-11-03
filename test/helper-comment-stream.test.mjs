@@ -83,3 +83,21 @@ test('status distinguishes helper off, disconnected, waiting for live and no lin
   await none.s.tick();
   assert.match(none.statuses.at(-1).message, /연결되지 않았습니다/);
 });
+
+test('댓글 재연결 re-attaches and keeps the cursor so no comment repeats', async () => {
+  const api = fakeApi([page([c(1), c(2)]), page([c(3)])]);
+  const { s, got, timers } = stream(api);
+  s.start();
+  await s.tick();
+  const before = timers.length;
+  s.reconnect();
+  assert.equal(timers.at(-1), 0, 'polls again immediately');
+  assert.ok(timers.length > before);
+  await s.tick();
+  assert.deepEqual(api.calls.map((x) => x.action), ['helper-attach', 'helper-pull', 'helper-attach', 'helper-pull']);
+  assert.equal(api.calls.at(-1).after, 2);
+  assert.deepEqual(got.map((x) => x.platformMessageId), ['m1', 'm2', 'm3']);
+  s.stop();
+  s.reconnect();
+  assert.equal(api.calls.length, 4, 'no reconnect after stop');
+});

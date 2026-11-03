@@ -49,6 +49,7 @@ export interface PhoneProducerOptions {
 interface PhoneCommentInput {
   start(): void;
   stop(): void;
+  reconnect(): void;
   detach?(): Promise<void>;
 }
 
@@ -142,6 +143,13 @@ export class TouchPhoneProducer {
         this.emit();
       },
       socketFactory: o.socketFactory,
+      onDiagnostic: (event) => {
+        try {
+          const key = `voicecap-comment-connection:${o.api.workspaceId}`;
+          const prior = JSON.parse(localStorage.getItem(key) || '[]');
+          localStorage.setItem(key, JSON.stringify([...(Array.isArray(prior) ? prior : []).slice(-39), event]));
+        } catch { /* Diagnostics never interrupt selling. */ }
+      },
     });
   }
 
@@ -353,6 +361,10 @@ export class TouchPhoneProducer {
 
   get running() {
     return !this.stopped;
+  }
+
+  reconnectComments() {
+    if (!this.stopped) this.stream.reconnect();
   }
 }
 

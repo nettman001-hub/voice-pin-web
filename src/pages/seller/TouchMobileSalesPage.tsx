@@ -57,17 +57,21 @@ import {
   TouchRecentSaleCard,
 } from '../../components/touch/TouchSaleModeParts';
 import { TouchPhoneOnly } from '../../components/touch/TouchPhoneOnly';
+import { TouchKeepingPanel } from '../../components/touch/TouchKeepingPanel';
+import { AppSalesTabs } from '../../components/common/AppSalesTabs';
+import { nextTouchProductNumber, touchBuyerSessionTotal } from '../../services/touchSalePresentation';
 import { isSalesApp } from '../../services/labelPrinter/androidBridge';
 import '../../styles/touchSales.css';
 
 const printLabel = (status: string) =>
   status === 'PRINTED'
-    ? '전표 출력됨'
+    ? '전표O'
     : status === 'FAILED'
       ? '전표 확인 필요'
       : '전표 대기';
 export default function TouchMobileSalesPage() {
   const salesApp = isSalesApp();
+  const [controlsCollapsed, setControlsCollapsed] = useState(false);
   const { workspaceId, user, logout } = useAuth();
   const api = useMemo(
     () => new TouchSalesApi(workspaceId || ''),
@@ -145,6 +149,10 @@ export default function TouchMobileSalesPage() {
     ),
     sessionId = bootstrap?.session?.id || pc?.sessionId || '';
   const detail = rows.find((s) => s.id === detailId);
+  const inlineNavigation = salesApp && tab === 'SELL' && !detail && !priceComment && !batch && !cardPrice && !editPrice;
+  useEffect(() => {
+    queueMicrotask(() => window.dispatchEvent(new CustomEvent('voicecap-inline-navigation', { detail: inlineNavigation })));
+  }, [inlineNavigation]);
   const pendingSaveFailures = outbox
     .filter((item) => item.error && !item.blocked)
     .map((item) => ({
@@ -961,7 +969,7 @@ export default function TouchMobileSalesPage() {
       pcOnline={bridgeOnline && !phoneRunning}
       wakeKey={bootstrap}
       controlsVisible={
-        !((editPrice && detail) || (cardPrice && recentRows[0]) || batch || priceComment || detail)
+        !controlsCollapsed && !((editPrice && detail) || (cardPrice && recentRows[0]) || batch || priceComment || detail)
       }
     />
   );
@@ -1196,7 +1204,7 @@ export default function TouchMobileSalesPage() {
           phoneOnly={phoneOnlyUi}
           key={touchCommentKey(priceComment)}
           comment={priceComment}
-          productName={pc?.product?.name || undefined}
+          productName={pc?.product?.name?.trim() || bootstrap?.product?.name?.trim() || touchProductLabel(nextTouchProductNumber(rows, sessionId))}
           recent={recent}
           busy={busy}
           error={error}
@@ -1232,6 +1240,7 @@ export default function TouchMobileSalesPage() {
           </small>
         </header>
         <div className="touch-detail-content">
+          <TouchKeepingPanel key={detail.id} sale={detail} workspaceId={api.workspaceId} sessionCode={bootstrap?.session?.display_code || ''} />
           <section className="touch-detail-hero">
             <div>
               {detail.imageUrl ? (
@@ -1468,22 +1477,16 @@ export default function TouchMobileSalesPage() {
     currentSoldPrice = numberInfo.get(currentNumber)?.unitPrice;
   const multiFooter = (
     <footer className="touch-selection-bar">
-      <p>
-        {picked.length ? (
+      {!!picked.length && <p>
           <>
             <strong>
               {currentLabel} · {picked.length}명
             </strong>{' '}
             · {picked.map((c) => c.nickname).join(', ')}
           </>
-        ) : (
-          <>
-            🟡 {salesMode === 'NUMBER' ? `${currentLabel} 댓글` : '구매 댓글'}을
-            눌러 구매자를 고르세요 · 여러 명 가능
-          </>
-        )}
-      </p>
-      <div>
+      </p>}
+      <div className={salesApp ? 'touch-unified-actions' : ''}>
+        {salesApp && <AppSalesTabs />}
         <button
           type="button"
           onClick={() => setPicked([])}
@@ -1494,10 +1497,14 @@ export default function TouchMobileSalesPage() {
         <button
           type="button"
           className="touch-primary"
-          onClick={() => confirmBatch(false)}
-          disabled={!picked.length || !enabled || busy}
+          onClick={() => {
+            const existing = picked.length === 1 && rows.find(s => s.comment?.platformMessageId && `${s.sessionId}:${s.comment.platformMessageId}` === touchCommentKey(picked[0]));
+            if (existing) { setDetailId(existing.id); setTab('HISTORY'); }
+            else confirmBatch(false);
+          }}
+          disabled={!picked.length || busy || (!enabled && !(picked.length === 1 && sold.has(touchCommentKey(picked[0]))))}
         >
-          {currentSoldPrice ? '전표만 출력' : '판매 확정'}
+          확인
         </button>
       </div>
       {!!currentSoldPrice && !!picked.length && (
@@ -1541,7 +1548,10 @@ export default function TouchMobileSalesPage() {
           계정
         </button>
       </nav>
+      {tab === 'SELL' && <button type="button" className="touch-controls-toggle" aria-expanded={!controlsCollapsed}
+        onClick={() => setControlsCollapsed(v => !v)}>{controlsCollapsed ? '판매 설정 펼치기 ▾' : '판매 설정 숨기기 ▴'}</button>}
       <div
+        hidden={controlsCollapsed && tab === 'SELL'}
         className={`touch-status-line ${!phoneOnlyUi && !onlinePc ? 'touch-status-offline' : ''}`}
       >
         <strong>{compactSession}</strong>
@@ -1612,6 +1622,7 @@ export default function TouchMobileSalesPage() {
               onChange={changeNumber}
             />
           )}
+          {recentCard}
           <TouchCommentList
             comments={displayComments}
             emptyMessage={
@@ -1628,13 +1639,10 @@ export default function TouchMobileSalesPage() {
             mode={salesMode}
             currentNumber={currentNumber}
             picked={multi ? picked.map(touchCommentKey) : undefined}
-            idleFooter={recentCard}
+            hideSearch={controlsCollapsed}
+            navigation={salesApp ? <AppSalesTabs /> : undefined}
             footer={
-              multi
-                ? picked.length || !recentCard
-                  ? multiFooter
-                  : recentCard
-                : undefined
+              multi ? multiFooter : undefined
             }
             onOpenSold={(key) => {
               const row = rows.find(
@@ -1672,7 +1680,9 @@ export default function TouchMobileSalesPage() {
             onConfirm={() => {
               if (selected) {
                 setError('');
-                setPriceComment(selected);
+                const existing = rows.find(s => s.comment?.platformMessageId && `${s.sessionId}:${s.comment.platformMessageId}` === touchCommentKey(selected));
+                if (existing) { setDetailId(existing.id); setTab('HISTORY'); }
+                else setPriceComment(selected);
               }
             }}
           />
@@ -1744,6 +1754,9 @@ export default function TouchMobileSalesPage() {
                       {String(rows.length - index).padStart(3, '0')}{' '}
                       {sale.buyerNickname} {sale.amount.toLocaleString()}원
                     </strong>
+                    {touchBuyerSessionTotal(sale, rows).count > 1 && <small className="touch-today-total">
+                      오늘합계 {touchBuyerSessionTotal(sale, rows).amount.toLocaleString()}원
+                    </small>}
                     <p>
                       <small
                         className={

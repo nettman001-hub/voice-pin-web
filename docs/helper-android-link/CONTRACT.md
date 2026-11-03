@@ -15,7 +15,7 @@
 - 도우미 모드에서는 폰의 직접 Euler 수신기를 함께 돌리지 않는다. 조용한 자동 전환도 없다.
 - `TouchSettings.commentSource`(`PHONE_DIRECT` | `WINDOWS_HELPER`)만 설정에 남는다. 연결 토큰은 설정·실행 상태에 넣지 않는다.
 
-## 2. 데이터 (마이그레이션 `supabase/migrations/202611030001_helper_android_link.sql`)
+## 2. 데이터 (마이그레이션 `supabase/migrations/202611030002_helper_android_link.sql`)
 
 | 테이블 | 내용 |
 | --- | --- |
@@ -77,20 +77,20 @@
 - 화면: 설정 창의 "안드로이드 댓글 연결" 카드, 트레이 메뉴의 상태 줄과 켜기/끄기.
 - 꺼짐 반영: 끄면 즉시 수집 요구 해제·대기열 비움, 서버 반영이 실패하면 "중지 반영 중"으로 1초마다 재시도. 서버 쪽은 생존 기한(30초)이 지나면 폰에 "PC 도우미 연결 끊김".
 
-## 5. 폰 (`/sell`, 판매 앱 1.0.5)
+## 5. 폰 (`/sell`, 판매 앱 1.0.7)
 
 - `HelperLinkPanel`: 인증번호 입력 → `helper-pair-claim` → PC 승인 대기(2초 확인) → 연결됨. 해제 버튼.
-- 토큰: 판매 앱 1.0.5의 `HelperLinkVault`(Android Keystore AES-GCM). 브라우저·옛 앱은 탭 메모리에만(새로고침하면 다시 연결).
+- 토큰: 판매 앱 1.0.7의 `HelperLinkVault`(Android Keystore AES-GCM). 브라우저·옛 앱은 탭 메모리에만(새로고침하면 다시 연결).
 - `HelperCommentStream`: 판매 시작 후 `helper-attach`, 1.5초마다 `helper-pull`(hasMore면 바로 다음 페이지), 멈춤·회차 변경 뒤 늦은 응답 버림, 판매 멈춤 때 `helper-detach`(폰 승인 유지).
 - 상태 줄: `PC 댓글 ● 받는 중 / 방송 시작 대기 / PC 도우미 연결 끊김 / 댓글 연결이 꺼져 있습니다` (댓글 없음과 끊김 구분).
 
 ## 6. 배포 순서와 원복
 
-1. DB: `202611030001_helper_android_link.sql` 적용(추가 전용, 재실행 안전).
+1. DB: `202611030002_helper_android_link.sql` 적용(추가 전용, 재실행 안전).
 2. `sales-api` 배포(새 액션만 추가, 기존 액션 동작 동일. `touch-run` 설정에 `commentSource` 필드만 추가).
 3. 도우미 1.4.0 빌드·GitHub 릴리스 업로드(`comment-helper-v1.4.0`). 웹의 다운로드 링크가 이 버전을 가리키므로 **릴리스를 먼저 올리고 웹을 합친다**.
 4. 웹 배포(`/helper/register`, 폰 판매 설정의 댓글 받기 선택).
-5. 판매 앱 1.0.5 빌드(토큰을 Keystore에 보관). 옛 앱도 웹 화면으로 쓸 수 있지만 토큰을 기억하지 못한다.
+5. 판매 앱 1.0.7 빌드(토큰을 Keystore에 보관). 옛 앱도 웹 화면으로 쓸 수 있지만 토큰을 기억하지 못한다.
 
 원복: 웹·도우미를 이전 버전으로 되돌리면 새 경로는 쓰이지 않는다. DB 원복 SQL은 마이그레이션 파일 끝 주석에 있다(기존 테이블은 건드리지 않음).
 

@@ -125,6 +125,18 @@ export class HelperCommentStream {
     this.status({ state: 'stopped' });
   }
 
+  /** "댓글 재연결": 기다리던 확인을 버리고 회차에 다시 붙어 바로 받는다. 받은 위치(cursor)는 그대로라 같은 댓글이 두 번 오지 않는다. */
+  reconnect() {
+    if (this.stopped) return;
+    this.epoch += 1;
+    if (this.timer) (this.o.clearTimer || ((t: unknown) => clearTimeout(t as ReturnType<typeof setTimeout>)))(this.timer);
+    this.timer = null;
+    this.attached = false;
+    this.failures = 0;
+    this.status({ state: 'connecting' });
+    this.schedule(0);
+  }
+
   /** 판매 회차를 도우미 전달에 연결한다(판매 시작·이어서 판매 때 1회, 끊겼다 돌아오면 다시). */
   private async attach(token: string) {
     await this.o.api.call('helper-attach', { linkToken: token, sessionId: this.o.sessionId, producerId: this.o.producerId });

@@ -54,7 +54,7 @@ export const TouchNumberBar: React.FC<{
 
 const printSummary = (rows: TouchSale[]) =>
   rows.every((s) => s.printStatus === 'PRINTED')
-    ? '전표 출력됨'
+    ? '전표O'
     : rows.some((s) => s.printStatus === 'FAILED')
       ? '전표 확인 필요'
       : '전표 대기';

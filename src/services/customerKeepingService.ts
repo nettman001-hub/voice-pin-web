@@ -11,6 +11,30 @@ const getStorageKey = (workspaceId?: string | null): string => {
 
 export function createCustomerKeepingService(remoteWorkspaceService = productionRemote, localStorage: Storage = globalThis.localStorage) {
 return {
+  /** Add one sale without replacing the customer's other kept items. Remote failures must surface. */
+  async keepSale(sale: Pick<SaleRecord, 'id' | 'sessionId' | 'buyerNickname' | 'buyerId' | 'amount' | 'productName'>,
+    sessionCode: string, workspaceId: string): Promise<CustomerKeepingRecord> {
+    const remote = await remoteWorkspaceService.fetchWorkspaceSettings<CustomerKeepingRecord[]>(workspaceId, 'customer_keeping_records');
+    const all = Array.isArray(remote) ? remote : this.getAllRecords(workspaceId);
+    const existingSale = all.find(r => r.status === 'KEPT' && r.saleIds.includes(sale.id));
+    if (existingSale) return existingSale;
+    const index = all.findIndex(r => r.status === 'KEPT' && r.sessionId === sale.sessionId &&
+      (r.buyerId ? r.buyerId === sale.buyerId : r.buyerNickname === sale.buyerNickname));
+    const prior = index >= 0 ? all[index] : null;
+    const record: CustomerKeepingRecord = {
+      ...(prior || {}), id: prior?.id || `keep_${crypto.randomUUID()}`,
+      buyerId: sale.buyerId, buyerNickname: sale.buyerNickname,
+      sessionId: sale.sessionId, sessionCode,
+      saleIds: [...(prior?.saleIds || []), sale.id],
+      totalAmount: (prior?.totalAmount || 0) + sale.amount,
+      productNames: [...(prior?.productNames || []), sale.productName || '상품'],
+      status: 'KEPT', keptAt: new Date().toISOString(),
+    };
+    if (index >= 0) all[index] = record; else all.unshift(record);
+    await remoteWorkspaceService.saveWorkspaceSettings(workspaceId, 'customer_keeping_records', all);
+    try { localStorage.setItem(getStorageKey(workspaceId), JSON.stringify(all)); } catch { /* Remote save succeeded. */ }
+    return record;
+  },
   /**
    * 로컬 스토리지에서 모든 키핑 기록을 불러옵니다.
    */
