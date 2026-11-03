@@ -41,6 +41,10 @@ class AndroidLinkManager {
     };
     this.creds = null;
     this.desiredEnabled = false;
+    // 켜짐/꺼짐은 PC와 폰(판매 시작·종료) 둘 다 바꾼다. 나중에 바뀐 쪽이 이긴다.
+    // knownEnabledVersion: 마지막으로 맞춘 서버 버전. enabledDirty: PC에서 바꿨는데 아직 서버에 못 올린 상태.
+    this.knownEnabledVersion = null;
+    this.enabledDirty = false;
     this.s = {
       registered: false,
       workspaceName: '',
@@ -60,6 +64,7 @@ class AndroidLinkManager {
       lastError: '',
       stopping: false,
       keyReady: false,
+      enabledBy: '',
       collector: { state: 'idle', username: '', message: '', lastCommentAt: null },
     };
     this.heartbeatTimer = null;
@@ -106,6 +111,8 @@ class AndroidLinkManager {
     this.started = true;
     const saved = this.o.store.load() || {};
     this.desiredEnabled = saved.enabled === true;
+    this.knownEnabledVersion = Number.isInteger(saved.enabledVersion) ? saved.enabledVersion : null;
+    this.enabledDirty = saved.enabledDirty === true;
     if (saved.deviceToken) {
       this.creds = { deviceToken: saved.deviceToken, deviceId: saved.deviceId };
       this.s.registered = true;
@@ -129,6 +136,8 @@ class AndroidLinkManager {
   persist() {
     const result = this.o.store.save({
       enabled: this.desiredEnabled,
+      enabledVersion: this.knownEnabledVersion ?? undefined,
+      enabledDirty: this.enabledDirty || undefined,
       deviceToken: this.creds ? this.creds.deviceToken : undefined,
       deviceId: this.creds ? this.creds.deviceId : undefined,
       workspaceName: this.s.workspaceName,
@@ -142,7 +151,10 @@ class AndroidLinkManager {
   deliveryState() {
     const s = this.s;
     if (!s.registered) return { key: 'unregistered', label: '판매자 계정 미등록' };
-    if (!this.desiredEnabled) return s.stopping ? { key: 'stopping', label: '중지 반영 중' } : { key: 'off', label: '꺼짐' };
+    if (!this.desiredEnabled) {
+      if (s.stopping) return { key: 'stopping', label: '중지 반영 중' };
+      return { key: 'off', label: s.link ? '꺼짐 · 폰에서 판매를 시작하면 켜집니다' : '꺼짐' };
+    }
     if (!s.online) return { key: 'offline', label: '서버 연결 끊김 · 다시 연결 중' };
     if (!s.serverEnabled) return { key: 'starting', label: '켜는 중' };
     if (!s.link) return { key: 'no-phone', label: '연결된 폰 없음' };
@@ -220,13 +232,21 @@ class AndroidLinkManager {
   async heartbeat() {
     if (!this.creds) return;
     try {
-      if (this.s.serverEnabled !== this.desiredEnabled && this.s.online) await this.syncEnabled();
+      if (this.enabledDirty && this.s.online) await this.syncEnabled();
       const r = await this.api('helper-heartbeat', { state: this.collectorState() });
       this.s.online = true;
       this.s.lastHeartbeatAt = new Date(this.o.now()).toISOString();
       if (this.s.lastError && !this.s.lastError.startsWith('대기열')) this.s.lastError = '';
       this.apply(r);
-      if (r.enabled !== this.desiredEnabled) await this.syncEnabled();
+      if (!Number.isInteger(r.enabledVersion)) {
+        // 옛 서버: PC 설정이 기준.
+        if (r.enabled !== this.desiredEnabled) await this.syncEnabled();
+      } else if (this.enabledDirty) {
+        await this.syncEnabled();
+      } else if (r.enabledVersion !== this.knownEnabledVersion) {
+        // 폰에서 판매를 시작·종료해 서버 값이 바뀌었다: 그 값을 따른다.
+        this.adoptServerEnabled(r.enabled === true, r.enabledVersion, r.enabledBy);
+      }
     } catch (e) {
       this.onApiError(e, 'heartbeat');
     } finally {
@@ -263,6 +283,29 @@ class AndroidLinkManager {
     this.s.serverEnabled = r.enabled === true;
     this.s.generation = r.generation || this.s.generation;
     if (!want) this.s.stopping = false;
+    if (want === this.desiredEnabled) {
+      this.enabledDirty = false;
+      if (Number.isInteger(r.enabledVersion)) this.knownEnabledVersion = r.enabledVersion;
+      if (r.enabledBy) this.s.enabledBy = r.enabledBy;
+      this.persist();
+    }
+    this.updateDemand();
+  }
+
+  /** 서버(폰의 판매 시작·종료)가 바꾼 켜짐/꺼짐을 PC에 반영한다. */
+  adoptServerEnabled(enabled, version, by) {
+    this.knownEnabledVersion = version;
+    this.s.enabledBy = by || '';
+    if (enabled !== this.desiredEnabled) {
+      this.desiredEnabled = enabled;
+      this.o.log(enabled ? '폰에서 판매를 시작해 안드로이드 댓글 연결을 켭니다.' : '폰에서 판매를 종료해 안드로이드 댓글 연결을 끕니다.');
+      if (!enabled) {
+        this.s.stopping = false;
+        this.setDemand(null);
+        this.o.outbox.clear('폰에서 판매를 종료했습니다.');
+      }
+    }
+    this.persist();
     this.updateDemand();
   }
 
@@ -397,6 +440,8 @@ class AndroidLinkManager {
   // ---------------------------------------------------------------- 사용자 조작
   async setEnabled(enabled) {
     this.desiredEnabled = Boolean(enabled);
+    this.enabledDirty = true;
+    this.s.enabledBy = 'HELPER';
     this.persist();
     if (!this.desiredEnabled) {
       // 로컬 효과는 즉시: 새 댓글 보관과 수집 요청을 멈춘다. 서버 반영은 재시도한다.

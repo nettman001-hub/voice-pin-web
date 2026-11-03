@@ -234,6 +234,34 @@ test('helper link manager end to end: register, pair, deliver, block network, sw
     const s2pull = await server.user(ownerAuth, { action: 'helper-pull', linkToken, sessionId: s2, after: 0 });
     assert.equal(s2pull.body.data.comments.length, 0);
 
+    // 9b. 폰 판매 종료 → PC 도우미 꺼짐, 폰 판매 시작 → 켜짐. PC에서 바꾸면 PC가 이긴다.
+    assert.equal(again.manager.snapshot().enabled, true);
+    assert.equal((await server.user(ownerAuth, { action: 'helper-detach', linkToken, sessionId: s2, producerId: p2 })).status, 200);
+    await again.manager.heartbeat();
+    assert.equal(again.manager.snapshot().enabled, false, 'phone sale stop turns the helper off');
+    assert.equal(again.manager.snapshot().delivery.key, 'off');
+    assert.equal(again.posts.filter((p) => p.type === 'android:demand').at(-1).username, null);
+    assert.equal(again.store.load().enabled, false, 'off survives a helper restart');
+    await again.manager.heartbeat();
+    assert.equal(again.manager.snapshot().enabled, false, 'stays off (no fight with the server)');
+    assert.equal((await server.user(ownerAuth, { action: 'helper-attach', linkToken, sessionId: s2, producerId: p2, start: true })).status, 200);
+    await again.manager.heartbeat();
+    assert.equal(again.manager.snapshot().enabled, true, 'phone sale start turns the helper on');
+    assert.equal(again.manager.snapshot().enabledBy, 'PHONE');
+    await new Promise((r) => setImmediate(r));
+    await again.manager.heartbeat();
+    assert.equal(again.posts.filter((p) => p.type === 'android:demand').at(-1).username, 'flower');
+    await again.manager.setEnabled(false);
+    await again.manager.heartbeat();
+    await again.manager.heartbeat();
+    assert.equal(again.manager.snapshot().enabled, false, 'PC switch wins until the next phone start/stop');
+    assert.equal((await pull()).body.data.enabled, false);
+    // 재연결(start 없음)은 PC에서 끈 것을 되돌리지 않는다.
+    assert.equal((await server.user(ownerAuth, { action: 'helper-attach', linkToken, sessionId: s2, producerId: p2 })).status, 200);
+    await again.manager.heartbeat();
+    assert.equal(again.manager.snapshot().enabled, false);
+    await again.manager.setEnabled(true);
+
     // 10. 폰 해제 → 수집 요청 해제. 등록 해제 → 저장된 토큰 삭제.
     await again.manager.unlink(again.manager.snapshot().link.id);
     await again.manager.heartbeat();

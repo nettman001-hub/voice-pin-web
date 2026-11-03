@@ -89,6 +89,8 @@ export class HelperCommentStream {
   private cursor: number | null = null;
   private failures = 0;
   private attached = false;
+  /** 판매 시작 직후 첫 연결: 서버가 PC 도우미 댓글 연결을 켠다. 재연결·자동 재부착은 켜지 않는다. */
+  private startPending = false;
   private o: Required<Pick<HelperCommentStreamOptions, 'intervalMs' | 'tail'>> & HelperCommentStreamOptions;
   private lastStatus = '';
 
@@ -113,6 +115,8 @@ export class HelperCommentStream {
     if (!this.stopped) return;
     this.stopped = false;
     this.epoch += 1;
+    this.startPending = true;
+    this.attached = false;
     this.status({ state: 'connecting' });
     this.schedule(0);
   }
@@ -132,15 +136,24 @@ export class HelperCommentStream {
     if (this.timer) (this.o.clearTimer || ((t: unknown) => clearTimeout(t as ReturnType<typeof setTimeout>)))(this.timer);
     this.timer = null;
     this.attached = false;
+    // 판매자가 직접 누른 "댓글 재연결"은 댓글을 받겠다는 뜻이라 꺼진 PC 도우미도 켠다(자동 재부착은 켜지 않음).
+    this.startPending = true;
     this.failures = 0;
     this.status({ state: 'connecting' });
     this.schedule(0);
   }
 
-  /** 판매 회차를 도우미 전달에 연결한다(판매 시작·이어서 판매 때 1회, 끊겼다 돌아오면 다시). */
+  /** 판매 회차를 도우미 전달에 연결한다(판매 시작·이어서 판매 때 1회, 끊겼다 돌아오면 다시). 판매 시작의 첫 연결은 PC 도우미 댓글 연결도 켠다. */
   private async attach(token: string) {
-    await this.o.api.call('helper-attach', { linkToken: token, sessionId: this.o.sessionId, producerId: this.o.producerId });
+    const start = this.startPending;
+    await this.o.api.call('helper-attach', {
+      linkToken: token,
+      sessionId: this.o.sessionId,
+      producerId: this.o.producerId,
+      ...(start ? { start: true } : {}),
+    });
     this.attached = true;
+    this.startPending = false;
   }
 
   async detach() {

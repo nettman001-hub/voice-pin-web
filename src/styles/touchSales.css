@@ -1180,6 +1180,7 @@
 .touch-print-target {
   display: grid;
   gap: 8px;
+  min-width: 0;
   margin: 12px 0;
   padding: 12px;
   border: 1px solid #d8e2ef;
@@ -1257,10 +1258,21 @@
   gap: 6px;
   margin-top: 6px;
 }
+/* "댓글 받기" 칸의 라디오용 가로 정렬(.touch-print-target label)을 받지 않고 안내 글 아래에 입력칸을 둔다. */
+.touch-helper-link .touch-helper-code-label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  min-height: 0;
+}
 .touch-helper-code {
   display: flex;
   gap: 8px;
   margin-top: 4px;
+  min-width: 0;
+}
+.touch-helper-code button {
+  flex-shrink: 0;
 }
 .touch-helper-code input {
   flex: 1;

@@ -41,6 +41,13 @@
 - push는 회차별 advisory lock으로 직렬화해서 cursor가 커밋 순서와 같다(늦게 커밋된 작은 cursor 누락 없음).
 - 판매확정(`voicecap_commit_touch_sale`)은 같은 live_comments 행을 그대로 쓴다(시험으로 확인). 닉네임·uniqueId·실제 사용자 ID는 feed에 따로 보존한다.
 
+### 2-1. 폰 판매 시작/종료가 켜짐/꺼짐을 바꾼다 (`202611030004_helper_phone_controls_delivery.sql`, 도우미 1.4.1)
+
+- 연결된 폰에서 판매를 시작하면(`helper-attach` + `start:true`) 도우미 댓글 연결이 켜지고, 판매를 종료하면(`helper-detach`, 같은 producer일 때만) 꺼진다.
+- 폰의 "댓글 재연결" 버튼도 켠다(판매자가 직접 누름). 네트워크가 끊겼다 돌아올 때의 자동 재부착(`start` 없음)은 켜지 않는다. PC에서 끈 것을 몰래 되돌리지 않기 위해서다.
+- `helper_delivery.enabled_version`이 켜짐/꺼짐이 바뀔 때마다 오르고 `enabled_by`(PHONE/HELPER)를 남긴다. 나중에 바뀐 쪽이 이긴다.
+- 도우미 1.4.1은 heartbeat(10초)에서 `enabledVersion`이 바뀌면 서버 값을 따르고, PC에서 바꿨지만 아직 못 올린 값이 있으면 그것을 먼저 올린다. 1.4.0은 PC 값을 계속 서버에 올려 폰 종료를 되돌리므로 1.4.1로 바꿔야 한다.
+
 ## 3. API (`sales-api`, 모두 POST `{ action, ... }`)
 
 | action | 인증 주체 | 입력 | 응답 data | 주요 오류 (재시도) |
@@ -58,7 +65,7 @@
 | `helper-comment-key` | 도우미 기기 | | `apiKey`(메모리에만) | COMMENT_KEY_MISSING |
 | `helper-pair-claim` | 로그인 판매자(폰) | `code`, `installId`, `phoneName` | `linkToken`(vcpl_…), `linkId`, `status=PENDING` | CODE_INVALID, RATE_LIMITED |
 | `helper-phone-status` | 로그인 + `linkToken` | | `linkStatus`, `helperName`, `enabled`, `helperAlive`, `collector` | LINK_NOT_ACTIVE |
-| `helper-attach` / `helper-detach` | 로그인 + `linkToken` | `sessionId`, `producerId` | `generation`, `enabled` | RUN_NOT_ACTIVE(예), LINK_NOT_ACTIVE |
+| `helper-attach` / `helper-detach` | 로그인 + `linkToken` | `sessionId`, `producerId`, `start`(판매 시작의 첫 연결이면 true) | `generation`, `enabled`, `enabledVersion` | RUN_NOT_ACTIVE(예), LINK_NOT_ACTIVE |
 | `helper-pull` | 로그인 + `linkToken` | `sessionId`, `after`(null=최근 `tail`건부터), `limit`≤1000 | `comments[]`(cursor 순), `cursor`, `hasMore`, `enabled`, `helperAlive`, `sessionActive`, `collector` | LINK_NOT_ACTIVE |
 | `helper-phone-unlink` | 로그인 + `linkToken` | | `status` | |
 
