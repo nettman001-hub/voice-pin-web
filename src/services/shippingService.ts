@@ -4,14 +4,8 @@ import { remoteWorkspaceService as productionRemote } from './remoteWorkspaceSer
 const SHIPPING_CONFIG_KEY = 'voicecap_shipping_config';
 const SHIPPING_OVERRIDES_KEY = 'voicecap_buyer_shipping_overrides';
 
-export const DEFAULT_SHIPPING_CONFIG: ShippingConfig = {
-  type: 'CONDITIONAL_FREE',
-  defaultFee: 3000,
-  freeThreshold: 50000,
-  remoteAreaFee: 3000,
-  includeKeepingInThreshold: true,
-  updatedAt: new Date().toISOString(),
-};
+import { DEFAULT_SHIPPING_CONFIG } from './shippingDefaults';
+export { DEFAULT_SHIPPING_CONFIG };
 
 const getStorageKey = (base: string, workspaceId?: string | null): string => {
   return workspaceId ? `${base}_${workspaceId}` : base;

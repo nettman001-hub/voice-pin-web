@@ -1,4 +1,5 @@
 import { invokeSalesApi } from '../productSalesApi';
+import type { ManageSummary } from './manageSummary';
 
 /**
  * 관리탭 서버 쓰기 (sales-api manage-* 액션).
@@ -68,6 +69,10 @@ export class ManageApi {
   }
   cancelInvoice(invoiceId: string) {
     return this.call('manage-invoice-cancel', { invoiceId });
+  }
+  /** 관리 홈 숫자를 서버가 세어 준다 (읽기만, operationId 없음). */
+  summary(periodDays: number) {
+    return this.invoke<ManageSummary>('manage-summary', { periodDays, workspaceId: this.workspaceId });
   }
 
   /**
