@@ -651,9 +651,9 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
             <fieldset className="touch-print-target" disabled={busy}>
               <legend>댓글 받기</legend>
               <label><input type="radio" name="phone-comment-source" value="PHONE_DIRECT" checked={commentSource === 'PHONE_DIRECT'}
-                onChange={() => setCommentSource('PHONE_DIRECT')} />이 폰이 직접</label>
+                onChange={() => { setCommentSource('PHONE_DIRECT'); write(sourceKey(workspaceId), 'PHONE_DIRECT'); }} />이 폰이 직접</label>
               <label><input type="radio" name="phone-comment-source" value="WINDOWS_HELPER" checked={commentSource === 'WINDOWS_HELPER'}
-                onChange={() => setCommentSource('WINDOWS_HELPER')} />PC 댓글도우미</label>
+                onChange={() => { setCommentSource('WINDOWS_HELPER'); write(sourceKey(workspaceId), 'WINDOWS_HELPER'); }} />PC 댓글도우미</label>
               {commentSource === 'WINDOWS_HELPER' && <HelperLinkPanel api={api} disabled={busy} onReady={setHelperReady} />}
             </fieldset>
             <p className="touch-muted">

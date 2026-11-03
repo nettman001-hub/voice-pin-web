@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { TouchSalesApi } from '../../services/touchSalesApi';
 import {
   clearHelperLink,
-  helperLinkSecure,
   phoneIdentity,
   readHelperLink,
   saveHelperLink,
@@ -167,11 +166,6 @@ export function HelperLinkPanel(props: {
             </button>
           </div>
         </label>
-      )}
-      {!helperLinkSecure() && (
-        <small className="touch-muted">
-          이 브라우저에서는 연결 정보를 저장하지 않습니다. 페이지를 새로 열면 다시 연결해야 합니다. 판매 앱을 쓰면 안전하게 기억합니다.
-        </small>
       )}
       {message && <p role="status" className="touch-muted">{message}</p>}
     </div>
