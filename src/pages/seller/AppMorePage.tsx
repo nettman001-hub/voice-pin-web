@@ -51,7 +51,7 @@ export const AppMorePage: React.FC = () => {
   const [newManage, setNewManage] = useNewManageUi();
   const manageRows: Item[] = newManage
     ? [
-        { name: '출고 (보관함·합배송)', hint: '보관 중인 상품과 결제된 새 상품을 한 번에 보냅니다', path: '/shipments', icon: Package },
+        { name: '출고 (보관함·합배송)', hint: '보관 중인 상품과 결제된 새 상품을 한 번에 보냅니다', path: '/manage/ship', icon: Package },
         { name: '판매내역', hint: '회차별 판매 목록', path: '/sales', icon: ShoppingBag },
         { name: '정산서', path: '/invoices', icon: ReceiptText },
       ]

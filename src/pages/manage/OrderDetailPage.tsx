@@ -7,6 +7,7 @@ import { useCommerce } from '../../context/CommerceContext';
 import { useManageDashboard } from '../../services/manage/useManageData';
 import { ManageApi } from '../../services/manage/manageApi';
 import { MONEY_STAGE_LABEL } from '../../services/manage/orderPipeline';
+import { GOODS_STATE_LABEL, goodsStateOf, type GoodsState } from '../../services/manage/fulfillment';
 import { formatPhone } from '../../services/manage/contactWorklist';
 import {
   INVOICE_BANK_ACCOUNT_KEY, INVOICE_FORM_ERROR_TEXT, defaultDueDate, invoiceCreateRequest, invoiceSmsBody, validateInvoiceForm,
@@ -57,6 +58,9 @@ export const OrderDetailPage: React.FC = () => {
     const ids = new Set(order.saleIds);
     return sales.filter((sale) => ids.has(sale.id)).sort((a, b) => a.recognizedAt.localeCompare(b.recognizedAt));
   }, [order, sales]);
+
+  const stateOf = (saleId: string): GoodsState =>
+    goodsStateOf(dashboard.paidSaleIds.has(saleId), dashboard.fulfillmentItems.get(saleId));
 
   const invoicesById = useMemo(() => new Map(commerce.invoices.map((invoice) => [invoice.id, invoice])), [commerce.invoices]);
   const invoice: SettlementInvoice | undefined = order?.invoiceId ? invoicesById.get(order.invoiceId) : undefined;
@@ -138,6 +142,25 @@ export const OrderDetailPage: React.FC = () => {
   };
 
   const open = invoice && ['DRAFT', 'QUEUED', 'SENT'].includes(invoice.status);
+  const readyIds = items.filter((sale) => stateOf(sale.id) === 'READY_TO_SHIP').map((sale) => sale.id);
+  const keptIds = items.filter((sale) => stateOf(sale.id) === 'KEPT').map((sale) => sale.id);
+
+  const keep = () => run('keep', async () => {
+    await api!.keep(order.buyerKey, readyIds);
+    return `${readyIds.length}개를 보관했습니다. 다음 출고 때 함께 나갑니다.`;
+  });
+  const unkeep = () => run('unkeep', async () => {
+    await api!.unkeep(keptIds);
+    return `보관을 풀었습니다. ${keptIds.length}개가 발송 대기로 돌아갔습니다.`;
+  });
+  const cancelItem = (saleId: string, label: string) => {
+    const reason = window.prompt(`${label}: 고객이 취소한 이유를 적어 주세요.`, '고객 요청');
+    if (reason === null) return;
+    return run(`cancel-item:${saleId}`, async () => {
+      await api!.cancelItems({ buyerKey: order.buyerKey, saleIds: [saleId], reason: reason.trim() || '고객 요청', cancelledBy: 'CUSTOMER' });
+      return dashboard.paidSaleIds.has(saleId) ? '취소했습니다. 입금된 상품이라 [출고 › 환불 필요]에 올렸습니다.' : '취소했습니다.';
+    });
+  };
 
   return (
     <div className="mx-auto max-w-lg space-y-3 p-3 lg:max-w-3xl">
@@ -170,10 +193,27 @@ export const OrderDetailPage: React.FC = () => {
                 <p className="truncate text-sm font-bold text-slate-900">{sale.productName || sale.productCode || '상품'}{(sale.quantity || 1) > 1 ? ` × ${sale.quantity}` : ''}</p>
                 <p className="text-[11px] text-slate-500">{new Date(sale.recognizedAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
               </div>
-              <span className="flex-shrink-0 text-sm font-black tabular-nums">{formatWon(sale.amount)}</span>
+              <div className="flex flex-shrink-0 items-center gap-2">
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{GOODS_STATE_LABEL[stateOf(sale.id)]}</span>
+                <span className="text-sm font-black tabular-nums">{formatWon(sale.amount)}</span>
+                {['UNPAID', 'READY_TO_SHIP', 'KEPT'].includes(stateOf(sale.id)) && (
+                  <button type="button" disabled={busy !== null} aria-label="고객 취소" onClick={() => cancelItem(sale.id, sale.productName || '상품')} className="h-8 rounded-lg border border-slate-200 px-2 text-[11px] font-bold text-slate-500 disabled:opacity-50">취소</button>
+                )}
+              </div>
             </li>
           ))}
         </ul>
+        {(readyIds.length > 0 || keptIds.length > 0) && (
+          <div className="flex flex-wrap gap-2 border-t border-slate-100 px-4 py-3">
+            {readyIds.length > 0 && (
+              <button type="button" disabled={busy !== null} onClick={keep} className="h-10 rounded-xl bg-slate-900 px-3 text-sm font-bold text-white disabled:opacity-50">보관하기 {readyIds.length}개 (다음에 함께 보내기)</button>
+            )}
+            {keptIds.length > 0 && (
+              <button type="button" disabled={busy !== null} onClick={unkeep} className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-bold text-slate-700 disabled:opacity-50">보관 풀기 {keptIds.length}개</button>
+            )}
+            <Link to="/manage/ship" className="inline-flex h-10 items-center text-sm font-bold text-brand-700">출고 화면</Link>
+          </div>
+        )}
       </section>
 
       <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">

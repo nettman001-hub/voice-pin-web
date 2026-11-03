@@ -94,14 +94,14 @@ export const ManageHomePage: React.FC = () => {
         <h2 className="mb-1.5 text-xs font-extrabold text-slate-500">물건 (전체 기간)</h2>
         <div className="grid grid-cols-4 gap-2">
           {[
-            { label: '발송 대기', value: goods.readyToShip },
-            { label: '보관 중', value: goods.kept },
-            { label: '출고 진행', value: goods.inProgress },
-            { label: '환불 필요', value: goods.refundNeeded, warn: goods.refundNeeded > 0 },
+            { label: '발송 대기', value: goods.readyToShip, to: '/manage/ship' },
+            { label: '보관 중', value: goods.kept, to: '/manage/ship?filter=keeping' },
+            { label: '출고 진행', value: goods.inProgress, to: '/manage/ship?filter=active' },
+            { label: '환불 필요', value: goods.refundNeeded, warn: goods.refundNeeded > 0, to: '/manage/ship?filter=refund' },
           ].map((item) => (
             <Link
               key={item.label}
-              to="/shipments"
+              to={item.to}
               className={`rounded-2xl border px-2 py-3 text-center ${
                 item.warn ? 'border-rose-300 bg-rose-50 text-rose-900' : 'border-slate-200 bg-white text-slate-900'
               }`}
@@ -161,7 +161,7 @@ export const ManageHomePage: React.FC = () => {
             ))}
           </ul>
         )}
-        <Link to="/shipments" className="mt-2 inline-flex min-h-[40px] items-center text-sm font-bold text-brand-700">
+        <Link to="/manage/ship?filter=keeping" className="mt-2 inline-flex min-h-[40px] items-center text-sm font-bold text-brand-700">
           출고(보관함·합배송)로 <ChevronRight className="h-4 w-4" />
         </Link>
       </section>

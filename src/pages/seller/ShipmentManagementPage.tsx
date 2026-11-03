@@ -10,7 +10,7 @@ import { formatSessionDisplay } from '../../utils/sessionFormatter';
 import { ShippingConfigModal } from '../../components/shipping/ShippingConfigModal';
 
 const shipmentLabels: Record<ShipmentStatus, string> = {
-  READY: '발송대기', PACKED: '포장완료', SHIPPED: '발송완료', DELIVERED: '배송완료', CANCELLED: '취소'
+  RESERVED: '출고 예약', READY: '발송대기', PACKED: '포장완료', SHIPPED: '발송완료', DELIVERED: '배송완료', CANCELLED: '취소'
 };
 
 export const ShipmentManagementPage: React.FC = () => {

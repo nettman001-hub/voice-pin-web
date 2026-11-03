@@ -51,6 +51,8 @@ export interface ManageDashboard {
   orders: ManageOrder[];
   contactBook: ContactBook;
   contactMessages: readonly ContactMessage[];
+  paidSaleIds: ReadonlySet<string>;
+  fulfillmentItems: ReadonlyMap<string, FulfillmentItemRecord>;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -83,6 +85,7 @@ export function buildManageDashboard(input: DashboardInput): ManageDashboard {
   const orders = buildOrders({
     sales: inPeriod, shippingConfig: input.shippingConfig, contactBook, invoices: input.invoices,
     getOverride: input.getOverride, keepingBuyerKeys, paidSaleIds,
+    cancelledSaleIds: new Set(input.fulfillmentItems.filter((item) => item.state === 'CANCELLED').map((item) => item.saleId)),
   });
 
   let paidAmount = 0;
@@ -134,5 +137,7 @@ export function buildManageDashboard(input: DashboardInput): ManageDashboard {
     orders,
     contactBook,
     contactMessages: input.messages,
+    paidSaleIds,
+    fulfillmentItems: items,
   };
 }
