@@ -223,8 +223,8 @@ test('touch sales keep required capture paths, recover queued operations once, a
     ).rows[0].p;
     assert.equal(correction.productName, '2번');
     assert.equal(correction.slipLine, '2번 · 블랙 M');
-    await db.exec(read('202611030001_touch_auto_product_numbers.sql'));
-    await db.exec(read('202611030001_touch_auto_product_numbers.sql'));
+    await db.exec(read('202611030003_touch_auto_product_numbers.sql'));
+    await db.exec(read('202611030003_touch_auto_product_numbers.sql'));
     const named = await commit(sale('auto-next'));
     const nameOf = async id => (await db.query('select product_name_snapshot name from sales where id=$1', [id])).rows[0].name;
     assert.equal(await nameOf(named.saleId), '3번');
