@@ -7,6 +7,8 @@ export type AndroidNative = {
   info(): string;
   printerState(): string;
   printerPick(requestId: string): void;
+  /** 판매 앱 1.0.5+: 모델 선택 지원. */
+  printerPickV2?(requestId: string): void;
   printerConnectLast(requestId: string): void;
   printerSend(requestId: string, base64: string): void;
   printerDisconnect(): void;
@@ -17,6 +19,7 @@ export type AndroidNative = {
   showSell?(): void;
   /** 단일 WebView 앱: React Router의 현재 탭을 네이티브 버튼에 표시한다. */
   setTab?(tab: 'sell' | 'manage'): void;
+  setWebNavigation?(enabled: boolean): void;
 };
 export type AndroidEvent = {
   type: string;

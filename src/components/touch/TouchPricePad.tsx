@@ -84,16 +84,10 @@ export const TouchPricePad: React.FC<Props> = ({
         </div>
         <p className="touch-amount-result">= {total.toLocaleString()}원</p>
         <p className="touch-muted">100 미만은 만원 단위 · 1.5 = 15,000원</p>
-        {input && price.error && (
-          <p role="alert" className="touch-error">
-            {price.error}
-          </p>
-        )}
-        {total > 99999999 && (
-          <p role="alert" className="touch-error">
-            총금액 범위를 확인해 주세요.
-          </p>
-        )}
+        <p className="touch-price-validation touch-error" role="status">
+          {total > 99999999 ? '총금액 범위를 확인해 주세요.'
+            : input && !/^(?:0+\.?0*|0*\.)$/.test(input) ? price.error || '' : ''}
+        </p>
       </div>
       <div className="touch-keypad-area">
         <div className="touch-price-tools">

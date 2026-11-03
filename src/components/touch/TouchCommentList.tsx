@@ -31,6 +31,8 @@ interface Props {
   /** 아무것도 고르지 않았을 때 선택 줄 자리에 보일 내용(방금 판매 칸). */
   idleFooter?: React.ReactNode;
   onOpenSold?: (key: string) => void;
+  hideSearch?: boolean;
+  navigation?: React.ReactNode;
 }
 export const TouchCommentList: React.FC<Props> = ({
   comments,
@@ -49,6 +51,8 @@ export const TouchCommentList: React.FC<Props> = ({
   footer,
   idleFooter,
   onOpenSold,
+  hideSearch = false,
+  navigation,
 }) => {
   const multi = touchModeUsesNumber(mode);
   const pickedSet = new Set(picked || []);
@@ -115,7 +119,7 @@ export const TouchCommentList: React.FC<Props> = ({
   };
   return (
     <section className="touch-selling-panel" aria-label="댓글에서 구매자 선택">
-      <div className="touch-search-bar">
+      {!hideSearch && <div className="touch-search-bar">
         <input
           aria-label="닉네임 검색"
           placeholder="⌕ 닉네임 검색"
@@ -141,7 +145,7 @@ export const TouchCommentList: React.FC<Props> = ({
         >
           구매댓글만
         </button>
-      </div>
+      </div>}
       {author && (
         <button className="touch-author-filter" onClick={() => setAuthor('')}>
           이 고객 댓글만 보는 중 · 전체 보기 ×
@@ -277,16 +281,13 @@ export const TouchCommentList: React.FC<Props> = ({
         idleFooter
       ) : (
       <footer className="touch-selection-bar">
-        <p>
-          {selected ? (
+        {selected && <p>
             <>
               <strong>선택: {selected.nickname}</strong> · “{selected.content}”
             </>
-          ) : (
-            <>🟡 깜빡이는 구매 댓글을 눌러 구매자를 고르세요</>
-          )}
-        </p>
-        <div>
+        </p>}
+        <div className={navigation ? 'touch-unified-actions' : ''}>
+          {navigation}
           <button type="button" onClick={onCancel} disabled={!selected}>
             취소
           </button>
@@ -294,7 +295,7 @@ export const TouchCommentList: React.FC<Props> = ({
             type="button"
             className="touch-primary"
             onClick={onConfirm}
-            disabled={!selected || !enabled}
+            disabled={!selected || (!enabled && !sold.has(touchCommentKey(selected)))}
           >
             확인
           </button>

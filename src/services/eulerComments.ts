@@ -1,7 +1,7 @@
 /**
  * 폰 단독 판매의 댓글 받기: Euler 클라우드 웹소켓(JSON 모드)에 폰이 직접 붙는다.
  * 연결 정보(짧은 토큰 또는 키)는 sales-api touch-comment-token에서 연결할 때마다 받고 저장하지 않는다.
- * JSON 모양은 실제 방송에서 아직 확인하지 않아 여러 모양을 받아 준다(시험 화면에 원문을 보여 준다).
+ * JSON 댓글 묶음과 문자열/숫자 형태의 방송 연결 상태를 해석한다.
  */
 export const EULER_WS_URL = 'wss://ws.eulerstream.com';
 
@@ -86,6 +86,11 @@ function chatFrom(data: any, fallbackId: string): EulerComment | null {
 }
 
 const isChatType = (type: string) => /chat/i.test(type) && !/emote|sticker/i.test(type);
+const roomState = (value: unknown) => {
+  const numeric = ['unspecified', 'connecting', 'connected', 'reconnecting', 'offline', 'ended', 'error'];
+  if (typeof value === 'number') return numeric[value] || '';
+  return str(value).toLowerCase().replace(/^room_status_state_/, '');
+};
 
 /** 한 메시지(JSON 문자열 또는 객체)에서 댓글과 방 상태를 꺼낸다. */
 export function parseEulerPayload(input: unknown, seed = Date.now()): EulerParsed {
@@ -120,7 +125,7 @@ export function parseEulerPayload(input: unknown, seed = Date.now()): EulerParse
             ? item.payload
             : item;
     if (/roomstatus|room_status/i.test(type) || (data && typeof data.state === 'string' && !type)) {
-      const state = str(data?.state);
+      const state = roomState(data?.state);
       if (state) out.roomStates.push(state);
       return;
     }
@@ -147,113 +152,195 @@ export interface EulerStreamOptions {
   /** 시험 화면용: 받은 원문 앞부분. */
   onRaw?: (text: string) => void;
   socketFactory?: (url: string) => WebSocket;
+  /** Connection metadata only: no token, URL, nickname or comment contents. */
+  onDiagnostic?: (event: { reason: string; at: number; closeCode?: number; idleMs: number }) => void;
 }
+
+export const EULER_HEALTH = { tokenTimeoutMs: 15000, connectTimeoutMs: 20000, idleTimeoutMs: 90000, roomTimeoutMs: 20000, checkEveryMs: 5000 };
 
 /** 다시 붙기: 일반 끊김은 2·4·8…최대 30초, 방송 전/종료는 15초, 토큰 만료는 새 토큰으로 바로. */
 export class EulerCommentStream {
   private socket: WebSocket | null = null;
   private stopped = true;
+  private terminal = false;
   private token: CommentToken | null = null;
   private retry = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private monitor: ReturnType<typeof setInterval> | null = null;
   private generation = 0;
   private seen = new Set<string>();
+  private phase: 'token' | 'opening' | 'open' | 'retry' | 'stopped' = 'stopped';
+  private phaseSince = 0;
+  private roomStalledAt: number | null = null;
   lastMessageAt = 0;
   private options: EulerStreamOptions;
-  constructor(options: EulerStreamOptions) {
-    this.options = options;
+  constructor(options: EulerStreamOptions) { this.options = options; }
+
+  private diagnostic(reason: string, closeCode?: number) {
+    this.options.onDiagnostic?.({ reason, closeCode, at: Date.now(), idleMs: Math.max(0, Date.now() - this.lastMessageAt) });
   }
+  private status(s: EulerStatus) { this.options.onStatus?.(s); }
+  private resume = () => { if (typeof document === 'undefined' || document.visibilityState === 'visible') this.checkHealth(); };
+  private online = () => { if (!this.stopped && !this.terminal) this.recover('NETWORK_ONLINE', 0); };
 
   start() {
     if (!this.stopped) return;
     this.stopped = false;
+    this.terminal = false;
+    this.monitor = setInterval(() => this.checkHealth(), EULER_HEALTH.checkEveryMs);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', this.online);
+      window.addEventListener('focus', this.resume);
+    }
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', this.resume);
     void this.connect();
   }
 
-  private status(s: EulerStatus) {
-    this.options.onStatus?.(s);
+  private disposeSocket() {
+    const socket = this.socket;
+    this.socket = null;
+    if (!socket) return;
+    socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
+    try { socket.close(1000); } catch { /* Closing a half-open connection may throw. */ }
+  }
+  private schedule(ms: number) {
+    if (this.stopped || this.terminal) return;
+    if (this.timer) clearTimeout(this.timer);
+    this.phase = 'retry';
+    this.timer = setTimeout(() => { this.timer = null; void this.connect(); }, ms);
+  }
+  private delay() { return Math.min(30000, 2000 * 2 ** this.retry++); }
+  private recover(reason: string, ms = this.delay(), closeCode?: number) {
+    if (this.stopped || this.terminal) return;
+    this.diagnostic(reason, closeCode);
+    this.generation++;
+    this.disposeSocket();
+    this.roomStalledAt = null;
+    this.status({ state: 'waiting', message: '댓글 연결을 다시 시도하고 있습니다.' });
+    this.schedule(ms);
   }
 
-  private schedule(ms: number) {
+  private checkHealth() {
+    if (this.stopped || this.terminal) return;
+    const age = Date.now() - this.phaseSince;
+    if (this.phase === 'token' && age >= EULER_HEALTH.tokenTimeoutMs) {
+      this.token = null;
+      this.recover('TOKEN_TIMEOUT');
+    } else if (this.phase === 'opening' && age >= EULER_HEALTH.connectTimeoutMs) {
+      this.recover('CONNECT_TIMEOUT');
+    } else if (this.phase === 'open') {
+      if (this.roomStalledAt !== null && Date.now() - this.roomStalledAt >= EULER_HEALTH.roomTimeoutMs)
+        this.recover('ROOM_STALLED');
+      else if (Date.now() - this.lastMessageAt >= EULER_HEALTH.idleTimeoutMs)
+        this.recover('NO_FRAMES');
+    }
+  }
+
+  /** Explicit repair replaces only the comment connection, preserving sales and receipts. */
+  reconnect() {
     if (this.stopped) return;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => void this.connect(), ms);
+    this.terminal = false;
+    this.token = null;
+    this.retry = 0;
+    this.recover('MANUAL_RECONNECT', 0);
   }
 
   private async connect() {
-    if (this.stopped) return;
+    if (this.stopped || this.terminal) return;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
     const generation = ++this.generation;
+    this.disposeSocket();
+    this.roomStalledAt = null;
+    this.phase = 'token';
+    this.phaseSince = Date.now();
     this.status({ state: 'connecting' });
     try {
-      if (!this.token || (this.token.expiresAt && this.token.expiresAt - Date.now() < 60000))
-        this.token = await this.options.getToken();
-    } catch (e) {
-      if (generation !== this.generation) return;
-      const code = (e as any)?.code;
-      this.status({ state: 'error', message: (e as Error).message || '댓글 연결 정보를 받지 못했습니다.' });
-      if (code === 'TIKTOK_ID_MISSING' || code === 'COMMENT_KEY_MISSING') return;
-      this.schedule(Math.min(30000, 2000 * 2 ** this.retry++));
-      return;
-    }
-    if (generation !== this.generation || this.stopped) return;
-    const url = eulerSocketUrl(this.token);
-    const socket = this.options.socketFactory ? this.options.socketFactory(url) : new WebSocket(url);
-    this.socket = socket;
-    socket.onopen = () => {
-      if (generation !== this.generation) return;
-      this.retry = 0;
-      this.status({ state: 'connected' });
-    };
-    socket.onmessage = (event) => {
-      if (generation !== this.generation) return;
-      this.lastMessageAt = Date.now();
-      if (typeof event.data !== 'string') {
-        this.options.onRaw?.(`(이진 데이터 ${(event.data as Blob)?.size ?? '?'}B)`);
-        return;
-      }
-      this.options.onRaw?.(event.data.slice(0, 600));
-      const parsed = parseEulerPayload(event.data);
-      const fresh = parsed.comments.filter((c) => {
-        if (this.seen.has(c.id)) return false;
-        this.seen.add(c.id);
-        return true;
-      });
-      while (this.seen.size > 5000) this.seen.delete(this.seen.values().next().value!);
-      if (fresh.length) this.options.onComments(fresh);
-      const last = parsed.roomStates[parsed.roomStates.length - 1];
-      if (last === 'connected') this.status({ state: 'connected' });
-      else if (last === 'offline' || last === 'ended')
-        this.status({ state: 'waiting', message: last === 'ended' ? '방송이 끝났습니다' : '아직 방송 중이 아닙니다' });
-    };
-    socket.onclose = (event) => {
+      let token = this.token;
+      if (!token || (token.expiresAt && token.expiresAt - Date.now() < 60000)) token = await this.options.getToken();
       if (generation !== this.generation || this.stopped) return;
-      this.socket = null;
-      const info = eulerCloseInfo(event.code);
-      if (info.action === 'stop') {
-        this.status({ state: 'error', message: info.message });
-        return;
-      }
-      if (info.action === 'token') this.token = null;
-      if (info.action === 'later') {
-        this.status({ state: 'waiting', message: info.message });
-        this.schedule(15000);
-        return;
-      }
-      this.status({ state: 'connecting' });
-      this.schedule(info.action === 'token' ? 500 : Math.min(30000, 2000 * 2 ** this.retry++));
-    };
-    socket.onerror = () => {};
+      this.token = token;
+      this.phase = 'opening';
+      this.phaseSince = Date.now();
+      const url = eulerSocketUrl(token);
+      const socket = this.options.socketFactory ? this.options.socketFactory(url) : new WebSocket(url);
+      this.socket = socket;
+      socket.onopen = () => {
+        if (generation !== this.generation || this.stopped) return;
+        this.retry = 0;
+        this.phase = 'open';
+        this.phaseSince = this.lastMessageAt = Date.now();
+        this.diagnostic('OPEN');
+        this.status({ state: 'connected' });
+      };
+      socket.onmessage = (event) => {
+        if (generation !== this.generation || this.stopped) return;
+        this.lastMessageAt = Date.now();
+        if (typeof event.data !== 'string') {
+          this.options.onRaw?.(`(이진 데이터 ${(event.data as Blob)?.size ?? '?'}B)`);
+          return;
+        }
+        this.options.onRaw?.(event.data.slice(0, 600));
+        const parsed = parseEulerPayload(event.data);
+        const fresh = parsed.comments.filter(c => {
+          if (this.seen.has(c.id)) return false;
+          this.seen.add(c.id);
+          return true;
+        });
+        while (this.seen.size > 5000) this.seen.delete(this.seen.values().next().value!);
+        if (fresh.length) this.options.onComments(fresh);
+        const last = parsed.roomStates[parsed.roomStates.length - 1];
+        if (last === 'connected' || fresh.length) {
+          this.roomStalledAt = null;
+          this.status({ state: 'connected' });
+        } else if (last && ['connecting', 'reconnecting', 'disconnected', 'error', 'offline', 'ended'].includes(last)) {
+          // Repeated room-status frames must not indefinitely reset recovery.
+          this.roomStalledAt ??= Date.now();
+          this.status({ state: 'waiting', message: last === 'ended' ? '방송이 끝났습니다' : last === 'offline' ? '아직 방송 중이 아닙니다' : '댓글 연결을 복구하고 있습니다.' });
+        }
+      };
+      socket.onclose = (event) => {
+        if (generation !== this.generation || this.stopped) return;
+        const info = eulerCloseInfo(event.code);
+        this.diagnostic('CLOSE', event.code);
+        if (info.action === 'stop') {
+          this.terminal = true;
+          this.generation++;
+          this.disposeSocket();
+          this.status({ state: 'error', message: info.message });
+          return;
+        }
+        if (info.action === 'token') this.token = null;
+        this.recover('CLOSE_RETRY', info.action === 'later' ? 15000 : info.action === 'token' ? 500 : this.delay(), event.code);
+      };
+      // Some WebViews report an error without ever delivering a close event.
+      socket.onerror = () => { if (generation === this.generation && !this.stopped) this.recover('SOCKET_ERROR'); };
+    } catch (e) {
+      if (generation !== this.generation || this.stopped) return;
+      const code = (e as { code?: string })?.code;
+      if (code === 'TIKTOK_ID_MISSING' || code === 'COMMENT_KEY_MISSING') this.terminal = true;
+      this.status({ state: 'error', message: (e as Error).message || '댓글 연결 정보를 받지 못했습니다.' });
+      this.diagnostic('CONNECT_ERROR');
+      this.generation++;
+      this.disposeSocket();
+      if (!this.terminal) this.schedule(this.delay());
+    }
   }
 
   stop() {
     this.stopped = true;
     this.generation++;
     if (this.timer) clearTimeout(this.timer);
+    if (this.monitor) clearInterval(this.monitor);
     this.timer = null;
-    try {
-      this.socket?.close(1000);
-    } catch {}
-    this.socket = null;
+    this.monitor = null;
+    this.phase = 'stopped';
+    this.disposeSocket();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', this.online);
+      window.removeEventListener('focus', this.resume);
+    }
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.resume);
     this.status({ state: 'stopped' });
   }
 }
