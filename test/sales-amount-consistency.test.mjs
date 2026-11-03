@@ -7,6 +7,7 @@ import ts from 'typescript';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import * as billableSales from '../src/services/billableSales.ts';
+import * as shippingDefaults from '../src/services/shippingDefaults.ts';
 import * as serverRejectedSale from '../src/services/serverRejectedSale.ts';
 import * as salesExtractor from '../src/services/salesExtractor.ts';
 import * as saleRowHistory from '../src/services/saleRowHistory.ts';
@@ -44,6 +45,7 @@ function loadSource(path, dependencies) {
 function fixture(records, configOverrides = {}) {
   const { shippingService, DEFAULT_SHIPPING_CONFIG } = loadSource('../src/services/shippingService.ts', {
     './remoteWorkspaceService': { remoteWorkspaceService: {} },
+    './shippingDefaults': shippingDefaults,
   });
   const config = { ...DEFAULT_SHIPPING_CONFIG, ...configOverrides };
   shippingService.getConfig = () => config;

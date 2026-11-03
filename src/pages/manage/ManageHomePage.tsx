@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ChevronRight, Package, RefreshCw } from 'lucide-react';
-import { useManageDashboard } from '../../services/manage/useManageData';
+import { useManageDashboard, useManageHomeSummary } from '../../services/manage/useManageData';
 import { formatWon } from '../../services/appShellState';
 import type { MoneyStage } from '../../services/manage/orderPipeline';
 
@@ -19,11 +19,15 @@ const STAGE_TONE: Record<MoneyStage, string> = {
   PAID: 'border-emerald-200 bg-emerald-50 text-emerald-900',
 };
 
-/** 관리 홈: 숫자 3개, 돈 4칸(연락처 연결 맨 앞), 물건 4칸, 할 일, 보관 카드. 읽기만 한다. */
+/** 관리 홈: 숫자 3개, 돈 4칸(연락처 연결 맨 앞), 물건 4칸, 할 일, 보관 카드. 읽기만 한다. 숫자는 서버 요약을 먼저 쓴다. */
 export const ManageHomePage: React.FC = () => {
   const [periodDays, setPeriodDays] = useState(7);
   const [reloadKey, setReloadKey] = useState(0);
-  const { dashboard, server } = useManageDashboard(periodDays, reloadKey);
+  const { dashboard: local, server } = useManageDashboard(periodDays, reloadKey);
+  const { summary } = useManageHomeSummary(periodDays, reloadKey);
+  // 서버 요약이 있으면 그것을, 없으면(오프라인 등) 폰이 센 값을 보여 준다
+  const dashboard = summary || local;
+  const alertDays = summary?.alertDays || server.alertDays;
   const { goods, keeping } = dashboard;
 
   return (
@@ -54,7 +58,7 @@ export const ManageHomePage: React.FC = () => {
         </button>
       </div>
 
-      {!server.serverReady && server.loadedAt && (
+      {!summary && !server.serverReady && server.loadedAt && (
         <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
           연락처·보관 기록을 서버에서 읽지 못했습니다. 인터넷 연결을 확인해 주세요.
         </div>
@@ -141,7 +145,7 @@ export const ManageHomePage: React.FC = () => {
             <Package className="h-4 w-4 text-brand-600" /> 보관함
           </h2>
           <Link to="/manage/settings/keeping" className="text-xs font-bold text-slate-500 underline">
-            알림 {server.alertDays.warnDays}일 · {server.alertDays.alertDays}일
+            알림 {alertDays.warnDays}일 · {alertDays.alertDays}일
           </Link>
         </div>
         <p className="mt-1 text-sm text-slate-700">
