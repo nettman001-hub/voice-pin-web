@@ -16,7 +16,7 @@ import { appToast } from '../../services/appDownload';
 export const ContactLinkPage: React.FC = () => {
   const { workspaceId } = useAuth();
   const api = useMemo(() => (workspaceId ? new ManageApi(workspaceId) : null), [workspaceId]);
-  const [periodDays, setPeriodDays] = useState(30);
+  const [periodDays, setPeriodDays] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
   const { dashboard, server } = useManageDashboard(periodDays, reloadKey);
   const [busy, setBusy] = useState<string | null>(null);
@@ -108,32 +108,36 @@ export const ContactLinkPage: React.FC = () => {
         <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-800">{error}</div>
       )}
 
-      {list.toSave.length > 0 && (
-        <section className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-          <h2 className="text-sm font-extrabold text-emerald-900">문자로 찾은 연결 {list.toSave.length}건</h2>
-          <p className="mt-0.5 text-xs text-emerald-800">문자에 닉네임이 그대로 있었습니다. 저장하면 다음 회차에도 자동으로 연결됩니다.</p>
-          <ul className="mt-2 space-y-1 text-sm text-emerald-950">
-            {list.toSave.map((contact) => (
-              <li key={contact.buyerKey} className="flex justify-between gap-2">
-                <span className="truncate font-bold">{contact.nickname}</span>
-                <span className="tabular-nums">{formatPhone(contact.phone || '')}</span>
-              </li>
-            ))}
-          </ul>
-          <button
-            type="button"
-            disabled={!!busy}
-            onClick={() => void run('save-all', async () => {
-              for (const contact of list.toSave) {
-                await api!.linkContact({ phone: contact.phone!, buyerKey: contact.buyerKey, nickname: contact.nickname, source: 'MESSAGE' });
-              }
-            }, `${list.toSave.length}건을 저장했습니다.`)}
-            className="mt-2 h-11 w-full rounded-xl bg-emerald-600 text-sm font-bold text-white disabled:opacity-50"
-          >
-            모두 저장
-          </button>
-        </section>
-      )}
+      <section className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+        <h2 className="text-sm font-extrabold text-emerald-900">수신OK 새구매자 {list.toSave.length}건</h2>
+        {list.toSave.length === 0 ? (
+          <p className="mt-1 text-sm text-emerald-800">새 문자로 확인된 구매자가 없습니다.</p>
+        ) : (
+          <>
+            <p className="mt-0.5 text-xs text-emerald-800">문자에 닉네임이 그대로 있었습니다. 저장하면 다음 회차에도 자동으로 연결됩니다.</p>
+            <ul className="mt-2 space-y-1 text-sm text-emerald-950">
+              {list.toSave.map((contact) => (
+                <li key={contact.buyerKey} className="flex justify-between gap-2">
+                  <span className="truncate font-bold">{contact.nickname}</span>
+                  <span className="tabular-nums">{formatPhone(contact.phone || '')}</span>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              disabled={!!busy}
+              onClick={() => void run('save-all', async () => {
+                for (const contact of list.toSave) {
+                  await api!.linkContact({ phone: contact.phone!, buyerKey: contact.buyerKey, nickname: contact.nickname, source: 'MESSAGE' });
+                }
+              }, `${list.toSave.length}건을 저장했습니다.`)}
+              className="mt-2 h-11 w-full rounded-xl bg-emerald-600 text-sm font-bold text-white disabled:opacity-50"
+            >
+              모두 저장
+            </button>
+          </>
+        )}
+      </section>
 
       <section className="overflow-hidden rounded-2xl border border-amber-200 bg-white">
         <h2 className="border-b border-amber-100 bg-amber-50 px-4 py-2.5 text-sm font-extrabold text-amber-900">
@@ -184,7 +188,7 @@ export const ContactLinkPage: React.FC = () => {
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5">
-          <h2 className="text-sm font-extrabold text-slate-900">연락처 없음 {list.missing.length}</h2>
+          <h2 className="text-sm font-extrabold text-slate-900">연락 대기 {list.missing.length}</h2>
           {list.missing.length > 0 && (
             <button type="button" onClick={() => void copyCallList()} className="flex min-h-[36px] items-center gap-1 text-xs font-bold text-brand-700">
               <Copy className="h-3.5 w-3.5" /> 불러 줄 명단 복사
@@ -230,7 +234,7 @@ export const ContactLinkPage: React.FC = () => {
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <h2 className="border-b border-slate-100 px-4 py-2.5 text-sm font-extrabold text-slate-900">누군지 모르는 문자 {list.unknown.length}</h2>
+        <h2 className="border-b border-slate-100 px-4 py-2.5 text-sm font-extrabold text-slate-900">발신자 확인안됨 {list.unknown.length}</h2>
         {list.unknown.length === 0 ? (
           <p className="px-4 py-3 text-sm text-slate-500">모르는 번호의 문자가 없습니다.</p>
         ) : (
@@ -276,7 +280,7 @@ export const ContactLinkPage: React.FC = () => {
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <h2 className="border-b border-slate-100 px-4 py-2.5 text-sm font-extrabold text-slate-900">연결됨 {list.linked.length}</h2>
+        <h2 className="border-b border-slate-100 px-4 py-2.5 text-sm font-extrabold text-slate-900">수신OK 기존구매자 {list.linked.length}</h2>
         {list.linked.length === 0 ? (
           <p className="px-4 py-3 text-sm text-slate-500">아직 연결된 구매자가 없습니다.</p>
         ) : (

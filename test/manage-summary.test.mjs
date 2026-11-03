@@ -57,7 +57,7 @@ test('server summary = the same numbers the phone computes, for every period', (
     const input = inputFor(periodDays);
     const local = buildManageDashboard(input);
     const summary = buildManageSummary(input);
-    for (const field of ['salesAmount', 'paidAmount', 'unpaidAmount', 'orderCount', 'stages', 'goods', 'todos', 'keeping']) {
+    for (const field of ['salesAmount', 'paidAmount', 'unpaidAmount', 'orderCount', 'sessionCount', 'buyerCount', 'stages', 'goods', 'todos', 'keeping']) {
       assert.deepEqual(summary[field], local[field], `${field} @ ${periodDays}일`);
     }
     assert.equal(summary.periodDays, periodDays);
@@ -71,9 +71,21 @@ test('server summary = the same numbers the phone computes, for every period', (
 test('summary counts: 보류·NOT_SALE excluded, kept item counted, unmatched payment is a to-do', () => {
   const summary = buildManageSummary(inputFor(1));
   assert.equal(summary.salesAmount, 65000); // s1+s2+s3 (보류 s4, NOT_SALE s6 제외, s5 는 기간 밖)
+  assert.equal(summary.orderCount, 2);
+  assert.equal(summary.sessionCount, 1);
+  assert.equal(summary.buyerCount, 2);
   assert.equal(summary.goods.kept, 1);
   assert.equal(summary.keeping.items, 1);
   assert.ok(summary.todos.some((todo) => todo.kind === 'PAYMENT_REVIEW' && todo.count === 1));
+});
+
+test('repeat buyer across sessions counts once as a buyer and twice as orders', () => {
+  const input = inputFor(0);
+  input.sales.push({ ...input.sales[0], id: 's7', sessionId: 'r2' });
+  const summary = buildManageSummary(input);
+  assert.equal(summary.orderCount, 4);
+  assert.equal(summary.sessionCount, 3);
+  assert.equal(summary.buyerCount, 3);
 });
 
 test('row mapping: contacts without buyer key are used only when BLOCKED; override key is 회차_닉네임', () => {

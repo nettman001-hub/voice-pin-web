@@ -79,6 +79,8 @@ export interface ManageSummary {
   paidAmount: number;
   unpaidAmount: number;
   orderCount: number;
+  sessionCount: number;
+  buyerCount: number;
   stages: StageSummary[];
   goods: GoodsSummary;
   todos: ManageTodo[];
@@ -95,6 +97,8 @@ export function summaryOf(dashboard: ManageDashboard, periodDays: number, alertD
     paidAmount: dashboard.paidAmount,
     unpaidAmount: dashboard.unpaidAmount,
     orderCount: dashboard.orderCount,
+    sessionCount: dashboard.sessionCount,
+    buyerCount: dashboard.buyerCount,
     stages: dashboard.stages,
     goods: dashboard.goods,
     todos: dashboard.todos,

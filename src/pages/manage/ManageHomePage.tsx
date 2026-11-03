@@ -78,7 +78,9 @@ export const ManageHomePage: React.FC = () => {
       </section>
 
       <section aria-label="주문 단계">
-        <h2 className="mb-1.5 text-xs font-extrabold text-slate-500">주문 {dashboard.orderCount}건 (회차×구매자)</h2>
+        <h2 className="mb-1.5 text-xs font-extrabold text-slate-500">
+          주문 {dashboard.orderCount}건 ({dashboard.sessionCount ?? local.sessionCount}회차/{dashboard.buyerCount ?? local.buyerCount}구매자)
+        </h2>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {dashboard.stages.map((stage) => (
             <Link
@@ -86,7 +88,7 @@ export const ManageHomePage: React.FC = () => {
               to={stage.stage === 'NEEDS_CONTACT' ? '/manage/contacts' : `/manage/orders?stage=${stage.stage}`}
               className={`rounded-2xl border px-3 py-3 ${STAGE_TONE[stage.stage]}`}
             >
-              <div className="text-xs font-bold">{stage.label}</div>
+              <div className="text-xs font-bold">{stage.stage === 'NEEDS_CONTACT' ? '연락 대기/연결' : stage.label}</div>
               <div className="mt-1 text-xl font-black tabular-nums">{stage.orderCount}</div>
               <div className="text-[11px] tabular-nums opacity-80">{formatWon(stage.amount)}</div>
             </Link>

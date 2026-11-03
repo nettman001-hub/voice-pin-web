@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { FileSpreadsheet, GitCompare, Home, Inbox, ListChecks, MoreHorizontal, Monitor, ReceiptText, ShoppingBag } from 'lucide-react';
 import { useNewManageUi } from '../../services/manage/useNewManageUi';
+import { ManageBackLink } from '../manage/ManageBackLink';
 import { useAuth } from '../../context/AuthContext';
 import { useSales } from '../../context/SalesContext';
 import { useProductSales } from '../../context/ProductSalesContext';
@@ -62,12 +63,13 @@ export const AppHeader: React.FC = () => {
   const { pathname } = useLocation();
   const activeSession = useProductSales()?.activeSession;
   return (
-    <header className="sticky top-0 z-40 flex h-12 items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-3 backdrop-blur select-none">
+    <header className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-slate-200 bg-white/95 px-3 backdrop-blur select-none">
+      <ManageBackLink compact />
       <div className="min-w-0 truncate text-base font-extrabold tracking-tight text-slate-900">
         {appScreenTitle(pathname)}
       </div>
       {activeSession?.displayCode && (
-        <span className="flex-shrink-0 rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-700">
+        <span className="ml-auto flex-shrink-0 rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-700">
           {activeSession.displayCode}
         </span>
       )}

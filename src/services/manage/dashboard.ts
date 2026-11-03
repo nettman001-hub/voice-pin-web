@@ -44,6 +44,8 @@ export interface ManageDashboard {
   paidAmount: number;
   unpaidAmount: number;
   orderCount: number;
+  sessionCount: number;
+  buyerCount: number;
   stages: StageSummary[];
   goods: GoodsSummary;
   todos: ManageTodo[];
@@ -126,6 +128,8 @@ export function buildManageDashboard(input: DashboardInput): ManageDashboard {
     paidAmount,
     unpaidAmount,
     orderCount: orders.length,
+    sessionCount: new Set(orders.map((order) => order.sessionId)).size,
+    buyerCount: new Set(orders.map((order) => order.buyerKey)).size,
     stages: summarizeStages(orders),
     goods,
     todos,
