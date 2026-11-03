@@ -41,6 +41,11 @@ export const ManageOrdersPage: React.FC = () => {
           );
         })}
       </div>
+      {stage === 'NEEDS_CONTACT' && !duplicateOnly && (
+        <Link to="/manage/contacts" className="flex h-12 items-center justify-center rounded-xl bg-amber-500 text-sm font-extrabold text-white">
+          연락처 연결하기
+        </Link>
+      )}
       <p className="text-[11px] text-slate-500">최근 30일. 정산서 만들기와 보내기는 [정산서] 화면에서 합니다.</p>
       {orders.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">해당하는 주문이 없습니다.</p>

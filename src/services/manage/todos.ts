@@ -37,10 +37,10 @@ export function buildManageTodos(input: TodoInput): ManageTodo[] {
     '열린 정산서가 둘인 주문', '/manage/orders?filter=duplicate');
   add('REFUND_NEEDED', input.refundNeededCount || 0, '환불 필요', '/manage/ship?filter=refund');
   add('CONTACT_CONFIRM', orders.filter((order) => order.stage === 'NEEDS_CONTACT' && order.contact?.state === 'NEEDS_CONFIRM').length,
-    '연락처 확인 필요', '/manage/orders?stage=NEEDS_CONTACT');
+    '연락처 확인 필요', '/manage/contacts');
   add('CONTACT_MISSING', orders.filter((order) => order.stage === 'NEEDS_CONTACT' && order.contact?.state !== 'NEEDS_CONFIRM').length,
-    '연락처 없음 (방송에서 불러 주기)', '/manage/orders?stage=NEEDS_CONTACT');
-  add('UNKNOWN_SENDER', input.contactBook?.unassignedPhones.length || 0, '누군지 모르는 문자', '/manage/inbox');
+    '연락처 없음 (방송에서 불러 주기)', '/manage/contacts');
+  add('UNKNOWN_SENDER', input.contactBook?.unassignedPhones.length || 0, '누군지 모르는 문자', '/manage/contacts');
   add('READY_TO_BILL', orders.filter((order) => order.stage === 'READY_TO_BILL').length, '청구 전', '/manage/orders?stage=READY_TO_BILL');
   add('AWAITING_PAYMENT', orders.filter((order) => order.stage === 'AWAITING_PAYMENT').length, '입금 대기', '/manage/orders?stage=AWAITING_PAYMENT');
   add('READY_TO_SHIP', input.readyToShipBuyerCount || 0, '출고할 구매자', '/manage/ship');

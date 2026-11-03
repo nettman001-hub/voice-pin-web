@@ -29,7 +29,8 @@ export const MANAGE_APP_TABS: { id: ManageTabId; name: string; path: string }[] 
 
 export function manageTabFor(pathname: string): ManageTabId {
   if (pathname === '/manage' || pathname === '/manage/') return 'home';
-  if (startsWithPath(pathname, '/manage/orders') || startsWithPath(pathname, '/invoices')) return 'orders';
+  if (startsWithPath(pathname, '/manage/orders') || startsWithPath(pathname, '/manage/contacts') || startsWithPath(pathname, '/invoices'))
+    return 'orders';
   if (
     startsWithPath(pathname, '/manage/inbox') ||
     startsWithPath(pathname, '/customer-messages') ||
@@ -78,6 +79,7 @@ export function appScreenTitle(pathname: string): string {
   if (pathname === '/manage' || pathname === '/manage/') return '관리 홈';
   if (startsWithPath(pathname, '/manage/orders')) return '주문';
   if (startsWithPath(pathname, '/manage/inbox')) return '문자·입금';
+  if (startsWithPath(pathname, '/manage/contacts')) return '연락처 연결';
   if (startsWithPath(pathname, '/manage/settings/keeping')) return '보관 설정';
   if (startsWithPath(pathname, '/invoices')) return '정산서';
   if (startsWithPath(pathname, '/shipments')) return '택배발송';

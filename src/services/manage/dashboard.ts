@@ -1,7 +1,7 @@
 import type { SaleRecord } from '../../types/live.ts';
 import type { BuyerShippingOverride, ShippingConfig } from '../../types/shipping.ts';
 import { isBillableSale } from '../billableSales.ts';
-import { buildContactBook, type ContactLinkRecord, type ContactMessage } from './contactLink.ts';
+import { buildContactBook, type ContactBook, type ContactLinkRecord, type ContactMessage } from './contactLink.ts';
 import { buildOrders, ordersProductTotal, saleBuyerKey, summarizeStages, type ManageOrder, type OrderInvoiceLike, type StageSummary } from './orderPipeline.ts';
 import {
   goodsStateOf, keepingAlerts, planShipment,
@@ -49,6 +49,8 @@ export interface ManageDashboard {
   todos: ManageTodo[];
   keeping: { buyers: number; items: number; amount: number; warn: number; alert: number; top: KeepingAlert[] };
   orders: ManageOrder[];
+  contactBook: ContactBook;
+  contactMessages: readonly ContactMessage[];
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -130,5 +132,7 @@ export function buildManageDashboard(input: DashboardInput): ManageDashboard {
       top: alerts.slice(0, 3),
     },
     orders,
+    contactBook,
+    contactMessages: input.messages,
   };
 }

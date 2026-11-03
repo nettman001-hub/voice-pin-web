@@ -1,12 +1,13 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, GitCompare, ReceiptText } from 'lucide-react';
+import { ChevronRight, GitCompare, ReceiptText, UserCheck } from 'lucide-react';
 
 /** 문자·입금: 새 "확인 필요" 화면이 생기기 전까지 기존 화면으로 이어 준다. */
 export const ManageInboxPage: React.FC = () => (
   <div className="mx-auto max-w-lg space-y-3 p-3">
     <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white">
       {[
+        { to: '/manage/contacts', icon: UserCheck, name: '연락처 연결', hint: '구매자가 보낸 닉네임·번호 확인, 모르는 번호 지정' },
         { to: '/customer-messages', icon: GitCompare, name: '문자', hint: '받은 문자와 판매내역을 맞춰 봅니다' },
         { to: '/invoices', icon: ReceiptText, name: '입금', hint: '정산서와 입금 확인' },
       ].map((item) => (

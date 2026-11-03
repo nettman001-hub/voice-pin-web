@@ -79,7 +79,7 @@ export const ManageHomePage: React.FC = () => {
           {dashboard.stages.map((stage) => (
             <Link
               key={stage.stage}
-              to={`/manage/orders?stage=${stage.stage}`}
+              to={stage.stage === 'NEEDS_CONTACT' ? '/manage/contacts' : `/manage/orders?stage=${stage.stage}`}
               className={`rounded-2xl border px-3 py-3 ${STAGE_TONE[stage.stage]}`}
             >
               <div className="text-xs font-bold">{stage.label}</div>
