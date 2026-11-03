@@ -61,6 +61,7 @@ function pageFixture(testMode = false) {
     '../../components/live/SalesModeSelector': {SalesModeSelector:'SalesModeSelector'},
     '../../components/live/TouchDesktopPanel': {TouchDesktopPanel:'TouchDesktopPanel'},
     '../../components/live/VoicePhoneStatusReporter': {VoicePhoneStatusReporter:'VoicePhoneStatusReporter'},
+    '../../components/manage/ManageSellExtras': {ManageSellExtras:()=>null},
     'react-router-dom': { Link: 'link' },
     'lucide-react': new Proxy({}, { get: (_target, name) => name }),
     '../../context/AuthContext': { useAuth: () => state.auth },
