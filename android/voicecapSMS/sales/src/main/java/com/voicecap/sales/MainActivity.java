@@ -524,6 +524,13 @@ public class MainActivity extends Activity {
         return Uri.fromFile(file);
     }
 
+    private HelperLinkVault helperLinkVault;
+
+    private synchronized HelperLinkVault helperVault() {
+        if (helperLinkVault == null) helperLinkVault = new HelperLinkVault(getApplicationContext());
+        return helperLinkVault;
+    }
+
     /** 웹에서 부르는 함수. 모두 문자열만 주고받고, 오래 걸리는 일은 이벤트로 결과를 준다. */
     private final class Bridge {
         private final WebView view;
@@ -647,6 +654,26 @@ public class MainActivity extends Activity {
                 send.putExtra(Intent.EXTRA_SUBJECT, fileName);
                 main.post(() -> startActivity(Intent.createChooser(send, fileName)));
             } catch (IOException | RuntimeException ignored) { }
+        }
+
+        /** PC 댓글도우미 연결 토큰(Keystore 암호화 보관). 작업공간마다 1개. */
+        @JavascriptInterface
+        public String helperLinkGet(String workspaceId) { return helperVault().get(workspaceId); }
+
+        @JavascriptInterface
+        public boolean helperLinkSet(String workspaceId, String token) { return helperVault().put(workspaceId, token); }
+
+        @JavascriptInterface
+        public void helperLinkClear(String workspaceId) { helperVault().clear(workspaceId); }
+
+        @JavascriptInterface
+        public String helperDeviceInfo() {
+            JSONObject o = new JSONObject();
+            try {
+                o.put("installId", helperVault().installId());
+                o.put("name", (Build.MANUFACTURER + " " + Build.MODEL).trim());
+            } catch (JSONException ignored) { }
+            return o.toString();
         }
 
         @JavascriptInterface

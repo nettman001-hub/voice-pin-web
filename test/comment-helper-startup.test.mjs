@@ -88,6 +88,13 @@ function fixture() {
     'electron-updater': { autoUpdater: Object.assign(new EventEmitter(), {}) },
     fs: { mkdirSync() {}, existsSync: () => false, appendFileSync() {}, writeFileSync() {} },
     http, path,
+    os: { hostname: () => 'FIXTURE-PC' },
+    crypto: { randomBytes: () => Buffer.alloc(32) },
+    // 안드로이드 연결 관리자는 별도 시험(test/helper-android-link-e2e.test.mjs)에서 확인한다.
+    './androidLink/linkManager.cjs': { AndroidLinkManager: class {
+      start() {} stop() {} snapshot() { return null; } resendToServer() {} onComment() {} setCollector() {}
+    } },
+    './androidLink/outbox.cjs': { CommentOutbox: class {} },
     child_process: { execSync(command) { shellCommands.push(command); return ''; } }
   };
   vm.runInNewContext(source, {

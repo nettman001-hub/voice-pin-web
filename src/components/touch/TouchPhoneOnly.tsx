@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { TouchSalesApi, TouchBootstrap } from '../../services/touchSalesApi';
-import type { TouchComment, TouchSettings, TouchPrintTarget, TouchPrintRelayState } from '../../types/touchSales';
+import type { TouchComment, TouchSettings, TouchPrintTarget, TouchPrintRelayState, TouchCommentSource } from '../../types/touchSales';
 import {
   TouchPhoneProducer,
   blobToDataUrl,
@@ -21,10 +21,14 @@ import { grabSharpestFrame, startFrontCamera } from '../../services/frontCamera'
 import { productSalesApi } from '../../services/productSalesApi';
 import { remoteWorkspaceService } from '../../services/remoteWorkspaceService';
 import { TouchErrorNotice } from './TouchErrorNotice';
+import { HelperLinkPanel } from './HelperLinkPanel';
+import { readHelperLink } from '../../services/helperLinkStore';
 import { recordPhoneCaptureDiagnostic, type PhoneCaptureDiagnostic } from '../../services/phoneCaptureDiagnostics';
 
 const producerKey = (workspaceId: string) => `voicecap-phone-producer:${workspaceId}`;
 const targetKey = (workspaceId: string) => `voicecap-phone-print-target:${workspaceId}`;
+// 댓글 출처 선택만 기억한다(토큰은 helperLinkStore가 Keystore에 따로 보관).
+const sourceKey = (workspaceId: string) => `voicecap-phone-comment-source:${workspaceId}`;
 const targetLabel = (target: TouchPrintTarget) => target === 'PC_HELPER' ? 'PC 판매도우미' : '폰 블루투스';
 const printerReconnectError = '저장된 프린터에 연결하지 못했습니다. 프린터 전원을 확인한 뒤 다시 연결해 주세요.';
 type ShotPhase = 'PREPARING' | 'COUNTDOWN' | 'SAMPLING' | 'ENCODING' | 'PREVIEW';
@@ -41,16 +45,18 @@ const write = (key: string, value: string) => {
   } catch {}
 };
 
-const commentLabel = (s: PhoneProducerStatus['comments']) =>
-  s.state === 'connected'
-    ? '댓글 ● 받는 중'
+const commentLabel = (s: PhoneProducerStatus['comments'], source: TouchCommentSource = 'PHONE_DIRECT') => {
+  const head = source === 'WINDOWS_HELPER' ? 'PC 댓글 ●' : '댓글 ●';
+  return s.state === 'connected'
+    ? `${head} 받는 중`
     : s.state === 'waiting'
-      ? `댓글 ● ${s.message}`
+      ? `${head} ${s.message}`
       : s.state === 'error'
-        ? `댓글 ● ${s.message}`
+        ? `${head} ${s.message}`
         : s.state === 'stopped'
-          ? '댓글 ● 멈춤'
-          : '댓글 ● 연결 중';
+          ? `${head} 멈춤`
+          : `${head} 연결 중`;
+};
 
 export interface TouchPhoneOnlyProps {
   api: TouchSalesApi;
@@ -92,6 +98,10 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
   const targetRef = useRef(printTarget);
   targetRef.current = printTarget;
   const [relay, setRelay] = useState<TouchPrintRelayState | null>(null);
+  const [commentSource, setCommentSource] = useState<TouchCommentSource>(() =>
+    read(sourceKey(workspaceId)) === 'WINDOWS_HELPER' ? 'WINDOWS_HELPER' : 'PHONE_DIRECT');
+  const [runningSource, setRunningSource] = useState<TouchCommentSource>('PHONE_DIRECT');
+  const [helperReady, setHelperReady] = useState(false);
   const [outputOpen, setOutputOpen] = useState(false);
   const [pendingTarget, setPendingTarget] = useState<TouchPrintTarget>(printTarget);
   const [error, setError] = useState('');
@@ -388,6 +398,8 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
     try {
       const id = tiktokId.trim().replace(/^@/, '');
       if (!id) throw new Error('틱톡 ID를 입력해 주세요.');
+      if (commentSource === 'WINDOWS_HELPER' && !helperReady)
+        throw new Error('PC 댓글도우미 연결을 먼저 마쳐 주세요. PC 도우미 화면의 인증번호를 입력하고 PC에서 승인합니다.');
       // 앱에 기억된 프린터만 다시 연결한다. 자동 연결은 기기 선택 창을 열지 않는다.
       if (printTarget === 'PC_HELPER') {
         if (!relayReady) throw new Error('PC에서 판매도우미를 켜고 댓글터치 판매 화면의 폰 전표 출력 대기를 시작해 주세요.');
@@ -406,7 +418,8 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
         producerId: producerId.current,
         sessionId: session.id,
         displayCode: session.display_code,
-        settings: { ...settings, mode: 'COMMENT_TOUCH', tiktokId: id, printTarget },
+        settings: { ...settings, mode: 'COMMENT_TOUCH', tiktokId: id, printTarget, commentSource },
+        helperLinkToken: async () => readHelperLink(workspaceId),
         printer: printer.current,
         serverOffset: props.serverOffset,
         totals: props.totals,
@@ -429,6 +442,8 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
       });
       await p.start();
       write(targetKey(workspaceId), printTarget);
+      write(sourceKey(workspaceId), commentSource);
+      setRunningSource(commentSource);
       producer.current = p;
       props.onRunningChange(true);
       androidNative()?.selling(true);
@@ -557,7 +572,7 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
         {overlay}
         <div className="touch-phone-bar" role="status">
           <span className={status.comments.state === 'connected' ? 'ok' : 'warn'}>
-            {commentLabel(status.comments)}
+            {commentLabel(status.comments, runningSource)}
           </span>
           <button disabled={busy} onClick={() => producer.current?.reconnectComments()}>댓글 재연결</button>
           <span className={(printTarget === 'PC_HELPER' ? relayReady : status.printer.connected) ? 'ok' : 'warn'}>
@@ -633,8 +648,19 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
                 autoCorrect="off"
               />
             </label>
+            <fieldset className="touch-print-target" disabled={busy}>
+              <legend>댓글 받기</legend>
+              <label><input type="radio" name="phone-comment-source" value="PHONE_DIRECT" checked={commentSource === 'PHONE_DIRECT'}
+                onChange={() => setCommentSource('PHONE_DIRECT')} />이 폰이 직접</label>
+              <label><input type="radio" name="phone-comment-source" value="WINDOWS_HELPER" checked={commentSource === 'WINDOWS_HELPER'}
+                onChange={() => setCommentSource('WINDOWS_HELPER')} />PC 댓글도우미</label>
+              {commentSource === 'WINDOWS_HELPER' && <HelperLinkPanel api={api} disabled={busy} onReady={setHelperReady} />}
+            </fieldset>
             <p className="touch-muted">
-              댓글은 이 폰이 직접 받습니다. 전표는 선택한 출력 위치로 보내고, 판매 사진은{' '}
+              {commentSource === 'WINDOWS_HELPER'
+                ? 'PC의 댓글도우미가 틱톡 댓글을 받아 이 폰으로 보냅니다(PC 홈페이지는 닫아도 됩니다).'
+                : '댓글은 이 폰이 직접 받습니다.'}{' '}
+              전표는 선택한 출력 위치로 보내고, 판매 사진은{' '}
               {settings?.captureOff
                 ? '찍지 않습니다(캡처 안 함).'
                 : `${settings?.prepareSeconds ?? 4}초 카운트다운 뒤 앞카메라로 1장 찍습니다.`}
@@ -679,13 +705,13 @@ export function TouchPhoneOnly(props: TouchPhoneOnlyProps) {
             {printerNotice && <p role="status" className="touch-muted">{printerNotice}</p>}
             <TouchErrorNotice message={error} onDismiss={() => setError('')} />
             {bootstrap?.session && (
-              <button className="touch-primary" disabled={busy || connectingPrinter || !settings || (printTarget === 'PC_HELPER' && !relayReady)} onClick={() => void start('CONTINUE')}>
+              <button className="touch-primary" disabled={busy || connectingPrinter || !settings || (printTarget === 'PC_HELPER' && !relayReady) || (commentSource === 'WINDOWS_HELPER' && !helperReady)} onClick={() => void start('CONTINUE')}>
                 지금 회차 이어서 판매
               </button>
             )}
             <button
               className={bootstrap?.session ? '' : 'touch-primary'}
-              disabled={busy || connectingPrinter || !settings || (printTarget === 'PC_HELPER' && !relayReady)}
+              disabled={busy || connectingPrinter || !settings || (printTarget === 'PC_HELPER' && !relayReady) || (commentSource === 'WINDOWS_HELPER' && !helperReady)}
               onClick={() => {
                 if (bootstrap?.session && !confirm('지금 회차를 끝내고 새 회차로 판매할까요?')) return;
                 void start('NEW');

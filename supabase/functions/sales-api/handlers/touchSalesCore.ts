@@ -112,5 +112,8 @@ export function cleanTouchRunSettings(input: any) {
     printTarget: input?.printTarget === 'PC_HELPER'
       ? ('PC_HELPER' as const)
       : ('PHONE_BLUETOOTH' as const),
+    commentSource: input?.commentSource === 'WINDOWS_HELPER'
+      ? ('WINDOWS_HELPER' as const)
+      : ('PHONE_DIRECT' as const),
   };
 }

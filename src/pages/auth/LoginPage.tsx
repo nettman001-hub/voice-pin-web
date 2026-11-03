@@ -15,7 +15,8 @@ const sellerHome = () => (isSalesApp() ? '/sales' : '/live');
 export const LoginPage: React.FC<{ returnTo?: string }> = ({ returnTo } = {}) => {
   const { login, isLocked, lockUntil, loginAttempts, isRemoteAuth, isAuthenticated, isInitialized, user } = useAuth();
   const navigate = useNavigate();
-  const salesReturnTo = returnTo === '/sell' || returnTo === '/app/sell' ? returnTo : null;
+  // 고정된 내부 경로만 돌아간다(임의 주소로 보내지 않음). /helper/register: PC 댓글도우미 등록.
+  const salesReturnTo = returnTo === '/sell' || returnTo === '/app/sell' || returnTo === '/helper/register' ? returnTo : null;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

@@ -19,6 +19,11 @@ export type AndroidNative = {
   showSell?(): void;
   /** 단일 WebView 앱: React Router의 현재 탭을 네이티브 버튼에 표시한다. */
   setTab?(tab: 'sell' | 'manage'): void;
+  /** 앱 1.0.7부터: PC 댓글도우미 연결 토큰(Keystore 암호화 보관). */
+  helperLinkGet?(workspaceId: string): string;
+  helperLinkSet?(workspaceId: string, token: string): boolean;
+  helperLinkClear?(workspaceId: string): void;
+  helperDeviceInfo?(): string;
   setWebNavigation?(enabled: boolean): void;
 };
 export type AndroidEvent = {

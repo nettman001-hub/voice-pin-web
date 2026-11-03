@@ -28,6 +28,12 @@ async function readKeyRow() {
   return data as { value?: CommentKeyValue; updated_at?: string } | null;
 }
 
+/** 등록된 PC 도우미가 브라우저 없이 받는 서명 키(helper-comment-key). */
+export async function readCommentApiKey() {
+  const value = (await readKeyRow())?.value || {};
+  return typeof value.apiKey === 'string' && value.apiKey ? value.apiKey : null;
+}
+
 async function mintJwt(
   value: CommentKeyValue,
   uniqueId: string,
