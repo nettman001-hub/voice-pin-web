@@ -5,6 +5,8 @@ import { useAuth } from '../../context/AuthContext';
 import { LoginPage } from '../../pages/auth/LoginPage';
 import TouchMobileSalesPage from '../../pages/seller/TouchMobileSalesPage';
 import { androidJson, androidNative, isSalesApp } from '../../services/labelPrinter/androidBridge';
+import { isNewManageUiEnabled } from '../../services/manage/manageUiSetting';
+import { applyViewportZoom } from '../../services/manage/viewportZoom';
 
 export const APP_SELL_PATH = '/app/sell';
 const AUTH_PATHS = ['/login', '/signup', '/onboarding', '/password/reset'];
@@ -16,7 +18,7 @@ export function SalesAppShell({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isInitialized, isRemoteAuth, user, workspaceId } = useAuth();
   const entered = useRef(false);
   const [inlineNavigation, setInlineNavigation] = useState(false);
-  const managementPath = useRef('/sales');
+  const managementPath = useRef<string | null>(null);
   const native = androidNative();
   const info = androidJson<{ singleWebView?: boolean; tab?: string }>(native?.info?.(), {});
   const initialTab = useRef(info.singleWebView ? info.tab : undefined);
@@ -45,23 +47,28 @@ export function SalesAppShell({ children }: { children: React.ReactNode }) {
       const detail = typeof raw === 'string' ? androidJson<{ type?: string; tab?: string }>(raw, {}) : raw;
       if (detail?.type !== 'app-tab-change') return;
       if (detail.tab === 'sell') navigate(APP_SELL_PATH);
-      else if (detail.tab === 'manage') navigate(managementPath.current);
+      else if (detail.tab === 'manage') navigate(managementPath.current || (isNewManageUiEnabled(workspaceId) ? '/manage' : '/sales'));
     };
     window.addEventListener('voicecap-android', changeTab);
     return () => window.removeEventListener('voicecap-android', changeTab);
-  }, [integrated, navigate]);
+  }, [integrated, navigate, workspaceId]);
+
+  // 관리 화면은 손가락으로 확대할 수 있고, 판매 화면은 잘못 눌러 확대되지 않게 막는다.
+  useEffect(() => {
+    applyViewportZoom(!(integrated && selling));
+  }, [integrated, selling]);
 
   useEffect(() => {
     if (!integrated) return;
     if (!adoptedInitialTab.current) {
       adoptedInitialTab.current = true;
       if (initialTab.current === 'manage' && selling) {
-        navigate(managementPath.current, { replace: true });
+        navigate(managementPath.current || (isNewManageUiEnabled(workspaceId) ? '/manage' : '/sales'), { replace: true });
         return;
       }
     }
     androidNative()?.setTab?.(selling ? 'sell' : 'manage');
-  }, [integrated, selling, navigate]);
+  }, [integrated, selling, navigate, workspaceId]);
 
   if (!integrated) return <>{children}</>;
   return (

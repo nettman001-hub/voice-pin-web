@@ -13,6 +13,35 @@ export const APP_TABS: { id: AppTabId; name: string; path: string }[] = [
 const startsWithPath = (pathname: string, base: string) =>
   pathname === base || pathname.startsWith(`${base}/`);
 
+/**
+ * "새 관리 화면 사용"을 켰을 때의 하단 메뉴 (2026-11-02 결정 3).
+ * 홈 · 주문 · 문자·입금 · 정산 · 더보기. 출고(보관함·합배송)는 더보기 안과 홈 카드·할 일에서 들어간다.
+ */
+export type ManageTabId = 'home' | 'orders' | 'inbox' | 'settlement' | 'more';
+
+export const MANAGE_APP_TABS: { id: ManageTabId; name: string; path: string }[] = [
+  { id: 'home', name: '홈', path: '/manage' },
+  { id: 'orders', name: '주문', path: '/manage/orders' },
+  { id: 'inbox', name: '문자·입금', path: '/manage/inbox' },
+  { id: 'settlement', name: '정산', path: '/settlement' },
+  { id: 'more', name: '더보기', path: '/more' },
+];
+
+export function manageTabFor(pathname: string): ManageTabId {
+  if (pathname === '/manage' || pathname === '/manage/') return 'home';
+  if (startsWithPath(pathname, '/manage/orders') || startsWithPath(pathname, '/manage/contacts') || startsWithPath(pathname, '/invoices'))
+    return 'orders';
+  if (
+    startsWithPath(pathname, '/manage/inbox') ||
+    startsWithPath(pathname, '/customer-messages') ||
+    startsWithPath(pathname, '/seller/customer-messages')
+  )
+    return 'inbox';
+  if (startsWithPath(pathname, '/settlement')) return 'settlement';
+  if (startsWithPath(pathname, '/sales') && pathname !== '/sales/review' && pathname !== '/sales/product') return 'home';
+  return 'more';
+}
+
 /** 지금 주소가 하단 메뉴 중 어디에 속하는지. */
 export function appTabFor(pathname: string): AppTabId {
   if (pathname === '/sales/review' || pathname === '/sales/product') return 'more';
@@ -47,6 +76,11 @@ export const isPcOnlyPath = (pathname: string) =>
 
 /** 상단 헤더에 보이는 화면 이름. */
 export function appScreenTitle(pathname: string): string {
+  if (pathname === '/manage' || pathname === '/manage/') return '관리 홈';
+  if (startsWithPath(pathname, '/manage/orders')) return '주문';
+  if (startsWithPath(pathname, '/manage/inbox')) return '문자·입금';
+  if (startsWithPath(pathname, '/manage/contacts')) return '연락처 연결';
+  if (startsWithPath(pathname, '/manage/settings/keeping')) return '보관 설정';
   if (startsWithPath(pathname, '/invoices')) return '정산서';
   if (startsWithPath(pathname, '/shipments')) return '택배발송';
   if (startsWithPath(pathname, '/settlement')) return '정산';

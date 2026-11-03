@@ -26,7 +26,9 @@ import {
   PanelLeftClose,
   Bot,
   BookOpenText,
-  Inbox
+  Inbox,
+  LayoutDashboard,
+  Timer
 } from 'lucide-react';
 
 interface NavItem {
@@ -74,6 +76,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       groupName: '판매 & 정산 관리',
       items: [
+        { name: '관리 홈 (새 화면)', path: '/manage', icon: LayoutDashboard, badge: '새' },
         { name: '판매 내역 목록', path: '/sales', icon: ShoppingBag },
         { name: '판매내역/문자비교', path: '/customer-messages', icon: Inbox },
         { name: '댓글/판매멘트 기록', path: '/comments', icon: MessageSquareText },
@@ -81,6 +84,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { name: '정산서 관리 & 발송', path: '/invoices', icon: ReceiptText },
         { name: '택배발송 관리', path: '/shipments', icon: Truck },
         { name: '정산 및 엑셀 다운로드', path: '/settlement', icon: FileSpreadsheet },
+        { name: '보관 설정', path: '/manage/settings/keeping', icon: Timer },
       ]
     },
     {
