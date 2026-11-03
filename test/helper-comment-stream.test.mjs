@@ -102,7 +102,7 @@ test('댓글 재연결 re-attaches and keeps the cursor so no comment repeats', 
   assert.equal(api.calls.length, 4, 'no reconnect after stop');
 });
 
-test('only the first attach after sale start asks the server to turn the helper on', async () => {
+test('sale start and the 댓글 재연결 button ask the server to turn the helper on', async () => {
   const api = fakeApi([page([c(1)]), page([c(2)]), page([c(3)])]);
   const { s } = stream(api);
   s.start();
@@ -112,9 +112,22 @@ test('only the first attach after sale start asks the server to turn the helper 
   const attaches = api.calls.filter((x) => x.action === 'helper-attach');
   assert.equal(attaches.length, 2);
   assert.equal(attaches[0].start, true, 'sale start turns the PC helper on');
-  assert.equal(attaches[1].start, undefined, 'reconnect does not override a PC that was turned off');
+  assert.equal(attaches[1].start, true, 'the seller pressing 댓글 재연결 turns the PC helper on');
   s.stop();
   s.start();
   await s.tick();
   assert.equal(api.calls.filter((x) => x.action === 'helper-attach').at(-1).start, true, 'next sale start turns it on again');
+});
+
+test('automatic re-attach after the server drops the session does not turn the helper on', async () => {
+  const api = fakeApi([page([c(1)]), page([], { sessionActive: false }), page([c(2)])]);
+  const { s } = stream(api);
+  s.start();
+  await s.tick();
+  await s.tick();
+  await s.tick();
+  const attaches = api.calls.filter((x) => x.action === 'helper-attach');
+  assert.equal(attaches.length, 2);
+  assert.equal(attaches[0].start, true);
+  assert.equal(attaches[1].start, undefined);
 });

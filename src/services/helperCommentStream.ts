@@ -136,6 +136,8 @@ export class HelperCommentStream {
     if (this.timer) (this.o.clearTimer || ((t: unknown) => clearTimeout(t as ReturnType<typeof setTimeout>)))(this.timer);
     this.timer = null;
     this.attached = false;
+    // 판매자가 직접 누른 "댓글 재연결"은 댓글을 받겠다는 뜻이라 꺼진 PC 도우미도 켠다(자동 재부착은 켜지 않음).
+    this.startPending = true;
     this.failures = 0;
     this.status({ state: 'connecting' });
     this.schedule(0);
