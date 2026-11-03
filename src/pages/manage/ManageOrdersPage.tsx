@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Send } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCommerce } from '../../context/CommerceContext';
@@ -20,7 +20,10 @@ export const ManageOrdersPage: React.FC = () => {
   const { workspaceId } = useAuth();
   const commerce = useCommerce();
   const api = useMemo(() => (workspaceId ? new ManageApi(workspaceId) : null), [workspaceId]);
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const { orderKey: openKey } = useParams();
+  const openOrder = (() => { try { return openKey ? decodeURIComponent(openKey) : null; } catch { return openKey || null; } })();
   const raw = params.get('stage');
   const stage: MoneyStage = MONEY_STAGE_ORDER.includes(raw as MoneyStage) ? (raw as MoneyStage) : 'NEEDS_CONTACT';
   const duplicateOnly = params.get('filter') === 'duplicate';
@@ -84,7 +87,7 @@ export const ManageOrdersPage: React.FC = () => {
               type="button"
               role="tab"
               aria-selected={on}
-              onClick={() => { setParams({ stage: item }); setSelected(new Set()); setResult(null); }}
+              onClick={() => { navigate(`/manage/orders?stage=${item}`); setSelected(new Set()); setResult(null); }}
               className={`min-h-[36px] flex-shrink-0 rounded-full px-3 text-xs font-bold ${
                 on ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'
               }`}
@@ -134,11 +137,11 @@ export const ManageOrdersPage: React.FC = () => {
       ) : (
         <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white">
           {orders.map((order) => (
-            <li key={order.key} className="flex items-start gap-3 px-4 py-3">
+            <li key={order.key} className={`flex items-start gap-3 px-4 py-3 ${openOrder === order.key ? 'bg-brand-50' : ''}`}>
               {bulkMode && (
                 <input type="checkbox" aria-label={`${order.nickname} 고르기`} checked={selected.has(order.key)} onChange={() => toggle(order.key)} className="mt-1 h-5 w-5 flex-shrink-0" />
               )}
-              <Link to={orderPath(order.key)} className="min-w-0 flex-1">
+              <Link to={`${orderPath(order.key)}${params.toString() ? `?${params.toString()}` : `?stage=${order.stage}`}`} aria-current={openOrder === order.key ? 'true' : undefined} className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
                   <span className="min-w-0 truncate text-sm font-extrabold text-slate-900">{order.nickname}</span>
                   <span className="text-sm font-black tabular-nums text-slate-900">{formatWon(order.totalAmount)}</span>

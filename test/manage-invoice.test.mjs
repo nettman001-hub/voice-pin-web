@@ -83,7 +83,11 @@ test('sendInvoiceOnce: refused lease never sends; failed send is recorded', asyn
 
 test('order detail page is routed and the order list links to it', () => {
   const app = fs.readFileSync('src/App.tsx', 'utf8');
-  assert.match(app, /path="\/manage\/orders\/:orderKey"/);
+  assert.match(app, /path="\/manage\/orders\/:orderKey" element={<OrdersWorkspace \/>}/);
+  assert.match(app, /path="\/manage\/orders" element={<OrdersWorkspace \/>}/);
+  const workspace = fs.readFileSync('src/pages/manage/OrdersWorkspace.tsx', 'utf8');
+  assert.match(workspace, /lg:grid-cols-/);
+  assert.match(workspace, /hidden lg:block/);
   const list = fs.readFileSync('src/pages/manage/ManageOrdersPage.tsx', 'utf8');
   assert.match(list, /orderPath\(order\.key\)/);
   const detail = fs.readFileSync('src/pages/manage/OrderDetailPage.tsx', 'utf8');

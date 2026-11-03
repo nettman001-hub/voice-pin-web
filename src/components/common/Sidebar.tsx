@@ -78,7 +78,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       groupName: '판매 & 정산 관리',
       items: [
         { name: '관리 홈 (새 화면)', path: '/manage', icon: LayoutDashboard, badge: '새' },
+        { name: '주문 (새 화면)', path: '/manage/orders', icon: ReceiptText, badge: '새' },
         { name: '출고 (새 화면)', path: '/manage/ship', icon: Package, badge: '새' },
+        { name: '문자·입금 (새 화면)', path: '/manage/inbox', icon: Inbox, badge: '새' },
         { name: '판매 내역 목록', path: '/sales', icon: ShoppingBag },
         { name: '판매내역/문자비교', path: '/customer-messages', icon: Inbox },
         { name: '댓글/판매멘트 기록', path: '/comments', icon: MessageSquareText },
