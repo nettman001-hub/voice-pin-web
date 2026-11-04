@@ -1,6 +1,6 @@
-import { ManagePeriodTabs } from '../../components/manage/ManagePeriodTabs';
+import { ManageScopeControl } from '../../components/manage/ManageScopeControl';
 import { useManagePeriod } from '../../services/manage/useManagePeriod';
-import { withManagePeriod } from '../../services/manage/period';
+import { withManageScope, manageScopeLabel } from '../../services/manage/scope';
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ChevronRight, Package, RefreshCw } from 'lucide-react';
@@ -17,10 +17,11 @@ const STAGE_TONE: Record<MoneyStage, string> = {
 
 /** 관리 홈: 숫자 3개, 돈 4칸(연락처 연결 맨 앞), 물건 4칸, 할 일, 보관 카드. 읽기만 한다. 숫자는 서버 요약을 먼저 쓴다. */
 export const ManageHomePage: React.FC = () => {
-  const { periodDays, setPeriodDays } = useManagePeriod(7);
+  const selection = useManagePeriod();
+  const { scope } = selection;
   const [reloadKey, setReloadKey] = useState(0);
-  const { dashboard: local, server } = useManageDashboard(periodDays, reloadKey);
-  const { summary } = useManageHomeSummary(periodDays, reloadKey);
+  const { dashboard: local, server } = useManageDashboard(scope, reloadKey, selection.sessions, selection.now);
+  const { summary } = useManageHomeSummary(scope, reloadKey, selection.now);
   // 서버 요약이 있으면 그것을, 없으면(오프라인 등) 폰이 센 값을 보여 준다
   const dashboard = summary || local;
   const alertDays = summary?.alertDays || server.alertDays;
@@ -28,16 +29,15 @@ export const ManageHomePage: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-lg space-y-3 p-3 lg:max-w-3xl">
-      <div className="flex items-center justify-between gap-2">
-        <ManagePeriodTabs days={periodDays} onChange={setPeriodDays} />
+      <ManageScopeControl selection={selection} trailing={
         <button
           type="button"
-          onClick={() => setReloadKey((key) => key + 1)}
+          onClick={() => { selection.refreshSessions(); setReloadKey((key) => key + 1); }}
           className="flex min-h-[36px] items-center gap-1 rounded-full border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600"
         >
           <RefreshCw className="h-3.5 w-3.5" /> 새로고침
         </button>
-      </div>
+      } />
 
       {!summary && !server.serverReady && server.loadedAt && (
         <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -45,7 +45,7 @@ export const ManageHomePage: React.FC = () => {
         </div>
       )}
 
-      <section aria-label="오늘의 숫자" className="grid grid-cols-3 gap-2">
+      <section aria-label="선택한 회차의 숫자" className="grid grid-cols-3 gap-2">
         {[
           { label: '판매액', value: dashboard.salesAmount },
           { label: '입금 완료', value: dashboard.paidAmount },
@@ -66,7 +66,7 @@ export const ManageHomePage: React.FC = () => {
           {dashboard.stages.map((stage) => (
             <Link
               key={stage.stage}
-              to={withManagePeriod(stage.stage === 'NEEDS_CONTACT' ? '/manage/contacts' : `/manage/orders?stage=${stage.stage}`, periodDays)}
+              to={withManageScope(stage.stage === 'NEEDS_CONTACT' ? '/manage/contacts' : `/manage/orders?stage=${stage.stage}`, scope)}
               className={`rounded-2xl border px-3 py-3 ${STAGE_TONE[stage.stage]}`}
             >
               <div className="text-xs font-bold">{stage.stage === 'NEEDS_CONTACT' ? '연락 대기/연결' : stage.label}</div>
@@ -78,7 +78,7 @@ export const ManageHomePage: React.FC = () => {
       </section>
 
       <section aria-label="물건">
-        <h2 className="mb-1.5 text-xs font-extrabold text-slate-500">물건 ({periodDays === 0 ? '전체 기간' : periodDays === 1 ? '오늘' : `최근 ${periodDays}일`})</h2>
+        <h2 className="mb-1.5 text-xs font-extrabold text-slate-500">물건 ({manageScopeLabel(scope, selection.sessions)})</h2>
         <div className="grid grid-cols-4 gap-2">
           {[
             { label: '발송 대기', value: goods.readyToShip, to: '/manage/ship' },
@@ -88,7 +88,7 @@ export const ManageHomePage: React.FC = () => {
           ].map((item) => (
             <Link
               key={item.label}
-              to={withManagePeriod(item.to, periodDays)}
+              to={withManageScope(item.to, scope)}
               className={`rounded-2xl border px-2 py-3 text-center ${
                 item.warn ? 'border-rose-300 bg-rose-50 text-rose-900' : 'border-slate-200 bg-white text-slate-900'
               }`}
@@ -108,7 +108,7 @@ export const ManageHomePage: React.FC = () => {
           <ul className="divide-y divide-slate-100">
             {dashboard.todos.map((todo) => (
               <li key={todo.kind}>
-                <Link to={withManagePeriod(todo.path, periodDays)} className="flex min-h-[52px] items-center gap-3 px-4 py-2.5 active:bg-slate-50">
+                <Link to={withManageScope(todo.path, scope)} className="flex min-h-[52px] items-center gap-3 px-4 py-2.5 active:bg-slate-50">
                   {(todo.kind === 'REFUND_NEEDED' || todo.kind === 'KEEPING_ALERT') && (
                     <AlertTriangle className="h-4 w-4 flex-shrink-0 text-rose-500" />
                   )}
@@ -127,7 +127,7 @@ export const ManageHomePage: React.FC = () => {
           <h2 className="flex items-center gap-1.5 text-sm font-extrabold text-slate-900">
             <Package className="h-4 w-4 text-brand-600" /> 보관함
           </h2>
-          <Link to={withManagePeriod('/manage/settings/keeping', periodDays)} className="text-xs font-bold text-slate-500 underline">
+          <Link to={withManageScope('/manage/settings/keeping', scope)} className="text-xs font-bold text-slate-500 underline">
             알림 {alertDays.warnDays}일 · {alertDays.alertDays}일
           </Link>
         </div>
@@ -148,7 +148,7 @@ export const ManageHomePage: React.FC = () => {
             ))}
           </ul>
         )}
-        <Link to={withManagePeriod('/manage/ship?filter=keeping', periodDays)} className="mt-2 inline-flex min-h-[40px] items-center text-sm font-bold text-brand-700">
+        <Link to={withManageScope('/manage/ship?filter=keeping', scope)} className="mt-2 inline-flex min-h-[40px] items-center text-sm font-bold text-brand-700">
           출고(보관함·합배송)로 <ChevronRight className="h-4 w-4" />
         </Link>
       </section>

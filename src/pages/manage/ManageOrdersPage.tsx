@@ -1,6 +1,6 @@
-import { ManagePeriodTabs } from '../../components/manage/ManagePeriodTabs';
+import { ManageScopeControl } from '../../components/manage/ManageScopeControl';
 import { useManagePeriod } from '../../services/manage/useManagePeriod';
-import { withManagePeriod } from '../../services/manage/period';
+import { withManageScope, manageScopeLabel } from '../../services/manage/scope';
 import { ManageBackLink } from '../../components/manage/ManageBackLink';
 import React, { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -30,9 +30,10 @@ export const ManageOrdersPage: React.FC = () => {
   const openOrder = (() => { try { return openKey ? decodeURIComponent(openKey) : null; } catch { return openKey || null; } })();
   const raw = params.get('stage');
   const stage: MoneyStage = MONEY_STAGE_ORDER.includes(raw as MoneyStage) ? (raw as MoneyStage) : 'NEEDS_CONTACT';
-  const { periodDays, setPeriodDays } = useManagePeriod(30);
+  const selection = useManagePeriod();
+  const { scope } = selection;
   const [reloadKey, setReloadKey] = useState(0);
-  const { dashboard } = useManageDashboard(periodDays, reloadKey);
+  const { dashboard } = useManageDashboard(scope, reloadKey, selection.sessions, selection.now);
   const orders = useMemo(
     () => dashboard.orders.filter((order) => order.stage === stage),
     [dashboard.orders, stage],
@@ -81,10 +82,7 @@ export const ManageOrdersPage: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-lg space-y-3 p-3 lg:max-w-3xl">
-      <div className="flex items-start gap-1">
-        <ManageBackLink />
-        <ManagePeriodTabs days={periodDays} onChange={setPeriodDays} />
-      </div>
+      <ManageScopeControl selection={selection} leading={<ManageBackLink />} />
       <div role="tablist" aria-label="주문 단계" className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-1">
         {MONEY_STAGE_ORDER.map((item) => {
           const count = dashboard.stages.find((summary) => summary.stage === item)?.orderCount ?? 0;
@@ -95,7 +93,7 @@ export const ManageOrdersPage: React.FC = () => {
               type="button"
               role="tab"
               aria-selected={on}
-              onClick={() => { navigate(withManagePeriod(`/manage/orders?stage=${item}`, periodDays)); setSelected(new Set()); setResult(null); }}
+              onClick={() => { navigate(withManageScope(`/manage/orders?stage=${item}`, scope)); setSelected(new Set()); setResult(null); }}
               className={`min-h-[36px] flex-shrink-0 rounded-full px-3 text-xs font-bold ${
                 on ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'
               }`}
@@ -106,11 +104,11 @@ export const ManageOrdersPage: React.FC = () => {
         })}
       </div>
       {stage === 'NEEDS_CONTACT' && (
-        <Link to={withManagePeriod('/manage/contacts', periodDays)} className="flex h-12 items-center justify-center rounded-xl bg-amber-500 text-sm font-extrabold text-white">
+        <Link to={withManageScope('/manage/contacts', scope)} className="flex h-12 items-center justify-center rounded-xl bg-amber-500 text-sm font-extrabold text-white">
           연락처 연결하기
         </Link>
       )}
-      <p className="text-[11px] text-slate-500">{periodDays === 0 ? '전체 기간' : periodDays === 1 ? '오늘' : `최근 ${periodDays}일`}. 주문을 눌러 자세히 보고, 정산서를 보내거나 취소합니다.</p>
+      <p className="text-[11px] text-slate-500">{manageScopeLabel(scope, selection.sessions)}. 주문을 눌러 자세히 보고, 정산서를 보내거나 취소합니다.</p>
 
       {bulkMode && orders.length > 0 && (
         <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-3">

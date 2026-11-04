@@ -76,7 +76,7 @@ test('summary counts: 보류·NOT_SALE excluded, old kept item excluded by perio
   assert.equal(summary.buyerCount, 2);
   assert.equal(summary.goods.kept, 0);
   assert.equal(summary.keeping.items, 0);
-  assert.ok(summary.todos.some((todo) => todo.kind === 'PAYMENT_REVIEW' && todo.count === 1));
+  assert.ok(summary.todos.some((todo) => todo.kind === 'PAYMENT_UNASSIGNED' && todo.count === 1));
 });
 
 test('repeat buyer across sessions counts once as a buyer and twice as orders', () => {
@@ -124,6 +124,6 @@ test('home uses the server summary first and falls back to the phone numbers', (
   const page = fs.readFileSync(new URL('../src/pages/manage/ManageHomePage.tsx', import.meta.url), 'utf8');
   assert.match(page, /const dashboard = summary \|\| local;/);
   const hook = fs.readFileSync(new URL('../src/services/manage/useManageData.ts', import.meta.url), 'utf8');
-  assert.match(hook, /api\.summary\(periodDays\)/);
+  assert.match(hook, /api\.summary\(scope\)/);
   assert.match(hook, /SUMMARY_REFRESH_DELAY_MS = 3000/);
 });

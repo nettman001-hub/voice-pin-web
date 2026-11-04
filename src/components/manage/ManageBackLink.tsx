@@ -1,6 +1,7 @@
 import React from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { readManagePeriod, withManagePeriod } from '../../services/manage/period';
+import { withManageScope } from '../../services/manage/scope';
+import { readManagePeriod } from '../../services/manage/period';
 import { ArrowLeft } from 'lucide-react';
 
 /** 각 관리 화면의 첫 버튼 줄에서 쓰는 뒤로가기. 직접 연 주소는 상위 화면으로 간다. */
@@ -13,7 +14,9 @@ export const ManageBackLink: React.FC<{ fallback?: string }> = ({ fallback }) =>
     if (typeof index === 'number' && index > 0) navigate(-1);
     else {
       const target = fallback || (pathname.startsWith('/manage/orders/') ? '/manage/orders' : '/manage');
-      navigate(params.has('period') ? withManagePeriod(target, readManagePeriod(params.get('period'))) : target);
+      const scope = params.has('session') ? { mode: 'session' as const, sessionId: params.get('session')! }
+        : params.has('period') ? { mode: 'period' as const, periodDays: readManagePeriod(params.get('period')) } : null;
+      navigate(scope ? withManageScope(target, scope) : target);
     }
   };
 

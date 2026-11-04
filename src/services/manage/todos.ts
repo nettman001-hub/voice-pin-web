@@ -8,7 +8,7 @@ import type { KeepingAlert } from './fulfillment.ts';
  */
 
 export type ManageTodoKind =
-  | 'REFUND_NEEDED' | 'PAYMENT_REVIEW' | 'CONTACT_CONFIRM' | 'CONTACT_MISSING' | 'UNKNOWN_SENDER'
+  | 'REFUND_NEEDED' | 'PAYMENT_REVIEW' | 'PAYMENT_UNASSIGNED' | 'CONTACT_CONFIRM' | 'CONTACT_MISSING' | 'UNKNOWN_SENDER'
   | 'READY_TO_BILL' | 'AWAITING_PAYMENT' | 'READY_TO_SHIP' | 'KEEPING_ALERT' | 'KEEPING_WARN';
 
 export interface ManageTodo {
@@ -27,6 +27,7 @@ export interface TodoInput {
   refundNeededCount?: number;
   /** 자동으로 못 붙인 입금 (확인 필요 + 미확인) */
   paymentReviewCount?: number;
+  unassignedPaymentCount?: number;
 }
 
 export function buildManageTodos(input: TodoInput): ManageTodo[] {
@@ -37,6 +38,7 @@ export function buildManageTodos(input: TodoInput): ManageTodo[] {
   const orders = input.orders;
   add('REFUND_NEEDED', input.refundNeededCount || 0, '환불 필요', '/manage/ship?filter=refund');
   add('PAYMENT_REVIEW', input.paymentReviewCount || 0, '입금 확인 필요', '/manage/inbox');
+  add('PAYMENT_UNASSIGNED', input.unassignedPaymentCount || 0, '회차 미확인 입금', '/manage/inbox?tab=unassigned');
   add('CONTACT_CONFIRM', orders.filter((order) => order.stage === 'NEEDS_CONTACT' && order.contact?.state === 'NEEDS_CONFIRM').length,
     '연락처 확인 필요', '/manage/contacts');
   add('CONTACT_MISSING', orders.filter((order) => order.stage === 'NEEDS_CONTACT' && order.contact?.state !== 'NEEDS_CONFIRM').length,

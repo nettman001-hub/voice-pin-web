@@ -57,6 +57,10 @@ export interface CustomerPurchaseClaim {
 export interface SettlementInvoice {
   id: string;
   saleIds: string[];
+  /** 새 관리 정산서의 방송 회차·구매자·종류. 이전 기록에는 없을 수 있다. */
+  sessionId?: string;
+  buyerKey?: string;
+  kind?: 'ORDER' | 'SHIPPING';
   customerNickname: string;
   phoneNumber: string;
   address: string;

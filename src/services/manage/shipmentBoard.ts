@@ -90,6 +90,7 @@ export interface ShipmentBoardInput {
   now?: Date;
   /** 표시할 상품의 판매 기간. 출고 예약에 쓰는 합배송 계획은 전체 기간으로 유지한다. */
   periodDays?: number;
+  selectedSessionIds?: ReadonlySet<string>;
 }
 
 const ACTIVE = new Set(['RESERVED', 'READY', 'PACKED']);
@@ -185,8 +186,10 @@ export function buildShipmentBoard(input: ShipmentBoardInput): ShipmentBoard {
       saleId: sale.id, nickname: sale.buyerNickname.trim(), productName: sale.productName || sale.productCode || '상품',
       amount: Number(sale.amount) || 0, sessionId: sale.sessionId,
     }));
-  if (input.periodDays === undefined) return { ready, keptOnly, active, done, refundNeeded };
-  const visibleIds = new Set(billable.filter((sale) => inManagePeriod(sale.recognizedAt, input.periodDays!, input.now || new Date())).map((sale) => sale.id));
+  if (input.periodDays === undefined && !input.selectedSessionIds) return { ready, keptOnly, active, done, refundNeeded };
+  const visibleIds = new Set(billable.filter((sale) => input.selectedSessionIds
+    ? input.selectedSessionIds.has(sale.sessionId)
+    : inManagePeriod(sale.recognizedAt, input.periodDays!, input.now || new Date())).map((sale) => sale.id));
   const includesVisible = (ids: readonly string[]) => ids.some((id) => visibleIds.has(id));
   return {
     ready: ready.filter((buyer) => includesVisible(buyer.plan.newSaleIds)),

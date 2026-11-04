@@ -8,8 +8,9 @@ import {
   buildManageSummary, contactLinksFromRows, fulfillmentItemsFromRows, normalizeSummaryPeriod, overrideLookup,
   summaryInvoiceFromRow, summaryMessageFromRow, summaryPaymentFromRow, summarySaleFromRow,
   CONTACT_COLUMNS, FULFILLMENT_COLUMNS, SUMMARY_INVOICE_COLUMNS, SUMMARY_MESSAGE_COLUMNS, SUMMARY_PAYMENT_COLUMNS,
-  SUMMARY_SALE_COLUMNS,
+  SUMMARY_SALE_COLUMNS, SUMMARY_SESSION_COLUMNS, summarySessionFromRow,
 } from '../../../../src/services/manage/manageSummary.ts';
+import { normalizeManageScope } from '../../../../src/services/manage/scope.ts';
 import { KEEPING_ALERT_DAYS_SETTING, normalizeKeepingAlertDays } from '../../../../src/services/manage/fulfillment.ts';
 import { DEFAULT_SHIPPING_CONFIG } from '../../../../src/services/shippingDefaults.ts';
 import { cleanMessageBody } from '../../../../src/utils/textCleaner.ts';
@@ -40,11 +41,13 @@ export async function handleManageSummary(auth: AuthContext, body: Record<string
   if (auth.actorType !== 'USER') {
     return errorResponse('CAPABILITY_DENIED', '판매자 로그인으로만 볼 수 있습니다.', 403);
   }
-  const periodDays = normalizeSummaryPeriod(body.periodDays);
-  if (periodDays === null) return errorResponse('VALIDATION_ERROR', '기간을 다시 골라 주세요.', 400, { field: 'periodDays' });
+  const legacyDays = normalizeSummaryPeriod(body.periodDays);
+  const scope = body.scope !== undefined ? normalizeManageScope(body.scope)
+    : legacyDays !== null ? { mode: 'period' as const, periodDays: legacyDays } : null;
+  if (!scope) return errorResponse('VALIDATION_ERROR', '방송 회차 또는 기간을 다시 골라 주세요.', 400, { field: 'scope' });
   const workspaceId = auth.workspaceId;
   try {
-    const [sales, invoices, payments, messages, contacts, items, shipping, overrides, alertRaw] = await Promise.all([
+    const [sales, invoices, payments, messages, contacts, items, shipping, overrides, alertRaw, sessions] = await Promise.all([
       readAll('sales', SUMMARY_SALE_COLUMNS, workspaceId, 'recognized_at'),
       readAll('invoices', SUMMARY_INVOICE_COLUMNS, workspaceId, 'created_at'),
       readAll('payment_receipts', SUMMARY_PAYMENT_COLUMNS, workspaceId, 'paid_at'),
@@ -54,6 +57,7 @@ export async function handleManageSummary(auth: AuthContext, body: Record<string
       readSetting(workspaceId, 'shipping_config'),
       readSetting(workspaceId, 'buyer_shipping_overrides'),
       readSetting(workspaceId, KEEPING_ALERT_DAYS_SETTING),
+      readAll('live_sessions', SUMMARY_SESSION_COLUMNS, workspaceId, 'started_at'),
     ]);
     const now = new Date();
     const summary = buildManageSummary({
@@ -67,7 +71,8 @@ export async function handleManageSummary(auth: AuthContext, body: Record<string
       getOverride: overrideLookup(overrides),
       alertDays: normalizeKeepingAlertDays(alertRaw),
       now,
-      periodDays,
+      scope,
+      sessions: sessions.map(summarySessionFromRow),
     });
     return successResponse(summary);
   } catch (_error) {

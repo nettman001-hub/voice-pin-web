@@ -5,6 +5,7 @@ import type { FulfillmentItemRecord, KeepingAlertDays } from './fulfillment.ts';
 import { buildManageDashboard, type DashboardInput, type GoodsSummary, type ManageDashboard, type PaymentLike } from './dashboard.ts';
 import type { OrderInvoiceLike, StageSummary } from './orderPipeline.ts';
 import type { ManageTodo } from './todos.ts';
+import type { ManageScope, ManageSessionLike } from './scope.ts';
 
 /**
  * 관리 홈 서버 요약 (sales-api manage-summary).
@@ -18,9 +19,10 @@ export const SUMMARY_PERIODS = [0, 1, 7, 30] as const;
 
 /** 서버가 읽는 판매 열 (계산에 쓰는 것만). 사진·기록은 읽지 않는다. */
 export const SUMMARY_SALE_COLUMNS = 'id,session_id,buyer_nickname,buyer_id,record_state,amount,recognized_at,status,quantity,ai_verification';
-export const SUMMARY_INVOICE_COLUMNS = 'id,status,sale_ids,customer_nickname,created_at';
-export const SUMMARY_PAYMENT_COLUMNS = 'sale_ids,match_status,paid_at';
-export const SUMMARY_MESSAGE_COLUMNS = 'phone_number,direction,body,received_at';
+export const SUMMARY_INVOICE_COLUMNS = 'id,status,sale_ids,customer_nickname,created_at,session_id,buyer_key,kind';
+export const SUMMARY_PAYMENT_COLUMNS = 'sale_ids,match_status,paid_at,invoice_id,candidate_ids';
+export const SUMMARY_MESSAGE_COLUMNS = 'phone_number,direction,body,received_at,sale_ids';
+export const SUMMARY_SESSION_COLUMNS = 'id,display_code,status,started_at,ended_at';
 export const CONTACT_COLUMNS = 'phone,buyer_key,nickname,state,linked_at';
 export const FULFILLMENT_COLUMNS = 'sale_id,buyer_key,state,kept_at,shipment_id,cancelled_by,refunded_at';
 
@@ -43,15 +45,22 @@ export function summarySaleFromRow(row: Row): SaleRecord {
 const ids = (value: unknown) => (Array.isArray(value) ? value.map(String) : []);
 
 export function summaryInvoiceFromRow(row: Row): OrderInvoiceLike & { saleIds: string[] } {
-  return { id: row.id, status: row.status, saleIds: ids(row.sale_ids), buyerNickname: row.customer_nickname, createdAt: row.created_at };
+  return { id: row.id, status: row.status, saleIds: ids(row.sale_ids), buyerNickname: row.customer_nickname, createdAt: row.created_at,
+    sessionId: row.session_id || undefined, buyerKey: row.buyer_key || undefined,
+    kind: row.kind === 'ORDER' || row.kind === 'SHIPPING' ? row.kind : undefined };
 }
 
 export function summaryPaymentFromRow(row: Row): PaymentLike {
-  return { saleIds: ids(row.sale_ids), matchStatus: row.match_status, paidAt: row.paid_at || undefined };
+  return { saleIds: ids(row.sale_ids), matchStatus: row.match_status, paidAt: row.paid_at || undefined,
+    invoiceId: row.invoice_id || undefined, candidateIds: ids(row.candidate_ids) };
 }
 
 export function summaryMessageFromRow(row: Row, cleanBody: (body?: string | null) => string): ContactMessage {
-  return { phone: row.phone_number, direction: row.direction, body: cleanBody(row.body), receivedAt: row.received_at || undefined };
+  return { phone: row.phone_number, direction: row.direction, body: cleanBody(row.body), receivedAt: row.received_at || undefined, saleIds: ids(row.sale_ids) };
+}
+
+export function summarySessionFromRow(row: Row): ManageSessionLike {
+  return { id: row.id, displayCode: row.display_code, status: row.status, startedAt: row.started_at, endedAt: row.ended_at };
 }
 
 /** buyer_contacts 행. 구매자 키가 없는 행은 BLOCKED(모르는 번호 막기)만 쓴다. */
@@ -74,6 +83,7 @@ export function overrideLookup(map: Record<string, BuyerShippingOverride> | null
 }
 
 export interface ManageSummary {
+  scope?: ManageScope;
   periodDays: number;
   salesAmount: number;
   paidAmount: number;
@@ -93,6 +103,7 @@ export interface ManageSummary {
 export function summaryOf(dashboard: ManageDashboard, periodDays: number, alertDays: KeepingAlertDays, now: Date): ManageSummary {
   return {
     periodDays,
+    scope: dashboard.scope,
     salesAmount: dashboard.salesAmount,
     paidAmount: dashboard.paidAmount,
     unpaidAmount: dashboard.unpaidAmount,
@@ -109,7 +120,7 @@ export function summaryOf(dashboard: ManageDashboard, periodDays: number, alertD
 }
 
 export function buildManageSummary(input: DashboardInput): ManageSummary {
-  return summaryOf(buildManageDashboard(input), input.periodDays, input.alertDays, input.now);
+  return summaryOf(buildManageDashboard(input), input.scope?.mode === 'period' ? input.scope.periodDays : input.periodDays ?? 0, input.alertDays, input.now);
 }
 
 export function normalizeSummaryPeriod(value: unknown): number | null {

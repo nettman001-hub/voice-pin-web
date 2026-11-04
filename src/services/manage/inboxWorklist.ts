@@ -18,6 +18,9 @@ export interface PaymentForReview {
 
 export interface InvoiceForReview {
   id: string;
+  sessionId?: string;
+  buyerKey?: string;
+  kind?: 'ORDER' | 'SHIPPING';
   customerNickname: string;
   amount: number;
   status: string;
@@ -34,6 +37,14 @@ export interface PaymentReviewItem {
 }
 
 const OPEN = new Set(['DRAFT', 'QUEUED', 'SENT']);
+
+/** 회차나 정산서 상태가 바뀌면 이전 선택을 현재 열린 후보에 한해서만 사용한다. */
+export function reviewInvoiceSelection(item: PaymentReviewItem, picked?: readonly string[]): string[] {
+  const candidates = item.candidates.filter((invoice) => OPEN.has(invoice.status)).map((invoice) => invoice.id);
+  if (picked === undefined) return candidates.length > 0 ? [candidates[0]] : [];
+  const allowed = new Set(candidates);
+  return [...new Set(picked.filter((id) => allowed.has(id)))];
+}
 
 export function buildPaymentReview(
   payments: readonly PaymentForReview[],

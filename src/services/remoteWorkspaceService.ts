@@ -224,6 +224,9 @@ const mapClaim = async (row: Row): Promise<CustomerPurchaseClaim> => {
 const mapInvoice = (row: Row): SettlementInvoice => ({
   id: row.id,
   saleIds: Array.isArray(row.sale_ids) ? row.sale_ids.map(String) : [],
+  sessionId: row.session_id || undefined,
+  buyerKey: row.buyer_key || undefined,
+  kind: row.kind === 'ORDER' || row.kind === 'SHIPPING' ? row.kind : undefined,
   customerNickname: row.customer_nickname,
   phoneNumber: row.phone_number,
   address: row.address,

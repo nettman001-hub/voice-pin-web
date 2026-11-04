@@ -8,14 +8,15 @@ import {
   type FulfillmentItemRecord, type KeepingAlert, type KeepingAlertDays,
 } from './fulfillment.ts';
 import { buildManageTodos, type ManageTodo } from './todos.ts';
-import { inManagePeriod } from './period.ts';
+import { buildManageSessions, selectedManageSessionIds, selectManageSales, type ManageScope, type ManageSessionLike } from './scope.ts';
+import { scopeManageInbox } from './scopedInbox.ts';
 
 /**
  * 관리 홈 한 장에 필요한 값 (순수 함수).
  * 숫자 3개(판매액·입금·남은 입금), 돈 4칸, 물건 4칸, 할 일, 보관 카드.
  */
 
-export interface PaymentLike { saleIds: readonly string[]; matchStatus: string; paidAt?: string }
+export interface PaymentLike { id?: string; saleIds: readonly string[]; matchStatus: string; paidAt?: string; invoiceId?: string; candidateIds?: readonly string[] }
 
 export interface DashboardInput {
   sales: readonly SaleRecord[];
@@ -28,8 +29,10 @@ export interface DashboardInput {
   getOverride?: (nickname: string, sessionId: string) => BuyerShippingOverride | null | undefined;
   alertDays: KeepingAlertDays;
   now: Date;
-  /** 판매·돈·물건을 볼 기간 (판매일 기준). 0 이면 전체. */
-  periodDays: number;
+  /** 이전 API 호환용. 새 화면은 scope를 전달한다. */
+  periodDays?: number;
+  scope?: ManageScope;
+  sessions?: readonly ManageSessionLike[];
 }
 
 export interface GoodsSummary {
@@ -41,6 +44,8 @@ export interface GoodsSummary {
 }
 
 export interface ManageDashboard {
+  scope: ManageScope;
+  selectedSessionIds: ReadonlySet<string>;
   salesAmount: number;
   paidAmount: number;
   unpaidAmount: number;
@@ -60,16 +65,23 @@ export interface ManageDashboard {
 
 export function paidSaleIdsOf(
   payments: readonly PaymentLike[],
-  invoices: readonly { status: string; saleIds?: readonly string[] | null }[],
+  invoices: readonly { id?: string; status: string; saleIds?: readonly string[] | null }[],
 ): Set<string> {
   const paid = new Set<string>();
-  for (const payment of payments) if (payment.matchStatus === 'MATCHED') for (const id of payment.saleIds) paid.add(id);
+  const invoiceById = new Map(invoices.filter((invoice) => invoice.id).map((invoice) => [invoice.id!, invoice]));
+  for (const payment of payments) if (payment.matchStatus === 'MATCHED') {
+    for (const id of payment.saleIds) paid.add(id);
+    for (const id of (payment.invoiceId && invoiceById.get(payment.invoiceId)?.saleIds) || []) paid.add(id);
+  }
   for (const invoice of invoices) if (invoice.status === 'PAID') for (const id of invoice.saleIds || []) paid.add(id);
   return paid;
 }
 
 export function buildManageDashboard(input: DashboardInput): ManageDashboard {
-  const inPeriod = input.sales.filter((sale) => inManagePeriod(sale.recognizedAt, input.periodDays, input.now));
+  const scope: ManageScope = input.scope || { mode: 'period', periodDays: input.periodDays ?? 7 };
+  const sessions = buildManageSessions(input.sessions || [], input.sales);
+  const selectedSessionIds = selectedManageSessionIds(scope, sessions, input.now);
+  const inPeriod = selectManageSales(input.sales, sessions, scope, input.now);
   const paidSaleIds = paidSaleIdsOf(input.payments, input.invoices);
   const items = new Map(input.fulfillmentItems.map((item) => [item.saleId, item]));
   const keepingBuyerKeys = new Set<string>();
@@ -81,7 +93,16 @@ export function buildManageDashboard(input: DashboardInput): ManageDashboard {
     const buyerKey = saleBuyerKey(sale);
     buyers.set(buyerKey, { buyerKey, nickname: sale.buyerNickname.trim() });
   }
-  const contactBook = buildContactBook([...buyers.values()], input.contactLinks, input.messages);
+  const knownSaleIds = new Set(input.sales.map((sale) => sale.id));
+  const selectedSaleIds = new Set(inPeriod.map((sale) => sale.id));
+  const contactMessages = input.messages.filter((message) =>
+    (message.saleIds || []).some((id) => selectedSaleIds.has(id))
+    || !(message.saleIds || []).some((id) => knownSaleIds.has(id)));
+  const contactBook = buildContactBook([...buyers.values()], input.contactLinks, contactMessages);
+  const inbox = scopeManageInbox({
+    sales: input.sales, selectedSessionIds, invoices: input.invoices, payments: input.payments, messages: input.messages, contactBook,
+    allSessions: (scope.mode === 'session' && scope.sessionId === 'ALL') || (scope.mode === 'period' && scope.periodDays === 0),
+  });
   const orders = buildOrders({
     sales: inPeriod, shippingConfig: input.shippingConfig, contactBook, invoices: input.invoices,
     getOverride: input.getOverride, keepingBuyerKeys, paidSaleIds,
@@ -117,12 +138,13 @@ export function buildManageDashboard(input: DashboardInput): ManageDashboard {
   const todos = buildManageTodos({
     orders, contactBook, keepingAlerts: alerts,
     readyToShipBuyerCount: goods.readyToShipBuyers, refundNeededCount: goods.refundNeeded,
-    paymentReviewCount: input.payments.filter((payment) =>
-      (payment.matchStatus === 'NEEDS_REVIEW' || payment.matchStatus === 'UNMATCHED')
-      && (!payment.paidAt || inManagePeriod(payment.paidAt, input.periodDays, input.now))).length,
+    paymentReviewCount: inbox.payments.filter((payment) => payment.matchStatus === 'NEEDS_REVIEW' || payment.matchStatus === 'UNMATCHED').length,
+    unassignedPaymentCount: inbox.unassignedPayments.filter((payment) => payment.matchStatus === 'NEEDS_REVIEW' || payment.matchStatus === 'UNMATCHED').length,
   });
 
   return {
+    scope,
+    selectedSessionIds,
     salesAmount: ordersProductTotal(orders),
     paidAmount,
     unpaidAmount,
@@ -142,7 +164,7 @@ export function buildManageDashboard(input: DashboardInput): ManageDashboard {
     },
     orders,
     contactBook,
-    contactMessages: input.messages,
+    contactMessages,
     paidSaleIds,
     fulfillmentItems: items,
   };

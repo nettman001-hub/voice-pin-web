@@ -1,5 +1,5 @@
 import { useManagePeriod } from '../../services/manage/useManagePeriod';
-import { withManagePeriod } from '../../services/manage/period';
+import { withManageScope, manageScopeLabel } from '../../services/manage/scope';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Send, XCircle } from 'lucide-react';
@@ -33,13 +33,16 @@ const STATUS_TEXT: Record<string, string> = {
 export const OrderDetailPage: React.FC = () => {
   const { orderKey = '' } = useParams();
   const key = useMemo(() => { try { return decodeURIComponent(orderKey); } catch { return orderKey; } }, [orderKey]);
+  const detailSessionId = key.split(/::(?:buyer|nickname):/)[0];
+  const detailScope = useMemo(() => ({ mode: 'session' as const, sessionId: detailSessionId }), [detailSessionId]);
   const { workspaceId } = useAuth();
   const { sales } = useSales();
   const commerce = useCommerce();
   const api = useMemo(() => (workspaceId ? new ManageApi(workspaceId) : null), [workspaceId]);
-  const { periodDays } = useManagePeriod(0);
+  const selection = useManagePeriod();
+  const { scope } = selection;
   const [reloadKey, setReloadKey] = useState(0);
-  const { dashboard } = useManageDashboard(periodDays, reloadKey);
+  const { dashboard } = useManageDashboard(detailScope, reloadKey, selection.sessions, selection.now);
   const order = dashboard.orders.find((item) => item.key === key);
   const [bankAccount, setBankAccount] = useState(readSavedBankAccount);
   const [dueDate, setDueDate] = useState(() => defaultDueDate(new Date()));
@@ -67,7 +70,7 @@ export const OrderDetailPage: React.FC = () => {
   if (!order) {
     return (
       <div className="mx-auto max-w-lg space-y-3 p-3">
-        <ManageBackLink fallback={withManagePeriod('/manage/orders', periodDays)} />
+        <ManageBackLink fallback={withManageScope('/manage/orders', scope)} />
         <p className="rounded-2xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">주문을 찾지 못했습니다. 판매가 취소됐거나 아직 불러오는 중입니다.</p>
       </div>
     );
@@ -149,9 +152,10 @@ export const OrderDetailPage: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-lg space-y-3 p-3 lg:max-w-3xl">
+      <p className="text-xs font-bold text-slate-500">{manageScopeLabel(detailScope, selection.sessions)}</p>
       <section className="rounded-2xl border border-slate-200 bg-white p-4">
         <div className="flex items-start justify-between gap-2">
-          <ManageBackLink fallback={withManagePeriod(`/manage/orders?stage=${order.stage}`, periodDays)} />
+          <ManageBackLink fallback={withManageScope(`/manage/orders?stage=${order.stage}`, scope)} />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-lg font-black text-slate-900">{order.nickname}</h2>
             <p className="text-xs text-slate-500">회차 {order.sessionId}</p>
@@ -193,7 +197,7 @@ export const OrderDetailPage: React.FC = () => {
             {keptIds.length > 0 && (
               <button type="button" disabled={busy !== null} onClick={unkeep} className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-bold text-slate-700 disabled:opacity-50">보관 풀기 {keptIds.length}개</button>
             )}
-            <Link to={withManagePeriod('/manage/ship', periodDays)} className="inline-flex h-10 items-center text-sm font-bold text-brand-700">출고 화면</Link>
+            <Link to={withManageScope('/manage/ship', scope)} className="inline-flex h-10 items-center text-sm font-bold text-brand-700">출고 화면</Link>
           </div>
         )}
       </section>
@@ -206,7 +210,7 @@ export const OrderDetailPage: React.FC = () => {
         {order.stage === 'NEEDS_CONTACT' && (
           <>
             <p className="text-sm text-slate-600">{order.contact?.reason || '연락처가 없습니다.'} 연락처를 연결해야 정산서를 보낼 수 있습니다.</p>
-            <Link to={withManagePeriod('/manage/contacts', periodDays)} className="flex h-12 items-center justify-center rounded-xl bg-amber-500 text-sm font-extrabold text-white">연락처 연결하기</Link>
+            <Link to={withManageScope('/manage/contacts', scope)} className="flex h-12 items-center justify-center rounded-xl bg-amber-500 text-sm font-extrabold text-white">연락처 연결하기</Link>
           </>
         )}
 

@@ -13,6 +13,7 @@ import {
 import { buildManageDashboard, type ManageDashboard } from './dashboard';
 import { CONTACT_COLUMNS, FULFILLMENT_COLUMNS, contactLinksFromRows, fulfillmentItemsFromRows, type ManageSummary } from './manageSummary';
 import { ManageApi } from './manageApi';
+import type { ManageScope, ManageSessionLike } from './scope';
 
 /**
  * 관리 화면이 읽는 값. 쓰기는 manageApi(서버)로만 한다.
@@ -67,7 +68,7 @@ export function useManageServerState(reloadKey = 0): ManageServerState {
   return state.workspaceId === workspaceId ? state : EMPTY;
 }
 
-export function useManageDashboard(periodDays: number, reloadKey = 0): { dashboard: ManageDashboard; server: ManageServerState } {
+export function useManageDashboard(scope: ManageScope, reloadKey = 0, sessions: readonly ManageSessionLike[] = [], now?: Date): { dashboard: ManageDashboard; server: ManageServerState } {
   const { workspaceId } = useAuth();
   const { sales } = useSales();
   const commerce = useCommerce();
@@ -76,20 +77,21 @@ export function useManageDashboard(periodDays: number, reloadKey = 0): { dashboa
     sales,
     invoices: commerce.invoices.map((invoice) => ({
       id: invoice.id, status: invoice.status, saleIds: invoice.saleIds, buyerNickname: invoice.customerNickname,
-      createdAt: invoice.createdAt,
+      createdAt: invoice.createdAt, sessionId: invoice.sessionId, buyerKey: invoice.buyerKey, kind: invoice.kind,
     })),
     payments: commerce.payments,
     messages: commerce.messages.map((message) => ({
-      phone: message.phoneNumber, direction: message.direction, body: message.body, receivedAt: message.receivedAt,
+      phone: message.phoneNumber, direction: message.direction, body: message.body, receivedAt: message.receivedAt, saleIds: message.saleIds,
     })),
     contactLinks: server.contactLinks,
     fulfillmentItems: server.fulfillmentItems,
     shippingConfig: shippingService.getConfig(workspaceId),
     getOverride: (nickname, sessionId) => shippingService.getOverride(nickname, sessionId, workspaceId),
     alertDays: server.alertDays,
-    now: new Date(),
-    periodDays,
-  }), [sales, commerce.invoices, commerce.payments, commerce.messages, server, workspaceId, periodDays]);
+    now: now || new Date(),
+    scope,
+    sessions,
+  }), [sales, commerce.invoices, commerce.payments, commerce.messages, server, workspaceId, scope, sessions, now]);
   return { dashboard, server };
 }
 
@@ -99,14 +101,15 @@ const SUMMARY_REFRESH_DELAY_MS = 3000;
  * 관리 홈 서버 요약. 폰이 판매를 다 받기 전에도 숫자를 바로 보여 준다.
  * 판매·정산서·입금·문자가 바뀌면 3초 뒤 다시 받는다. 못 받으면 summary 는 null (폰 계산을 쓴다).
  */
-export function useManageHomeSummary(periodDays: number, reloadKey = 0): { summary: ManageSummary | null; error: string | null } {
+export function useManageHomeSummary(scope: ManageScope, reloadKey = 0, now?: Date): { summary: ManageSummary | null; error: string | null } {
   const { workspaceId } = useAuth();
   const { sales } = useSales();
   const commerce = useCommerce();
   const api = useMemo(() => (workspaceId && isSupabaseConfigured ? new ManageApi(workspaceId) : null), [workspaceId]);
   const [state, setState] = useState<{ key: string; summary: ManageSummary | null; error: string | null }>({ key: '', summary: null, error: null });
   const [changeTick, setChangeTick] = useState(0);
-  const key = `${workspaceId}:${periodDays}`;
+  const scopeKey = JSON.stringify(scope);
+  const key = `${workspaceId}:${scopeKey}:${now?.getTime() || 0}`;
 
   const changes = useRef(0);
   useEffect(() => {
@@ -119,13 +122,13 @@ export function useManageHomeSummary(periodDays: number, reloadKey = 0): { summa
   useEffect(() => {
     if (!api) return undefined;
     let cancelled = false;
-    api.summary(periodDays)
+    api.summary(scope)
       .then((summary) => { if (!cancelled) setState({ key, summary, error: null }); })
       .catch((error) => {
         if (!cancelled) setState((prev) => ({ key, summary: prev.key === key ? prev.summary : null, error: String(error?.message || error) }));
       });
     return () => { cancelled = true; };
-  }, [api, key, periodDays, reloadKey, changeTick]);
+  }, [api, key, reloadKey, changeTick]);
 
   return state.key === key ? { summary: state.summary, error: state.error } : { summary: null, error: null };
 }

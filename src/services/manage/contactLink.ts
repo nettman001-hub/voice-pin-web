@@ -32,6 +32,7 @@ export interface ContactMessage {
   direction: string;
   body?: string | null;
   receivedAt?: string;
+  saleIds?: readonly string[];
   channel?: 'SMS' | 'KAKAO';
 }
 

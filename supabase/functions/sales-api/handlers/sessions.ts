@@ -12,14 +12,21 @@ export async function getActiveSession(workspaceId: string) {
 }
 
 export async function handleListSessions(workspaceId: string) {
-  const { data: sessions, error } = await admin
-    .from('live_sessions')
-    .select('id, display_code, status, active_product_id, revision, started_at, ended_at')
-    .eq('workspace_id', workspaceId)
-    .order('started_at', { ascending: false })
-    .limit(500)
-
-  if (error) return errorResponse('DATABASE_ERROR', `방송 회차 조회 실패: ${error.message}`, 500)
+  // 오래된 회차도 서버 요약과 같은 시작일로 조회할 수 있도록 끝까지 읽는다.
+  const sessions: any[] = []
+  const pageSize = 1000
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await admin
+      .from('live_sessions')
+      .select('id, display_code, status, active_product_id, revision, started_at, ended_at')
+      .eq('workspace_id', workspaceId)
+      .order('started_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(offset, offset + pageSize - 1)
+    if (error) return errorResponse('DATABASE_ERROR', `방송 회차 조회 실패: ${error.message}`, 500)
+    sessions.push(...(data || []))
+    if (!data || data.length < pageSize) break
+  }
 
   return successResponse({
     sessions: (sessions || []).map((session) => ({

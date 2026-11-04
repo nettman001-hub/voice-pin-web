@@ -1,6 +1,6 @@
-import { ManagePeriodTabs } from '../../components/manage/ManagePeriodTabs';
+import { ManageScopeControl } from '../../components/manage/ManageScopeControl';
 import { useManagePeriod } from '../../services/manage/useManagePeriod';
-import { withManagePeriod } from '../../services/manage/period';
+import { withManageScope, manageScopeLabel } from '../../services/manage/scope';
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Check, Copy, Phone, RefreshCw, UserX } from 'lucide-react';
@@ -20,9 +20,10 @@ import { ManageBackLink } from '../../components/manage/ManageBackLink';
 export const ContactLinkPage: React.FC = () => {
   const { workspaceId } = useAuth();
   const api = useMemo(() => (workspaceId ? new ManageApi(workspaceId) : null), [workspaceId]);
-  const { periodDays, setPeriodDays } = useManagePeriod(0);
+  const selection = useManagePeriod();
+  const { scope } = selection;
   const [reloadKey, setReloadKey] = useState(0);
-  const { dashboard, server } = useManageDashboard(periodDays, reloadKey);
+  const { dashboard, server } = useManageDashboard(scope, reloadKey, selection.sessions, selection.now);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -74,20 +75,16 @@ export const ContactLinkPage: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-lg space-y-3 p-3 lg:max-w-3xl">
-      <div className="flex items-center justify-between gap-1">
-        <div className="flex min-w-0 items-center gap-1">
-          <ManageBackLink />
-          <ManagePeriodTabs days={periodDays} onChange={setPeriodDays} />
-        </div>
+      <ManageScopeControl selection={selection} leading={<ManageBackLink />} trailing={
         <button
           type="button"
-          onClick={() => setReloadKey((key) => key + 1)}
+          onClick={() => { selection.refreshSessions(); setReloadKey((key) => key + 1); }}
           aria-label="새로고침"
           className="flex h-9 items-center gap-1 rounded-full border border-slate-200 bg-white px-2 text-xs font-bold text-slate-600 min-[380px]:px-3"
         >
           <RefreshCw className="h-3.5 w-3.5" /> <span className="hidden min-[380px]:inline">새로고침</span>
         </button>
-      </div>
+      } />
 
       {!server.serverReady && server.loadedAt && (
         <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -255,6 +252,7 @@ export const ContactLinkPage: React.FC = () => {
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
         <h2 className="border-b border-slate-100 px-4 py-2.5 text-sm font-extrabold text-slate-900">발신자 확인안됨 {list.unknown.length}건</h2>
+        <p className="border-b border-slate-100 px-4 py-2 text-[11px] text-slate-500">회차 미확인 문자입니다. 구매자를 확인해 연결하세요.</p>
         {list.unknown.length === 0 ? (
           <p className="px-4 py-3 text-sm text-slate-500">모르는 번호의 문자가 없습니다.</p>
         ) : (
@@ -301,7 +299,7 @@ export const ContactLinkPage: React.FC = () => {
 
 
 
-      <Link to={withManagePeriod('/manage/orders?stage=READY_TO_BILL', periodDays)} className="block text-center text-sm font-bold text-brand-700">
+      <Link to={withManageScope('/manage/orders?stage=READY_TO_BILL', scope)} className="block text-center text-sm font-bold text-brand-700">
         청구 전 주문 보기
       </Link>
     </div>

@@ -1,6 +1,6 @@
-import { ManagePeriodTabs } from '../../components/manage/ManagePeriodTabs';
+import { ManageScopeControl } from '../../components/manage/ManageScopeControl';
 import { useManagePeriod } from '../../services/manage/useManagePeriod';
-import { withManagePeriod } from '../../services/manage/period';
+import { withManageScope, manageScopeLabel } from '../../services/manage/scope';
 import { ManageBackLink } from '../../components/manage/ManageBackLink';
 import React, { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -34,9 +34,10 @@ export const ShipPage: React.FC = () => {
   const [params, setParams] = useSearchParams();
   const filter = params.get('filter');
   const tab = filter === 'keeping' || filter === 'active' || filter === 'refund' ? filter : 'ready';
-  const { periodDays, setPeriodDays } = useManagePeriod(0);
+  const selection = useManagePeriod();
+  const { scope } = selection;
   const [reloadKey, setReloadKey] = useState(0);
-  const { dashboard, server } = useManageDashboard(periodDays, reloadKey);
+  const { dashboard, server } = useManageDashboard(scope, reloadKey, selection.sessions, selection.now);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -51,10 +52,10 @@ export const ShipPage: React.FC = () => {
 
   const board = useMemo(() => buildShipmentBoard({
     sales, paidSaleIds: dashboard.paidSaleIds, items: dashboard.fulfillmentItems, shipments: commerce.shipments,
-    invoices: commerce.invoices, claims: commerce.claims, contactPhones, periodDays, doneDays: Infinity,
+    invoices: commerce.invoices, claims: commerce.claims, contactPhones, selectedSessionIds: dashboard.selectedSessionIds, doneDays: Infinity,
     shippingConfig: shippingService.getConfig(workspaceId),
     getOverride: (nickname, sessionId) => shippingService.getOverride(nickname, sessionId, workspaceId),
-  }), [sales, dashboard.paidSaleIds, dashboard.fulfillmentItems, commerce.shipments, commerce.invoices, commerce.claims, contactPhones, workspaceId, periodDays]);
+  }), [sales, dashboard.paidSaleIds, dashboard.fulfillmentItems, commerce.shipments, commerce.invoices, commerce.claims, contactPhones, workspaceId, dashboard.selectedSessionIds]);
 
   const run = async (key: string, action: () => Promise<string>) => {
     if (!api) return;
@@ -150,20 +151,17 @@ export const ShipPage: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-lg space-y-3 p-3 lg:max-w-3xl">
-      <div className="flex items-start gap-1">
-        <ManageBackLink />
-        <ManagePeriodTabs days={periodDays} onChange={setPeriodDays} />
-      </div>
+      <ManageScopeControl selection={selection} leading={<ManageBackLink />} />
       <div role="tablist" aria-label="출고" className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-1">
         {tabs.map((item) => (
           <button key={item.id} type="button" role="tab" aria-selected={tab === item.id}
-            onClick={() => setParams({ period: String(periodDays), ...(item.id === 'ready' ? {} : { filter: item.id }) })}
+            onClick={() => setParams((previous) => { const next = new URLSearchParams(previous); if (item.id === 'ready') next.delete('filter'); else next.set('filter', item.id); return next; })}
             className={`min-h-[36px] flex-shrink-0 rounded-full px-3 text-xs font-bold ${tab === item.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'}`}>
             {item.label}
           </button>
         ))}
       </div>
-      <p className="text-[11px] text-slate-500">판매일 기준으로 표시합니다. 합배송에는 이전 보관 상품도 함께 포함됩니다.</p>
+      <p className="text-[11px] text-slate-500">선택한 방송 회차의 상품을 표시합니다. 합배송에는 이전 회차의 보관 상품도 함께 포함됩니다.</p>
       {!server.serverReady && server.loadedAt && (
         <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">보관·출고 기록을 서버에서 읽지 못했습니다. 인터넷 연결을 확인해 주세요.</p>
       )}
@@ -181,7 +179,7 @@ export const ShipPage: React.FC = () => {
 
       {tab === 'keeping' && (
         <>
-          <p className="text-[11px] text-slate-500">선택 기간에 판매한 보관 상품이 있는 고객입니다. 고객이 요청하면 출고 예약하세요. <Link to={withManagePeriod('/manage/settings/keeping', periodDays)} className="font-bold underline">알림 일수</Link></p>
+          <p className="text-[11px] text-slate-500">선택한 방송 회차에 보관 상품이 있는 고객입니다. 고객이 요청하면 출고 예약하세요. <Link to={withManageScope('/manage/settings/keeping', scope)} className="font-bold underline">알림 일수</Link></p>
           {board.keptOnly.length === 0 ? <Empty text="보관 중인 고객이 없습니다." /> : (
             <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white">{board.keptOnly.map(buyerCard)}</ul>
           )}

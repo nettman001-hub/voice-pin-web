@@ -71,8 +71,8 @@ export class ManageApi {
     return this.call('manage-invoice-cancel', { invoiceId });
   }
   /** 관리 홈 숫자를 서버가 세어 준다 (읽기만, operationId 없음). */
-  summary(periodDays: number) {
-    return this.invoke<ManageSummary>('manage-summary', { periodDays, workspaceId: this.workspaceId });
+  summary(scope: import('./scope').ManageScope) {
+    return this.invoke<ManageSummary>('manage-summary', { scope, workspaceId: this.workspaceId });
   }
 
   /**
