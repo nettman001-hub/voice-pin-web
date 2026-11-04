@@ -1,3 +1,6 @@
+import { ManagePeriodTabs } from '../../components/manage/ManagePeriodTabs';
+import { useManagePeriod } from '../../services/manage/useManagePeriod';
+import { withManagePeriod } from '../../services/manage/period';
 import { ManageBackLink } from '../../components/manage/ManageBackLink';
 import React, { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -18,21 +21,22 @@ const when = (iso: string) => new Date(iso).toLocaleString('ko-KR', { month: 'nu
  */
 export const ManageInboxPage: React.FC = () => {
   const commerce = useCommerce();
-  const { dashboard } = useManageDashboard(30);
+  const { periodDays, setPeriodDays } = useManagePeriod(30);
+  const { dashboard } = useManageDashboard(periodDays);
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') === 'messages' ? 'messages' : 'payments';
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const review = useMemo(() => buildPaymentReview(commerce.payments, commerce.invoices), [commerce.payments, commerce.invoices]);
+  const review = useMemo(() => buildPaymentReview(commerce.payments, commerce.invoices, { days: periodDays || Infinity }), [commerce.payments, commerce.invoices, periodDays]);
   const threads = useMemo(() => buildBuyerThreads(
     commerce.messages.map((message) => ({
       id: message.id, phone: message.phoneNumber, body: message.body, direction: message.direction,
       at: message.receivedAt || message.createdAt,
     })),
-    dashboard.contactBook,
-  ), [commerce.messages, dashboard.contactBook]);
+    dashboard.contactBook, { days: periodDays || Infinity },
+  ), [commerce.messages, dashboard.contactBook, periodDays]);
 
   const toggle = (paymentId: string, invoiceId: string) => setPicked((prev) => {
     const current = prev[paymentId] || [];
@@ -66,15 +70,16 @@ export const ManageInboxPage: React.FC = () => {
     <div className="mx-auto max-w-lg space-y-3 p-3 lg:max-w-3xl">
       <div className="flex items-start gap-1">
         <ManageBackLink />
-        <div role="tablist" aria-label="문자·입금" className="flex gap-1">
-          {[{ id: 'payments', label: `입금 확인 ${review.length}` }, { id: 'messages', label: `받은 문자 ${threads.length}` }].map((item) => (
-            <button key={item.id} type="button" role="tab" aria-selected={tab === item.id}
-              onClick={() => setParams(item.id === 'payments' ? {} : { tab: item.id })}
-              className={`min-h-[36px] rounded-full px-3 text-xs font-bold ${tab === item.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'}`}>
-              {item.label}
-            </button>
-          ))}
-        </div>
+        <ManagePeriodTabs days={periodDays} onChange={setPeriodDays} />
+      </div>
+      <div role="tablist" aria-label="문자·입금" className="flex gap-1">
+        {[{ id: 'payments', label: `입금 확인 ${review.length}` }, { id: 'messages', label: `받은 문자 ${threads.length}` }].map((item) => (
+          <button key={item.id} type="button" role="tab" aria-selected={tab === item.id}
+            onClick={() => setParams({ period: String(periodDays), ...(item.id === 'payments' ? {} : { tab: item.id }) })}
+            className={`min-h-[36px] rounded-full px-3 text-xs font-bold ${tab === item.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'}`}>
+            {item.label}
+          </button>
+        ))}
       </div>
       {error && <p role="alert" className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">{error}</p>}
 
@@ -136,7 +141,7 @@ export const ManageInboxPage: React.FC = () => {
                   <span className="flex-shrink-0 text-[11px] text-slate-500">{when(thread.lastAt)}{thread.incomingCount > 1 ? ` · ${thread.incomingCount}통` : ''}</span>
                 </div>
                 <p className="mt-0.5 line-clamp-2 text-xs text-slate-600">{thread.lastBody}</p>
-                {!thread.nickname && <Link to="/manage/contacts" className="mt-1 inline-block text-xs font-bold text-amber-700">누군지 모르는 번호: 연락처 연결</Link>}
+                {!thread.nickname && <Link to={withManagePeriod('/manage/contacts', periodDays)} className="mt-1 inline-block text-xs font-bold text-amber-700">누군지 모르는 번호: 연락처 연결</Link>}
               </li>
             ))}
           </ul>
@@ -150,7 +155,7 @@ export const ManageInboxPage: React.FC = () => {
           { to: '/invoices', icon: ReceiptText, name: '정산서·입금 (기존 화면)', hint: '정산서와 입금 전체 기록' },
         ].map((item) => (
           <li key={item.to}>
-            <Link to={item.to} className="flex min-h-[52px] items-center gap-3 px-4 py-2 active:bg-slate-50">
+            <Link to={withManagePeriod(item.to, periodDays)} className="flex min-h-[52px] items-center gap-3 px-4 py-2 active:bg-slate-50">
               <item.icon className="h-5 w-5 flex-shrink-0 text-brand-600" />
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-bold text-slate-900">{item.name}</span>

@@ -1,15 +1,20 @@
 import React from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { readManagePeriod, withManagePeriod } from '../../services/manage/period';
 import { ArrowLeft } from 'lucide-react';
 
 /** 각 관리 화면의 첫 버튼 줄에서 쓰는 뒤로가기. 직접 연 주소는 상위 화면으로 간다. */
 export const ManageBackLink: React.FC<{ fallback?: string }> = ({ fallback }) => {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const goBack = () => {
     const index = window.history.state?.idx;
     if (typeof index === 'number' && index > 0) navigate(-1);
-    else navigate(fallback || (pathname.startsWith('/manage/orders/') ? '/manage/orders' : '/manage'));
+    else {
+      const target = fallback || (pathname.startsWith('/manage/orders/') ? '/manage/orders' : '/manage');
+      navigate(params.has('period') ? withManagePeriod(target, readManagePeriod(params.get('period'))) : target);
+    }
   };
 
   return (

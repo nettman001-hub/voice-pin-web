@@ -1,3 +1,5 @@
+import { useManagePeriod } from '../../services/manage/useManagePeriod';
+import { withManagePeriod } from '../../services/manage/period';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Send, XCircle } from 'lucide-react';
@@ -35,8 +37,9 @@ export const OrderDetailPage: React.FC = () => {
   const { sales } = useSales();
   const commerce = useCommerce();
   const api = useMemo(() => (workspaceId ? new ManageApi(workspaceId) : null), [workspaceId]);
+  const { periodDays } = useManagePeriod(0);
   const [reloadKey, setReloadKey] = useState(0);
-  const { dashboard } = useManageDashboard(0, reloadKey);
+  const { dashboard } = useManageDashboard(periodDays, reloadKey);
   const order = dashboard.orders.find((item) => item.key === key);
   const [bankAccount, setBankAccount] = useState(readSavedBankAccount);
   const [dueDate, setDueDate] = useState(() => defaultDueDate(new Date()));
@@ -64,7 +67,7 @@ export const OrderDetailPage: React.FC = () => {
   if (!order) {
     return (
       <div className="mx-auto max-w-lg space-y-3 p-3">
-        <ManageBackLink fallback="/manage/orders" />
+        <ManageBackLink fallback={withManagePeriod('/manage/orders', periodDays)} />
         <p className="rounded-2xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">주문을 찾지 못했습니다. 판매가 취소됐거나 아직 불러오는 중입니다.</p>
       </div>
     );
@@ -148,7 +151,7 @@ export const OrderDetailPage: React.FC = () => {
     <div className="mx-auto max-w-lg space-y-3 p-3 lg:max-w-3xl">
       <section className="rounded-2xl border border-slate-200 bg-white p-4">
         <div className="flex items-start justify-between gap-2">
-          <ManageBackLink fallback={`/manage/orders?stage=${order.stage}`} />
+          <ManageBackLink fallback={withManagePeriod(`/manage/orders?stage=${order.stage}`, periodDays)} />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-lg font-black text-slate-900">{order.nickname}</h2>
             <p className="text-xs text-slate-500">회차 {order.sessionId}</p>
@@ -190,7 +193,7 @@ export const OrderDetailPage: React.FC = () => {
             {keptIds.length > 0 && (
               <button type="button" disabled={busy !== null} onClick={unkeep} className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-bold text-slate-700 disabled:opacity-50">보관 풀기 {keptIds.length}개</button>
             )}
-            <Link to="/manage/ship" className="inline-flex h-10 items-center text-sm font-bold text-brand-700">출고 화면</Link>
+            <Link to={withManagePeriod('/manage/ship', periodDays)} className="inline-flex h-10 items-center text-sm font-bold text-brand-700">출고 화면</Link>
           </div>
         )}
       </section>
@@ -203,7 +206,7 @@ export const OrderDetailPage: React.FC = () => {
         {order.stage === 'NEEDS_CONTACT' && (
           <>
             <p className="text-sm text-slate-600">{order.contact?.reason || '연락처가 없습니다.'} 연락처를 연결해야 정산서를 보낼 수 있습니다.</p>
-            <Link to="/manage/contacts" className="flex h-12 items-center justify-center rounded-xl bg-amber-500 text-sm font-extrabold text-white">연락처 연결하기</Link>
+            <Link to={withManagePeriod('/manage/contacts', periodDays)} className="flex h-12 items-center justify-center rounded-xl bg-amber-500 text-sm font-extrabold text-white">연락처 연결하기</Link>
           </>
         )}
 

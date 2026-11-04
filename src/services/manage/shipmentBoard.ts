@@ -3,6 +3,7 @@ import type { BuyerShippingOverride, ShippingConfig } from '../../types/shipping
 import { isBillableSale } from '../billableSales.ts';
 import { saleBuyerKey } from './orderPipeline.ts';
 import { goodsStateOf, planShipment, type FulfillmentItemRecord, type GoodsState, type ShipmentPlan } from './fulfillment.ts';
+import { inManagePeriod } from './period.ts';
 
 /**
  * 출고 화면 계산 (순수 함수).
@@ -87,6 +88,8 @@ export interface ShipmentBoardInput {
   /** 끝난 출고(발송·배송 완료·취소)를 며칠까지 보여 줄지 */
   doneDays?: number;
   now?: Date;
+  /** 표시할 상품의 판매 기간. 출고 예약에 쓰는 합배송 계획은 전체 기간으로 유지한다. */
+  periodDays?: number;
 }
 
 const ACTIVE = new Set(['RESERVED', 'READY', 'PACKED']);
@@ -182,7 +185,16 @@ export function buildShipmentBoard(input: ShipmentBoardInput): ShipmentBoard {
       saleId: sale.id, nickname: sale.buyerNickname.trim(), productName: sale.productName || sale.productCode || '상품',
       amount: Number(sale.amount) || 0, sessionId: sale.sessionId,
     }));
-  return { ready, keptOnly, active, done, refundNeeded };
+  if (input.periodDays === undefined) return { ready, keptOnly, active, done, refundNeeded };
+  const visibleIds = new Set(billable.filter((sale) => inManagePeriod(sale.recognizedAt, input.periodDays!, input.now || new Date())).map((sale) => sale.id));
+  const includesVisible = (ids: readonly string[]) => ids.some((id) => visibleIds.has(id));
+  return {
+    ready: ready.filter((buyer) => includesVisible(buyer.plan.newSaleIds)),
+    keptOnly: [...keptOnly, ...ready].filter((buyer) => includesVisible(buyer.plan.keptSaleIds)),
+    active: active.filter((card) => includesVisible(card.shipment.saleIds)),
+    done: done.filter((card) => includesVisible(card.shipment.saleIds)),
+    refundNeeded: refundNeeded.filter((item) => visibleIds.has(item.saleId)),
+  };
 }
 
 /** 다음에 누를 수 있는 단계 (서버 shipment-status 규칙과 같음) */

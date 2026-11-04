@@ -1,16 +1,12 @@
+import { ManagePeriodTabs } from '../../components/manage/ManagePeriodTabs';
+import { useManagePeriod } from '../../services/manage/useManagePeriod';
+import { withManagePeriod } from '../../services/manage/period';
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ChevronRight, Package, RefreshCw } from 'lucide-react';
 import { useManageDashboard, useManageHomeSummary } from '../../services/manage/useManageData';
 import { formatWon } from '../../services/appShellState';
 import type { MoneyStage } from '../../services/manage/orderPipeline';
-
-const PERIODS = [
-  { days: 1, label: '오늘' },
-  { days: 7, label: '7일' },
-  { days: 30, label: '30일' },
-  { days: 0, label: '전체' },
-];
 
 const STAGE_TONE: Record<MoneyStage, string> = {
   NEEDS_CONTACT: 'border-amber-300 bg-amber-50 text-amber-900',
@@ -21,7 +17,7 @@ const STAGE_TONE: Record<MoneyStage, string> = {
 
 /** 관리 홈: 숫자 3개, 돈 4칸(연락처 연결 맨 앞), 물건 4칸, 할 일, 보관 카드. 읽기만 한다. 숫자는 서버 요약을 먼저 쓴다. */
 export const ManageHomePage: React.FC = () => {
-  const [periodDays, setPeriodDays] = useState(7);
+  const { periodDays, setPeriodDays } = useManagePeriod(7);
   const [reloadKey, setReloadKey] = useState(0);
   const { dashboard: local, server } = useManageDashboard(periodDays, reloadKey);
   const { summary } = useManageHomeSummary(periodDays, reloadKey);
@@ -33,22 +29,7 @@ export const ManageHomePage: React.FC = () => {
   return (
     <div className="mx-auto max-w-lg space-y-3 p-3 lg:max-w-3xl">
       <div className="flex items-center justify-between gap-2">
-        <div role="tablist" aria-label="기간" className="flex gap-1">
-          {PERIODS.map((period) => (
-            <button
-              key={period.days}
-              type="button"
-              role="tab"
-              aria-selected={periodDays === period.days}
-              onClick={() => setPeriodDays(period.days)}
-              className={`min-h-[36px] rounded-full px-3 text-xs font-bold ${
-                periodDays === period.days ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'
-              }`}
-            >
-              {period.label}
-            </button>
-          ))}
-        </div>
+        <ManagePeriodTabs days={periodDays} onChange={setPeriodDays} />
         <button
           type="button"
           onClick={() => setReloadKey((key) => key + 1)}
@@ -85,7 +66,7 @@ export const ManageHomePage: React.FC = () => {
           {dashboard.stages.map((stage) => (
             <Link
               key={stage.stage}
-              to={stage.stage === 'NEEDS_CONTACT' ? '/manage/contacts' : `/manage/orders?stage=${stage.stage}`}
+              to={withManagePeriod(stage.stage === 'NEEDS_CONTACT' ? '/manage/contacts' : `/manage/orders?stage=${stage.stage}`, periodDays)}
               className={`rounded-2xl border px-3 py-3 ${STAGE_TONE[stage.stage]}`}
             >
               <div className="text-xs font-bold">{stage.stage === 'NEEDS_CONTACT' ? '연락 대기/연결' : stage.label}</div>
@@ -97,7 +78,7 @@ export const ManageHomePage: React.FC = () => {
       </section>
 
       <section aria-label="물건">
-        <h2 className="mb-1.5 text-xs font-extrabold text-slate-500">물건 (전체 기간)</h2>
+        <h2 className="mb-1.5 text-xs font-extrabold text-slate-500">물건 ({periodDays === 0 ? '전체 기간' : periodDays === 1 ? '오늘' : `최근 ${periodDays}일`})</h2>
         <div className="grid grid-cols-4 gap-2">
           {[
             { label: '발송 대기', value: goods.readyToShip, to: '/manage/ship' },
@@ -107,7 +88,7 @@ export const ManageHomePage: React.FC = () => {
           ].map((item) => (
             <Link
               key={item.label}
-              to={item.to}
+              to={withManagePeriod(item.to, periodDays)}
               className={`rounded-2xl border px-2 py-3 text-center ${
                 item.warn ? 'border-rose-300 bg-rose-50 text-rose-900' : 'border-slate-200 bg-white text-slate-900'
               }`}
@@ -127,7 +108,7 @@ export const ManageHomePage: React.FC = () => {
           <ul className="divide-y divide-slate-100">
             {dashboard.todos.map((todo) => (
               <li key={todo.kind}>
-                <Link to={todo.path} className="flex min-h-[52px] items-center gap-3 px-4 py-2.5 active:bg-slate-50">
+                <Link to={withManagePeriod(todo.path, periodDays)} className="flex min-h-[52px] items-center gap-3 px-4 py-2.5 active:bg-slate-50">
                   {(todo.kind === 'REFUND_NEEDED' || todo.kind === 'KEEPING_ALERT') && (
                     <AlertTriangle className="h-4 w-4 flex-shrink-0 text-rose-500" />
                   )}
@@ -146,7 +127,7 @@ export const ManageHomePage: React.FC = () => {
           <h2 className="flex items-center gap-1.5 text-sm font-extrabold text-slate-900">
             <Package className="h-4 w-4 text-brand-600" /> 보관함
           </h2>
-          <Link to="/manage/settings/keeping" className="text-xs font-bold text-slate-500 underline">
+          <Link to={withManagePeriod('/manage/settings/keeping', periodDays)} className="text-xs font-bold text-slate-500 underline">
             알림 {alertDays.warnDays}일 · {alertDays.alertDays}일
           </Link>
         </div>
@@ -167,7 +148,7 @@ export const ManageHomePage: React.FC = () => {
             ))}
           </ul>
         )}
-        <Link to="/manage/ship?filter=keeping" className="mt-2 inline-flex min-h-[40px] items-center text-sm font-bold text-brand-700">
+        <Link to={withManagePeriod('/manage/ship?filter=keeping', periodDays)} className="mt-2 inline-flex min-h-[40px] items-center text-sm font-bold text-brand-700">
           출고(보관함·합배송)로 <ChevronRight className="h-4 w-4" />
         </Link>
       </section>

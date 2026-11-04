@@ -1,3 +1,6 @@
+import { ManagePeriodTabs } from '../../components/manage/ManagePeriodTabs';
+import { useManagePeriod } from '../../services/manage/useManagePeriod';
+import { withManagePeriod } from '../../services/manage/period';
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Check, Copy, Phone, RefreshCw, UserX } from 'lucide-react';
@@ -17,7 +20,7 @@ import { ManageBackLink } from '../../components/manage/ManageBackLink';
 export const ContactLinkPage: React.FC = () => {
   const { workspaceId } = useAuth();
   const api = useMemo(() => (workspaceId ? new ManageApi(workspaceId) : null), [workspaceId]);
-  const [periodDays, setPeriodDays] = useState(0);
+  const { periodDays, setPeriodDays } = useManagePeriod(0);
   const [reloadKey, setReloadKey] = useState(0);
   const { dashboard, server } = useManageDashboard(periodDays, reloadKey);
   const [busy, setBusy] = useState<string | null>(null);
@@ -74,22 +77,7 @@ export const ContactLinkPage: React.FC = () => {
       <div className="flex items-center justify-between gap-1">
         <div className="flex min-w-0 items-center gap-1">
           <ManageBackLink />
-          <div role="tablist" aria-label="기간" className="flex gap-1">
-            {[{ days: 7, label: '7일' }, { days: 30, label: '30일' }, { days: 0, label: '전체' }].map((period) => (
-              <button
-                key={period.days}
-                type="button"
-                role="tab"
-                aria-selected={periodDays === period.days}
-                onClick={() => setPeriodDays(period.days)}
-                className={`min-h-[36px] rounded-full px-3 text-xs font-bold ${
-                  periodDays === period.days ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'
-                }`}
-              >
-                {period.label}
-              </button>
-            ))}
-          </div>
+          <ManagePeriodTabs days={periodDays} onChange={setPeriodDays} />
         </div>
         <button
           type="button"
@@ -313,7 +301,7 @@ export const ContactLinkPage: React.FC = () => {
 
 
 
-      <Link to="/manage/orders?stage=READY_TO_BILL" className="block text-center text-sm font-bold text-brand-700">
+      <Link to={withManagePeriod('/manage/orders?stage=READY_TO_BILL', periodDays)} className="block text-center text-sm font-bold text-brand-700">
         청구 전 주문 보기
       </Link>
     </div>

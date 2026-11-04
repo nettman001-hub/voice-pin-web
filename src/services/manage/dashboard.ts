@@ -8,6 +8,7 @@ import {
   type FulfillmentItemRecord, type KeepingAlert, type KeepingAlertDays,
 } from './fulfillment.ts';
 import { buildManageTodos, type ManageTodo } from './todos.ts';
+import { inManagePeriod } from './period.ts';
 
 /**
  * 관리 홈 한 장에 필요한 값 (순수 함수).
@@ -27,7 +28,7 @@ export interface DashboardInput {
   getOverride?: (nickname: string, sessionId: string) => BuyerShippingOverride | null | undefined;
   alertDays: KeepingAlertDays;
   now: Date;
-  /** 판매·돈 숫자를 볼 기간 (일). 0 이면 전체. 보관·출고는 기간과 상관없이 전체를 본다. */
+  /** 판매·돈·물건을 볼 기간 (판매일 기준). 0 이면 전체. */
   periodDays: number;
 }
 
@@ -57,8 +58,6 @@ export interface ManageDashboard {
   fulfillmentItems: ReadonlyMap<string, FulfillmentItemRecord>;
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 export function paidSaleIdsOf(
   payments: readonly PaymentLike[],
   invoices: readonly { status: string; saleIds?: readonly string[] | null }[],
@@ -70,8 +69,7 @@ export function paidSaleIdsOf(
 }
 
 export function buildManageDashboard(input: DashboardInput): ManageDashboard {
-  const since = input.periodDays > 0 ? input.now.getTime() - input.periodDays * DAY_MS : -Infinity;
-  const inPeriod = input.sales.filter((sale) => Date.parse(sale.recognizedAt) >= since);
+  const inPeriod = input.sales.filter((sale) => inManagePeriod(sale.recognizedAt, input.periodDays, input.now));
   const paidSaleIds = paidSaleIdsOf(input.payments, input.invoices);
   const items = new Map(input.fulfillmentItems.map((item) => [item.saleId, item]));
   const keepingBuyerKeys = new Set<string>();
@@ -97,10 +95,11 @@ export function buildManageDashboard(input: DashboardInput): ManageDashboard {
     else unpaidAmount += order.totalAmount;
   }
 
-  // 물건: 기간과 상관없이 전체 판매
+  // 표시할 물건은 선택 기간, 합배송 계산은 전체 판매를 사용한다.
   const goods: GoodsSummary = { readyToShip: 0, kept: 0, inProgress: 0, refundNeeded: 0, readyToShipBuyers: 0 };
   const shipBuyers = new Set<string>();
-  const billable = input.sales.filter(isBillableSale);
+  const allBillable = input.sales.filter(isBillableSale);
+  const billable = inPeriod.filter(isBillableSale);
   for (const sale of billable) {
     const state = goodsStateOf(paidSaleIds.has(sale.id), items.get(sale.id));
     if (state === 'READY_TO_SHIP') { goods.readyToShip += 1; shipBuyers.add(saleBuyerKey(sale)); }
@@ -110,17 +109,17 @@ export function buildManageDashboard(input: DashboardInput): ManageDashboard {
   }
   // 출고할 구매자: 보관 상품이 있어도 새로 결제된 상품이 있으면 출고 대상 (보관만 있는 구매자는 판매자가 정할 때까지 기다림)
   for (const buyerKey of shipBuyers) {
-    const plan = planShipment({ buyerKey, sales: billable, paidSaleIds, items, shippingConfig: input.shippingConfig });
+    const plan = planShipment({ buyerKey, sales: allBillable, paidSaleIds, items, shippingConfig: input.shippingConfig });
     if (plan.canReserve && plan.conflicts.length === 0) goods.readyToShipBuyers += 1;
   }
 
-  const alerts = keepingAlerts(input.sales, items, input.now, input.alertDays);
+  const alerts = keepingAlerts(inPeriod, items, input.now, input.alertDays);
   const todos = buildManageTodos({
     orders, contactBook, keepingAlerts: alerts,
     readyToShipBuyerCount: goods.readyToShipBuyers, refundNeededCount: goods.refundNeeded,
     paymentReviewCount: input.payments.filter((payment) =>
       (payment.matchStatus === 'NEEDS_REVIEW' || payment.matchStatus === 'UNMATCHED')
-      && (!payment.paidAt || Date.parse(payment.paidAt) >= input.now.getTime() - 30 * DAY_MS)).length,
+      && (!payment.paidAt || inManagePeriod(payment.paidAt, input.periodDays, input.now))).length,
   });
 
   return {

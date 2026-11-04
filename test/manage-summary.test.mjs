@@ -68,14 +68,14 @@ test('server summary = the same numbers the phone computes, for every period', (
   }
 });
 
-test('summary counts: 보류·NOT_SALE excluded, kept item counted, unmatched payment is a to-do', () => {
+test('summary counts: 보류·NOT_SALE excluded, old kept item excluded by period, unmatched payment is a to-do', () => {
   const summary = buildManageSummary(inputFor(1));
   assert.equal(summary.salesAmount, 65000); // s1+s2+s3 (보류 s4, NOT_SALE s6 제외, s5 는 기간 밖)
   assert.equal(summary.orderCount, 2);
   assert.equal(summary.sessionCount, 1);
   assert.equal(summary.buyerCount, 2);
-  assert.equal(summary.goods.kept, 1);
-  assert.equal(summary.keeping.items, 1);
+  assert.equal(summary.goods.kept, 0);
+  assert.equal(summary.keeping.items, 0);
   assert.ok(summary.todos.some((todo) => todo.kind === 'PAYMENT_REVIEW' && todo.count === 1));
 });
 

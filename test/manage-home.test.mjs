@@ -84,11 +84,11 @@ test('dashboard: numbers, money stages, goods and keeping card', () => {
   assert.equal(dashboard.paidAmount, 20000);
   assert.equal(dashboard.unpaidAmount, 12000 + 3000 + 8000 + 3000);
   assert.deepEqual(dashboard.stages.map((s) => [s.label, s.orderCount]), [['연락처 연결', 0], ['청구 전', 1], ['입금 대기', 1], ['결제 완료', 1]]);
-  assert.deepEqual(dashboard.goods, { readyToShip: 1, kept: 1, inProgress: 0, refundNeeded: 0, readyToShipBuyers: 1 });
-  assert.equal(dashboard.keeping.buyers, 1);
-  assert.equal(dashboard.keeping.alert, 1);
-  assert.equal(dashboard.keeping.top[0].days, 33);
-  assert.deepEqual(dashboard.todos.map((t) => t.kind), ['PAYMENT_REVIEW', 'READY_TO_BILL', 'AWAITING_PAYMENT', 'READY_TO_SHIP', 'KEEPING_ALERT']);
+  assert.deepEqual(dashboard.goods, { readyToShip: 1, kept: 0, inProgress: 0, refundNeeded: 0, readyToShipBuyers: 1 });
+  assert.equal(dashboard.keeping.buyers, 0);
+  assert.equal(dashboard.keeping.alert, 0);
+  assert.equal(dashboard.keeping.top.length, 0);
+  assert.deepEqual(dashboard.todos.map((t) => t.kind), ['PAYMENT_REVIEW', 'READY_TO_BILL', 'AWAITING_PAYMENT', 'READY_TO_SHIP']);
 
   const all = buildManageDashboard({ sales, invoices: [], payments: [], messages: [], contactLinks: [], fulfillmentItems: [], shippingConfig: CONFIG, alertDays: { warnDays: 14, alertDays: 30 }, now: NOW, periodDays: 0 });
   assert.equal(all.salesAmount, 55000);
