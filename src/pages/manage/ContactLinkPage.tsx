@@ -7,6 +7,7 @@ import { ManageApi } from '../../services/manage/manageApi';
 import { normalizePhone } from '../../services/manage/contactLink';
 import { buildContactWorklist, callListText, formatPhone } from '../../services/manage/contactWorklist';
 import { appToast } from '../../services/appDownload';
+import { ManageBackLink } from '../../components/manage/ManageBackLink';
 
 /**
  * 연락처 연결 (청구보다 먼저).
@@ -70,29 +71,33 @@ export const ContactLinkPage: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-lg space-y-3 p-3 lg:max-w-3xl">
-      <div className="flex items-center justify-between gap-2">
-        <div role="tablist" aria-label="기간" className="flex gap-1">
-          {[{ days: 7, label: '7일' }, { days: 30, label: '30일' }, { days: 0, label: '전체' }].map((period) => (
-            <button
-              key={period.days}
-              type="button"
-              role="tab"
-              aria-selected={periodDays === period.days}
-              onClick={() => setPeriodDays(period.days)}
-              className={`min-h-[36px] rounded-full px-3 text-xs font-bold ${
-                periodDays === period.days ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'
-              }`}
-            >
-              {period.label}
-            </button>
-          ))}
+      <div className="flex items-center justify-between gap-1">
+        <div className="flex min-w-0 items-center gap-1">
+          <ManageBackLink inline />
+          <div role="tablist" aria-label="기간" className="flex gap-1">
+            {[{ days: 7, label: '7일' }, { days: 30, label: '30일' }, { days: 0, label: '전체' }].map((period) => (
+              <button
+                key={period.days}
+                type="button"
+                role="tab"
+                aria-selected={periodDays === period.days}
+                onClick={() => setPeriodDays(period.days)}
+                className={`min-h-[36px] rounded-full px-3 text-xs font-bold ${
+                  periodDays === period.days ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'
+                }`}
+              >
+                {period.label}
+              </button>
+            ))}
+          </div>
         </div>
         <button
           type="button"
           onClick={() => setReloadKey((key) => key + 1)}
-          className="flex min-h-[36px] items-center gap-1 rounded-full border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600"
+          aria-label="새로고침"
+          className="flex h-9 items-center gap-1 rounded-full border border-slate-200 bg-white px-2 text-xs font-bold text-slate-600 min-[380px]:px-3"
         >
-          <RefreshCw className="h-3.5 w-3.5" /> 새로고침
+          <RefreshCw className="h-3.5 w-3.5" /> <span className="hidden min-[380px]:inline">새로고침</span>
         </button>
       </div>
 
