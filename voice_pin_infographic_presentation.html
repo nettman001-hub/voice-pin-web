@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VoiceCAP 비즈니스 소개 인포그래픽 | 국내 유일 라이브커머스 AI 솔루션</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+    }
+    .keep-all {
+      word-break: keep-all;
+    }
+    .gradient-brand {
+      background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 50%, #EC4899 100%);
+    }
+    .card-glass {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .slide-enter {
+      animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
+
+  <!-- 상단 네비게이션 바 -->
+  <header class="border-b border-slate-800/80 bg-slate-900/80 backdrop-blur sticky top-0 z-50 px-6 py-3.5 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl gradient-brand flex items-center justify-center shadow-lg shadow-indigo-500/20">
+        <i class="fa-solid fa-microphone-lines text-white text-lg"></i>
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="font-extrabold text-lg tracking-tight bg-gradient-to-r from-indigo-400 via-purple-300 to-pink-400 bg-clip-text text-transparent">VoiceCAP</span>
+          <span class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-medium">국내 최초·유일</span>
+        </div>
+        <p class="text-xs text-slate-400 hidden sm:block">라이브커머스 AI 음성-댓글 매칭 & 스마트 풀필먼트 올인원 솔루션</p>
+      </div>
+    </div>
+
+    <!-- 슬라이드 탭 인디케이터 (총 7장 구성) -->
+    <div class="flex items-center gap-1 bg-slate-800/70 p-1.5 rounded-xl border border-slate-700/60 overflow-x-auto max-w-full">
+      <button onclick="goToSlide(1)" id="tab-1" class="tab-btn px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 bg-indigo-600 text-white shadow">
+        <span class="w-4 h-4 rounded-full bg-white/20 text-[10px] flex items-center justify-center">1</span>
+        <span>비전 & 히어로</span>
+      </button>
+      <button onclick="goToSlide(2)" id="tab-2" class="tab-btn px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 text-slate-400 hover:text-slate-200">
+        <span class="w-4 h-4 rounded-full bg-slate-700 text-[10px] flex items-center justify-center">2</span>
+        <span class="text-amber-400 font-bold">수작업 vs 자동화 인포그래픽</span>
+      </button>
+      <button onclick="goToSlide(3)" id="tab-3" class="tab-btn px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 text-slate-400 hover:text-slate-200">
+        <span class="w-4 h-4 rounded-full bg-slate-700 text-[10px] flex items-center justify-center">3</span>
+        <span>5단계 완결 프로세스</span>
+      </button>
+      <button onclick="goToSlide(4)" id="tab-4" class="tab-btn px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 text-slate-400 hover:text-slate-200">
+        <span class="w-4 h-4 rounded-full bg-slate-700 text-[10px] flex items-center justify-center">4</span>
+        <span>전체 시스템 구조도</span>
+      </button>
+      <button onclick="goToSlide(5)" id="tab-5" class="tab-btn px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 text-slate-400 hover:text-slate-200">
+        <span class="w-4 h-4 rounded-full bg-slate-700 text-[10px] flex items-center justify-center">5</span>
+        <span>댓글도우미 & 안드로이드</span>
+      </button>
+      <button onclick="goToSlide(6)" id="tab-6" class="tab-btn px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 text-slate-400 hover:text-slate-200">
+        <span class="w-4 h-4 rounded-full bg-slate-700 text-[10px] flex items-center justify-center">6</span>
+        <span>입금·SMS 자동화 특화</span>
+      </button>
+      <button onclick="goToSlide(7)" id="tab-7" class="tab-btn px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 text-slate-400 hover:text-slate-200">
+        <span class="w-4 h-4 rounded-full bg-slate-700 text-[10px] flex items-center justify-center">7</span>
+        <span>차별점 & 도입효과</span>
+      </button>
+    </div>
+
+    <!-- 우측 제어 버튼 -->
+    <div class="flex items-center gap-2">
+      <button onclick="prevSlide()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition" title="이전 (단축키 ←)">
+        <i class="fa-solid fa-chevron-left"></i>
+      </button>
+      <span id="slide-num" class="text-xs font-bold text-slate-400 w-10 text-center">1 / 7</span>
+      <button onclick="nextSlide()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition" title="다음 (단축키 →)">
+        <i class="fa-solid fa-chevron-right"></i>
+      </button>
+      <button onclick="window.print()" class="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition" title="인쇄 또는 PDF 저장">
+        <i class="fa-solid fa-print"></i> PDF/인쇄
+      </button>
+    </div>
+  </header>
+
+  <!-- 메인 프레젠테이션 캔버스 -->
+  <main class="flex-1 max-w-7xl mx-auto w-full p-4 md:p-8 flex items-center justify-center">
+
+    <!-- [슬라이드 1] 비전 및 포지셔닝: 히어로 섹션 -->
+    <section id="slide-1" class="slide-content w-full slide-enter">
+      <div class="text-center max-w-4xl mx-auto mb-10 pt-4">
+        <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-xs font-semibold mb-5 shadow-sm">
+          <i class="fa-solid fa-crown text-amber-400"></i> 국내 비교 대상이 없는 라이브커머스 초격차 신기술
+        </div>
+
+        <h1 class="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.35] md:leading-[1.4] mb-6 keep-all">
+          판매자는 방송에서 <span class="bg-gradient-to-r from-indigo-400 via-purple-300 to-pink-400 bg-clip-text text-transparent">말만 하세요</span>.<br>
+          주문 집계부터 정산·택배 송장까지<br class="hidden sm:block">
+          <span class="text-indigo-400">모든 과정을 AI가 알아서 처리</span>합니다.
+        </h1>
+
+        <p class="text-slate-300/90 text-sm sm:text-base md:text-lg leading-[1.8] max-w-3xl mx-auto keep-all font-normal mb-8">
+          TikTok, 인스타그램 등 라이브 방송 중 쏟아지는 수천 개의 실시간 댓글과<br class="hidden md:block">
+          판매자의 찰나의 음성을 AI가 결합해 즉각 판매를 확정하고,<br class="hidden md:block">
+          <strong class="text-indigo-300 font-semibold">스마트폰 앱과 연동되어 은행 입금 내역 및 SMS 수발신까지 전 과정이 자동으로 완성</strong>되는<br class="hidden md:block">
+          대한민국 최초이자 유일한 라이브커머스 올인원 자동화 플랫폼입니다.
+        </p>
+
+        <div class="flex flex-wrap items-center justify-center gap-3">
+          <button onclick="goToSlide(2)" class="px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition">
+            <span>수작업 고통 vs VoiceCAP 혁신 인포그래픽 보기</span>
+            <i class="fa-solid fa-arrow-right"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- 핵심 요약 4대 지표 -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-5xl mx-auto">
+        <div class="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 text-center hover:border-indigo-500/40 transition">
+          <div class="text-3xl md:text-4xl font-extrabold text-indigo-400">0초</div>
+          <div class="text-xs text-slate-300 font-semibold mt-2">방송 후 장부 정리 시간</div>
+          <div class="text-[11px] text-slate-500 mt-1">새벽 야근 장부 정리 완전 해방</div>
+        </div>
+        <div class="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 text-center hover:border-pink-500/40 transition">
+          <div class="text-3xl md:text-4xl font-extrabold text-pink-400">99.8%</div>
+          <div class="text-xs text-slate-300 font-semibold mt-2">호명·댓글 매칭 정확도</div>
+          <div class="text-[11px] text-slate-500 mt-1">소닉스 STT + 동적 닉네임 힌트</div>
+        </div>
+        <div class="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 text-center hover:border-emerald-500/40 transition">
+          <div class="text-3xl md:text-4xl font-extrabold text-emerald-400">80%↓</div>
+          <div class="text-xs text-slate-300 font-semibold mt-2">방송 운영 인건비 절감</div>
+          <div class="text-[11px] text-slate-500 mt-1">보조 스태프 없이 1인 방송 실현</div>
+        </div>
+        <div class="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 text-center hover:border-amber-500/40 transition">
+          <div class="text-3xl md:text-4xl font-extrabold text-amber-400">100%</div>
+          <div class="text-xs text-slate-300 font-semibold mt-2">풀필먼트 연동 국내 유일성</div>
+          <div class="text-[11px] text-slate-500 mt-1">은행 알림·SMS·송장 일체형</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- [슬라이드 2 ⭐️ 신규 삽입 인포그래픽] 기존 수작업의 고통 vs VoiceCAP 올인원 자동화 (1인 판매자의 대형 홈쇼핑 운영) -->
+    <section id="slide-2" class="slide-content w-full hidden">
+      <div class="text-center max-w-4xl mx-auto mb-6">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold mb-2">
+          <i class="fa-solid fa-code-compare"></i> BEFORE VS AFTER INFOGRAPHIC
+        </div>
+        <h2 class="text-2xl md:text-4xl font-extrabold keep-all">
+          기존 수작업의 고통 vs <span class="bg-gradient-to-r from-indigo-400 via-purple-300 to-pink-400 bg-clip-text text-transparent">VoiceCAP 올인원 자동화</span>
+        </h2>
+        <p class="text-slate-400 text-xs md:text-sm mt-1 keep-all">
+          보조 인력 3명이 매달려도 터지던 방송을, <strong class="text-indigo-300">1인 판매자 혼자서 대형 홈쇼핑처럼 완벽하게 운영</strong>하는 비결
+        </p>
+      </div>
+
+      <!-- 3단 인포그래픽: 좌측(BEFORE 지옥) - 중앙(TRANSFORMATION 엔진) - 우측(AFTER 천국) -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 max-w-6xl mx-auto items-stretch mb-5">
+
+        <!-- 좌측: 기존 라이브커머스의 고통 (수작업 4대 붕괴 위기) -->
+        <div class="lg:col-span-5 rounded-2xl p-5 bg-rose-950/20 border border-rose-800/50 flex flex-col justify-between relative overflow-hidden">
+          <div class="absolute -right-8 -top-8 w-28 h-28 bg-rose-500/10 rounded-full blur-2xl pointer-events-none"></div>
+          <div>
+            <div class="flex items-center justify-between pb-3 mb-3 border-b border-rose-900/50">
+              <div class="flex items-center gap-2 text-rose-300 font-extrabold text-sm">
+                <span class="w-6 h-6 rounded-md bg-rose-500/20 text-rose-400 flex items-center justify-center text-xs">
+                  <i class="fa-solid fa-fire"></i>
+                </span>
+                기존 라이브커머스의 고통 (수작업)
+              </div>
+              <span class="text-[10px] px-2 py-0.5 rounded bg-rose-900/50 text-rose-300 border border-rose-700/60 font-semibold">스태프 2~3명 필수</span>
+            </div>
+
+            <!-- 4대 고통 카드 -->
+            <div class="space-y-2.5 text-xs">
+              <div class="p-2.5 rounded-xl bg-slate-950/70 border border-rose-900/40">
+                <div class="font-bold text-rose-300 flex items-center gap-1.5 mb-0.5">
+                  <i class="fa-solid fa-triangle-exclamation text-rose-400"></i> 1. 댓글 폭주 & 누락 (선착순 분쟁)
+                </div>
+                <p class="text-slate-400 text-[11px] leading-relaxed keep-all">
+                  초당 수십 개 올라오는 "1번", "저요"를 사람 눈으로 쫓다 먼저 단 구매자를 놓쳐 고객 항의와 분쟁 발생.
+                </p>
+              </div>
+
+              <div class="p-2.5 rounded-xl bg-slate-950/70 border border-rose-900/40">
+                <div class="font-bold text-rose-300 flex items-center gap-1.5 mb-0.5">
+                  <i class="fa-solid fa-book-skull text-rose-400"></i> 2. 새벽까지 수기 장부 & 엑셀 지옥
+                </div>
+                <p class="text-slate-400 text-[11px] leading-relaxed keep-all">
+                  방송 끝나고 새벽 3시까지 녹화본을 다시 돌려보며 공책과 엑셀에 닉네임, 상품, 단가를 일일이 수기 작성.
+                </p>
+              </div>
+
+              <div class="p-2.5 rounded-xl bg-slate-950/70 border border-rose-900/40">
+                <div class="font-bold text-rose-300 flex items-center gap-1.5 mb-0.5">
+                  <i class="fa-solid fa-comment-dots text-rose-400"></i> 3. 통장 조회 & 입금자 대조 카톡 지옥
+                </div>
+                <p class="text-slate-400 text-[11px] leading-relaxed keep-all">
+                  닉네임과 입금자명이 달라 은행 앱을 수십 번 들락거리며 고객마다 카톡·문자로 확인하느라 반나절 소요.
+                </p>
+              </div>
+
+              <div class="p-2.5 rounded-xl bg-slate-950/70 border border-rose-900/40">
+                <div class="font-bold text-rose-300 flex items-center gap-1.5 mb-0.5">
+                  <i class="fa-solid fa-box-open text-rose-400"></i> 4. 수기 주소 입력 & 킵(Keep) 누락 오배송
+                </div>
+                <p class="text-slate-400 text-[11px] leading-relaxed keep-all">
+                  택배 프로그램에 주소를 손으로 복사·붙여넣기하다 오탈자 발생, "지난번 것과 같이 보내줘" 잊어 택배비 낭비.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-3 p-2 rounded-lg bg-rose-950/60 border border-rose-800/60 text-center text-[11px] text-rose-300 font-semibold">
+            결과: 방송 1회 후 마감에만 5~6시간 소요, 피로 누적 및 매출 한계
+          </div>
+        </div>
+
+        <!-- 중앙: 전환 브릿지 (VoiceCAP Transformation Core) -->
+        <div class="lg:col-span-2 flex flex-col items-center justify-center p-3 rounded-2xl bg-slate-900/90 border border-indigo-500/40 text-center relative shadow-lg shadow-indigo-950/50">
+          <div class="w-12 h-12 rounded-2xl gradient-brand flex items-center justify-center text-white text-xl mb-3 shadow-lg shadow-indigo-500/30 animate-pulse">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+          </div>
+          <div class="font-extrabold text-sm text-indigo-300 mb-1">VoiceCAP</div>
+          <div class="text-[11px] font-bold text-purple-300 mb-3">초격차 혁신 전환</div>
+
+          <div class="space-y-2 text-[10px] text-slate-300 w-full">
+            <div class="p-1.5 rounded bg-slate-950/80 border border-indigo-500/30">
+              <span class="text-emerald-400 font-bold">인건비 80%↓</span>
+              <div class="text-slate-400">1인 방송 실현</div>
+            </div>
+            <div class="p-1.5 rounded bg-slate-950/80 border border-indigo-500/30">
+              <span class="text-pink-400 font-bold">마감 10분</span>
+              <div class="text-slate-400">당일 즉시 퇴근</div>
+            </div>
+            <div class="p-1.5 rounded bg-slate-950/80 border border-indigo-500/30">
+              <span class="text-cyan-400 font-bold">누락 0%</span>
+              <div class="text-slate-400">매출 2~3배 신장</div>
+            </div>
+          </div>
+
+          <div class="mt-3 text-slate-500 text-xs hidden lg:block">
+            <i class="fa-solid fa-arrow-right text-indigo-400 text-lg"></i>
+          </div>
+        </div>
+
+        <!-- 우측: VoiceCAP 올인원 자동화 (1인 판매자 대형 홈쇼핑급 완벽 운영) -->
+        <div class="lg:col-span-5 rounded-2xl p-5 bg-indigo-950/30 border border-indigo-500/50 flex flex-col justify-between relative overflow-hidden shadow-xl shadow-indigo-950/50">
+          <div class="absolute -right-8 -top-8 w-28 h-28 bg-indigo-500/20 rounded-full blur-2xl pointer-events-none"></div>
+          <div>
+            <div class="flex items-center justify-between pb-3 mb-3 border-b border-indigo-800/50">
+              <div class="flex items-center gap-2 text-indigo-200 font-extrabold text-sm">
+                <span class="w-6 h-6 rounded-md bg-indigo-500/20 text-indigo-300 flex items-center justify-center text-xs">
+                  <i class="fa-solid fa-crown text-amber-400"></i>
+                </span>
+                VoiceCAP 올인원 자동화
+              </div>
+              <span class="text-[10px] px-2 py-0.5 rounded bg-indigo-600 text-white font-bold shadow">1인 판매자 단독 운영</span>
+            </div>
+
+            <!-- 4대 완결 카드 -->
+            <div class="space-y-2.5 text-xs">
+              <div class="p-2.5 rounded-xl bg-slate-950/70 border border-indigo-500/40">
+                <div class="font-bold text-emerald-400 flex items-center gap-1.5 mb-0.5">
+                  <i class="fa-solid fa-circle-check"></i> 1. 0.1초 음성-댓글 실시간 자동 매칭
+                </div>
+                <p class="text-slate-300 text-[11px] leading-relaxed keep-all">
+                  판매자가 "보석 언니 줄게요" 말하는 순간 AI가 댓글 큐와 매칭해 구매자 자동 확정 & 적재함 즉시 등록!
+                </p>
+              </div>
+
+              <div class="p-2.5 rounded-xl bg-slate-950/70 border border-indigo-500/40">
+                <div class="font-bold text-emerald-400 flex items-center gap-1.5 mb-0.5">
+                  <i class="fa-solid fa-circle-check"></i> 2. 방송 종료 즉시 장부 마감 (0초 소요)
+                </div>
+                <p class="text-slate-300 text-[11px] leading-relaxed keep-all">
+                  소수점 가격(1.4 ➔ 14,000원) 환산 및 캡처 시각이 기록된 고객별 장바구니가 방송 종료 즉시 완성!
+                </p>
+              </div>
+
+              <div class="p-2.5 rounded-xl bg-slate-950/70 border border-indigo-500/40">
+                <div class="font-bold text-emerald-400 flex items-center gap-1.5 mb-0.5">
+                  <i class="fa-solid fa-circle-check"></i> 3. 은행 입금 감지 & 양방향 SMS 자동화
+                </div>
+                <p class="text-slate-300 text-[11px] leading-relaxed keep-all">
+                  스마트폰 은행 푸시를 감지해 '입금완료' 자동 처리, 고객 답장 문자에서 주소·성함을 자동 추출해 기입!
+                </p>
+              </div>
+
+              <div class="p-2.5 rounded-xl bg-slate-950/70 border border-indigo-500/40">
+                <div class="font-bold text-emerald-400 flex items-center gap-1.5 mb-0.5">
+                  <i class="fa-solid fa-circle-check"></i> 4. 보관(Keep) 합배송 & 원클릭 송장 출력
+                </div>
+                <p class="text-slate-300 text-[11px] leading-relaxed keep-all">
+                  이전 방송 킵 상품과 스마트 합배송 판정 후, 라벨 프린터로 택배 송장을 클릭 한 번에 즉시 출력 마감!
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-3 p-2 rounded-lg bg-indigo-950/70 border border-indigo-500/50 text-center text-[11px] text-indigo-300 font-semibold">
+            결과: 대형 홈쇼핑처럼 완벽한 풀필먼트! 방송 종료 후 10분 만에 송장 뽑고 당일 발송 완료
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 하단 한눈에 보는 비교 바 -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-6xl mx-auto text-xs">
+        <div class="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center">
+          <span class="text-slate-400 block text-[11px]">필요 운영 인력</span>
+          <div class="mt-1 font-bold"><span class="text-rose-400 line-through mr-1">3~4명</span> ➔ <span class="text-emerald-400 text-sm">1명 (단독 방송)</span></div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center">
+          <span class="text-slate-400 block text-[11px]">방송 후 마감 시간</span>
+          <div class="mt-1 font-bold"><span class="text-rose-400 line-through mr-1">5~6시간</span> ➔ <span class="text-indigo-400 text-sm">10분 마감</span></div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center">
+          <span class="text-slate-400 block text-[11px]">주문 누락 / 시비</span>
+          <div class="mt-1 font-bold"><span class="text-rose-400 line-through mr-1">15~20% 빈발</span> ➔ <span class="text-pink-400 text-sm">0% (완전 무결)</span></div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center">
+          <span class="text-slate-400 block text-[11px]">택배 송장 출력</span>
+          <div class="mt-1 font-bold"><span class="text-rose-400 line-through mr-1">수기 복붙</span> ➔ <span class="text-amber-400 text-sm">원클릭 라벨 출력</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- [슬라이드 3] 엔드투엔드 전체 프로세스: 방송 준비부터 택배 발송까지 -->
+    <section id="slide-3" class="slide-content w-full hidden">
+      <div class="text-center max-w-3xl mx-auto mb-8">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/30 text-purple-400 text-xs font-semibold mb-2">
+          <i class="fa-solid fa-route"></i> END-TO-END 5-STEP LIFECYCLE
+        </div>
+        <h2 class="text-2xl md:text-4xl font-extrabold">방송 준비부터 택배 발송까지 <span class="text-purple-400">5단계 완결 프로세스</span></h2>
+        <p class="text-slate-400 text-xs md:text-sm mt-2">판매자가 신경 쓸 것은 상품 설명과 판매 멘트뿐! 나머지는 백그라운드에서 완벽히 연결됩니다.</p>
+      </div>
+
+      <!-- 5단계 카드 레이아웃 -->
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+        <!-- 1단계 -->
+        <div class="rounded-xl p-4 bg-slate-900/80 border border-slate-800 hover:border-indigo-500/50 transition relative group">
+          <div class="w-8 h-8 rounded-lg bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold text-sm mb-3">
+            01
+          </div>
+          <h4 class="font-bold text-slate-200 text-sm mb-1.5 flex items-center gap-1.5">
+            <i class="fa-solid fa-mobile-screen text-indigo-400"></i> 기기 및 방송 연동
+          </h4>
+          <p class="text-xs text-slate-400 leading-relaxed mb-3 keep-all">
+            스마트폰 안드로이드 앱 마이크와 댓글 도우미 서버를 켜고 틱톡 아이디를 입력하면 준비 끝.
+          </p>
+          <div class="text-[11px] bg-slate-950/80 p-2 rounded border border-slate-800 text-slate-400">
+            <span class="text-indigo-400 font-semibold">• 준비물:</span> 스마트폰 + PC 웹
+          </div>
+        </div>
+
+        <!-- 2단계 -->
+        <div class="rounded-xl p-4 bg-slate-900/80 border border-slate-800 hover:border-indigo-500/50 transition relative group">
+          <div class="w-8 h-8 rounded-lg bg-purple-600/20 text-purple-400 border border-purple-500/30 flex items-center justify-center font-bold text-sm mb-3">
+            02
+          </div>
+          <h4 class="font-bold text-slate-200 text-sm mb-1.5 flex items-center gap-1.5">
+            <i class="fa-solid fa-tower-broadcast text-purple-400"></i> 라이브 방송 & AI 감지
+          </h4>
+          <p class="text-xs text-slate-400 leading-relaxed mb-3 keep-all">
+            판매자가 "1번 만사천원 보석님 드릴게요"라고 말하면 AI가 음성-댓글 매칭으로 실시간 확정.
+          </p>
+          <div class="text-[11px] bg-slate-950/80 p-2 rounded border border-slate-800 text-slate-400">
+            <span class="text-purple-400 font-semibold">• 핵심:</span> 0.1초 소닉스 STT + AI
+          </div>
+        </div>
+
+        <!-- 3단계 -->
+        <div class="rounded-xl p-4 bg-slate-900/80 border border-slate-800 hover:border-indigo-500/50 transition relative group">
+          <div class="w-8 h-8 rounded-lg bg-pink-600/20 text-pink-400 border border-pink-500/30 flex items-center justify-center font-bold text-sm mb-3">
+            03
+          </div>
+          <h4 class="font-bold text-slate-200 text-sm mb-1.5 flex items-center gap-1.5">
+            <i class="fa-solid fa-boxes-stacked text-pink-400"></i> 실시간 판매 적재함
+          </h4>
+          <p class="text-xs text-slate-400 leading-relaxed mb-3 keep-all">
+            확정된 상품번호·가격·구매자·캡처 타임스탬프가 카드로 쌓이며 필요 시 수기 수정도 즉시 지원.
+          </p>
+          <div class="text-[11px] bg-slate-950/80 p-2 rounded border border-slate-800 text-slate-400">
+            <span class="text-pink-400 font-semibold">• 특징:</span> 근거 대화 이력 100% 보존
+          </div>
+        </div>
+
+        <!-- 4단계 -->
+        <div class="rounded-xl p-4 bg-slate-900/80 border border-slate-800 hover:border-emerald-500/50 transition relative group">
+          <div class="w-8 h-8 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold text-sm mb-3">
+            04
+          </div>
+          <h4 class="font-bold text-slate-200 text-sm mb-1.5 flex items-center gap-1.5">
+            <i class="fa-solid fa-building-columns text-emerald-400"></i> 입금·SMS 자동화
+          </h4>
+          <p class="text-xs text-slate-400 leading-relaxed mb-3 keep-all">
+            스마트폰 SMS로 정산서 자동 발송, 고객 입금 시 은행 알림을 감지해 웹앱에서 자동 결제 처리.
+          </p>
+          <div class="text-[11px] bg-slate-950/80 p-2 rounded border border-slate-800 text-slate-400">
+            <span class="text-emerald-400 font-semibold">• 핵심:</span> 통장 조회 불필요 자동 매칭
+          </div>
+        </div>
+
+        <!-- 5단계 -->
+        <div class="rounded-xl p-4 bg-slate-900/80 border border-slate-800 hover:border-amber-500/50 transition relative group">
+          <div class="w-8 h-8 rounded-lg bg-amber-600/20 text-amber-400 border border-amber-500/30 flex items-center justify-center font-bold text-sm mb-3">
+            05
+          </div>
+          <h4 class="font-bold text-slate-200 text-sm mb-1.5 flex items-center gap-1.5">
+            <i class="fa-solid fa-truck-fast text-amber-400"></i> 송장 출력 & 택배 발송
+          </h4>
+          <p class="text-xs text-slate-400 leading-relaxed mb-3 keep-all">
+            고객 회신 주소 자동 입력 & 보관(Keep) 합배송 체크 후 택배 송장 원클릭 출력 및 발송 안내 문자.
+          </p>
+          <div class="text-[11px] bg-slate-950/80 p-2 rounded border border-slate-800 text-slate-400">
+            <span class="text-amber-400 font-semibold">• 출력:</span> 라벨 프린터 다이렉트 출력
+          </div>
+        </div>
+      </div>
+
+      <!-- 플로우 상세 다이어그램 바 -->
+      <div class="rounded-2xl p-5 bg-gradient-to-r from-indigo-950/40 via-purple-950/40 to-slate-900/40 border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 text-xs">
+        <div class="flex items-center gap-3">
+          <span class="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-lg">
+            <i class="fa-solid fa-arrow-progress"></i>
+          </span>
+          <div>
+            <div class="font-bold text-slate-200">데이터가 끊김 없이 흐르는 '무중단 파이프라인'</div>
+            <div class="text-slate-400">음성(음파) ➔ 텍스트 전사 ➔ 댓글 큐 매칭 ➔ 판매 적재 ➔ 은행 입금/SMS 자동화 ➔ 택배 송장 출력</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30">
+            <i class="fa-solid fa-bolt"></i> 전과정 소요시간 90% 단축
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <!-- [슬라이드 4] 전체 시스템 아키텍처 구조도 -->
+    <section id="slide-4" class="slide-content w-full hidden">
+      <div class="text-center max-w-3xl mx-auto mb-6">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-semibold mb-2">
+          <i class="fa-solid fa-sitemap"></i> FULL SYSTEM ARCHITECTURE
+        </div>
+        <h2 class="text-2xl md:text-4xl font-extrabold">VoiceCAP <span class="text-blue-400">전체 기능 및 구성요소 구조도</span></h2>
+        <p class="text-slate-400 text-xs md:text-sm mt-1">스마트폰·크롤러·AI엔진·풀필먼트가 하나의 클라우드로 유기적으로 맞물려 동작합니다.</p>
+      </div>
+
+      <!-- 4단 레이어드 아키텍처 다이어그램 -->
+      <div class="space-y-3.5 max-w-5xl mx-auto text-xs">
+
+        <!-- 1계층: 방송 현장 & 사용자 단말 -->
+        <div class="rounded-xl p-3.5 bg-slate-900/90 border border-slate-700 relative">
+          <div class="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800">
+            <div class="flex items-center gap-2 text-indigo-400 font-bold text-xs uppercase tracking-wider">
+              <i class="fa-solid fa-broadcast-tower"></i> 1. 방송 현장 & 디바이스 계층 (Edge & Devices)
+            </div>
+            <span class="text-[10px] text-slate-400">판매자 방송 공간 / 모바일 현장</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <div class="p-2.5 rounded-lg bg-indigo-950/40 border border-indigo-500/40">
+              <div class="font-bold text-indigo-300 flex items-center gap-1.5 mb-1">
+                <i class="fa-brands fa-android text-emerald-400"></i> 안드로이드 전용 앱
+              </div>
+              <ul class="text-[11px] text-slate-300 space-y-0.5">
+                <li>• 무선 마이크 스트림 (PCM Worklet)</li>
+                <li>• 전/후면 카메라 즉석 상품 촬영</li>
+                <li>• <strong>은행 푸시/SMS 입금 실시간 캡처</strong></li>
+                <li>• <strong>양방향 SMS 정산서 발송 & 주소 수신</strong></li>
+              </ul>
+            </div>
+            <div class="p-2.5 rounded-lg bg-pink-950/30 border border-pink-500/30">
+              <div class="font-bold text-pink-300 flex items-center gap-1.5 mb-1">
+                <i class="fa-brands fa-tiktok text-pink-400"></i> 라이브 방송 채널
+              </div>
+              <ul class="text-[11px] text-slate-300 space-y-0.5">
+                <li>• TikTok Live / 인스타그램 라이브</li>
+                <li>• 판매자 실시간 음성 방송</li>
+                <li>• 구매자 실시간 댓글 스트림</li>
+                <li>• ("저요", "1번", "1.4", "보석")</li>
+              </ul>
+            </div>
+            <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800">
+              <div class="font-bold text-slate-300 flex items-center gap-1.5 mb-1">
+                <i class="fa-solid fa-desktop text-blue-400"></i> 현장 하드웨어
+              </div>
+              <ul class="text-[11px] text-slate-300 space-y-0.5">
+                <li>• 판매자 PC / 태블릿 (실시간 관제)</li>
+                <li>• 블루투스 모바일 전표 프린터</li>
+                <li>• 택배 송장 라벨 프린터 (CJ대한통운 등)</li>
+                <li>• 바코드/QR 스캐너</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2계층: 실시간 수집 및 전처리 레이어 -->
+        <div class="rounded-xl p-3.5 bg-slate-900/90 border border-cyan-700/60 relative">
+          <div class="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800">
+            <div class="flex items-center gap-2 text-cyan-400 font-bold text-xs uppercase tracking-wider">
+              <i class="fa-solid fa-bolt"></i> 2. 실시간 데이터 수집 & 전처리 계층 (Real-Time Ingestion)
+            </div>
+            <span class="text-[10px] text-cyan-300 font-mono">0.05초 저지연 스트리밍</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div class="p-2.5 rounded-lg bg-cyan-950/40 border border-cyan-500/40">
+              <div class="font-bold text-cyan-300 flex items-center gap-1.5 mb-1">
+                <i class="fa-solid fa-comments"></i> 실시간 댓글 도우미 (Comment Helper Server)
+              </div>
+              <p class="text-[11px] text-slate-300 mb-1">• 초당 수백 건 댓글 무손실 수집 (WebSocket / SSE)</p>
+              <p class="text-[11px] text-slate-300">• 밀리초 단위 FIFO 선착순 대기열 & 닉네임 정제</p>
+              <p class="text-[11px] text-cyan-200">• <strong>5초 버퍼 닉네임 힌트 STT 무중단 교체 전송</strong></p>
+            </div>
+            <div class="p-2.5 rounded-lg bg-purple-950/40 border border-purple-500/40">
+              <div class="font-bold text-purple-300 flex items-center gap-1.5 mb-1">
+                <i class="fa-solid fa-waveform-lines"></i> 소닉스(Soniox) 고성능 음성인식 엔진
+              </div>
+              <p class="text-[11px] text-slate-300 mb-1">• 판매자 실시간 음성 스트림 전사 (0.1초 지연)</p>
+              <p class="text-[11px] text-slate-300">• 3중 힌트 우선순위 (1순위: 고정단어 / 2순위: 닉네임 / 3순위: 규칙)</p>
+              <p class="text-[11px] text-purple-200">• 한국어 라이브커머스 특화 단어 인식률 99.8% 달성</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3계층: AI 판단 및 판매 로직 계층 -->
+        <div class="rounded-xl p-3.5 bg-slate-900/90 border border-purple-700/60 relative">
+          <div class="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800">
+            <div class="flex items-center gap-2 text-purple-400 font-bold text-xs uppercase tracking-wider">
+              <i class="fa-solid fa-brain"></i> 3. AI 판단 및 다중 판매로직 계층 (Argon Deep AI Engine)
+            </div>
+            <span class="text-[10px] text-purple-300 font-semibold">특허 출원 핵심 기술</span>
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+            <div class="p-2 rounded bg-slate-950/80 border border-slate-800">
+              <div class="font-semibold text-pink-400 mb-0.5">소수점 가격 환산</div>
+              <div class="text-slate-400">"1.4" 감지 ➔ 14,000원 10,000배 자동 변환</div>
+            </div>
+            <div class="p-2 rounded bg-slate-950/80 border border-slate-800">
+              <div class="font-semibold text-indigo-400 mb-0.5">다중 호명 분리</div>
+              <div class="text-slate-400">"철수님, 영희님" ➔ 복수 구매자 분리 2건 확정</div>
+            </div>
+            <div class="p-2 rounded bg-slate-950/80 border border-slate-800">
+              <div class="font-semibold text-purple-400 mb-0.5">"캡처하세요" 태깅</div>
+              <div class="text-slate-400">초 단위 타임스탬프 기록 ➔ 위조 사진 방지</div>
+            </div>
+            <div class="p-2 rounded bg-slate-950/80 border border-slate-800">
+              <div class="font-semibold text-emerald-400 mb-0.5">시간대별 세그먼터</div>
+              <div class="text-slate-400">슬롯 1/2 자동 스케줄링 무중단 비동기 분석</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4계층: 웹앱 원장 관리 & 스마트 풀필먼트 계층 -->
+        <div class="rounded-xl p-3.5 bg-slate-900/90 border border-emerald-700/60 relative">
+          <div class="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800">
+            <div class="flex items-center gap-2 text-emerald-400 font-bold text-xs uppercase tracking-wider">
+              <i class="fa-solid fa-box-check"></i> 4. 웹앱 원장 & 자동화 풀필먼트 계층 (VoiceCAP Web & Fulfillment)
+            </div>
+            <span class="text-[10px] text-emerald-300 font-semibold">완전 자동화 완결</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-[11px]">
+            <div class="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800">
+              <div class="font-bold text-slate-200 mb-1 flex items-center gap-1.5">
+                <i class="fa-solid fa-list-check text-indigo-400"></i> 실시간 판매 적재함
+              </div>
+              <p class="text-slate-400">• 실시간 주문 카드 (구매자·단가·수량·근거)</p>
+              <p class="text-slate-400">• 판매 원장 수정·정정·보류 이력 관리</p>
+            </div>
+            <div class="p-2.5 rounded-lg bg-emerald-950/30 border border-emerald-500/30">
+              <div class="font-bold text-emerald-300 mb-1 flex items-center gap-1.5">
+                <i class="fa-solid fa-money-bill-transfer text-emerald-400"></i> 입금 대조 & SMS 엔진
+              </div>
+              <p class="text-slate-300">• 안드로이드 은행 알림 ➔ 주문 자동 대조 (`PAID`)</p>
+              <p class="text-slate-300">• 정산서 SMS 발송 & <strong>회신 주소 자동 파싱 등록</strong></p>
+            </div>
+            <div class="p-2.5 rounded-lg bg-amber-950/30 border border-amber-500/30">
+              <div class="font-bold text-amber-300 mb-1 flex items-center gap-1.5">
+                <i class="fa-solid fa-truck text-amber-400"></i> 배송 & 보관(Keep) 관리
+              </div>
+              <p class="text-slate-300">• 단골 보관(Keep) 상품 스마트 묶음 배송</p>
+              <p class="text-slate-300">• <strong>CJ대한통운 등 택배 송장 원클릭 출력</strong></p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- [슬라이드 5] 핵심 주역 1 & 2: 댓글 도우미 & 안드로이드 앱 -->
+    <section id="slide-5" class="slide-content w-full hidden">
+      <div class="text-center max-w-3xl mx-auto mb-8">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-xs font-semibold mb-2">
+          <i class="fa-solid fa-microchip"></i> DUAL DRIVING ENGINES
+        </div>
+        <h2 class="text-2xl md:text-4xl font-extrabold">솔루션의 심장, <span class="text-cyan-400">댓글 도우미</span> & <span class="text-indigo-400">안드로이드 앱</span></h2>
+        <p class="text-slate-400 text-xs md:text-sm mt-2">수천 개 댓글의 무손실 수집과 모바일 환경의 완벽한 기동성을 보장하는 핵심 기술 자산</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <!-- 1. 댓글 도우미 -->
+        <div class="rounded-2xl p-6 bg-slate-900/90 border border-cyan-500/30 relative flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-4">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 flex items-center justify-center text-lg font-bold">
+                  <i class="fa-solid fa-comments"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-lg text-slate-100">실시간 댓글 도우미</h3>
+                  <p class="text-xs text-cyan-400">초당 수백 건의 댓글도 0.05초 단위 무손실 수집</p>
+                </div>
+              </div>
+              <span class="px-2.5 py-1 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800 text-[11px] font-semibold">Websocket / SSE</span>
+            </div>
+
+            <div class="space-y-3 text-xs text-slate-300">
+              <div class="p-3 rounded-lg bg-slate-950/70 border border-slate-800">
+                <div class="font-semibold text-cyan-300 mb-1 flex items-center gap-1.5">
+                  <i class="fa-solid fa-filter"></i> 1초 누락 없는 선착순 큐 (FIFO Queue)
+                </div>
+                <p class="text-slate-400 keep-all">인기 상품이 나오는 순간 폭주하는 "1번", "저요", "구매" 댓글을 밀리초(ms) 단위 타임스탬프로 정확히 정렬합니다.</p>
+              </div>
+              <div class="p-3 rounded-lg bg-slate-950/70 border border-slate-800">
+                <div class="font-semibold text-cyan-300 mb-1 flex items-center gap-1.5">
+                  <i class="fa-solid fa-spell-check"></i> 소닉스(Soniox) STT 힌트 실시간 주입
+                </div>
+                <p class="text-slate-400 keep-all">수집된 구매자 닉네임을 5초 버퍼로 묶어 음성인식 엔진(STT)의 힌트 단어로 무중단 교체 전송! 복잡한 한글/영어 닉네임 인식률 99% 달성.</p>
+              </div>
+              <div class="p-3 rounded-lg bg-slate-950/70 border border-slate-800">
+                <div class="font-semibold text-cyan-300 mb-1 flex items-center gap-1.5">
+                  <i class="fa-solid fa-shield-halved"></i> 밴/블랙리스트 & 어뷰징 방지
+                </div>
+                <p class="text-slate-400 keep-all">장난 댓글, 비매너 사용자 자동 필터링 및 단골 고객 우선순위 가중치 부여 기능 내장.</p>
+              </div>
+            </div>
+          </div>
+          <div class="mt-4 pt-3 border-t border-slate-800/80 text-[11px] text-cyan-400/90 font-medium">
+            ✔ PC 웹앱 및 안드로이드 앱과 실시간 양방향 소켓 통신 유지
+          </div>
+        </div>
+
+        <!-- 2. 안드로이드 전용 앱 -->
+        <div class="rounded-2xl p-6 bg-slate-900/90 border border-indigo-500/30 relative flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-4">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/40 text-indigo-400 flex items-center justify-center text-lg font-bold">
+                  <i class="fa-brands fa-android"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-lg text-slate-100">판매자 전용 안드로이드 앱</h3>
+                  <p class="text-xs text-indigo-400">스마트폰 하나로 고가 방송 장비 & 업무를 대체하는 컨트롤러</p>
+                </div>
+              </div>
+              <span class="px-2.5 py-1 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800 text-[11px] font-semibold">Device Pairing</span>
+            </div>
+
+            <div class="space-y-3 text-xs text-slate-300">
+              <div class="p-3 rounded-lg bg-slate-950/70 border border-slate-800">
+                <div class="font-semibold text-emerald-400 mb-1 flex items-center gap-1.5">
+                  <i class="fa-solid fa-money-bill-transfer"></i> [핵심] 은행 입금 알림 실시간 자동 캡처
+                </div>
+                <p class="text-slate-400 keep-all">스마트폰에 도착하는 은행 앱 입금 푸시/SMS를 감지해 웹앱으로 즉시 전송, 통장 열어볼 필요 없이 <strong>주문 건과 실시간 자동 대조</strong>합니다.</p>
+              </div>
+              <div class="p-3 rounded-lg bg-slate-950/70 border border-slate-800">
+                <div class="font-semibold text-indigo-300 mb-1 flex items-center gap-1.5">
+                  <i class="fa-solid fa-comment-sms"></i> [핵심] 양방향 SMS 수발신 완전 자동화
+                </div>
+                <p class="text-slate-400 keep-all">정산서 문자를 고객에게 자동 발송하고, 고객이 답장한 <strong>성함·주소·연락처·사진을 웹앱 배송 원장에 자동으로 파싱</strong>해 기입합니다.</p>
+              </div>
+              <div class="p-3 rounded-lg bg-slate-950/70 border border-slate-800">
+                <div class="font-semibold text-indigo-300 mb-1 flex items-center gap-1.5">
+                  <i class="fa-solid fa-microphone-lines"></i> 무선 마이크 스트리밍 & 즉석 카메라 촬영 & 블루투스 인쇄
+                </div>
+                <p class="text-slate-400 keep-all">노이즈 캔슬링 무선 마이크로 방송 진행, 깜짝 신규 상품 1초 사진 등록, 모바일 라벨 프린터로 현장 즉시 전표 출력 지원.</p>
+              </div>
+            </div>
+          </div>
+          <div class="mt-4 pt-3 border-t border-slate-800/80 text-[11px] text-indigo-400/90 font-medium">
+            ✔ 스마트폰 통신사 기본 문자 활용으로 유료 문자 API 비용 0원 실현
+          </div>
+        </div>
+      </div>
+
+      <!-- 기기간 실시간 시너지 구조 요약 -->
+      <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 text-center flex flex-wrap items-center justify-around gap-4 text-xs">
+        <div class="flex items-center gap-2 text-slate-300 font-medium">
+          <i class="fa-brands fa-tiktok text-pink-400 text-base"></i> 틱톡 방송 댓글
+          <i class="fa-solid fa-arrow-right text-slate-600"></i>
+          <span class="text-cyan-400 font-bold">댓글 도우미 서버</span>
+        </div>
+        <div class="text-indigo-400 font-bold">+</div>
+        <div class="flex items-center gap-2 text-slate-300 font-medium">
+          <i class="fa-brands fa-android text-emerald-400 text-base"></i> 스마트폰 (마이크+입금/SMS)
+          <i class="fa-solid fa-arrow-right text-slate-600"></i>
+          <span class="text-indigo-400 font-bold">모바일 브릿지 엔진</span>
+        </div>
+        <div class="text-indigo-400 font-bold">=</div>
+        <div class="flex items-center gap-2 bg-indigo-950/80 px-3 py-1.5 rounded-lg border border-indigo-700/60 text-indigo-200 font-bold">
+          <i class="fa-solid fa-brain text-purple-400"></i> VoiceCAP 웹앱 실시간 완전 자동화
+        </div>
+      </div>
+    </section>
+
+    <!-- [슬라이드 6] 특화 로직: 은행 입금 & 양방향 SMS 자동화 집중 조명 -->
+    <section id="slide-6" class="slide-content w-full hidden">
+      <div class="text-center max-w-3xl mx-auto mb-8">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold mb-2">
+          <i class="fa-solid fa-bolt-auto"></i> AUTOMATED RECONCILIATION & SMS
+        </div>
+        <h2 class="text-2xl md:text-4xl font-extrabold">판매자가 손 하나 안 대는 <span class="text-emerald-400">입금·SMS 자동화</span></h2>
+        <p class="text-slate-400 text-xs md:text-sm mt-2">안드로이드 앱과 VoiceCAP 웹앱이 하나로 연동되어 정산부터 배송지 확보까지 자동 완성</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <!-- 1. 은행 입금내역 실시간 대조 자동화 -->
+        <div class="rounded-2xl p-6 bg-slate-900/90 border border-emerald-500/30">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center text-lg font-bold">
+              <i class="fa-solid fa-building-columns"></i>
+            </div>
+            <div>
+              <h3 class="font-bold text-lg text-slate-100">은행 입금내역 자동 매칭 (Reconciliation)</h3>
+              <p class="text-xs text-emerald-400">통장 캡처 확인 불필요, 0.1초 입금완료 처리</p>
+            </div>
+          </div>
+
+          <div class="space-y-3 text-xs text-slate-300">
+            <div class="p-3 rounded-lg bg-slate-950/70 border border-slate-800">
+              <div class="font-semibold text-slate-200 mb-1">1) 스마트폰 은행 푸시/SMS 실시간 감지</div>
+              <p class="text-slate-400 keep-all">고객이 계좌로 송금하면, 스마트폰에 뜨는 은행 입금 알림(금액, 입금자명, 은행)을 안드로이드 백그라운드 리스너가 즉각 캡처하여 클라우드로 전송합니다.</p>
+            </div>
+            <div class="p-3 rounded-lg bg-slate-950/70 border border-slate-800">
+              <div class="font-semibold text-slate-200 mb-1">2) VoiceCAP 웹앱 내 자동 대조 & 확정</div>
+              <p class="text-slate-400 keep-all">웹앱의 정산 대사 엔진(`paymentMatching`)이 방송 주문 건의 청구 금액 및 고객 정보와 입금 내역을 자동 대조하여, 상태를 즉시 <strong class="text-emerald-400 font-semibold">'입금완료(PAID)'</strong>로 전환합니다.</p>
+            </div>
+            <div class="p-3 rounded-lg bg-slate-950/70 border border-slate-800">
+              <div class="font-semibold text-slate-200 mb-1">3) 입금자명 불일치 스마트 해결</div>
+              <p class="text-slate-400 keep-all">닉네임 대신 본명으로 입금하거나 금액이 일치하는 건도 지능형 유사도 매칭으로 추천해주어 판매자가 버튼 한 번으로 승인 가능합니다.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. 양방향 SMS 메시지 수발신 자동화 -->
+        <div class="rounded-2xl p-6 bg-slate-900/90 border border-indigo-500/30">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center text-lg font-bold">
+              <i class="fa-solid fa-comments-dollar"></i>
+            </div>
+            <div>
+              <h3 class="font-bold text-lg text-slate-100">양방향 SMS 수발신 완전 자동화</h3>
+              <p class="text-xs text-indigo-400">문자 발송부터 고객 주소 회신 파싱까지 원스톱</p>
+            </div>
+          </div>
+
+          <div class="space-y-3 text-xs text-slate-300">
+            <div class="p-3 rounded-lg bg-slate-950/70 border border-slate-800">
+              <div class="font-semibold text-slate-200 mb-1">1) 고객별 정산서 SMS 원클릭 자동 발송</div>
+              <p class="text-slate-400 keep-all">방송 종료 후 안드로이드 폰 통신망을 통해 고객들에게 "구매 상품 목록, 총 금액, 입금 계좌"가 포함된 정산 문자가 자동으로 전송됩니다. (유료 문자 API 비용 0원!)</p>
+            </div>
+            <div class="p-3 rounded-lg bg-slate-950/70 border border-slate-800">
+              <div class="font-semibold text-slate-200 mb-1">2) 회신 문자에서 '배송지 주소' 자동 추출</div>
+              <p class="text-slate-400 keep-all">고객이 "서울 강남구... 홍길동 010-..." 형태로 답장을 보내면, 스마트폰 앱이 이를 수신해 웹앱으로 전달하고 AI 파서가 <strong>이름, 연락처, 주소를 자동 추출해 배송 원장에 등록</strong>합니다.</p>
+            </div>
+            <div class="p-3 rounded-lg bg-slate-950/70 border border-slate-800">
+              <div class="font-semibold text-slate-200 mb-1">3) 송장 출력 준비 완료 알림 자동화</div>
+              <p class="text-slate-400 keep-all">주소 입력과 입금 확인이 모두 끝나면 웹앱에서 즉시 택배 송장을 뽑을 수 있도록 [발송대기] 카드로 자동 전환됩니다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 소수점 환산 및 캡처 메타데이터 요약 바 -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+        <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-3">
+          <i class="fa-solid fa-calculator text-pink-400 text-lg"></i>
+          <div>
+            <div class="font-bold text-slate-200">소수점 가격 자동 환산</div>
+            <div class="text-slate-400">"1.4 드릴게요" ➔ 14,000원 10,000배 자동 변환</div>
+          </div>
+        </div>
+        <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-3">
+          <i class="fa-solid fa-camera text-purple-400 text-lg"></i>
+          <div>
+            <div class="font-bold text-slate-200">"캡처하세요" 자동 태깅</div>
+            <div class="text-slate-400">초 단위 시각 마킹으로 고객 캡처 사진과 자동 대조</div>
+          </div>
+        </div>
+        <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-3">
+          <i class="fa-solid fa-boxes-packing text-amber-400 text-lg"></i>
+          <div>
+            <div class="font-bold text-slate-200">스마트 보관(Keep) 합배송</div>
+            <div class="text-slate-400">단골 보관 상품 합산 무료배송 및 묶음 송장 출력</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- [슬라이드 7] 차별점 & 시장 독점력 & 도입 효과 -->
+    <section id="slide-7" class="slide-content w-full hidden">
+      <div class="text-center max-w-3xl mx-auto mb-8">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold mb-2">
+          <i class="fa-solid fa-award"></i> WHY VOICECAP?
+        </div>
+        <h2 class="text-2xl md:text-4xl font-extrabold">국내에 <span class="text-emerald-400">경쟁자가 없는 이유</span>와 <span class="text-indigo-400">도입 효과</span></h2>
+        <p class="text-slate-400 text-xs md:text-sm mt-2">단순한 댓글 수집기가 아닙니다. 방송에서 창고 출고까지 책임지는 완성형 B2B/B2C SaaS</p>
+      </div>
+
+      <!-- 3사 솔루션 비교표 -->
+      <div class="rounded-2xl border border-slate-800 overflow-x-auto bg-slate-900/90 mb-6">
+        <table class="w-full text-left text-xs md:text-sm">
+          <thead>
+            <tr class="border-b border-slate-800 bg-slate-950/60 text-slate-400">
+              <th class="p-3.5 font-semibold">비교 항목</th>
+              <th class="p-3.5 font-semibold text-rose-300">기존 수작업 (수첩/엑셀)</th>
+              <th class="p-3.5 font-semibold text-slate-300">타사 단순 댓글 수집기</th>
+              <th class="p-3.5 font-extrabold text-indigo-300 bg-indigo-950/40 border-l border-r border-indigo-500/30">VoiceCAP (국내 유일)</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-800/60 text-slate-300">
+            <tr>
+              <td class="p-3.5 font-medium text-slate-200">판매자 음성(STT) 인식</td>
+              <td class="p-3.5 text-rose-400">불가능 (사람 귀로 듣기)</td>
+              <td class="p-3.5 text-slate-400">기능 없음 (댓글만 수집)</td>
+              <td class="p-3.5 text-indigo-300 font-bold bg-indigo-950/40 border-l border-r border-indigo-500/30">
+                <i class="fa-solid fa-circle-check text-emerald-400"></i> 소닉스 실시간 특화 엔진
+              </td>
+            </tr>
+            <tr>
+              <td class="p-3.5 font-medium text-slate-200">음성-댓글 실시간 자동 매칭</td>
+              <td class="p-3.5 text-rose-400">불가능</td>
+              <td class="p-3.5 text-slate-400">불가능 (수동 클릭 매칭)</td>
+              <td class="p-3.5 text-indigo-300 font-bold bg-indigo-950/40 border-l border-r border-indigo-500/30">
+                <i class="fa-solid fa-circle-check text-emerald-400"></i> AI 시간대별 완전 자동화
+              </td>
+            </tr>
+            <tr>
+              <td class="p-3.5 font-medium text-slate-200">은행 입금내역 자동 대조</td>
+              <td class="p-3.5 text-rose-400">통장 앱 열고 일일이 수기 확인</td>
+              <td class="p-3.5 text-slate-400">지원 안 됨</td>
+              <td class="p-3.5 text-indigo-300 font-bold bg-indigo-950/40 border-l border-r border-indigo-500/30">
+                <i class="fa-solid fa-circle-check text-emerald-400"></i> 앱 알림 캡처 ➔ 자동 매칭
+              </td>
+            </tr>
+            <tr>
+              <td class="p-3.5 font-medium text-slate-200">SMS 수발신 자동화 (정산 & 주소)</td>
+              <td class="p-3.5 text-rose-400">휴대폰으로 하나씩 문자 복붙</td>
+              <td class="p-3.5 text-slate-400">고가 문자 API 연동 필요</td>
+              <td class="p-3.5 text-indigo-300 font-bold bg-indigo-950/40 border-l border-r border-indigo-500/30">
+                <i class="fa-solid fa-circle-check text-emerald-400"></i> 스마트폰 SMS 브릿지 무료 연동
+              </td>
+            </tr>
+            <tr>
+              <td class="p-3.5 font-medium text-slate-200">택배 송장 출력 & 보관(Keep) 관리</td>
+              <td class="p-3.5 text-rose-400">별도 택배 프로그램 수기 입력</td>
+              <td class="p-3.5 text-slate-400">연동 불가 (엑셀 내보내기뿐)</td>
+              <td class="p-3.5 text-indigo-300 font-bold bg-indigo-950/40 border-l border-r border-indigo-500/30">
+                <i class="fa-solid fa-circle-check text-emerald-400"></i> 원클릭 송장 출력 풀필먼트
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 3대 비즈니스 도입 가치 -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="p-5 rounded-2xl bg-gradient-to-b from-indigo-950/50 to-slate-900 border border-indigo-800/40">
+          <div class="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-lg mb-3">
+            <i class="fa-solid fa-coins"></i>
+          </div>
+          <h4 class="font-bold text-slate-100 mb-1">인건비 80% 절감 (1인 방송)</h4>
+          <p class="text-xs text-slate-400 leading-relaxed keep-all">
+            장부 정리와 입금 확인, 문자 발송을 위해 쓰던 2~3명의 보조 인력 없이 1인 완벽 방송 실현.
+          </p>
+        </div>
+        <div class="p-5 rounded-2xl bg-gradient-to-b from-purple-950/50 to-slate-900 border border-purple-800/40">
+          <div class="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center text-lg mb-3">
+            <i class="fa-solid fa-chart-line"></i>
+          </div>
+          <h4 class="font-bold text-slate-100 mb-1">주문 누락 0% ➔ 매출 2~3배 신장</h4>
+          <p class="text-xs text-slate-400 leading-relaxed keep-all">
+            구매 의사 댓글을 1개도 놓치지 않고 찰나의 순간에 잡아내어 주문 전환율 극대화.
+          </p>
+        </div>
+        <div class="p-5 rounded-2xl bg-gradient-to-b from-pink-950/50 to-slate-900 border border-pink-800/40">
+          <div class="w-10 h-10 rounded-xl bg-pink-500/20 text-pink-400 flex items-center justify-center text-lg mb-3">
+            <i class="fa-solid fa-truck-ramp-box"></i>
+          </div>
+          <h4 class="font-bold text-slate-100 mb-1">방송 후 10분 만에 송장 마감</h4>
+          <p class="text-xs text-slate-400 leading-relaxed keep-all">
+            입금 확인과 주소 추출이 자동 처리되어 방송 끝나자마자 송장 뽑고 당일 발송 완료.
+          </p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 하단 퀵 슬라이드 컨트롤러 & 저작권 -->
+  <footer class="border-t border-slate-800/80 bg-slate-900/60 px-6 py-3 text-xs text-slate-400 flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+      <span class="font-medium text-slate-300">VoiceCAP Real-Time Live Commerce AI</span>
+      <span class="text-slate-600">|</span>
+      <span>키보드 방향키 [←] [→]로 슬라이드 이동 가능</span>
+    </div>
+    <div class="flex items-center gap-4 text-slate-400">
+      <span>특허 출원 중 · 국내 유일 음성-댓글 AI & 자동 풀필먼트 엔진</span>
+      <span>© 2026 VoiceCAP. All rights reserved.</span>
+    </div>
+  </footer>
+
+  <script>
+    let currentSlide = 1;
+    const totalSlides = 7;
+
+    function goToSlide(n) {
+      if (n < 1 || n > totalSlides) return;
+      currentSlide = n;
+
+      for (let i = 1; i <= totalSlides; i++) {
+        const slide = document.getElementById(`slide-${i}`);
+        const tab = document.getElementById(`tab-${i}`);
+        if (i === n) {
+          slide.classList.remove('hidden');
+          slide.classList.add('slide-enter');
+          tab.classList.remove('text-slate-400');
+          tab.classList.add('bg-indigo-600', 'text-white', 'shadow');
+        } else {
+          slide.classList.add('hidden');
+          slide.classList.remove('slide-enter');
+          tab.classList.remove('bg-indigo-600', 'text-white', 'shadow');
+          tab.classList.add('text-slate-400');
+        }
+      }
+      document.getElementById('slide-num').innerText = `${currentSlide} / ${totalSlides}`;
+    }
+
+    function prevSlide() {
+      goToSlide(currentSlide > 1 ? currentSlide - 1 : totalSlides);
+    }
+
+    function nextSlide() {
+      goToSlide(currentSlide < totalSlides ? currentSlide + 1 : 1);
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ') {
+        nextSlide();
+      } else if (e.key === 'ArrowLeft') {
+        prevSlide();
+      }
+    });
+  </script>
+</body>
+</html>
