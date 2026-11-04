@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { ManageBackLink } from '../../components/manage/ManageBackLink';
 import { useAuth } from '../../context/AuthContext';
 import { remoteWorkspaceService } from '../../services/remoteWorkspaceService';
 import {
@@ -43,6 +44,10 @@ export const KeepingSettingsPage: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-lg space-y-3 p-3">
+      <div className="flex items-center gap-2">
+        <ManageBackLink />
+        <h2 className="text-sm font-extrabold text-slate-900">보관 설정</h2>
+      </div>
       <div className="space-y-3 rounded-2xl border border-slate-200 bg-white px-4 py-4">
         <p className="text-sm text-slate-600">
           보관한 지 오래된 상품을 홈과 할 일에서 알려 드립니다. 알림만 하고 자동으로 출고하지 않습니다.

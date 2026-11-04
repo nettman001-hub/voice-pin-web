@@ -73,7 +73,7 @@ export const ContactLinkPage: React.FC = () => {
     <div className="mx-auto max-w-lg space-y-3 p-3 lg:max-w-3xl">
       <div className="flex items-center justify-between gap-1">
         <div className="flex min-w-0 items-center gap-1">
-          <ManageBackLink inline />
+          <ManageBackLink />
           <div role="tablist" aria-label="기간" className="flex gap-1">
             {[{ days: 7, label: '7일' }, { days: 30, label: '30일' }, { days: 0, label: '전체' }].map((period) => (
               <button
@@ -113,13 +113,40 @@ export const ContactLinkPage: React.FC = () => {
         <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-800">{error}</div>
       )}
 
-      <section className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-        <h2 className="text-sm font-extrabold text-emerald-900">수신OK 새구매자 {list.toSave.length}건</h2>
-        {list.toSave.length === 0 ? (
-          <p className="mt-1 text-sm text-emerald-800">새 문자로 확인된 구매자가 없습니다.</p>
+      <section className="overflow-hidden rounded-2xl border border-emerald-200 bg-white">
+        <h2 className="border-b border-emerald-100 bg-emerald-50 px-4 py-2.5 text-sm font-extrabold text-emerald-900">수신OK 기존구매자 {list.linked.length}건</h2>
+        {list.linked.length === 0 ? (
+          <p className="px-4 py-3 text-sm text-slate-500">아직 연결된 구매자가 없습니다.</p>
         ) : (
-          <>
-            <p className="mt-0.5 text-xs text-emerald-800">문자에 닉네임이 그대로 있었습니다. 저장하면 다음 회차에도 자동으로 연결됩니다.</p>
+          <ul className="divide-y divide-slate-100">
+            {list.linked.map((contact) => (
+              <li key={contact.buyerKey} className="flex items-center gap-2 px-4 py-2.5">
+                <span className="min-w-0 flex-1 truncate text-sm font-bold text-slate-900">{contact.nickname}</span>
+                <span className="text-xs tabular-nums text-slate-600">{formatPhone(contact.phone || '')}</span>
+                <button
+                  type="button"
+                  disabled={!!busy || !server.serverReady}
+                  onClick={() => {
+                    if (!window.confirm(`${contact.nickname}님과 이 번호의 연결을 해제할까요? 같은 번호는 이 구매자에게 다시 자동으로 붙지 않습니다.`)) return;
+                    void run(`unlink:${contact.phone}`, () => api!.blockContact({ phone: contact.phone!, buyerKey: contact.buyerKey, nickname: contact.nickname }), '연결을 해제했습니다.');
+                  }}
+                  className="h-9 rounded-lg border border-slate-300 px-2 text-xs font-bold text-slate-600 disabled:opacity-40"
+                >
+                  해제
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-emerald-200 bg-white">
+        <h2 className="border-b border-emerald-100 bg-emerald-50 px-4 py-2.5 text-sm font-extrabold text-emerald-900">수신OK 새구매자 {list.toSave.length}건</h2>
+        {list.toSave.length === 0 ? (
+          <p className="px-4 py-3 text-sm text-slate-500">새 문자로 확인된 구매자가 없습니다.</p>
+        ) : (
+          <div className="px-4 py-3">
+            <p className="text-xs text-slate-500">문자에 닉네임이 그대로 있었습니다. 저장하면 다음 회차에도 자동으로 연결됩니다.</p>
             <ul className="mt-2 space-y-1 text-sm text-emerald-950">
               {list.toSave.map((contact) => (
                 <li key={contact.buyerKey} className="flex justify-between gap-2">
@@ -140,13 +167,13 @@ export const ContactLinkPage: React.FC = () => {
             >
               모두 저장
             </button>
-          </>
+          </div>
         )}
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-amber-200 bg-white">
         <h2 className="border-b border-amber-100 bg-amber-50 px-4 py-2.5 text-sm font-extrabold text-amber-900">
-          확인 필요 {list.confirm.length}
+          확인 필요 {list.confirm.length}건
         </h2>
         {list.confirm.length === 0 ? (
           <p className="px-4 py-3 text-sm text-slate-500">확인할 연결이 없습니다.</p>
@@ -193,7 +220,7 @@ export const ContactLinkPage: React.FC = () => {
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5">
-          <h2 className="text-sm font-extrabold text-slate-900">연락 대기 {list.missing.length}</h2>
+          <h2 className="text-sm font-extrabold text-slate-900">연락 대기 {list.missing.length}건</h2>
           {list.missing.length > 0 && (
             <button type="button" onClick={() => void copyCallList()} className="flex min-h-[36px] items-center gap-1 text-xs font-bold text-brand-700">
               <Copy className="h-3.5 w-3.5" /> 불러 줄 명단 복사
@@ -239,7 +266,7 @@ export const ContactLinkPage: React.FC = () => {
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <h2 className="border-b border-slate-100 px-4 py-2.5 text-sm font-extrabold text-slate-900">발신자 확인안됨 {list.unknown.length}</h2>
+        <h2 className="border-b border-slate-100 px-4 py-2.5 text-sm font-extrabold text-slate-900">발신자 확인안됨 {list.unknown.length}건</h2>
         {list.unknown.length === 0 ? (
           <p className="px-4 py-3 text-sm text-slate-500">모르는 번호의 문자가 없습니다.</p>
         ) : (
@@ -284,32 +311,7 @@ export const ContactLinkPage: React.FC = () => {
         )}
       </section>
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <h2 className="border-b border-slate-100 px-4 py-2.5 text-sm font-extrabold text-slate-900">수신OK 기존구매자 {list.linked.length}</h2>
-        {list.linked.length === 0 ? (
-          <p className="px-4 py-3 text-sm text-slate-500">아직 연결된 구매자가 없습니다.</p>
-        ) : (
-          <ul className="divide-y divide-slate-100">
-            {list.linked.map((contact) => (
-              <li key={contact.buyerKey} className="flex items-center gap-2 px-4 py-2.5">
-                <span className="min-w-0 flex-1 truncate text-sm font-bold text-slate-900">{contact.nickname}</span>
-                <span className="text-xs tabular-nums text-slate-600">{formatPhone(contact.phone || '')}</span>
-                <button
-                  type="button"
-                  disabled={!!busy || !server.serverReady}
-                  onClick={() => {
-                    if (!window.confirm(`${contact.nickname}님과 이 번호의 연결을 해제할까요? 같은 번호는 이 구매자에게 다시 자동으로 붙지 않습니다.`)) return;
-                    void run(`unlink:${contact.phone}`, () => api!.blockContact({ phone: contact.phone!, buyerKey: contact.buyerKey, nickname: contact.nickname }), '연결을 해제했습니다.');
-                  }}
-                  className="h-9 rounded-lg border border-slate-300 px-2 text-xs font-bold text-slate-600 disabled:opacity-40"
-                >
-                  해제
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+
 
       <Link to="/manage/orders?stage=READY_TO_BILL" className="block text-center text-sm font-bold text-brand-700">
         청구 전 주문 보기

@@ -1,3 +1,4 @@
+import { ManageBackLink } from '../../components/manage/ManageBackLink';
 import React, { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ChevronRight, GitCompare, ReceiptText, UserCheck } from 'lucide-react';
@@ -63,14 +64,17 @@ export const ManageInboxPage: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-lg space-y-3 p-3 lg:max-w-3xl">
-      <div role="tablist" aria-label="문자·입금" className="flex gap-1">
-        {[{ id: 'payments', label: `입금 확인 ${review.length}` }, { id: 'messages', label: `받은 문자 ${threads.length}` }].map((item) => (
-          <button key={item.id} type="button" role="tab" aria-selected={tab === item.id}
-            onClick={() => setParams(item.id === 'payments' ? {} : { tab: item.id })}
-            className={`min-h-[36px] rounded-full px-3 text-xs font-bold ${tab === item.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'}`}>
-            {item.label}
-          </button>
-        ))}
+      <div className="flex items-start gap-1">
+        <ManageBackLink />
+        <div role="tablist" aria-label="문자·입금" className="flex gap-1">
+          {[{ id: 'payments', label: `입금 확인 ${review.length}` }, { id: 'messages', label: `받은 문자 ${threads.length}` }].map((item) => (
+            <button key={item.id} type="button" role="tab" aria-selected={tab === item.id}
+              onClick={() => setParams(item.id === 'payments' ? {} : { tab: item.id })}
+              className={`min-h-[36px] rounded-full px-3 text-xs font-bold ${tab === item.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'}`}>
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
       {error && <p role="alert" className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">{error}</p>}
 

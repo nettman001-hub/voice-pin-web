@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Send, XCircle } from 'lucide-react';
+import { Send, XCircle } from 'lucide-react';
+import { ManageBackLink } from '../../components/manage/ManageBackLink';
 import { useAuth } from '../../context/AuthContext';
 import { useSales } from '../../context/SalesContext';
 import { useCommerce } from '../../context/CommerceContext';
@@ -63,7 +64,7 @@ export const OrderDetailPage: React.FC = () => {
   if (!order) {
     return (
       <div className="mx-auto max-w-lg space-y-3 p-3">
-        <Link to="/manage/orders" className="inline-flex items-center gap-1 text-sm font-bold text-slate-600"><ArrowLeft className="h-4 w-4" />주문 목록</Link>
+        <ManageBackLink fallback="/manage/orders" />
         <p className="rounded-2xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">주문을 찾지 못했습니다. 판매가 취소됐거나 아직 불러오는 중입니다.</p>
       </div>
     );
@@ -145,13 +146,10 @@ export const OrderDetailPage: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-lg space-y-3 p-3 lg:max-w-3xl">
-      <Link to={`/manage/orders?stage=${order.stage}`} className="inline-flex items-center gap-1 text-sm font-bold text-slate-600">
-        <ArrowLeft className="h-4 w-4" />주문 목록
-      </Link>
-
       <section className="rounded-2xl border border-slate-200 bg-white p-4">
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
+          <ManageBackLink fallback={`/manage/orders?stage=${order.stage}`} />
+          <div className="min-w-0 flex-1">
             <h2 className="truncate text-lg font-black text-slate-900">{order.nickname}</h2>
             <p className="text-xs text-slate-500">회차 {order.sessionId}</p>
           </div>

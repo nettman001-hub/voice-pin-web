@@ -1,3 +1,4 @@
+import { ManageBackLink } from '../../components/manage/ManageBackLink';
 import React, { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Send } from 'lucide-react';
@@ -76,25 +77,28 @@ export const ManageOrdersPage: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-lg space-y-3 p-3 lg:max-w-3xl">
-      <div role="tablist" aria-label="주문 단계" className="flex gap-1 overflow-x-auto pb-1">
-        {MONEY_STAGE_ORDER.map((item) => {
-          const count = dashboard.stages.find((summary) => summary.stage === item)?.orderCount ?? 0;
-          const on = item === stage;
-          return (
-            <button
-              key={item}
-              type="button"
-              role="tab"
-              aria-selected={on}
-              onClick={() => { navigate(`/manage/orders?stage=${item}`); setSelected(new Set()); setResult(null); }}
-              className={`min-h-[36px] flex-shrink-0 rounded-full px-3 text-xs font-bold ${
-                on ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'
-              }`}
-            >
-              {MONEY_STAGE_LABEL[item]} {count}
-            </button>
-          );
-        })}
+      <div className="flex items-start gap-1">
+        <ManageBackLink />
+        <div role="tablist" aria-label="주문 단계" className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-1">
+          {MONEY_STAGE_ORDER.map((item) => {
+            const count = dashboard.stages.find((summary) => summary.stage === item)?.orderCount ?? 0;
+            const on = item === stage;
+            return (
+              <button
+                key={item}
+                type="button"
+                role="tab"
+                aria-selected={on}
+                onClick={() => { navigate(`/manage/orders?stage=${item}`); setSelected(new Set()); setResult(null); }}
+                className={`min-h-[36px] flex-shrink-0 rounded-full px-3 text-xs font-bold ${
+                  on ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'
+                }`}
+              >
+                {MONEY_STAGE_LABEL[item]} {count}
+              </button>
+            );
+          })}
+        </div>
       </div>
       {stage === 'NEEDS_CONTACT' && (
         <Link to="/manage/contacts" className="flex h-12 items-center justify-center rounded-xl bg-amber-500 text-sm font-extrabold text-white">

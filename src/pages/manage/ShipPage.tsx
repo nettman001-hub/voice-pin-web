@@ -1,3 +1,4 @@
+import { ManageBackLink } from '../../components/manage/ManageBackLink';
 import React, { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Package, Truck } from 'lucide-react';
@@ -145,14 +146,17 @@ export const ShipPage: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-lg space-y-3 p-3 lg:max-w-3xl">
-      <div role="tablist" aria-label="출고" className="flex gap-1 overflow-x-auto pb-1">
-        {tabs.map((item) => (
-          <button key={item.id} type="button" role="tab" aria-selected={tab === item.id}
-            onClick={() => setParams(item.id === 'ready' ? {} : { filter: item.id })}
-            className={`min-h-[36px] flex-shrink-0 rounded-full px-3 text-xs font-bold ${tab === item.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'}`}>
-            {item.label}
-          </button>
-        ))}
+      <div className="flex items-start gap-1">
+        <ManageBackLink />
+        <div role="tablist" aria-label="출고" className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-1">
+          {tabs.map((item) => (
+            <button key={item.id} type="button" role="tab" aria-selected={tab === item.id}
+              onClick={() => setParams(item.id === 'ready' ? {} : { filter: item.id })}
+              className={`min-h-[36px] flex-shrink-0 rounded-full px-3 text-xs font-bold ${tab === item.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'}`}>
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
       {!server.serverReady && server.loadedAt && (
         <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">보관·출고 기록을 서버에서 읽지 못했습니다. 인터넷 연결을 확인해 주세요.</p>
