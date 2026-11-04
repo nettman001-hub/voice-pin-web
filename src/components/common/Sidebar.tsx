@@ -2,6 +2,7 @@ import { useWorkspaceRuntime } from '../../context/WorkspaceRuntimeContext';
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useManageNavigationPath } from '../../services/manage/useManagePeriod';
 import { useLive } from '../../context/LiveContext';
 import { AiLiveStatusBadge } from '../live/AiLiveStatusBadge';
 import {
@@ -59,6 +60,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse
 }) => {
   const runtime = useWorkspaceRuntime();
+  const managePath = useManageNavigationPath();
   const { user } = useAuth();
   const { isListening } = useLive();
 
@@ -196,7 +198,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 return (
                   <NavLink
                     key={item.path}
-                    to={runtime.isTest && ['/sales', '/sales/review', '/comments'].includes(item.path || '') ? runtime.path(item.path!) : item.path!}
+                    to={runtime.isTest && ['/sales', '/sales/review', '/comments'].includes(item.path || '') ? runtime.path(item.path!) : managePath(item.path!)}
                     onClick={() => onCloseMobile && onCloseMobile()}
                     end={item.path === '/live' || item.path === '/admin' || item.path === '/sales'}
                     className={({ isActive }) =>

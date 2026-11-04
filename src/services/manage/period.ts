@@ -9,6 +9,26 @@ export function readManagePeriod(value: string | null, fallback = 7): number {
   return value !== null && MANAGE_PERIODS.some((period) => String(period.days) === value) ? Number(value) : fallback;
 }
 
+const periodKey = (workspaceId?: string | null) => `voicecap_manage_period_${workspaceId || 'local'}`;
+
+export function readStoredManagePeriod(workspaceId?: string | null, fallback = 7,
+  storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage): number {
+  try {
+    return readManagePeriod(storage?.getItem(periodKey(workspaceId)) ?? null, fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+export function storeManagePeriod(workspaceId: string | null | undefined, days: number,
+  storage: Pick<Storage, 'setItem'> | undefined = globalThis.localStorage): void {
+  try {
+    storage?.setItem(periodKey(workspaceId), String(days));
+  } catch {
+    // 저장이 차단되어도 현재 주소의 기간은 유지한다.
+  }
+}
+
 export function withManagePeriod(path: string, days: number): string {
   const url = new URL(path, 'https://voicecap.shop');
   url.searchParams.set('period', String(days));

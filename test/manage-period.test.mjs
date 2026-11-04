@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { inManagePeriod, readManagePeriod, withManagePeriod } from '../src/services/manage/period.ts';
+import { inManagePeriod, readManagePeriod, readStoredManagePeriod, storeManagePeriod, withManagePeriod } from '../src/services/manage/period.ts';
 import { buildShipmentBoard } from '../src/services/manage/shipmentBoard.ts';
 
 test('period links retain stage/filter and accept only supported periods including all', () => {
@@ -14,6 +14,20 @@ test('period links retain stage/filter and accept only supported periods includi
   assert.equal(readManagePeriod(null, 0), 0);
   assert.equal(readManagePeriod('365'), 7);
   assert.equal(readManagePeriod(''), 7);
+});
+
+test('management period is shared across menus and reloads, scoped to each workspace', () => {
+  const values = new Map();
+  const storage = { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  assert.equal(readStoredManagePeriod('seller-a', 7, storage), 7);
+  for (const days of [1, 7, 30, 0]) {
+    storeManagePeriod('seller-a', days, storage);
+    for (const pageDefault of [0, 7, 30]) assert.equal(readStoredManagePeriod('seller-a', pageDefault, storage), days);
+    assert.equal(readStoredManagePeriod('seller-b', 7, storage), 7);
+  }
+  const blocked = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } };
+  assert.equal(readStoredManagePeriod('seller-a', 7, blocked), 7);
+  assert.doesNotThrow(() => storeManagePeriod('seller-a', 30, blocked));
 });
 
 test('period filters shipment views while retaining older kept items in the atomic shipment plan', () => {

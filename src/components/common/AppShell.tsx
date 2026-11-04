@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { FileSpreadsheet, GitCompare, Home, Inbox, ListChecks, MoreHorizontal, Monitor, ReceiptText, ShoppingBag } from 'lucide-react';
 import { useNewManageUi } from '../../services/manage/useNewManageUi';
+import { useManageNavigationPath } from '../../services/manage/useManagePeriod';
 import { useAuth } from '../../context/AuthContext';
 import { useSales } from '../../context/SalesContext';
 import { useProductSales } from '../../context/ProductSalesContext';
@@ -119,6 +120,7 @@ export const AppBottomNav: React.FC = () => {
 
 const ManageBottomNav: React.FC<{ pathname: string }> = ({ pathname }) => {
   const active = manageTabFor(pathname);
+  const managePath = useManageNavigationPath();
   return (
     <nav
       className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200/80 bg-white/95 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.05)] backdrop-blur-lg select-none"
@@ -131,7 +133,7 @@ const ManageBottomNav: React.FC<{ pathname: string }> = ({ pathname }) => {
           return (
             <NavLink
               key={tab.id}
-              to={tab.path}
+              to={managePath(tab.path)}
               end={tab.id === 'home'}
               aria-current={on ? 'page' : undefined}
               className={`flex h-full min-w-[44px] flex-1 flex-col items-center justify-center rounded-2xl px-1 py-1 ${

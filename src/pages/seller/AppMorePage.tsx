@@ -18,6 +18,7 @@ import {
   LayoutDashboard,
 } from 'lucide-react';
 import { useNewManageUi } from '../../services/manage/useNewManageUi';
+import { useManageNavigationPath } from '../../services/manage/useManagePeriod';
 import { useAuth } from '../../context/AuthContext';
 import { androidJson, androidNative } from '../../services/labelPrinter/androidBridge';
 
@@ -47,6 +48,7 @@ const ITEMS: Item[] = [
 export const AppMorePage: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const managePath = useManageNavigationPath();
   const version = androidJson<{ version?: string }>(androidNative()?.info(), {}).version;
   const [newManage, setNewManage] = useNewManageUi();
   const manageRows: Item[] = newManage
@@ -91,7 +93,7 @@ export const AppMorePage: React.FC = () => {
           checked={newManage}
           onChange={(event) => {
             setNewManage(event.target.checked);
-            navigate(event.target.checked ? '/manage' : '/sales');
+            navigate(managePath(event.target.checked ? '/manage' : '/sales'));
           }}
           className="h-6 w-6 flex-shrink-0 accent-brand-600"
           aria-label="새 관리 화면 사용"
@@ -102,7 +104,7 @@ export const AppMorePage: React.FC = () => {
           const Icon = item.icon;
           return (
             <li key={item.path}>
-              <Link to={item.path} className="flex min-h-[56px] items-center gap-3 px-4 py-3 active:bg-slate-50">
+              <Link to={managePath(item.path)} className="flex min-h-[56px] items-center gap-3 px-4 py-3 active:bg-slate-50">
                 <Icon className="h-5 w-5 flex-shrink-0 text-brand-600" />
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-bold text-slate-900">{item.name}</span>
